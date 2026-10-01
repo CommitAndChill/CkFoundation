@@ -139,7 +139,8 @@ auto
                 Movement->IsFalling() ? ECk_Gait_Footing::Airborne : ECk_Gait_Footing::Grounded,
                 Movement->IsCrouching() ? ECk_Gait_Stance::Crouched : ECk_Gait_Stance::Standing};
 
-            CK_ENSURE_IF_NOT(NOT Movement->Velocity.ContainsNaN(),
+            const auto IsVelocityFinite = NOT Motion.Get_Velocity().ContainsNaN();
+            CK_ENSURE_IF_NOT(IsVelocityFinite,
                 TEXT("Gait [{}] sampled a non-finite velocity [{}]; the gait rests this frame"), InHandle, Movement->Velocity)
             { Motion = gait::Get_RestMotion(); }
         }
