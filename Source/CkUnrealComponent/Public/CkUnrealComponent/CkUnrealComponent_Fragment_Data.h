@@ -5,6 +5,9 @@
 
 #include "CkEcs/Handle/CkHandle.h"
 #include "CkEcs/Handle/CkHandle_TypeSafe.h"
+#include "CkEcs/Request/CkRequest_Data.h"
+
+#include "CkGraphics/CkGraphics_Common.h"
 
 #include "Components/ActorComponent.h"
 
@@ -92,6 +95,29 @@ public:
     CK_PROPERTY(_TickPolicy);
     CK_PROPERTY(_StaticWorldBakePolicy);
     CK_PROPERTY(_DebugName);
+};
+
+// --------------------------------------------------------------------------------------------------------------------
+
+USTRUCT(BlueprintType)
+struct CKUNREALCOMPONENT_API FCk_Request_UnrealComponent_SetCustomPrimitiveData : public FCk_Request_Base
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(FCk_Request_UnrealComponent_SetCustomPrimitiveData);
+    CK_REQUEST_DEFINE_DEBUG_NAME(FCk_Request_UnrealComponent_SetCustomPrimitiveData);
+
+private:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    FCk_CustomPrimitiveData _Data;
+
+public:
+    CK_PROPERTY_GET(_Data);
+
+public:
+    CK_DEFINE_CONSTRUCTORS(FCk_Request_UnrealComponent_SetCustomPrimitiveData, _Data);
 };
 
 // --------------------------------------------------------------------------------------------------------------------

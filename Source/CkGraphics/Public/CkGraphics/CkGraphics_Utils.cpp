@@ -3,6 +3,7 @@
 #include "CkCore/Ensure/CkEnsure.h"
 #include "CkGraphics/CkGraphics_Common.h"
 
+#include <Components/PrimitiveComponent.h>
 #include <Engine/Texture.h>
 #include <Engine/World.h>
 #include <EngineUtils.h>
@@ -149,6 +150,56 @@ auto
         default:
         {
             CK_INVALID_ENUM(InParameter.Get_Type());
+            break;
+        }
+    }
+}
+
+auto
+    UCk_Utils_Graphics_UE::
+    Apply_CustomPrimitiveData(
+        UPrimitiveComponent* InComponent,
+        const FCk_CustomPrimitiveData& InData)
+    -> void
+{
+    CK_ENSURE_IF_NOT(ck::IsValid(InComponent),
+        TEXT("Invalid Primitive Component supplied to Apply_CustomPrimitiveData for index [{}]"), InData.Get_CustomDataIndex())
+    { return; }
+
+    const auto& DataValue = InData.Get_Value();
+    const auto& DataIndex = InData.Get_CustomDataIndex();
+
+    switch (DataValue.Get_Type())
+    {
+        case ECk_CustomPrimitiveData_Type::Float:
+        {
+            InComponent->SetCustomPrimitiveDataFloat(DataIndex, DataValue.Get_Float());
+            break;
+        }
+        case ECk_CustomPrimitiveData_Type::Vector2:
+        {
+            InComponent->SetCustomPrimitiveDataVector2(DataIndex, DataValue.Get_Vector2());
+            break;
+        }
+        case ECk_CustomPrimitiveData_Type::Vector3:
+        {
+            InComponent->SetCustomPrimitiveDataVector3(DataIndex, DataValue.Get_Vector3());
+            break;
+        }
+        case ECk_CustomPrimitiveData_Type::Vector4:
+        {
+            InComponent->SetCustomPrimitiveDataVector4(DataIndex, DataValue.Get_Vector4());
+            break;
+        }
+        case ECk_CustomPrimitiveData_Type::LinearColor:
+        {
+            const auto& Color = DataValue.Get_LinearColor();
+            InComponent->SetCustomPrimitiveDataVector4(DataIndex, FVector4(Color.R, Color.G, Color.B, Color.A));
+            break;
+        }
+        default:
+        {
+            CK_INVALID_ENUM(DataValue.Get_Type());
             break;
         }
     }

@@ -6,6 +6,7 @@
 #include "CkCore/Math/Vector/CkVector_Utils.h"
 
 #include "CkEcsExt/Transform/CkTransform_Utils.h"
+#include "CkGraphics/CkGraphics_Utils.h"
 #include "CkIsmRenderer/CkIsmRenderer_Log.h"
 #include "CkIsmRenderer/CkIsmRenderer_Stats.h"
 
@@ -125,43 +126,7 @@ namespace ck_ism_proxy_processor
             TEXT("Trying to apply custom primitive data to an INVALID ISM component"))
         { return; }
 
-        const auto& DataValue = InData.Get_Value();
-        const auto& DataIndex = InData.Get_CustomDataIndex();
-
-        switch (DataValue.Get_Type())
-        {
-            case ECk_CustomPrimitiveData_Type::Float:
-            {
-                InComponent->SetCustomPrimitiveDataFloat(DataIndex, DataValue.Get_Float());
-                break;
-            }
-            case ECk_CustomPrimitiveData_Type::Vector2:
-            {
-                InComponent->SetCustomPrimitiveDataVector2(DataIndex, DataValue.Get_Vector2());
-                break;
-            }
-            case ECk_CustomPrimitiveData_Type::Vector3:
-            {
-                InComponent->SetCustomPrimitiveDataVector3(DataIndex, DataValue.Get_Vector3());
-                break;
-            }
-            case ECk_CustomPrimitiveData_Type::Vector4:
-            {
-                InComponent->SetCustomPrimitiveDataVector4(DataIndex, DataValue.Get_Vector4());
-                break;
-            }
-            case ECk_CustomPrimitiveData_Type::LinearColor:
-            {
-                const auto& Color = DataValue.Get_LinearColor();
-                InComponent->SetCustomPrimitiveDataVector4(DataIndex, FVector4(Color.R, Color.G, Color.B, Color.A));
-                break;
-            }
-            default:
-            {
-                CK_INVALID_ENUM(DataValue.Get_Type());
-                break;
-            }
-        }
+        UCk_Utils_Graphics_UE::Apply_CustomPrimitiveData(InComponent, InData);
     }
 
     // Returns nullptr when the proxy carries neither applied-state, or its shadow instance is gone.

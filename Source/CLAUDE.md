@@ -47,7 +47,8 @@ Before writing any code, navigate the documentation in this order:
 | store multiple behavior tags (replicated) | `CkTagSet` |
 | FName-flavored multi-tags + tag queries | `CkEntityTag` |
 | higher-level ECS (SceneNode, Meta, Transform) | `CkEcsExt` |
-| attach/manage UActorComponents on entities | `CkUnrealComponent` (no doc yet) |
+| attach/manage UActorComponents on entities | `CkUnrealComponent` |
+| write custom primitive data on an entity-owned component | `CkUnrealComponent` — `Request_SetCustomPrimitiveData` |
 | place/spawn EntityScripts in a level | `CkEntitySpawner` (`AInfo`-derived spawner actor; no doc yet) |
 | entity presets / archetypes | EntityScript spawn params (`FInstancedStruct`, `CkEntityScript.h:65`) + `CkProvider`. CkTemplate/CkEcsTemplate were REMOVED (`ad045415b`); these are the successors (INFERRED) |
 | ECS timers with signals/delegates | `CkTimer` |
@@ -252,7 +253,7 @@ but **deps must never point to a higher band**. Editor/UncookedOnly modules are 
 | CkUICore | Core,Ecs,Log,ThirdParty (extracted from CkUI 2026-08-14 — widget bases, UI types, cursor-lock/nav-config utils, input suspension, screen fade; sibling-base for CkUI and CkWidgets, NOT a layer they stack on) |
 | CkUI | Core,Ecs,Log,Settings,ThirdParty,UICore (EcsExt dropped 2026-08-08 — WorldSpaceWidget was its only consumer; GameSession dropped 2026-08-14 as a dead dep; base layer split out to CkUICore and the widget primitives to CkWidgets same day, which took Graphics and Input with them) |
 | CkWidgets | Core,Graphics,Input,Log,ThirdParty,UICore (split from CkUI 2026-08-14 — custom widgets, the 29 Common* styles, widget rasterizer, screen-projection utils; SIBLING of CkUI on CkUICore, never a layer under it) |
-| CkUnrealComponent | Core,Ecs,EcsExt,Jolt,Label,Log,Record,Settings,Usf (Jolt added 2026-08-11 for the static-world bake opt-in; Usf added 2026-09-12 so ECS-owned primitive components consume resolved outline claims — same-tier deps) |
+| CkUnrealComponent | Core,Ecs,EcsExt,Graphics,Jolt,Label,Log,Record,Settings,Usf (Jolt added 2026-08-11 for the static-world bake opt-in; Usf added 2026-09-12 so ECS-owned primitive components consume resolved outline claims; Graphics added 2026-09-30 for the custom-primitive-data request's `FCk_CustomPrimitiveData` — same-tier deps) |
 | CkUsf | Core,Ecs,Graphics,Log |
 | CkVat | Core,Ecs,EcsExt,Graphics,IsmRenderer,Log,ResourceLoader,Usf |
 | CkVfx | ActorRelay,Core,Cue,Ecs,EcsExt,Label,Log,Provider,Record,Settings,Timer |
@@ -276,7 +277,7 @@ CkGameplayDebugger's `CkInsightsDebugger`), `CkAssetExporter` (asset data → JS
 ### Table notes
 
 - **Per-module docs** live at `Source/<Module>/Claude.md` (CkGoap's is `CLAUDE.md`). **No doc yet:**
-  CkEqs, CkRenderTarget, CkSpline, CkEntitySpawner, CkUnrealComponent.
+  CkEqs, CkRenderTarget, CkSpline, CkEntitySpawner.
   CkIskmRendererVF is covered by CkIskmRenderer's doc. CkCrowd's and CkNavigation's docs were
   flagged stale on 2026-07-02 ("not yet created" / "skeleton only" — both modules are fully built);
   trust code over doc and note the drift.

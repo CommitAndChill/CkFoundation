@@ -62,6 +62,28 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
+    struct CKUNREALCOMPONENT_API FFragment_UnrealComponent_Requests
+    {
+    public:
+        CK_GENERATED_BODY(FFragment_UnrealComponent_Requests);
+
+    public:
+        friend class FProcessor_UnrealComponent_HandleRequests;
+        friend class ::UCk_Utils_UnrealComponent_UE;
+
+    public:
+        using RequestType = std::variant<FCk_Request_UnrealComponent_SetCustomPrimitiveData>;
+        using RequestList = TArray<RequestType>;
+
+    private:
+        RequestList _Requests;
+
+    public:
+        CK_PROPERTY_GET(_Requests);
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
     CK_DEFINE_RECORD_OF_ENTITIES_AND_UTILS_TRANSIENT(
         RecordOfUnrealComponents_Utils,
         FFragment_RecordOfUnrealComponents,

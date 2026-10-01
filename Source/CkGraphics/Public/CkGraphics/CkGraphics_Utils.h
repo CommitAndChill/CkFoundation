@@ -3,6 +3,7 @@
 #include "CkCore/Macros/CkMacros.h"
 #include "CkCore/Time/CkTime.h"
 #include "CkEcs/Delegates/CkDelegates.h"
+#include "CkGraphics/CkGraphics_Common.h"
 
 #include "CkGraphics_Utils.generated.h"
 
@@ -71,6 +72,16 @@ public:
     Apply_MaterialParameter(
         UMaterialInstanceDynamic* InDynamicMaterial,
         const FCk_Material_Parameter& InParameter);
+
+    // Writes the value onto the component's custom primitive data using the engine setter for its type
+    // (LinearColor is written as a Vector4). Does NOT range-check the index — the caller owns that contract.
+    UFUNCTION(BlueprintCallable,
+              DisplayName  = "[Ck] Apply Custom Primitive Data",
+              Category = "Ck|Utils|Graphics")
+    static void
+    Apply_CustomPrimitiveData(
+        UPrimitiveComponent* InComponent,
+        const FCk_CustomPrimitiveData& InData);
 };
 
 // --------------------------------------------------------------------------------------------------------------------

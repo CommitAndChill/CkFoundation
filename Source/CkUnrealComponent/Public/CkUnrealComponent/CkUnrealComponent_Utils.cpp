@@ -346,6 +346,55 @@ auto
     return InUnrealComponent;
 }
 
+auto
+    UCk_Utils_UnrealComponent_UE::
+    Request_SetCustomPrimitiveData(
+        FCk_Handle_UnrealComponent& InUnrealComponent,
+        FCk_Request_UnrealComponent_SetCustomPrimitiveData InRequest,
+        const FCk_Delegate_Request_OnCompleted& InDelegate)
+    -> FCk_Handle_UnrealComponent
+{
+    const auto UnrealComponentIsValid = ck::IsValid(InUnrealComponent);
+    CK_ENSURE_IF_NOT(UnrealComponentIsValid,
+        TEXT("Cannot set custom primitive data on invalid UnrealComponent"))
+    {
+        InDelegate.ExecuteIfBound(InUnrealComponent, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return InUnrealComponent;
+    }
+
+    // Legitimate during teardown, hence no ensure: once destruction has begun a queued request could only be
+    // cancelled, and one queued after the EndPlay cancellation has run would never complete.
+    if (InUnrealComponent.Has<ck::FTag_DestroyEntity_Initiate>())
+    {
+        ck::unreal_component::Verbose(TEXT("Not enqueuing custom primitive data on UnrealComponent [{}] — it is being destroyed"),
+            InUnrealComponent);
+
+        InDelegate.ExecuteIfBound(InUnrealComponent, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return InUnrealComponent;
+    }
+
+    const auto& Data = InRequest.Get_Data();
+    const auto DataIndex = Data.Get_CustomDataIndex();
+    const auto FloatCount = Data.Get_Value().Get_FloatCount();
+    const auto DataFitsCustomPrimitiveData = FloatCount > 0 && DataIndex >= 0 &&
+        DataIndex <= FCustomPrimitiveData::NumCustomPrimitiveDataFloats - FloatCount;
+    CK_ENSURE_IF_NOT(DataFitsCustomPrimitiveData,
+        TEXT("Cannot set custom primitive data on UnrealComponent [{}] — index [{}] with [{}] float(s) does not fit "
+             "the engine's [{}] custom primitive data floats"),
+        InUnrealComponent, DataIndex, FloatCount, FCustomPrimitiveData::NumCustomPrimitiveDataFloats)
+    {
+        InDelegate.ExecuteIfBound(InUnrealComponent, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return InUnrealComponent;
+    }
+
+    if (InDelegate.IsBound())
+    { InRequest.Set_CompletionDelegate(InDelegate); }
+
+    InUnrealComponent.AddOrGet<ck::FFragment_UnrealComponent_Requests>()._Requests.Emplace(InRequest);
+
+    return InUnrealComponent;
+}
+
 // --------------------------------------------------------------------------------------------------------------------
 
 auto
@@ -372,6 +421,39 @@ auto
     { return {}; }
 
     return InUnrealComponent.Get<ck::FFragment_UnrealComponent>().Get_OwningEntity();
+}
+
+auto
+    UCk_Utils_UnrealComponent_UE::
+    Get_CustomPrimitiveDataFloat(
+        const FCk_Handle_UnrealComponent& InUnrealComponent,
+        int32 InIndex)
+    -> float
+{
+    const auto UnrealComponentIsValid = ck::IsValid(InUnrealComponent);
+    CK_ENSURE_IF_NOT(UnrealComponentIsValid,
+        TEXT("Cannot Get_CustomPrimitiveDataFloat on invalid UnrealComponent handle"))
+    { return 0.0f; }
+
+    const auto IndexIsInRange = InIndex >= 0 && InIndex < FCustomPrimitiveData::NumCustomPrimitiveDataFloats;
+    CK_ENSURE_IF_NOT(IndexIsInRange,
+        TEXT("Cannot Get_CustomPrimitiveDataFloat on UnrealComponent [{}] — index [{}] is outside the engine's [{}] "
+             "custom primitive data floats"),
+        InUnrealComponent, InIndex, FCustomPrimitiveData::NumCustomPrimitiveDataFloats)
+    { return 0.0f; }
+
+    auto* PrimitiveComponent = ::Cast<UPrimitiveComponent>(
+        InUnrealComponent.Get<ck::FFragment_UnrealComponent>().Get_Component().Get());
+
+    if (ck::Is_NOT_Valid(PrimitiveComponent))
+    { return 0.0f; }
+
+    const auto& CustomPrimitiveData = PrimitiveComponent->GetCustomPrimitiveData().Data;
+
+    if (NOT CustomPrimitiveData.IsValidIndex(InIndex))
+    { return 0.0f; }
+
+    return CustomPrimitiveData[InIndex];
 }
 
 auto

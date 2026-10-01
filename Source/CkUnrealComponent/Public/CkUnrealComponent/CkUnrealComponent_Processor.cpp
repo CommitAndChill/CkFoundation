@@ -10,11 +10,14 @@
 
 #include "CkEcs/EditorSelectionOwner/CkEditorSelectionOwner_Utils.h"
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
+#include "CkEcs/Request/CkRequest_Completion.h"
 #include "CkEcs/Scheduler/CkProcessorRegistration.h"
 
 #include "CkProfile/Stats/CkCpuWork.h"
 
 #include "CkEcsExt/Transform/CkTransform_Utils.h"
+
+#include "CkGraphics/CkGraphics_Utils.h"
 
 #include "CkJolt/StaticWorld/CkJoltBakeExtraction.h"
 #include "CkJolt/StaticWorld/CkJoltStaticWorld_Subsystem.h"
@@ -31,7 +34,9 @@
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_Setup);
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_PushTransform);
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_Tick);
+CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_HandleRequests);
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_EndPlay);
+CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_CancelPendingRequests);
 
 namespace ck_unreal_component_processor
 {
@@ -344,6 +349,66 @@ namespace ck
     // --------------------------------------------------------------------------------------------------------------------
 
     auto
+        FProcessor_UnrealComponent_HandleRequests::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_UnrealComponent_Params& InParams,
+            const FFragment_UnrealComponent& InUnrealComponent,
+            FFragment_UnrealComponent_Requests& InRequestsComp)
+        -> void
+    {
+        const auto RequestsCopy = InRequestsComp._Requests;
+        InRequestsComp._Requests.Reset();
+
+        algo::ForEachRequest(RequestsCopy, ck::Visitor(
+        [&](const auto& InRequest) -> void
+        {
+            auto Result = ECk_Request_OperationResult::Failed;
+            const auto Guard = MakeCompletionGuard(InRequest, InHandle, Result);
+
+            Result = DoHandleRequest(InHandle, InParams, InUnrealComponent, InRequest);
+        }), policy::DontResetContainer{});
+
+        if (InRequestsComp._Requests.IsEmpty())
+        {
+            InHandle.Remove<MarkedDirtyBy>();
+        }
+    }
+
+    auto
+        FProcessor_UnrealComponent_HandleRequests::
+        DoHandleRequest(
+            HandleType InHandle,
+            const FFragment_UnrealComponent_Params& InParams,
+            const FFragment_UnrealComponent& InUnrealComponent,
+            const FCk_Request_UnrealComponent_SetCustomPrimitiveData& InRequest)
+        -> ECk_Request_OperationResult
+    {
+        auto* PrimitiveComponent = Cast<UPrimitiveComponent>(InUnrealComponent.Get_Component().Get());
+
+        const auto HostsPrimitiveComponent = ck::IsValid(PrimitiveComponent);
+        CK_ENSURE_IF_NOT(HostsPrimitiveComponent,
+            TEXT("Cannot set custom primitive data on UnrealComponent [{}] — its component of class [{}] is not a live "
+                 "PRIMITIVE component (a non-primitive class, or torn down)."),
+            InHandle, InParams.Get_ComponentClass())
+        { return ECk_Request_OperationResult::Failed; }
+
+        const auto& Data = InRequest.Get_Data();
+        const auto DataIndex = Data.Get_CustomDataIndex();
+        const auto& DataValue = Data.Get_Value();
+
+        ck::unreal_component::VeryVerbose(TEXT("Setting custom primitive data of type [{}] at index [{}] on UnrealComponent [{}]"),
+            DataValue.Get_Type(), DataIndex, InHandle);
+
+        UCk_Utils_Graphics_UE::Apply_CustomPrimitiveData(PrimitiveComponent, Data);
+
+        return ECk_Request_OperationResult::Succeeded;
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
         FProcessor_UnrealComponent_EndPlay::
         ForEachEntity(
             TimeType InDeltaT,
@@ -376,6 +441,19 @@ namespace ck
         }
 
         InUnrealComponent._Component.Reset();
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProcessor_UnrealComponent_CancelPendingRequests::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_UnrealComponent_Requests& InRequestsComp)
+        -> void
+    {
+        request::FireCancelledForPending(InHandle, InRequestsComp.Get_Requests());
     }
 }
 

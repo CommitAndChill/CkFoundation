@@ -20,6 +20,7 @@ public class CkUnrealComponent : CkModuleRules
             "CkCore",
             "CkEcs",
             "CkEcsExt",
+            "CkGraphics",
             // The Jolt static-world bake opt-in (Request_BakeIntoJoltStaticWorld) — same-tier dep.
             "CkJolt",
             "CkLabel",

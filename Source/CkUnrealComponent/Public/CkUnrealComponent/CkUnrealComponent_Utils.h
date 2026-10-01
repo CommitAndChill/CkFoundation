@@ -155,6 +155,20 @@ public:
     Get_CanEnableTransformPush(
         const FCk_Handle_UnrealComponent& InUnrealComponent);
 
+    // Writes custom primitive data on the hosted PRIMITIVE component. A request made before the component
+    // has been set up is held and applied once it exists. Fails when the hosted component is not a
+    // primitive, or when the value's floats do not fit the engine's custom primitive data. A request made
+    // once the component entity is being destroyed is not enqueued (Failed_NotEnqueued, no ensure).
+    UFUNCTION(BlueprintCallable,
+              Category = "Ck|Utils|UnrealComponent",
+              DisplayName = "[Ck][UnrealComponent] Request Set Custom Primitive Data",
+              meta = (AutoCreateRefTerm = "InDelegate"))
+    static FCk_Handle_UnrealComponent
+    Request_SetCustomPrimitiveData(
+        UPARAM(ref) FCk_Handle_UnrealComponent& InUnrealComponent,
+        FCk_Request_UnrealComponent_SetCustomPrimitiveData InRequest,
+        const FCk_Delegate_Request_OnCompleted& InDelegate);
+
 public:
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|UnrealComponent",
@@ -169,6 +183,17 @@ public:
     static FCk_Handle
     Get_OwningEntity(
         const FCk_Handle_UnrealComponent& InUnrealComponent);
+
+    // The float currently stored at InIndex on the hosted primitive component; 0 when nothing has been
+    // written there, the component does not exist yet, or the hosted component is not a primitive. An index
+    // outside [0, FCustomPrimitiveData::NumCustomPrimitiveDataFloats) ensures and returns 0.
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|UnrealComponent",
+              DisplayName = "[Ck][UnrealComponent] Get Custom Primitive Data Float")
+    static float
+    Get_CustomPrimitiveDataFloat(
+        const FCk_Handle_UnrealComponent& InUnrealComponent,
+        int32 InIndex);
 
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|UnrealComponent",
