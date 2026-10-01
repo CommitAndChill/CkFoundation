@@ -29,6 +29,7 @@ namespace ck
     DEFINE_TYPE_MAPPING(int64, "int64")
     DEFINE_TYPE_MAPPING(FVector, "FVector")
     DEFINE_TYPE_MAPPING(FVector2D, "FVector2D")
+    DEFINE_TYPE_MAPPING(FVector4, "FVector4")
     DEFINE_TYPE_MAPPING(FRotator, "FRotator")
     DEFINE_TYPE_MAPPING(FTransform, "FTransform")
     DEFINE_TYPE_MAPPING(FIntVector, "FIntVector")
