@@ -1,7 +1,6 @@
 #include "CkUsfEditor/Generator/CkUsf_Generator.h"
 
 #include "CkUsf/LookDefinition/CkUsf_LookDefinition.h"
-#include "CkUsf/LookDefinition/CkUsf_LookDefinition_Naming.h"
 #include "CkUsfEditor/Generator/CkUsf_LookValidator.h"
 #include "CkUsfEditor_Log.h"
 
@@ -446,7 +445,7 @@ namespace ck::usf_editor
         const auto WantsRefraction = IsSurface && IsTranslucent && EffectiveShadingModel != MSM_Unlit;
 
         // ---- Create package + UMaterial (idempotent refresh) ----
-        const auto PkgPath = ck::usf::Get_GeneratedMasterPackagePath(LookName, InPackageRootOverride);
+        const auto PkgPath = InDef->Get_GeneratedMasterPackagePath(InPackageRootOverride);
         const auto AssetName = FString::Printf(TEXT("M_CkUsf_Look_%s"), *LookName.ToString());
 
         // An asset-registry stub leaves a previously-generated package partially loaded and SavePackage

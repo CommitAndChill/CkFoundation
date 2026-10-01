@@ -5,6 +5,9 @@
 #include "CkCore/Macros/CkMacros.h"
 
 #include "Misc/FileHelper.h"
+#include "Misc/PackageName.h"
+#include "Misc/Paths.h"
+#include "SceneTypes.h"
 #include "ShaderCore.h"
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -282,6 +285,79 @@ namespace ck_usf_look_validator
 
         Compare_Signature(InLookName, InFnName, InFirstParamType, InReturnType, InExpected, ParamList, InOutResult);
     }
+
+    // A Vector parameter node reads a whole float4 of custom primitive data, not the three channels the look
+    // receives, so its fourth slot has to exist as well.
+    auto Get_NumCustomPrimitiveDataFloatsRead(const FCk_Usf_ParamDesc& InParam) -> int32
+    {
+        switch (InParam._Type)
+        {
+            case ECk_Usf_ParamType::Scalar: return 1;
+            case ECk_Usf_ParamType::Vector: return 4;
+            default:                        return 0;
+        }
+    }
+
+    auto Validate_GeneratedPackageRoot(const FName InLookName, const UCkUsf_LookDefinition* InDef,
+        ck::usf_editor::FLookValidationResult& InOutResult) -> void
+    {
+        const auto& Root = InDef->_GeneratedPackageRoot;
+        if (Root.IsEmpty())
+        { return; }
+
+        const auto AddRootError = [&](const FString& InProblem) -> void
+        {
+            InOutResult.Errors.Add(FString::Printf(
+                TEXT("Look [%s]: _GeneratedPackageRoot [%s] %s"), *InLookName.ToString(), *Root, *InProblem));
+        };
+
+        if (NOT Root.StartsWith(TEXT("/")))
+        {
+            AddRootError(TEXT("must start with '/' — it is a long package path such as /Game/MyGame/GeneratedLooks"));
+            return;
+        }
+
+        if (Root.EndsWith(TEXT("/")))
+        {
+            AddRootError(TEXT("must not end with '/' — the generated master's name is appended after a separator"));
+            return;
+        }
+
+        const auto PackagePath = InDef->Get_GeneratedMasterPackagePath();
+
+        auto Reason = FText{};
+        if (NOT FPackageName::IsValidTextForLongPackageName(PackagePath, &Reason))
+        {
+            AddRootError(FString::Printf(
+                TEXT("does not form a valid long package name [%s]: %s"), *PackagePath, *Reason.ToString()));
+            return;
+        }
+
+        constexpr auto IncludeReadOnlyRoots = false;
+        if (NOT FPackageName::IsValidLongPackageName(PackagePath, IncludeReadOnlyRoots, &Reason))
+        {
+            AddRootError(FString::Printf(
+                TEXT("is not under a mounted, non-read-only content root: %s"), *Reason.ToString()));
+            return;
+        }
+
+        auto PackageFilename = FString{};
+        if (NOT FPackageName::TryConvertLongPackageNameToFilename(PackagePath, PackageFilename))
+        {
+            AddRootError(FString::Printf(
+                TEXT("does not resolve to a file on disk for package [%s]"), *PackagePath));
+            return;
+        }
+
+        // The engine's mount points are not read-only, so the mount check above admits /Engine/... and engine
+        // plugins; a master saved there would land in the engine install rather than in the game or plugin.
+        if (FPaths::IsUnderDirectory(PackageFilename, FPaths::EngineDir()))
+        {
+            AddRootError(FString::Printf(
+                TEXT("resolves to [%s], under the engine directory — a generated master must be saved in project or plugin content"),
+                *FPaths::ConvertRelativePathToFull(PackageFilename)));
+        }
+    }
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -383,7 +459,23 @@ namespace ck::usf_editor
                     TEXT("Look [%s]: param [%s] is _CustomPrimitiveData but its _CustomPrimitiveDataIndex is [%d] — the CPD layout is owned by the writer, so the index must be set explicitly"),
                     *LookName.ToString(), *Name, Param._CustomPrimitiveDataIndex));
             }
+
+            if (Param._CustomPrimitiveData && Param._CustomPrimitiveDataIndex >= 0)
+            {
+                const auto NumFloatsRead = Get_NumCustomPrimitiveDataFloatsRead(Param);
+                constexpr auto LastIndexCarried = FCustomPrimitiveData::NumCustomPrimitiveDataFloats - 1;
+                const auto LastFirstIndexThatFits = LastIndexCarried - (NumFloatsRead - 1);
+
+                if (Param._CustomPrimitiveDataIndex > LastFirstIndexThatFits)
+                {
+                    Result.Errors.Add(FString::Printf(
+                        TEXT("Look [%s]: param [%s] reads [%d] custom primitive data float(s) from index [%d], past the last custom primitive data index [%d] a primitive carries (a Vector reads four floats)"),
+                        *LookName.ToString(), *Name, NumFloatsRead, Param._CustomPrimitiveDataIndex, LastIndexCarried));
+                }
+            }
         }
+
+        Validate_GeneratedPackageRoot(LookName, InDef, Result);
 
         const auto IsSurfaceDomain = InDef->_Domain == ECk_Usf_Domain::SurfaceLit
                                   || InDef->_Domain == ECk_Usf_Domain::SurfaceUnlit;

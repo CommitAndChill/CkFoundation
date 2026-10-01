@@ -18,8 +18,9 @@ namespace ck::usf_editor
     // InPackageRootOverride (both functions) redirects the generated package to another content root, e.g.
     // "/CkFoundation/CkUsf/GeneratedLooksTest/P1234". It exists for the automation lanes: a real-RHI run is
     // spread over concurrent editors, and two of them saving the same shipped .uasset kills both. Empty is
-    // the shipped root, so the console command, the package-save hook and the generator subsystem all write
-    // the shipped packages, byte for byte.
+    // the look's own root (UCkUsf_LookDefinition::_GeneratedPackageRoot, the framework root when unset), so
+    // the console command, the package-save hook and the generator subsystem all write the shipped packages,
+    // byte for byte.
 
     // Discovers all UCkUsf_LookDefinition assets and generates/refreshes a master per look.
     CKUSFEDITOR_API auto Generate_AllLookMaterials(const FString& InPackageRootOverride = {}) -> FGenerateResult;

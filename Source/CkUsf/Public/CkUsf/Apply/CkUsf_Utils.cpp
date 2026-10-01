@@ -1,7 +1,6 @@
 #include "CkUsf/Apply/CkUsf_Utils.h"
 
 #include "CkUsf/LookDefinition/CkUsf_LookDefinition.h"
-#include "CkUsf/LookDefinition/CkUsf_LookDefinition_Naming.h"
 #include "CkUsf_Log.h"
 
 #include "CkCore/Validation/CkIsValid.h"
@@ -28,7 +27,7 @@ auto
         return nullptr;
     }
 
-    const auto ObjPath = ck::usf::Get_GeneratedMasterObjectPath(InLook->Get_EffectiveLookName());
+    const auto ObjPath = InLook->Get_GeneratedMasterObjectPath();
     auto* Mat = LoadObject<UMaterialInterface>(nullptr, *ObjPath);
 
     if (ck::Is_NOT_Valid(Mat))

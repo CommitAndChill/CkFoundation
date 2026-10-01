@@ -282,6 +282,25 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     FName _LookName = NAME_None;
 
+    // Content root the generated master is saved under and loaded from, e.g. "/Game/MyGame/Materials/GeneratedLooks".
+    // Empty keeps the framework root, which is where every look that ships with CkFoundation lives. A look that
+    // belongs to a game sets this so its master is saved in the game's own content, not in the plugin's.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
+    FString _GeneratedPackageRoot;
+
+    UFUNCTION(BlueprintPure, Category = "CkUsf",
+              DisplayName = "[Ck][Usf] Get Effective Generated Package Root")
+    FString Get_EffectiveGeneratedPackageRoot() const;
+
+    // InPackageRootOverride is the tests-only seam described in CkUsf_LookDefinition_Naming.h; when set it wins.
+    auto
+    Get_GeneratedMasterPackagePath(
+        const FString& InPackageRootOverride = {}) const -> FString;
+
+    auto
+    Get_GeneratedMasterObjectPath(
+        const FString& InPackageRootOverride = {}) const -> FString;
+
     UFUNCTION(BlueprintCallable, Category = "CkUsf",
               DisplayName = "[Ck][Usf] Get Effective Look Name")
     FName Get_EffectiveLookName() const;

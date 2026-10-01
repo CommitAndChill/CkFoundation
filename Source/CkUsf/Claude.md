@@ -3,9 +3,9 @@
 **Purpose:** Author materials as plain HLSL functions instead of material-editor node graphs. A
 *look* = one `.ush` entry point + one `UCkUsf_LookDefinition` data asset; the editor-side generator
 (CkUsfEditor) assembles a master `UMaterial` around a Custom node, validates the asset↔HLSL
-contract, force-compiles the shaders, and saves it under `/CkFoundation/CkUsf/GeneratedLooks/`.
-Runtime code applies looks via `UCk_Utils_Usf_UE` (master lookup, MID creation, post-process
-attach). Also home to the Shadertoy-style multi-pass renderer, the Custom-Stencil outline subsystem,
+contract, force-compiles the shaders, and saves it under the look's generated package root,
+`/CkFoundation/CkUsf/GeneratedLooks/` by default. Runtime code applies looks via `UCk_Utils_Usf_UE`
+(master lookup, MID creation, post-process attach). Also home to the Shadertoy-style multi-pass renderer, the Custom-Stencil outline subsystem,
 and the four-effect **Stylize** suite (HandDrawn / CelShade / ScreenDither / CrossHatch) built on top
 of all of it.
 
@@ -19,7 +19,12 @@ of all of it.
 - `UCkUsf_LookDefinition` (`LookDefinition/CkUsf_LookDefinition.h`) — the look asset: ush
   include/function names, domain, blend/shading/translucency-lighting overrides, `_Defines`,
   usage flags, params. Per-instance slot layout queries: `Get_PerInstanceSlotOf`,
-  `Get_NumPerInstanceFloats`.
+  `Get_NumPerInstanceFloats`. Where its master lives: `_GeneratedPackageRoot` (empty = the framework
+  root), resolved by `Get_EffectiveGeneratedPackageRoot` / `Get_GeneratedMasterPackagePath` /
+  `Get_GeneratedMasterObjectPath` — the generator saves there and `Get_LookMasterMaterial` loads from
+  there. The name-only `ck::usf::Get_GeneratedMaster*Path(FName)` functions
+  (`LookDefinition/CkUsf_LookDefinition_Naming.h`) always mean the framework root; they are for callers
+  that address a framework look by name and have no definition in hand.
 - `UCk_Utils_Usf_UE` (`Apply/CkUsf_Utils.h`) — `Get_LookMasterMaterial`, `Create_MID_ForLook`,
   `Apply_PostProcess_ToCamera/Component`, `Set_Scalar/Vector/Texture`.
 - `UCkUsf_MultiPassRenderer` (`MultiPass/`) — BufferA-D + Image passes, double-buffered feedback.
@@ -76,12 +81,12 @@ of all of it.
   (`CkUsfEditor/Generator/CkUsf_Generator.h`); validation in `CkUsf_LookValidator.h`. Both take an
   optional package-root override — TESTS ONLY, so parallel automation lanes generate into lane-unique
   paths instead of colliding on the shipped `GeneratedLooks/` packages; omitted, the editor-facing
-  output is unchanged.
+  output is unchanged. When passed it beats the definition's own `_GeneratedPackageRoot`.
 
 ## Authoring a new look (the loop)
 
 1. **Write the shader** — `Source/CkUsf/Shaders/CkUsf/Looks/<Name>.ush` (or your own module's
-   mapped shader dir; BB maps `/BusterBlock` in `BusterBlock.cpp`):
+   mapped shader dir when the look belongs to a game; BB maps `/BusterBlock` in `BusterBlock.cpp`):
    ```hlsl
    #pragma once
    #include "/CkUsf/Common.ush"
@@ -96,6 +101,9 @@ of all of it.
 2. **Declare the asset** — AS `asset <Name> of UCkUsf_LookDefinition { ... }`
    (`Script/CkUsf/CkUsf_Looks_Assets.as` is the exemplar file) or an editor data asset.
    `_Parameters` order MUST match the function's params after `In` — the validator enforces it.
+   A look that belongs to a game sets `_GeneratedPackageRoot` to a root in the game's own content
+   (e.g. `/Game/MyGame/GeneratedLooks`), so its master is saved there and not committed into this
+   plugin; leave it empty only for looks that ship with CkFoundation.
 3. **Generate** — save the asset in-editor (auto-regens via the package-save hook), or run the
    console command `Ck_Usf_GenerateLooks [LookName]`, or call the `UCkUsf_GeneratorSubsystem`
    functions. Generation fails LOUDLY (log + result errors) on any contract violation.
@@ -119,8 +127,13 @@ the reserved Custom-node input/output/local names (`Time`, `UV`, `WorldPosition`
 `Refraction`, `SubsurfaceColor`, `ClearCoat`, `ClearCoatRoughness`, `In`, `O`). The entry point
 must be defined DIRECTLY in `_UshIncludePath` (not a nested include / macro).
 
-Two further asset-side rules the validator enforces before it ever reads the .ush: `_PerInstance` is
-legal only on Scalar/Vector params (textures cannot ride per-instance custom data), and
+Three further asset-side rules the validator enforces before it ever reads the .ush: `_PerInstance` is
+legal only on Scalar/Vector params (textures cannot ride per-instance custom data), a non-empty
+`_GeneratedPackageRoot` must start with `/`, must not end with `/`, and must form a valid long package
+name under a mounted, non-read-only content root whose files are not under the engine directory —
+`/Engine/...` and engine-plugin mounts are not read-only, so the mount check alone admits them; the
+validator also resolves the package to its file and rejects one under `FPaths::EngineDir()` (a rejected
+look writes no package at all), and
 `_UshIncludePath` must resolve through the registered shader source directory mappings
 (`AddShaderSourceDirectoryMapping`) — an unresolvable virtual path is an error, not a silent skip.
 
@@ -132,7 +145,10 @@ plain `UPrimitiveComponent` — a per-entity SKMC has CPD where an ISM has per-i
 declares one param per source, not one param for both. Same Scalar/Vector-only rule as `_PerInstance`,
 mutually exclusive with it, and the index is REQUIRED when the flag is set: the layout is the writer's,
 there is no `Get_PerInstanceSlotOf` equivalent to auto-assign one, and a negative index would cast to
-255 and read a slot nothing writes. Every field defaults off, so looks that predate it regenerate
+255 and read a slot nothing writes. The index must also fit what a primitive carries
+(`FCustomPrimitiveData::NumCustomPrimitiveDataFloats`, 36 floats): a Scalar reads one slot and a Vector
+reads a whole float4 even though the look receives `.rgb`, so Scalar ≤ 35 and Vector ≤ 32 — past that
+is a generation error. Every field defaults off, so looks that predate it regenerate
 byte-identically. Shipped pair: `VisualLodCrowdFade` (per-instance) / `VisualLodNearFade` (CPD) — the
 two halves of CkVisualLod's crossfade, sharing `CkUsf_VisualLod_FadeThreshold` from `Common.ush` so
 their masks stay exact complements.

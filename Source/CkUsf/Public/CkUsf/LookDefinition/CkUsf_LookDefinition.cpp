@@ -1,5 +1,7 @@
 #include "CkUsf/LookDefinition/CkUsf_LookDefinition.h"
 
+#include "CkUsf/LookDefinition/CkUsf_LookDefinition_Naming.h"
+
 #include "CkCore/Macros/CkMacros.h"
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -26,6 +28,15 @@ namespace ck_usf_look_definition
             case ECk_Usf_ParamType::Vector: return 3;
             default:                        return 0;
         }
+    }
+
+    auto
+        Get_PackageRoot(
+            const UCkUsf_LookDefinition& InLook,
+            const FString& InPackageRootOverride)
+        -> FString
+    {
+        return InPackageRootOverride.IsEmpty() ? InLook.Get_EffectiveGeneratedPackageRoot() : InPackageRootOverride;
     }
 }
 
@@ -73,6 +84,34 @@ auto
         { AutoTotal += NumFloats; }
     }
     return FMath::Max(AutoTotal, MaxExplicitEnd);
+}
+
+auto
+    UCkUsf_LookDefinition::
+    Get_EffectiveGeneratedPackageRoot() const
+    -> FString
+{
+    return _GeneratedPackageRoot.IsEmpty() ? ck::usf::Get_GeneratedMasterPackageRoot() : _GeneratedPackageRoot;
+}
+
+auto
+    UCkUsf_LookDefinition::
+    Get_GeneratedMasterPackagePath(
+        const FString& InPackageRootOverride) const
+    -> FString
+{
+    return ck::usf::Get_GeneratedMasterPackagePath(
+        Get_EffectiveLookName(), ck_usf_look_definition::Get_PackageRoot(*this, InPackageRootOverride));
+}
+
+auto
+    UCkUsf_LookDefinition::
+    Get_GeneratedMasterObjectPath(
+        const FString& InPackageRootOverride) const
+    -> FString
+{
+    return ck::usf::Get_GeneratedMasterObjectPath(
+        Get_EffectiveLookName(), ck_usf_look_definition::Get_PackageRoot(*this, InPackageRootOverride));
 }
 
 // --------------------------------------------------------------------------------------------------------------------
