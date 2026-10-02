@@ -206,7 +206,7 @@ namespace ck
                 for (const auto& Anchor : Stance.Get_Anchors())
                 {
                     const auto& Leg = Anchor.Get_Leg();
-                    if (ck::Is_NOT_Valid(Leg) || Leg.Has<FTag_DestroyEntity_Initiate>() || Leg.Has<FTag_ProceduralLeg_Disabled>()
+                    if (NOT procedural_leg::Get_IsSupporting(Leg)
                         || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Leg) != InHandle.ConvertToHandle()
                         || NOT Leg.Has<FFragment_ProceduralLeg>())
                     { continue; }

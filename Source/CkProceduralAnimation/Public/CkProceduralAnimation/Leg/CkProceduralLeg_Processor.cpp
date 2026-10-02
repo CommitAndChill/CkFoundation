@@ -65,6 +65,9 @@ namespace ck
             const FCk_Request_ProceduralLeg_EnableDisable& InRequest)
         -> void
     {
+        if (InHandle.Has<FTag_ProceduralLeg_Detached>())
+        { return; }
+
         switch (InRequest.Get_EnableDisable())
         {
             case ECk_EnableDisable::Enable:
@@ -87,6 +90,10 @@ namespace ck
             const FCk_Request_ProceduralLeg_Detach& InRequest)
         -> void
     {
+        // A repeat queued before the first detach drained: the leg is already detached, so the intent holds.
+        if (InHandle.Has<FTag_ProceduralLeg_Detached>())
+        { return; }
+
         auto Released = FCk_ProceduralLeg_ReleasedParts{};
         if (UCk_Utils_ProceduralRig_UE::Has(InHandle))
         {
@@ -102,17 +109,43 @@ namespace ck
             Released.Set_Parts(Parts);
         }
 
-        if (InRequest.Get_PartsOwnership() == ECk_ProceduralLeg_ReleasedPartsOwnership::TransferToWorld)
+        switch (InRequest.Get_PartsOwnership())
         {
-            for (auto Part : Released.Get_Parts())
+            case ECk_ProceduralLeg_ReleasedPartsOwnership::KeepBodyOwned:
             {
-                UCk_Utils_EntityLifetime_UE::Request_TransferLifetimeOwner(Part, UCk_Utils_EntityLifetime_UE::Get_TransientEntity(Part));
+                break;
+            }
+            case ECk_ProceduralLeg_ReleasedPartsOwnership::TransferToWorld:
+            {
+                for (auto Part : Released.Get_Parts())
+                {
+                    UCk_Utils_EntityLifetime_UE::Request_TransferLifetimeOwner(Part, UCk_Utils_EntityLifetime_UE::Get_TransientEntity(Part));
+                }
+                break;
+            }
+            case ECk_ProceduralLeg_ReleasedPartsOwnership::TransferToLeg:
+            {
+                for (auto Part : Released.Get_Parts())
+                {
+                    UCk_Utils_EntityLifetime_UE::Request_TransferLifetimeOwner(Part, InHandle);
+                }
+                break;
             }
         }
 
+        // Binders may still read the rig here; it is unbound right after.
         UUtils_Signal_OnProceduralLeg_Detached::Broadcast(InHandle, MakePayload(InHandle, Released));
 
-        UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(InHandle);
+        // After the broadcast, so a binder still resolves the body through the leg's lifetime owner.
+        if (InRequest.Get_LegOwnership() == ECk_ProceduralLeg_DetachedLegOwnership::TransferToWorld)
+        { UCk_Utils_EntityLifetime_UE::Request_TransferLifetimeOwner(InHandle, UCk_Utils_EntityLifetime_UE::Get_TransientEntity(InHandle)); }
+
+        UCk_Utils_ProceduralRig_UE::DoUnbind(InHandle);
+
+        // The Disabled tag stays: the status reads Detached regardless, and an already-disabled leg leaves the enabled set
+        // unchanged.
+        InHandle.Try_Remove<FFragment_ProceduralLeg_FrozenPose>();
+        InHandle.AddOrGet<FTag_ProceduralLeg_Detached>();
     }
 
     // --------------------------------------------------------------------------------------------------------------------

@@ -20,6 +20,7 @@ namespace ck
         TReadWrite<FFragment_ProceduralRig>,
         FTag_ProceduralRig_NeedsSetup,
         TExclude<FTag_DestroyEntity_Initiate>,
+        TExclude<FTag_ProceduralLeg_Detached>,
         CK_IGNORE_PENDING_KILL>
     {
     public:

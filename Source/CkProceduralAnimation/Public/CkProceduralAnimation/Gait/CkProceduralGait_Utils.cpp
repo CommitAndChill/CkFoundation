@@ -121,6 +121,12 @@ auto
         InBody, Legs.Num())
     { return {}; }
 
+    const auto LegsAttached = ck::algo::AllOf(Legs, &UCk_Utils_ProceduralLeg_UE::Get_IsAttached);
+    CK_ENSURE_IF_NOT(LegsAttached,
+        TEXT("Procedural gait Add rejected body [{}]: one of its legs is detached or pending destruction; detach legs only after the gait exists."),
+        InBody)
+    { return {}; }
+
     const auto LegBeyondReach = DoFind_LegBeyondReach(Legs, InData->Get_Step());
     const auto RestsWithinReach = ck::Is_NOT_Valid(LegBeyondReach);
     CK_ENSURE_IF_NOT(RestsWithinReach,
@@ -204,7 +210,7 @@ auto
     return ck::algo::CountIf(InGait.Get<ck::FFragment_ProceduralGait>()._Legs,
     [](const FCk_Handle_ProceduralLeg& InLeg) -> bool
     {
-        return ck::IsValid(InLeg) && UCk_Utils_ProceduralLeg_UE::Get_Foot(InLeg).Get_Contact() == ECk_ProceduralLeg_FootContact::Trusted;
+        return ck::procedural_leg::Get_IsLive(InLeg) && UCk_Utils_ProceduralLeg_UE::Get_Foot(InLeg).Get_Contact() == ECk_ProceduralLeg_FootContact::Trusted;
     });
 }
 
@@ -220,17 +226,18 @@ auto
     return ck::algo::CountIf(InGait.Get<ck::FFragment_ProceduralGait>()._Legs,
     [](const FCk_Handle_ProceduralLeg& InLeg) -> bool
     {
-        return ck::IsValid(InLeg) && UCk_Utils_ProceduralLeg_UE::Get_Foot(InLeg).Get_Phase() == ECk_ProceduralLeg_FootPhase::Planted;
+        return ck::procedural_leg::Get_IsLive(InLeg) && UCk_Utils_ProceduralLeg_UE::Get_Foot(InLeg).Get_Phase() == ECk_ProceduralLeg_FootPhase::Planted;
     });
 }
 
 auto
     UCk_Utils_ProceduralGait_UE::
     Get_Legs(
-        const FCk_Handle_ProceduralGait& InGait)
+        const FCk_Handle_ProceduralGait& InGait,
+        ECk_ProceduralLeg_Filter InFilter)
     -> TArray<FCk_Handle_ProceduralLeg>
 {
-    return UCk_Utils_ProceduralLeg_UE::Get_Legs(InGait);
+    return UCk_Utils_ProceduralLeg_UE::Get_Legs(InGait, InFilter);
 }
 
 auto
@@ -425,7 +432,7 @@ auto
 {
     for (const auto& Leg : InLegs)
     {
-        if (ck::Is_NOT_Valid(Leg))
+        if (NOT ck::procedural_leg::Get_IsLive(Leg))
         { continue; }
 
         const auto& Params = Leg.Get<ck::FFragment_ProceduralLeg_Params>();

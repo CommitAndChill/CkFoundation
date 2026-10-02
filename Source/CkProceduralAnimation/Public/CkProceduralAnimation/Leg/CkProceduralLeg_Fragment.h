@@ -30,6 +30,26 @@ namespace ck
     // --------------------------------------------------------------------------------------------------------------------
 
     CK_DEFINE_ECS_TAG(FTag_ProceduralLeg_Disabled);
+    // Permanent: the detach drain adds it and nothing removes it.
+    CK_DEFINE_ECS_TAG(FTag_ProceduralLeg_Detached);
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // Every leg iteration in the module goes through these two predicates.
+    namespace procedural_leg
+    {
+        // A leg the gait still owns: valid, not pending destruction, not detached.
+        CKPROCEDURALANIMATION_API auto
+            Get_IsLive(
+                const FCk_Handle_ProceduralLeg& InLeg)
+            -> bool;
+
+        // A live leg that is also enabled: it may plant, reserve, support the body and anchor the reach pace.
+        CKPROCEDURALANIMATION_API auto
+            Get_IsSupporting(
+                const FCk_Handle_ProceduralLeg& InLeg)
+            -> bool;
+    }
 
     // --------------------------------------------------------------------------------------------------------------------
 

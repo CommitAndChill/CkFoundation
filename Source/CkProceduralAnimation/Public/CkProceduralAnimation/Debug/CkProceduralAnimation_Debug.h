@@ -4,6 +4,7 @@
 #include "CkProceduralAnimation/Core/CkProceduralFootProbe.h"
 #include "CkProceduralAnimation/Core/CkProceduralFoothold.h"
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Fragment_Data.h"
+#include "CkProceduralAnimation/Leg/CkProceduralLeg_Fragment_Data.h"
 #include "CkProceduralAnimation/Rig/CkProceduralRig_Fragment_Data.h"
 #include "CkProceduralAnimation/SurfaceMotion/CkSurfaceMotion_Fragment_Data.h"
 
@@ -186,6 +187,7 @@ private:
     FName _Id;
     FString _LegEntityId;
     bool _Enabled = true;
+    ECk_ProceduralLeg_Status _Status = ECk_ProceduralLeg_Status::Enabled;
     FCk_ProceduralAnimation_DebugLegTargeting _Targeting;
     FCk_ProceduralAnimation_DebugFoot _Foot;
     FCk_ProceduralAnimation_DebugProbe _Probe;
@@ -202,6 +204,7 @@ public:
     CK_PROPERTY(_Id);
     CK_PROPERTY(_LegEntityId);
     CK_PROPERTY(_Enabled);
+    CK_PROPERTY(_Status);
     CK_PROPERTY(_Targeting);
     CK_PROPERTY(_Foot);
     CK_PROPERTY(_Probe);

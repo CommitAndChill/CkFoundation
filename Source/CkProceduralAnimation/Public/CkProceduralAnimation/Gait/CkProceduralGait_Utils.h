@@ -152,7 +152,8 @@ public:
               DisplayName="[Ck][ProceduralGait] Get Legs")
     static TArray<FCk_Handle_ProceduralLeg>
     Get_Legs(
-        const FCk_Handle_ProceduralGait& InGait);
+        const FCk_Handle_ProceduralGait& InGait,
+        ECk_ProceduralLeg_Filter InFilter = ECk_ProceduralLeg_Filter::NoFilter);
 
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|ProceduralGait",

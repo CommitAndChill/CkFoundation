@@ -513,7 +513,7 @@ namespace ck
         auto LiveLegs = TArray<FCk_Handle_ProceduralLeg, TInlineAllocator<16>>{};
         for (const auto& Leg : InGaitComp._Legs)
         {
-            if (ck::IsValid(Leg) && NOT Leg.Has<FTag_DestroyEntity_Initiate>()
+            if (procedural_leg::Get_IsLive(Leg)
                 && Leg.Has<FFragment_ProceduralLeg_Params>() && Leg.Has<FFragment_ProceduralLeg>()
                 && UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Leg) == Body)
             { LiveLegs.Add(Leg); }

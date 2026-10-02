@@ -333,10 +333,49 @@ UENUM(BlueprintType)
 enum class ECk_ProceduralLeg_ReleasedPartsOwnership : uint8
 {
     KeepBodyOwned    UMETA(DisplayName = "Keep Body Owned (parts die with the body)"),
-    TransferToWorld  UMETA(DisplayName = "Transfer To World (parts outlive the body)")
+    TransferToWorld  UMETA(DisplayName = "Transfer To World (parts outlive the body)"),
+    TransferToLeg    UMETA(DisplayName = "Transfer To Leg (parts become the detached leg's lifetime children)")
 };
 
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralLeg_ReleasedPartsOwnership);
+
+// --------------------------------------------------------------------------------------------------------------------
+
+UENUM(BlueprintType)
+enum class ECk_ProceduralLeg_DetachedLegOwnership : uint8
+{
+    KeepBodyOwned    UMETA(DisplayName = "Keep Body Owned (the detached leg dies with the body)"),
+    TransferToWorld  UMETA(DisplayName = "Transfer To World (the detached leg outlives the body)")
+};
+
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralLeg_DetachedLegOwnership);
+
+// --------------------------------------------------------------------------------------------------------------------
+
+// Enabled and Disabled are the two attached states; Detached is permanent and dominates.
+UENUM(BlueprintType)
+enum class ECk_ProceduralLeg_Status : uint8
+{
+    Enabled,
+    Disabled,
+    Detached
+};
+
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralLeg_Status);
+
+// --------------------------------------------------------------------------------------------------------------------
+
+UENUM(BlueprintType)
+enum class ECk_ProceduralLeg_Filter : uint8
+{
+    OnlyEnabled,
+    OnlyDisabled,
+    OnlyAttached  UMETA(DisplayName = "Only Attached (enabled or disabled)"),
+    OnlyDetached,
+    NoFilter      UMETA(DisplayName = "No Filter (every leg the body has)")
+};
+
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralLeg_Filter);
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -373,8 +412,13 @@ private:
               meta = (AllowPrivateAccess = true))
     ECk_ProceduralLeg_ReleasedPartsOwnership _PartsOwnership = ECk_ProceduralLeg_ReleasedPartsOwnership::KeepBodyOwned;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    ECk_ProceduralLeg_DetachedLegOwnership _LegOwnership = ECk_ProceduralLeg_DetachedLegOwnership::KeepBodyOwned;
+
 public:
     CK_PROPERTY_GET(_PartsOwnership);
+    CK_PROPERTY(_LegOwnership);
 
 public:
     CK_DEFINE_CONSTRUCTORS(FCk_Request_ProceduralLeg_Detach, _PartsOwnership);

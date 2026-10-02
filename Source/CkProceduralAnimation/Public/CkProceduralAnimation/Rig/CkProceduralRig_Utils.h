@@ -12,6 +12,13 @@
 
 // --------------------------------------------------------------------------------------------------------------------
 
+namespace ck
+{
+    class FProcessor_ProceduralLeg_HandleRequests;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
 UCLASS(NotBlueprintable, Meta = (ScriptMixin = "FCk_Handle_ProceduralRig"))
 class CKPROCEDURALANIMATION_API UCk_Utils_ProceduralRig_UE : public UCk_Utils_Ecs_Base_UE
 {
@@ -110,6 +117,16 @@ public:
     static float
     Get_SwivelDegrees(
         const FCk_Handle_ProceduralRig& InRig);
+
+private:
+    friend class ck::FProcessor_ProceduralLeg_HandleRequests;
+
+    // Removes the rig from a leg: its params, state, setup tag and failure. The parts are untouched (the caller decides their
+    // ownership); afterwards Has(Leg) is false and the parts are admissible to another rig.
+    static auto
+    DoUnbind(
+        FCk_Handle_ProceduralLeg& InLeg)
+        -> void;
 };
 
 // --------------------------------------------------------------------------------------------------------------------

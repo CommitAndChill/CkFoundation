@@ -1,5 +1,6 @@
 #include "CkProceduralAnimation/Rig/CkProceduralRig_Utils.h"
 
+#include "CkProceduralAnimation/Leg/CkProceduralLeg_Fragment.h"
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Utils.h"
 #include "CkProceduralAnimation/Rig/CkProceduralRig_Fragment.h"
 
@@ -73,6 +74,7 @@ auto
 {
     const auto LegValid = ck::IsValid(InLeg)
         && NOT InLeg.Has<ck::FTag_DestroyEntity_Initiate>()
+        && NOT InLeg.Has<ck::FTag_ProceduralLeg_Detached>()
         && NOT Has(InLeg);
     const auto Valid = LegValid
         && ck::IsValid(InParams)
@@ -82,7 +84,7 @@ auto
         TEXT("Procedural rig Add rejected leg [{}]. The leg must be live with no rig; the chain needs 1..8 unique live segments, "
              "as many as the leg's segment lengths, and a single segment only takes the Auto solver; every segment and the optional "
              "foot must carry a transform, must not be the leg or its body, must be a direct lifetime child of the leg's body and "
-             "must not be bound by another leg's rig."),
+             "must not be bound by another leg's rig. A detached leg takes no rig."),
         InLeg)
     { return {}; }
 
@@ -163,6 +165,20 @@ auto
     return ck::IsValid(InRig) && Has(InRig)
         ? InRig.Get<ck::FFragment_ProceduralRig>()._SwivelDegrees
         : 0.0f;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    UCk_Utils_ProceduralRig_UE::
+    DoUnbind(
+        FCk_Handle_ProceduralLeg& InLeg)
+    -> void
+{
+    InLeg.Try_Remove<ck::FFragment_ProceduralRig_Params>();
+    InLeg.Try_Remove<ck::FFragment_ProceduralRig>();
+    InLeg.Try_Remove<ck::FTag_ProceduralRig_NeedsSetup>();
+    InLeg.Try_Remove<ck::FFragment_ProceduralRig_Failure>();
 }
 
 // --------------------------------------------------------------------------------------------------------------------

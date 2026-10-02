@@ -2,6 +2,7 @@
 
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Utils.h"
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Fragment.h"
+#include "CkProceduralAnimation/CkProceduralAnimation_Log.h"
 
 #include "CkCore/Ensure/CkEnsure.h"
 
@@ -12,6 +13,52 @@
 // --------------------------------------------------------------------------------------------------------------------
 
 CK_DEFINE_HAS_CAST_CONV_HANDLE_TYPESAFE(UCk_Utils_ProceduralLeg_UE, FCk_Handle_ProceduralLeg, ck::FFragment_ProceduralLeg);
+
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace ck::procedural_leg
+{
+    auto
+        Get_IsLive(
+            const FCk_Handle_ProceduralLeg& InLeg)
+        -> bool
+    {
+        return ck::IsValid(InLeg)
+            && NOT InLeg.Has<FTag_DestroyEntity_Initiate>()
+            && NOT InLeg.Has<FTag_ProceduralLeg_Detached>();
+    }
+
+    auto
+        Get_IsSupporting(
+            const FCk_Handle_ProceduralLeg& InLeg)
+        -> bool
+    {
+        return Get_IsLive(InLeg) && NOT InLeg.Has<FTag_ProceduralLeg_Disabled>();
+    }
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace ck_procedural_leg_utils
+{
+    auto
+        Get_PassesFilter(
+            const FCk_Handle_ProceduralLeg& InLeg,
+            ECk_ProceduralLeg_Filter InFilter)
+        -> bool
+    {
+        const auto Status = UCk_Utils_ProceduralLeg_UE::Get_Status(InLeg);
+        switch (InFilter)
+        {
+            case ECk_ProceduralLeg_Filter::OnlyEnabled: return Status == ECk_ProceduralLeg_Status::Enabled;
+            case ECk_ProceduralLeg_Filter::OnlyDisabled: return Status == ECk_ProceduralLeg_Status::Disabled;
+            case ECk_ProceduralLeg_Filter::OnlyAttached: return Status != ECk_ProceduralLeg_Status::Detached;
+            case ECk_ProceduralLeg_Filter::OnlyDetached: return Status == ECk_ProceduralLeg_Status::Detached;
+            case ECk_ProceduralLeg_Filter::NoFilter: return true;
+        }
+        return true;
+    }
+}
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -119,7 +166,33 @@ auto
         const FCk_Handle_ProceduralLeg& InLeg)
     -> ECk_EnableDisable
 {
-    return InLeg.Has<ck::FTag_ProceduralLeg_Disabled>() ? ECk_EnableDisable::Disable : ECk_EnableDisable::Enable;
+    return InLeg.Has<ck::FTag_ProceduralLeg_Disabled>() || InLeg.Has<ck::FTag_ProceduralLeg_Detached>()
+        ? ECk_EnableDisable::Disable
+        : ECk_EnableDisable::Enable;
+}
+
+auto
+    UCk_Utils_ProceduralLeg_UE::
+    Get_Status(
+        const FCk_Handle_ProceduralLeg& InLeg)
+    -> ECk_ProceduralLeg_Status
+{
+    if (ck::Is_NOT_Valid(InLeg) || NOT Has(InLeg) || InLeg.Has<ck::FTag_ProceduralLeg_Detached>())
+    { return ECk_ProceduralLeg_Status::Detached; }
+
+    return InLeg.Has<ck::FTag_ProceduralLeg_Disabled>() ? ECk_ProceduralLeg_Status::Disabled : ECk_ProceduralLeg_Status::Enabled;
+}
+
+auto
+    UCk_Utils_ProceduralLeg_UE::
+    Get_IsAttached(
+        const FCk_Handle_ProceduralLeg& InLeg)
+    -> bool
+{
+    return ck::IsValid(InLeg)
+        && Has(InLeg)
+        && NOT InLeg.Has<ck::FTag_DestroyEntity_Initiate>()
+        && NOT InLeg.Has<ck::FTag_ProceduralLeg_Detached>();
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -140,6 +213,13 @@ auto
     CK_ENSURE_IF_NOT(RequestValid,
         TEXT("Procedural leg Request_EnableDisable rejected leg [{}]: it must be a live leg entity."), InLeg)
     {
+        Request.TryFireCompletion(InLeg, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return InLeg;
+    }
+
+    if (InLeg.Has<ck::FTag_ProceduralLeg_Detached>())
+    {
+        ck::procedural_animation::Verbose(TEXT("Procedural leg Request_EnableDisable ignored leg [{}]: it is detached."), InLeg);
         Request.TryFireCompletion(InLeg, ECk_Request_OperationResult::Failed_NotEnqueued);
         return InLeg;
     }
@@ -165,6 +245,13 @@ auto
     CK_ENSURE_IF_NOT(RequestValid,
         TEXT("Procedural leg Request_Detach rejected leg [{}]: it must be a live leg entity."), InLeg)
     {
+        Request.TryFireCompletion(InLeg, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return InLeg;
+    }
+
+    if (InLeg.Has<ck::FTag_ProceduralLeg_Detached>())
+    {
+        ck::procedural_animation::Verbose(TEXT("Procedural leg Request_Detach ignored leg [{}]: it is detached."), InLeg);
         Request.TryFireCompletion(InLeg, ECk_Request_OperationResult::Failed_NotEnqueued);
         return InLeg;
     }
@@ -253,10 +340,17 @@ auto
 auto
     UCk_Utils_ProceduralLeg_UE::
     Get_Legs(
-        const FCk_Handle& InBody)
+        const FCk_Handle& InBody,
+        ECk_ProceduralLeg_Filter InFilter)
     -> TArray<FCk_Handle_ProceduralLeg>
 {
-    return ck::FUtils_RecordOfProceduralLegs::Get_ValidEntries(InBody);
+    if (InFilter == ECk_ProceduralLeg_Filter::NoFilter)
+    { return ck::FUtils_RecordOfProceduralLegs::Get_ValidEntries(InBody); }
+
+    return ck::FUtils_RecordOfProceduralLegs::Get_ValidEntries_If(InBody, [&](const FCk_Handle_ProceduralLeg& InLeg) -> bool
+    {
+        return ck_procedural_leg_utils::Get_PassesFilter(InLeg, InFilter);
+    });
 }
 
 auto

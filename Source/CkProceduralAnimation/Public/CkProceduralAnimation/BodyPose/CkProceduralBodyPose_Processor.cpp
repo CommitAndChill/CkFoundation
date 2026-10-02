@@ -104,9 +104,7 @@ namespace ck
         for (auto Index = 0; Index < HipLocals.Num(); ++Index)
         {
             const auto& Leg = InGaitComp._Legs[Index];
-            const auto Supports = ck::IsValid(Leg)
-                && NOT Leg.Has<FTag_DestroyEntity_Initiate>()
-                && NOT Leg.Has<FTag_ProceduralLeg_Disabled>();
+            const auto Supports = procedural_leg::Get_IsSupporting(Leg);
             Legs.Emplace(HipLocals[Index], Supports ? Supporting : Unsupported);
         }
 
@@ -141,10 +139,7 @@ namespace ck
             Feet.Reserve(InGaitComp._Legs.Num());
             for (const auto& Leg : InGaitComp._Legs)
             {
-                const auto Stands = NOT Airborne
-                    && ck::IsValid(Leg)
-                    && NOT Leg.Has<FTag_DestroyEntity_Initiate>()
-                    && NOT Leg.Has<FTag_ProceduralLeg_Disabled>();
+                const auto Stands = NOT Airborne && procedural_leg::Get_IsSupporting(Leg);
                 if (NOT Stands)
                 {
                     Feet.Emplace(FVector::ZeroVector, FVector::ZeroVector, 0.0f);
@@ -229,7 +224,7 @@ namespace ck
             for (const auto& Anchor : Stance.Get_Anchors())
             {
                 const auto& Leg = Anchor.Get_Leg();
-                if (ck::Is_NOT_Valid(Leg) || Leg.Has<FTag_DestroyEntity_Initiate>() || Leg.Has<FTag_ProceduralLeg_Disabled>()
+                if (NOT procedural_leg::Get_IsSupporting(Leg)
                     || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Leg) != InHandle.ConvertToHandle()
                     || NOT Leg.Has<FFragment_ProceduralLeg>())
                 { continue; }
@@ -247,7 +242,7 @@ namespace ck
             // body's offset; adding them to the stance snapshot would make a swinging foot hold simulation travel.
             for (const auto& Leg : InGaitComp._Legs)
             {
-                if (ck::Is_NOT_Valid(Leg) || Leg.Has<FTag_DestroyEntity_Initiate>() || Leg.Has<FTag_ProceduralLeg_Disabled>()
+                if (NOT procedural_leg::Get_IsSupporting(Leg)
                     || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Leg) != InHandle.ConvertToHandle()
                     || NOT Leg.Has<FFragment_ProceduralLeg>() || NOT Leg.Has<FFragment_ProceduralLeg_Params>())
                 { continue; }

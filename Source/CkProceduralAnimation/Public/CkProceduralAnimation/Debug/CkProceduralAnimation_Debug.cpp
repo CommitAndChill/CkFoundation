@@ -176,6 +176,12 @@ auto
         auto& DebugLeg = Snapshot.Get_Legs()[Index];
         DebugLeg.Set_LegEntityId(Leg.Get_Entity().ToString());
 
+        if (Leg.Has<ck::FTag_ProceduralLeg_Detached>())
+        {
+            DebugLeg.Set_Status(ECk_ProceduralLeg_Status::Detached);
+            continue;
+        }
+
         if (NOT UCk_Utils_ProceduralRig_UE::Has(Leg))
         { continue; }
 

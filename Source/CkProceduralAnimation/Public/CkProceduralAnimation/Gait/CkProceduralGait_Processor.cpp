@@ -1100,9 +1100,7 @@ namespace ck_procedural_gait
             const FCk_Handle_ProceduralLeg& InLeg)
         -> bool
     {
-        return ck::IsValid(InLeg)
-            && NOT InLeg.Has<ck::FTag_DestroyEntity_Initiate>()
-            && NOT InLeg.Has<ck::FTag_ProceduralLeg_Disabled>();
+        return ck::procedural_leg::Get_IsSupporting(InLeg);
     }
 
     // Rebuilt from committed solver state; no second reservation lifetime or stale release path.
@@ -1356,7 +1354,7 @@ namespace ck
             .RemainingLegs = TNumericLimits<int32>::Max(),
             .Solve = InGaitComp._SolveSequence};
         const auto MaxHipLateral = ck_procedural_gait::Get_MaxHipLateral(InGaitComp._Legs,
-            [](const FCk_Handle_ProceduralLeg& InLeg) { return ck::IsValid(InLeg); });
+            [](const FCk_Handle_ProceduralLeg& InLeg) { return procedural_leg::Get_IsLive(InLeg); });
         auto InitialFeet = TArray<FVector, TInlineAllocator<8>>{};
         auto InitialTrust = TArray<bool, TInlineAllocator<8>>{};
         auto InitialReservations = TArray<FProceduralFootReservation, TInlineAllocator<8>>{};
@@ -1365,7 +1363,7 @@ namespace ck
         for (auto Index = 0; Index < InGaitComp._Legs.Num(); ++Index)
         {
             auto& Leg = InGaitComp._Legs[Index];
-            if (ck::Is_NOT_Valid(Leg))
+            if (NOT procedural_leg::Get_IsLive(Leg))
             {
                 constexpr auto Untrusted = false;
                 InitialFeet.Add(InverseBasis.RotateVector(Body.GetLocation()));
@@ -1608,10 +1606,14 @@ namespace ck
             auto& DebugLeg = InDebugComp._ScratchLegs[Index];
             const auto WasEnabled = (InGaitComp._EnabledMask & ck_procedural_gait::Get_LegBit(Index)) != 0;
             const auto LegValid = ck::IsValid(Leg);
+            const auto Live = procedural_leg::Get_IsLive(Leg);
             const auto Enabled = ck_procedural_gait::Get_IsLegEnabled(Leg);
 
             Input.Set_Enabled(Enabled);
             DebugLeg.Set_Enabled(Enabled)
+                .Set_Status(NOT Live ? ECk_ProceduralLeg_Status::Detached
+                    : Enabled ? ECk_ProceduralLeg_Status::Enabled
+                    : ECk_ProceduralLeg_Status::Disabled)
                 .Set_LandingPointWorld(FVector::ZeroVector)
                 .Set_LandingProbe(FCk_ProceduralAnimation_DebugProbe{})
                 .Set_LandingGround(EProceduralGaitLandingGround::Unknown)
@@ -1622,9 +1624,14 @@ namespace ck
             DebugLeg.Get_Probe() = FCk_ProceduralAnimation_DebugProbe{};
             DebugLeg.Get_Foot().Set_ContactTrusted(false);
 
-            if (NOT LegValid)
+            if (NOT Live)
             {
                 EnabledMask &= ~ck_procedural_gait::Get_LegBit(Index);
+                if (LegValid)
+                {
+                    Leg.Try_Remove<FFragment_ProceduralLeg_FrozenPose>();
+                    DebugLeg.Set_Id(Leg.Get<FFragment_ProceduralLeg_Params>().Get_Id());
+                }
                 continue;
             }
 
@@ -1661,10 +1668,8 @@ namespace ck
                     .Set_Contact(ECk_ProceduralLeg_FootContact::Guessed)
                     .Set_Foothold(ECk_ProceduralLeg_Foothold::None);
 
-                // A detached leg stays valid until its destruction completes, and its last pose is frozen here too;
-                // freezing a swinging foot as it goes is not a plant.
-                if (NOT Leg.Has<FTag_DestroyEntity_Initiate>())
-                { ck_procedural_gait::DoPublish_FootPhaseChange(Leg, LegComp, PreviousPhase, PreviousPosition, Dt); }
+                // Freezing a swinging foot as it goes is not a plant.
+                ck_procedural_gait::DoPublish_FootPhaseChange(Leg, LegComp, PreviousPhase, PreviousPosition, Dt);
 
                 // The frozen pose is the source of truth so a re-enabled leg swings from where it is drawn.
                 // On the transition frame the solver's own reconcile freezes this same pose.
@@ -1923,8 +1928,7 @@ namespace ck
             for (auto Index = 0; Index < LegCount; ++Index)
             {
                 const auto& Leg = InGaitComp._Legs[Index];
-                if (NOT Inputs[Index].Get_Enabled() || NOT Outputs[Index].Get_Planted() || ck::Is_NOT_Valid(Leg)
-                    || Leg.Has<FTag_DestroyEntity_Initiate>())
+                if (NOT Inputs[Index].Get_Enabled() || NOT Outputs[Index].Get_Planted() || NOT procedural_leg::Get_IsSupporting(Leg))
                 { continue; }
 
                 const auto& Foot = Leg.Get<FFragment_ProceduralLeg>()._Foot;
@@ -1940,7 +1944,7 @@ namespace ck
                 const auto& Output = Outputs[Index];
                 const auto& State = InGaitComp._Solver.GetLegState(Index);
                 const auto& Leg = InGaitComp._Legs[Index];
-                const auto PublishedFoot = ck::IsValid(Leg) && Leg.Has<FFragment_ProceduralLeg>()
+                const auto PublishedFoot = procedural_leg::Get_IsLive(Leg) && Leg.Has<FFragment_ProceduralLeg>()
                     ? TOptional<FCk_ProceduralLeg_Foot>{Leg.Get<FFragment_ProceduralLeg>().Get_Foot()}
                     : TOptional<FCk_ProceduralLeg_Foot>{};
                 InDebugComp._ScratchLegs[Index].Get_Foot().Set_PlantedPosition(Basis.RotateVector(State.Get_Plant().Get_Position()))

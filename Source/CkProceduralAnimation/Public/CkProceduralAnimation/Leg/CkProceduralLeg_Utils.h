@@ -103,11 +103,28 @@ public:
     Get_IdealVerdict(
         const FCk_Handle_ProceduralLeg& InLeg);
 
+    // Disable for a detached leg: it never steps again.
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|ProceduralLeg",
               DisplayName="[Ck][ProceduralLeg] Get Enable Disable")
     static ECk_EnableDisable
     Get_EnableDisable(
+        const FCk_Handle_ProceduralLeg& InLeg);
+
+    // Detached once the leg's detach request drained, whatever its enable state was; an invalid handle reads Detached.
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|ProceduralLeg",
+              DisplayName="[Ck][ProceduralLeg] Get Status")
+    static ECk_ProceduralLeg_Status
+    Get_Status(
+        const FCk_Handle_ProceduralLeg& InLeg);
+
+    // True for a live leg entity that has not been detached and is not pending destruction.
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|ProceduralLeg",
+              DisplayName="[Ck][ProceduralLeg] Get Is Attached")
+    static bool
+    Get_IsAttached(
         const FCk_Handle_ProceduralLeg& InLeg);
 
 public:
@@ -187,13 +204,16 @@ public:
         const FCk_Delegate_ProceduralLeg_OnLifted& InDelegate);
 
 public:
+    // Every leg the body has, in record order, which a detach does not change; the filter keeps the legs of one status.
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|ProceduralLeg",
               DisplayName="[Ck][ProceduralLeg] Get Legs")
     static TArray<FCk_Handle_ProceduralLeg>
     Get_Legs(
-        const FCk_Handle& InBody);
+        const FCk_Handle& InBody,
+        ECk_ProceduralLeg_Filter InFilter = ECk_ProceduralLeg_Filter::NoFilter);
 
+    // Resolves detached legs too: the Id stays the leg's identity.
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|ProceduralLeg",
               DisplayName="[Ck][ProceduralLeg] Try Get Leg")

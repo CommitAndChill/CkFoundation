@@ -69,17 +69,14 @@ auto
     const auto Valid = GaitValid
         && ck::IsValid(InParams)
         && ck_procedural_body_pose_utils::Get_IsPresentationAdmissible(InParams.Get_Presentation(), InGait.ConvertToHandle())
-        && ck::algo::AllOf(InGait.Get<ck::FFragment_ProceduralGait>()._Legs, [](const FCk_Handle_ProceduralLeg& InLeg) -> bool
-        {
-            return ck::IsValid(InLeg) && NOT InLeg.Has<ck::FTag_DestroyEntity_Initiate>();
-        });
+        && ck::algo::AllOf(InGait.Get<ck::FFragment_ProceduralGait>()._Legs, &UCk_Utils_ProceduralLeg_UE::Get_IsAttached);
     CK_ENSURE_IF_NOT(Valid,
         TEXT("Procedural body pose Add rejected gait [{}]. The gait must be live with no body pose; the presentation must be a "
              "live transform entity that is a direct lifetime child of the body, not the body itself and not a rig part; spring "
              "stiffness and mass must be positive, damping and max attitude lag non-negative, collapse drop non-negative and max tilt "
              "within 0..89 degrees; the conform's max tilt must be within 0..89 degrees, its height weight within 0..1, its max "
              "height non-negative and its max tilt and height rates positive. "
-             "Every leg the gait captured must still be live."),
+             "Every leg the gait captured must still be live and attached."),
         InGait)
     { return {}; }
 
