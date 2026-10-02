@@ -54,6 +54,7 @@
 #include "/CkParticles/Behaviors/Behavior_BombExplosion.ush"
 #include "/CkParticles/Behaviors/Behavior_LightningHit.ush"
 #include "/CkParticles/Behaviors/Behavior_Dash.ush"
+#include "/CkParticles/Behaviors/Behavior_SteamJet.ush"
 
 FCkParticles_StageOutput CkParticles_Dispatch(FCkParticles_StageInput In)
 {
@@ -103,6 +104,7 @@ FCkParticles_StageOutput CkParticles_Dispatch(FCkParticles_StageInput In)
     if (In.BehaviorId == 44) { return CkParticles_Behavior_BombExplosion(In); }
     if (In.BehaviorId == 45) { return CkParticles_Behavior_LightningHit(In); }
     if (In.BehaviorId == 46) { return CkParticles_Behavior_Dash(In); }
+    if (In.BehaviorId == 47) { return CkParticles_Behavior_SteamJet(In); }
 
     // BehaviorId 0 (and any unknown id) -> Gravity.
     return CkParticles_Behavior_Gravity(In);

@@ -88,7 +88,7 @@ namespace ck::particles
     // Behavior roster size. ONE definition so tests, gyms and docs can iterate the roster without each restating a
     // magic maximum id that then drifts when a behavior is added.
     // --------------------------------------------------------------------------------------------------------------
-    inline constexpr int32 NumBehaviors = 47;                    // ids [0 .. NumBehaviors-1]
+    inline constexpr int32 NumBehaviors = 48;                    // ids [0 .. NumBehaviors-1]
     inline constexpr int32 LastBehaviorId = NumBehaviors - 1;
 
     // --------------------------------------------------------------------------------------------------------------
@@ -993,6 +993,10 @@ namespace ck::particles
             // 1.5 s life — the same 1.55 the ArrowCast row carries for the same wind pair.
             { TEXT("PS_CkParticles_Template_Dash"), 2.0f, 1.55f, 19,
               Get_DashRendererSpecs(), 50.0f },
+            // SteamJet: an original design row, not a port. A continuous jet — rate only, no burst — whose 0.9 s
+            // life is what lets drag carry a puff most of its v0/k range before it thins out. It draws through the
+            // shared smoke sprite (VisTag 2), so it declares no renderers of its own.
+            { TEXT("PS_CkParticles_Template_SteamJet"), 1.0f, 0.9f, 0, {}, 70.0f },
         };
         return MakeArrayView(Specs);
     }
@@ -1175,6 +1179,11 @@ namespace ck::particles
         return Get_TemplateSystemObjectPath(TEXT("PS_CkParticles_Template_Dash"));
     }
 
+    inline auto Get_SteamJetTemplateSystemObjectPath() -> FString
+    {
+        return Get_TemplateSystemObjectPath(TEXT("PS_CkParticles_Template_SteamJet"));
+    }
+
     // Which template a behavior spawns through. A recreation whose source cadence differs from every existing row
     // gets its own row and is named here; the multi-particle one-shots keep the shared burst template.
     inline auto Get_BehaviorTemplateSystemObjectPath(const int32 InBehaviorId) -> FString
@@ -1222,6 +1231,7 @@ namespace ck::particles
             // The everything-effect: every renderer class the pipeline has, on one row.
             case 45: return Get_LightningHitTemplateSystemObjectPath();       // 2.0s loop, 1.3s, 84 + ribbon 30
             case 46: return Get_DashTemplateSystemObjectPath();               // 2.0s loop, 1.55s, 19 + 50/s
+            case 47: return Get_SteamJetTemplateSystemObjectPath();           // 1.0s loop, 0.9s, rate 70/s
             default: break;
         }
 
@@ -1448,6 +1458,7 @@ namespace ck::particles
             case 44: return FName(TEXT("BombExplosion"));
             case 45: return FName(TEXT("LightningHit"));
             case 46: return FName(TEXT("Dash"));
+            case 47: return FName(TEXT("SteamJet"));
             default: return NAME_None;
         }
     }

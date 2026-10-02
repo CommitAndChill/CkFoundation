@@ -199,6 +199,7 @@ cookbook is worth more than the sum of its recipes.
 | [NS_Bomb_Explosion.md](NS_Bomb_Explosion.md) | Vefects `NS_Bomb_Explosion` | `BombExplosion` (44) | implementation-complete (2026-08-02); **`[HUMAN-VERIFY]` open**. Cookbook's largest burst at 162; fifteen row renderers, two new looks, and the batch's only consumer of every C8 facing mode |
 | [NS_Lightning_Hit.md](NS_Lightning_Hit.md) | Vefects `NS_Lightning_Hit` | `LightningHit` (45) | implemented (2026-08-02) — **`[HUMAN-VERIFY]` open**. Widest spread in the cookbook (16 row renderers on VisTags 225–240 + the ribbon's 241); added ZERO new assets — drawn entirely from the library the previous 28 ports built |
 | [NS_Dash.md](NS_Dash.md) | Vefects `NS_Dash` | `Dash` (46) | implemented (2026-08-02) — the campaign's actual last port, caught by the close-out index sweep after the wave table had silently dropped it; **`[HUMAN-VERIFY]` open**. Burst 19 + rate 50/s; one new look (`WindDisAdd03`) + the Cone carrier |
+| [SteamJet.md](SteamJet.md) | none — ORIGINAL design, not an `NS_` port | `SteamJet` (47) | implemented (2026-10-02) — design constants only, no corpus; **`[HUMAN-VERIFY]` open**. Rate 70/s on its own row, drawn through the shared VisTag-2 smoke sprite; closed-form linear drag |
 
 ---
 

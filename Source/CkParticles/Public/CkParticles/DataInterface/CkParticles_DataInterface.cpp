@@ -87,6 +87,7 @@ namespace NDICkParticlesLocal
         TEXT("/CkParticles/Behaviors/Behavior_BombExplosion.ush"),
         TEXT("/CkParticles/Behaviors/Behavior_LightningHit.ush"),
         TEXT("/CkParticles/Behaviors/Behavior_Dash.ush"),
+        TEXT("/CkParticles/Behaviors/Behavior_SteamJet.ush"),
     };
 }
 
@@ -10671,6 +10672,39 @@ namespace NDICkParticlesLocal
                     Out.VisTag = VisLines;
                     break;
                 }
+            }
+            case 47: // SteamJet — drag-slowed steam jet along +X, buoyant lift, soft-smoke renderer. Mirrors Behavior_SteamJet.ush; design sheet Cookbook/SteamJet.md.
+            {
+                const float t = InAge;
+
+                const float r0 = 7.0f * FMath::Sqrt(Rand(InSeed, 1));
+                const float th = 6.28318530718f * Rand(InSeed, 2);
+                const FVector3f Birth(0.0f, r0 * FMath::Cos(th), r0 * FMath::Sin(th));
+
+                const float v0 = FMath::Lerp(520.0f, 680.0f, Rand(InSeed, 3));
+                const float k  = 2.2f;
+
+                const float a   = FMath::DegreesToRadians(7.0f) * FMath::Sqrt(Rand(InSeed, 4));
+                const float phi = 6.28318530718f * Rand(InSeed, 5);
+                const FVector3f Dir(FMath::Cos(a), FMath::Sin(a) * FMath::Cos(phi), FMath::Sin(a) * FMath::Sin(phi));
+
+                const float Decay = FMath::Exp(-k * t);
+                const float s     = v0 * (1.0f - Decay) / k;
+
+                Out.Position = Birth + Dir * s + FVector3f(0.0f, 0.0f, 35.0f * t * t);
+                Out.Velocity = Dir * (v0 * Decay) + FVector3f(0.0f, 0.0f, 70.0f * t);
+
+                const float Size = (14.0f + 50.0f * NormalizedAge) * FMath::Lerp(0.9f, 1.1f, Rand(InSeed, 6));
+                Out.Size = FVector2f(Size, Size);
+
+                const float A    = 0.55f * SmoothStep(0.0f, 0.08f, NormalizedAge) * (1.0f - SmoothStep(0.40f, 1.0f, NormalizedAge));
+                const float Grey = FMath::Lerp(0.95f, 0.80f, NormalizedAge);
+                Out.Color = FLinearColor(Grey * A, Grey * A, Grey * A, A);
+
+                Out.VisTag   = 2;
+                Out.Rotation = (Rand(InSeed, 7) - 0.5f) * 360.0f + (Rand(InSeed, 8) - 0.5f) * 90.0f * t;
+                Out.Dynamic  = FVector4f(Saturate(NormalizedAge - 0.3f) * 1.4f, 0.0f, 0.0f, 0.0f);
+                break;
             }
             case 0: // Gravity — constant downward accel, integrate, tint warm->dark over life.
             default:

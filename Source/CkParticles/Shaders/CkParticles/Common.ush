@@ -79,6 +79,14 @@ float CkParticles_NormalizedAge(FCkParticles_StageInput In)
     return CkParticles_NormalizedAgeOf(In.Age, In.Lifetime);
 }
 
+// Hermite smoothstep, written out rather than the intrinsic so the C++ mirror (NDICkParticlesLocal::SmoothStep) is
+// the same three lines and cannot round differently.
+float CkParticles_SmoothStep(float e0, float e1, float x)
+{
+    const float s = saturate((x - e0) / (e1 - e0));
+    return s * s * (3.0 - 2.0 * s);
+}
+
 // --------------------------------------------------------------------------------------------------------------------
 // Per-particle randomness. CkParticles_Rand hashes (Seed, Salt) -> [0,1). Uses only the low 24 bits so float(n)/2^24
 // is exact, giving bit-identical results between this GPU code and its C++ CPU mirror (NDICkParticlesLocal::Rand).

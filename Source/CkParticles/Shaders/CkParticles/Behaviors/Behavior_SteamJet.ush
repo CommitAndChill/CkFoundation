@@ -1,0 +1,45 @@
+// /CkParticles/Behaviors/Behavior_SteamJet.ush — BehaviorId 47.
+// A continuous jet of steam along +X from a nozzle at the origin: born in a 7 uu disc in the YZ plane, launched
+// 520-680 uu/s inside a 7 degree cone, slowed by linear drag k = 2.2/s (closed form: range v0/k, 236-309 uu), lifted
+// by buoyancy 35 t^2, growing 14 -> 64 uu, warm-white fading to grey through the soft-smoke renderer (VisTag 2).
+// Design constants (no source corpus) - see Cookbook/SteamJet.md. Keep the CPU mirror in lockstep.
+#pragma once
+#include "/CkParticles/Common.ush"
+
+FCkParticles_StageOutput CkParticles_Behavior_SteamJet(FCkParticles_StageInput In)
+{
+    FCkParticles_StageOutput O = CkParticles_DefaultOutput(In);
+
+    const float n = CkParticles_NormalizedAge(In);
+    const float t = In.Age;
+
+    const float r0 = 7.0 * sqrt(CkParticles_Rand(In.Seed, 1));
+    const float th = 6.28318530718 * CkParticles_Rand(In.Seed, 2);
+    const float3 Birth = float3(0.0, r0 * cos(th), r0 * sin(th));
+
+    const float v0 = lerp(520.0, 680.0, CkParticles_Rand(In.Seed, 3));
+    const float k  = 2.2;
+
+    const float a   = radians(7.0) * sqrt(CkParticles_Rand(In.Seed, 4));
+    const float phi = 6.28318530718 * CkParticles_Rand(In.Seed, 5);
+    const float3 Dir = float3(cos(a), sin(a) * cos(phi), sin(a) * sin(phi));
+
+    // Linear drag integrated analytically, so position is a function of Age alone and never of the frame cadence.
+    const float Decay = exp(-k * t);
+    const float s     = v0 * (1.0 - Decay) / k;
+
+    O.Position = Birth + Dir * s + float3(0.0, 0.0, 35.0 * t * t);
+    O.Velocity = Dir * (v0 * Decay) + float3(0.0, 0.0, 70.0 * t);
+
+    const float Size = (14.0 + 50.0 * n) * lerp(0.9, 1.1, CkParticles_Rand(In.Seed, 6));
+    O.Size = float2(Size, Size);
+
+    const float A    = 0.55 * CkParticles_SmoothStep(0.0, 0.08, n) * (1.0 - CkParticles_SmoothStep(0.40, 1.0, n));
+    const float Grey = lerp(0.95, 0.80, n);
+    O.Color = float4(Grey * A, Grey * A, Grey * A, A);
+
+    O.VisTag   = 2;
+    O.Rotation = (CkParticles_Rand(In.Seed, 7) - 0.5) * 360.0 + (CkParticles_Rand(In.Seed, 8) - 0.5) * 90.0 * t;
+    O.Dynamic  = float4(saturate(n - 0.3) * 1.4, 0.0, 0.0, 0.0);
+    return O;
+}

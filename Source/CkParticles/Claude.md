@@ -173,6 +173,7 @@ Shipped recipes:
 | [`NS_Bomb_Explosion.md`](Cookbook/NS_Bomb_Explosion.md) | Vefects `NS_Bomb_Explosion` + 9 `M_VFX_DisAdd_*` + `M_VFX_FlatAdd` + 3 `MI_VFX_FresnelBomb_*` | `BombExplosion` (44) |
 | [`NS_Lightning_Hit.md`](Cookbook/NS_Lightning_Hit.md) | Vefects `NS_Lightning_Hit` + 12 `M_VFX_DisAdd_*` + `M_VFX_FlatAdd` — the widest system in the pack, and the only port that added ZERO new assets of any kind | `LightningHit` (45) |
 | [`NS_Dash.md`](Cookbook/NS_Dash.md) | Vefects `NS_Dash` + `M_VFX_DisAdd_{Wind01,Wind02,Wind03,Part02}` + `SM_VFX_{Ring01,Ring04}` — the pack's only `Life Cycle Mode = Self` emitter and its only mixed-coordinate-space system | `Dash` (46) |
+| [`SteamJet.md`](Cookbook/SteamJet.md) | none — an ORIGINAL design sheet, not a port; its constants are design constants | `SteamJet` (47) |
 
 ---
 
@@ -326,7 +327,7 @@ FireBurst=20, FireBallHit=21, GunshotHit=22, ArrowCast=23, ArrowHit=24, BombSpaw
 HealLoop=27, BuffLoop=28, DebuffLoop=29, PickupCast=30, HealCast=31, DebuffCast=32, GunshotCast=33,
 FireBallCast=34, LightningCast=35, FireBallProjectile=36, BombProjectile=37, BuffCast=38,
 LightningMuzzle=39, ExplosionGround=40, ExplosionGroundIce=41, ExplosionOmni=42,
-ExplosionOmniIce=43, BombExplosion=44, LightningHit=45, Dash=46.
+ExplosionOmniIce=43, BombExplosion=44, LightningHit=45, Dash=46, SteamJet=47.
 
 Ids 40-43 are the explosion FAMILY: two structural variants of one effect in two palettes, sharing one
 implementation (`Behaviors/Behavior_ExplosionShared.ush` + one `Explosion_Run` in the CPU mirror) behind
@@ -342,7 +343,8 @@ The roster SIZE has one definition — `ck::particles::NumBehaviors`, exposed to
 
 **Aim-axis conventions** (these are baked into the behavior math — spawn rotation aims them):
 MuzzleFlash/Tracer forward = **+X**; ImpactBurst surface normal = **+Z**;
-GroundRing/LightningStrike/AuraSwirl ground plane = local **XY**; Beam travels down **+X**.
+GroundRing/LightningStrike/AuraSwirl ground plane = local **XY**; Beam travels down **+X**; SteamJet travels down
+**+X** (the nozzle axis — spawn rotation aims the jet).
 
 **Per-instance tuning (`User.CkTuning`, 2026-08-03).** Every template exposes a float4 user parameter
 (default identity `(1,1,1,1)`) that the stage applies CENTRALLY — in `CkParticles_ExecuteStage`
@@ -459,6 +461,7 @@ neither is the legacy seed template, whose cadence comes from the emitter factor
 | `PS_CkParticles_Template_BombExplosion` | 2 s | 0.5 s | **162** | Vefects `NS_Bomb_Explosion` (44) — the cookbook's largest burst; 15 row renderers, SEVEN of them meshes, and the only row that uses every C8 facing mode |
 | `PS_CkParticles_Template_LightningHit` | 2 s | 1.3 s | 84 | Vefects `NS_Lightning_Hit` (45) — 16 row renderers, the widest spread in the cookbook (two 2x2 sheets in Niagara's TWO different sub-UV modes, two custom-facing ground quads, four meshes over three carriers) + a ribbon emitter carrying the same arc PAIR NS_Lightning_Muzzle draws |
 | `PS_CkParticles_Template_Dash` | 2 s | 1.55 s | 19 **+ rate 50/s** | Vefects `NS_Dash` (46) — 4 row renderers, one per source emitter: two meshes (the shared Cylinder and this row's own Cone), one 2x2 sub-UV camera quad and one velocity-aligned streak |
+| `PS_CkParticles_Template_SteamJet` | 1 s | 0.9 s | rate 70/s | `SteamJet` (47) — an original design row (no source system); declares no renderers, drawing through the shared VisTag-2 smoke sprite |
 
 Rows verified 2026-08-01 against `ck::particles::Get_TemplateSpecs()` and against `Add_SpawnEmitterStack`,
 which reads `LoopDuration` / `ParticleLifetime` / `BurstCount` straight off the spec — so the table above is
