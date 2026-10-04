@@ -586,8 +586,11 @@ auto
     const auto LoadingScreenWidgetClass = TSubclassOf<UUserWidget>{
         UCk_Utils_LoadingScreen_Settings_UE::Get_LoadingScreenWidget().TryLoadClass<UUserWidget>()};
 
-    if (const auto UserWidget = UUserWidget::CreateWidgetInstance(*LocalGameInstance, LoadingScreenWidgetClass, NAME_None);
-        ck::IsValid(UserWidget))
+    const auto UserWidget = ck::IsValid(LoadingScreenWidgetClass)
+        ? UUserWidget::CreateWidgetInstance(*LocalGameInstance, LoadingScreenWidgetClass, NAME_None)
+        : nullptr;
+
+    if (ck::IsValid(UserWidget))
     {
         _LoadingScreenWidget = UserWidget->TakeWidget();
     }
