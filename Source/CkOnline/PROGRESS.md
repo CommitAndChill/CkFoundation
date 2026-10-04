@@ -32,6 +32,77 @@ Client K locally; remote Client F2/O pastes the new host invite, Enter/F3 joins.
 | 8: control-loss recovery | Incremental build and seven focused Direct/script tests pass in OnlineControlRecoveryGate-01 | Deferred by user on 2026-10-04; separate three-check recovery gate |
 | 9: advertised gameplay endpoint | Incremental build and seven focused Direct/script tests pass in OnlineAdvertisedEndpointGate-01 | Deferred by user; local gameplay and two-machine checks remain unverified |
 | 10: gameplay failure recovery | Incremental build and eight focused Direct/script tests pass in OnlineGameplayRecoveryGate-02, including real failed ClientTravel and retained ready lobby | Deferred while user is AFK; early Client G and Host X-first observations |
+| 11: Direct invite renewal | Incremental build and eight focused Direct/script tests pass in OnlineInviteRenewalGate-02 | Deferred while user is AFK; rotate invite without changing the live lobby, reject old invite and join fresh |
+
+## Direct invite renewal phase
+
+The active objective is to continue the replacement phases until the user returns.
+The previous goal turn made progress: Gate10 found and repaired actual pending
+gameplay-driver survival, passed eight focused tests, and committed root 77687ce
+with independent code/evidence slices. At Gate11 entry Foundation/CkTests matched
+their root gitlinks and were clean; CkAuto remains its unrelated f1983a7e checkout.
+Unrelated root dirt and both [DROP BEFORE MERGE] commits remain preserved.
+
+Contract: Plan/Gate_11_DirectInviteRenewal.md. Source evidence: Host creates private
+Capability/Expiry once; P copies the snapshot descriptor; Join checks capability
+before expiry/capacity, while accepted peers subsequently use socket membership
+and epoch. Renew can therefore be local and wire-compatible, preserving the live
+lobby while revoking the old descriptor for future admission. Current Execute
+writes LastNow before action validation; renewal validates its deadline before
+that Execute cache write. Host ticks and transport Poll still independently advance
+their monotonic clocks, so the extreme Host.Tick fixture proves unchanged invite/
+snapshot and one failure, not subsequent normal-clock recovery.
+
+Root owns the contract and integration. Bounded implementation ownership is
+Foundation Direct enum/Utils/transport/consumer guide, the single existing native
+Direct spec, and CkTests gym/controller/deferred guide; AS smoke stays with root.
+The eight passing Gate10 tests are the entry baseline without a duplicate run.
+Rendered/BP acceptance remains deferred. No Steam App ID, account/auth policy,
+engine/wire change, EIK removal or packaging is inferred from this continuation.
+
+RenewInvite is appended without changing existing serialized action values. The
+host validates a fresh capability and advancing deadline before publishing one
+changed snapshot and one completion. Existing members, ready state, transcript,
+generation, epoch and address are retained. Old descriptors processed afterwards
+return Unauthorized. Native tests use actual TCP admissions, including a real
+Expired result followed by renewal and fresh same-epoch admission. The expiry
+fixture alone controls monotonic service time while its socket pump and latent
+timeout remain real. Extreme Host.Tick(max) rejects once without snapshot mutation;
+it does not establish normal-clock recovery. The AS smoke runs actual reflected
+Host, SetReady and RenewInvite requests and verifies matching identity/readiness.
+The gym adds an owned host-only details Y action; P copies the completed invite.
+
+OnlineInviteRenewalGate-01 built successfully and passed seven of eight tests.
+Only the preceding recovery fixture failed: its raw initial-world pointer equaled
+the newly allocated return world. Fresh logs prove old-world teardown, new PIE
+copy, then Offline Lobby with no driver or pending game. The independent fixture
+fix records FObjectKey identity instead, retaining the new-world requirement and
+avoiding both stale dereference and keeping the old world alive. Two additional
+fresh boots covered discovery and the same serial test lane after that correction.
+
+`Saved/Logs/OnlineInviteRenewalGate-02.log`: incremental build succeeded, all eight
+selected tests passed, zero failed/skipped/contaminated, exit 0, tests 57 seconds.
+Combined, fresh discovery (CkPlugins-backup-2026.10.04-23.26.59.log) and external
+test (CkPlugins.log) logs contain no Error records, ensures or script failures.
+Existing nonfatal warnings remain. Source review corrected the action display
+name and short guide: F2 is conditional because it toggles; an old valid invite
+gets a new operation ID and terminal Unauthorized rather than local admission
+rejection. Invite comparisons do not print capabilities even on test failure.
+
+Arguments: `--build --target=Editor --test --test-pattern=Online
+--project-prefix=Ck.Online.Direct --discover-fresh --parallel=1 --no-live
+--skip-renderer-tests --project=D:/Repos/CkPlugins
+--output=Saved/Logs/OnlineInviteRenewalGate-02.log`.
+The known-red two-world Iris fixture and renderer-only tests remain excluded.
+Manual guide: CkTests/Script/CkOnline/INVITE_RENEWAL_EDITOR_TESTING.md, unchecked.
+It repeats two separate Standalone windows, Host J > Hosting > P / Client K,
+both R, then Y renewal and old/fresh invite comparison. No five-minute wait is
+needed; rendered colors/focus/clipboard and Blueprint graphs remain unobserved.
+
+Local delivery separates Foundation 8024159f9 (renewal API), CkTests 7a31995f
+(world-identity fixture fix), and CkTests 36ee3c59 (gym plus native/script coverage).
+The editor guide and contract/evidence are separate documentation commits, followed
+by a root checkpoint updating only Foundation/CkTests. No push or history rewrite.
 
 ## Gameplay failure recovery phase
 
