@@ -3,6 +3,7 @@
 #include "CkEcsExt/CkEcsExt_Utils.h"
 #include "CkEcs/Signal/CkSignal_Fragment_Data.h"
 #include "CkOnline/Direct/CkOnlineDirect_Fragment_Data.h"
+#include "CkOnline/Direct/CkOnlineDirect_ReadyLobbyBinding.h"
 
 #include "CkOnlineDirect_Utils.generated.h"
 
@@ -33,6 +34,36 @@ private:
     static FCk_Handle_OnlineDirect DoCastChecked(FCk_Handle InHandle);
 
 public:
+
+    /** Capture all ready members using the caller's explicit roster-count policy. Rejection resets OutBinding. */
+    UFUNCTION(BlueprintPure, Category = "Ck|Online|Direct")
+    static bool
+    TryCaptureReadyLobby(
+        const FCk_OnlineDirect_Snapshot& InSnapshot,
+        bool InHosting,
+        int32 InExpectedMembers,
+        FCk_OnlineDirect_ReadyLobbyBinding& OutBinding);
+
+    UFUNCTION(BlueprintPure, Category = "Ck|Online|Direct")
+    static bool
+    MatchesReadyLobby(
+        const FCk_OnlineDirect_ReadyLobbyBinding& InBinding,
+        const FCk_OnlineDirect_Snapshot& InSnapshot);
+
+    /** Normalize a literal IPv4:port endpoint; rejection clears OutCanonical. */
+    UFUNCTION(BlueprintPure, Category = "Ck|Online|Direct")
+    static bool
+    TryParseGameplayEndpoint(
+        const FString& InEndpoint,
+        FString& OutCanonical);
+
+    /** Validate binding correlation and require its host address; this does not authorize gameplay admission. */
+    UFUNCTION(BlueprintPure, Category = "Ck|Online|Direct")
+    static bool
+    TryParseReadyLobbyEndpoint(
+        const FString& InEndpoint,
+        const FCk_OnlineDirect_ReadyLobbyBinding& InBinding,
+        FString& OutCanonical);
 
     UFUNCTION(BlueprintCallable, Category = "Ck|Online|Direct")
     static bool TryRequest(UPARAM(ref) FCk_Handle_OnlineDirect& InService, const FCk_Request_OnlineDirect& InRequest);

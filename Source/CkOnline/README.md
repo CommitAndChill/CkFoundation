@@ -50,6 +50,28 @@ target here, independently of its own advertised-address draft. This address is
 public routing information; it does not expose the invite capability or prove a
 gameplay member's identity. Consumers choose their separate gameplay port.
 
+`FCk_OnlineDirect_ReadyLobbyBinding` captures a ready roster for gameplay consumers.
+Use `utils_online_direct::TryCaptureReadyLobby(Snapshot, Hosting, ExpectedMembers,
+Binding)` in AngelScript or the corresponding `UCk_Utils_OnlineDirect_UE` function
+in native code and Blueprint. Choose an explicit expected count from 1 to 8;
+the two-player gym chooses 2. Capture requires the exact role, valid generation,
+epoch and local identity, a canonical host IPv4 address, and unique ready member
+IDs including the local member. Rejection resets the entire output binding.
+
+`MatchesReadyLobby(Binding, Snapshot)` compares that captured identity and sorted
+roster with a fresh ready snapshot. Invite renewal, chat, names and revision alone
+do not break matching. A changed member, role, readiness, address, generation or
+epoch does. This value provides correlation; consumers still check ownership,
+current service state and their separate gameplay admission policy.
+
+`TryParseGameplayEndpoint(Endpoint, Canonical)` accepts literal unicast IPv4:port
+and normalizes decimal octets and port. DNS, map paths, options and invalid ports
+reject. `TryParseReadyLobbyEndpoint(Endpoint, Binding, Canonical)` additionally
+requires an intrinsically valid binding and its captured host address; gameplay
+ports remain caller-selected. Both parsers clear rejected output and support
+using the same string as input and output. These helpers do not start travel or
+authorize a connection.
+
 The ready-lobby CkTests gym freezes this address and uses gameplay port 7787;
 control continues on TCP 7788. Its default remains loopback. An explicit reachable
 LAN/Tailscale address is supported by the handoff recipe, with cross-machine

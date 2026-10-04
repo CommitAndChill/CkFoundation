@@ -5,6 +5,107 @@
 #include "CkOnline/CkOnline_Fragment.h"
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Fragment.h"
 
+auto
+    UCk_Utils_OnlineDirect_UE::
+    TryCaptureReadyLobby(
+        const FCk_OnlineDirect_Snapshot& InSnapshot,
+        bool InHosting,
+        int32 InExpectedMembers,
+        FCk_OnlineDirect_ReadyLobbyBinding& OutBinding)
+    -> bool
+{
+    return FCk_OnlineDirect_ReadyLobbyBinding::TryCapture(InSnapshot, InHosting, InExpectedMembers, OutBinding);
+}
+
+auto
+    UCk_Utils_OnlineDirect_UE::
+    MatchesReadyLobby(
+        const FCk_OnlineDirect_ReadyLobbyBinding& InBinding,
+        const FCk_OnlineDirect_Snapshot& InSnapshot)
+    -> bool
+{
+    return InBinding.Matches(InSnapshot);
+}
+
+auto
+    UCk_Utils_OnlineDirect_UE::
+    TryParseGameplayEndpoint(
+        const FString& InEndpoint,
+        FString& OutCanonical)
+    -> bool
+{
+    if (InEndpoint.Len() > 21)
+    {
+        OutCanonical.Empty();
+        return false;
+    }
+    const auto Endpoint = InEndpoint;
+    OutCanonical.Empty();
+    auto Address = FString{};
+    auto PortText = FString{};
+    if (NOT Endpoint.Split(TEXT(":"), &Address, &PortText))
+    { return false; }
+    const auto IsDecimal = [](const FString& InText)
+    {
+        if (InText.IsEmpty())
+        { return false; }
+        for (const auto Character : InText)
+        {
+            if (Character < TEXT('0') || Character > TEXT('9'))
+            { return false; }
+        }
+        return true;
+    };
+    auto Parts = TArray<FString>{};
+    Address.ParseIntoArray(Parts, TEXT("."), false);
+    if (Parts.Num() != 4 || PortText.Len() > 5 || NOT IsDecimal(PortText))
+    { return false; }
+    const auto Port = FCString::Atoi(*PortText);
+    if (Port < 1 || Port > 65535)
+    { return false; }
+    int32 Octets[4];
+    for (auto Index = 0; Index < 4; ++Index)
+    {
+        if (Parts[Index].Len() > 3 || NOT IsDecimal(Parts[Index]))
+        { return false; }
+        Octets[Index] = FCString::Atoi(*Parts[Index]);
+        if (Octets[Index] > 255)
+        { return false; }
+    }
+    if (Octets[0] == 0 || Octets[0] >= 224)
+    { return false; }
+    OutCanonical = FString::Printf(TEXT("%d.%d.%d.%d:%d"), Octets[0], Octets[1], Octets[2], Octets[3], Port);
+    return true;
+}
+
+auto
+    UCk_Utils_OnlineDirect_UE::
+    TryParseReadyLobbyEndpoint(
+        const FString& InEndpoint,
+        const FCk_OnlineDirect_ReadyLobbyBinding& InBinding,
+        FString& OutCanonical)
+    -> bool
+{
+    if (InEndpoint.Len() > 21)
+    {
+        OutCanonical.Empty();
+        return false;
+    }
+    const auto Endpoint = InEndpoint;
+    OutCanonical.Empty();
+    if (NOT InBinding.Get_IsValid())
+    { return false; }
+    auto Canonical = FString{};
+    if (NOT TryParseGameplayEndpoint(Endpoint, Canonical))
+    { return false; }
+    auto Address = FString{};
+    auto Port = FString{};
+    if (NOT Canonical.Split(TEXT(":"), &Address, &Port) || Address != InBinding.Get_HostAddress())
+    { return false; }
+    OutCanonical = MoveTemp(Canonical);
+    return true;
+}
+
 auto UCk_Utils_OnlineDirect_UE::Has(const FCk_Handle& InHandle) -> bool
 {
     return IsInGameThread() && ck::IsValid(InHandle, ck::IsValid_Policy_IncludePendingKill{}) &&
