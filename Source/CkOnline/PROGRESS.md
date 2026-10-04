@@ -31,8 +31,73 @@ Client K locally; remote Client F2/O pastes the new host invite, Enter/F3 joins.
 | 7: easier editor testing | Incremental build, seven focused Direct tests and two panel-control tests pass in OnlineGuidedPanelGate-01 / OnlineGuidedPanelControls-01 | Deferred by user on 2026-10-04; panel/focus/round-trip recheck |
 | 8: control-loss recovery | Incremental build and seven focused Direct/script tests pass in OnlineControlRecoveryGate-01 | Deferred by user on 2026-10-04; separate three-check recovery gate |
 | 9: advertised gameplay endpoint | Incremental build and seven focused Direct/script tests pass in OnlineAdvertisedEndpointGate-01 | Deferred by user; local gameplay and two-machine checks remain unverified |
+| 10: gameplay failure recovery | Incremental build and eight focused Direct/script tests pass in OnlineGameplayRecoveryGate-02, including real failed ClientTravel and retained ready lobby | Deferred while user is AFK; early Client G and Host X-first observations |
 
-## Current work: advertised gameplay endpoint
+## Gameplay failure recovery phase
+
+The user requested committing the completed work and continuing while AFK. The
+root local checkpoint is b5c7b75; Foundation 09d46f0b5 and CkTests d29174bb are
+clean at entry. CkAuto remains f1983a7e with its unrelated root pointer preserved.
+Contract: Plan/Gate_10_GameplayFailureRecovery.md. Baseline is Gate 9's seven
+green focused Direct/script tests and clean fresh logs, without an equivalent rerun.
+
+This phase exercises the existing native failure/return path using one gameplay
+client and a real native TCP lobby host. A held silent UDP endpoint cannot admit
+gameplay, so the real ClientTravel waits for its existing bounded entry deadline
+and deferred Lobby return. No second gameplay world or same-process Iris retry
+is used. Owned invite joining gains a common clipboard-free API for reliable
+automation, preserving validation and rollback. Recovery hints must direct prior
+bridged sessions to Lobby G, because native R intentionally refuses that context.
+All rendered/local-host-loss checks stay deferred in a short self-contained guide
+that repeats Host J, wait Hosting, P / Client K joining. Authentication and protocol
+policy remain separate architecture decisions; unrelated dirt is preserved.
+
+The first incremental build passed. OnlineGameplayRecoveryGate-01 selected all
+eight intended tests: seven passed, while the new real failed-entry fixture timed
+out after its 35-second return bound (zero contamination). Fresh CkPlugins.log
+shows local Entry reload at 22:17:31 UTC, but the pending gameplay driver survived
+until test teardown at 22:17:52. Engine source confirms local OpenLevel/Browse
+does not cancel that pending connection. The bounded fix uses engine CancelPending
+on the validated owned world context before queuing return; both settlement and
+Offline readback require no pending game. Disconnect reports a rejected return
+explicitly. A sanitized fixture timeout snapshot preserves future failure evidence.
+Two additional fresh boots covered discovery and one serial lane in the same
+eight-test repair gate; the prior two-world Iris fixture stayed excluded.
+
+`Saved/Logs/OnlineGameplayRecoveryGate-02.log`: incremental build succeeded and
+all eight selected Direct/socket/AS tests passed, zero failed/skipped/contaminated,
+exit 0, tests 46 seconds. The new GameplayEntryFailureReturnsToLobby test observed
+real pending travel, then the helper's timeout and a new exact Standalone Lobby
+world with no net driver or pending game, no proof and a captured error. It checks
+the same GameInstance, owned Direct generation, epoch, local member, two ready
+members and advertised address. Empty/malformed invites and wrong gameplay
+address reject before profile start/travel; the foreign-service AS probe rejects
+a syntactically valid invite without profile/draft/revision or adapter mutation.
+The resident editor map is unchanged and owned cleanup completes.
+
+Fresh combined, discovery (CkPlugins-backup-2026.10.04-22.24.26.log) and external
+test (CkPlugins.log) logs have no Error records, ensures or script errors. Engine
+late-module/console registration warnings remain visible; no engine/config change
+suppresses them. Driver shutdown at 22:25:07.434 UTC precedes local Lobby browse
+at 22:25:07.440. Independent source and evidence reviews cover the common invite
+path, owned cancellation, failure control flow, fixture lifecycle and guide.
+This proves failed entry recovery, not established two-process host loss, rendered
+colors/focus, successful gameplay admission/retry or remote-machine reachability.
+Those editor checks remain deferred in GAMEPLAY_RECOVERY_EDITOR_TESTING.md;
+joining is Host J, wait Hosting, P / Client K, both R before Lobby G.
+
+Arguments: `--build --target=Editor --test --test-pattern=Online
+--project-prefix=Ck.Online.Direct --discover-fresh --parallel=1 --no-live
+--skip-renderer-tests --project=D:/Repos/CkPlugins
+--output=Saved/Logs/OnlineGameplayRecoveryGate-02.log`.
+
+Gate 10 is locally committed in CkTests as 05819d41 (common invite admission),
+5e0d30d0 (pending-connection recovery plus fixture and hints), and 599d7cfc
+(deferred editor guide). Evidence/contract documentation is committed separately
+in Foundation, followed by a root update of only those two submodule pointers.
+Manual checks remain unchecked; no push, cleanup or research-history rewrite.
+
+## Advertised gameplay endpoint phase
 
 The user explicitly deferred the latest gym checks while AFK and authorized the
 next phase. CkTests/Script/CkOnline/DEFERRED_EDITOR_CHECKS.md is the short index;
