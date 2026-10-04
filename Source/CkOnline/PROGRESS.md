@@ -33,6 +33,68 @@ Client K locally; remote Client F2/O pastes the new host invite, Enter/F3 joins.
 | 9: advertised gameplay endpoint | Incremental build and seven focused Direct/script tests pass in OnlineAdvertisedEndpointGate-01 | Deferred by user; local gameplay and two-machine checks remain unverified |
 | 10: gameplay failure recovery | Incremental build and eight focused Direct/script tests pass in OnlineGameplayRecoveryGate-02, including real failed ClientTravel and retained ready lobby | Deferred while user is AFK; early Client G and Host X-first observations |
 | 11: Direct invite renewal | Incremental build and eight focused Direct/script tests pass in OnlineInviteRenewalGate-02 | Deferred while user is AFK; rotate invite without changing the live lobby, reject old invite and join fresh |
+| 12: public ready-lobby binding | Incremental build and eight focused Direct/script tests pass in OnlinePublicReadyLobbyGate-01 | Deferred while user is AFK; readiness barrier and gameplay round trip through Foundation validation |
+
+## Public ready-lobby binding phase
+
+Gate11 is locally committed at root cdb038f with Foundation 663a939f9 and CkTests
+0efd1ea1; those checkouts are clean at entry. The last gate passed all eight
+focused tests and fresh log review. Contract: Plan/Gate_12_PublicReadyLobbyBinding.md.
+The active AFK objective continues. Unrelated work and both research ancestors
+are intact; there is no blocking-condition recurrence at this checkpoint.
+
+Source review found the reusable ready-lobby binding and endpoint validation still
+inside CkTests. Promote those pure contracts into CkOnline, expose getter-only
+reflected values/Utils, and make the existing gym/tests actual consumers. Caller
+chooses expected roster count; the gym keeps exact two. Travel/recovery ownership
+and private-network trust stay unchanged. Steam source/payload exists in the selected
+engine, but no game App ID/account test setup was supplied. That platform gate stays
+separate; no Steam capability or packaging success is inferred from this phase.
+
+The public getter-only FCk_OnlineDirect_ReadyLobbyBinding and four reflected Utils
+helpers now own capture, matching and endpoint parsing. Capture validates exact
+caller-selected count 1..8, role, correlation IDs, admitted address and unique ready
+local-containing roster before publication. Default/failed output is fully empty.
+Matching uses the captured role/count and excludes chat, invite and revision.
+Endpoint parsers normalize decimal input, reject oversized input before copying,
+handle input/output aliasing and clear failure output. Binding endpoint parsing
+also validates intrinsic correlation before address comparison. These pure helpers
+do not authorize gameplay, prove service ownership or begin travel.
+
+CkTests' bridge header is only a type alias. The IP consumer keeps ownership,
+generation, world/driver, exact-two-member, travel and recovery checks while using
+the public value/parser implementation. Its two existing parser methods forward
+to Foundation; no duplicate parser remains. The existing real TCP test exercises
+the reflected wrappers with actual ready/unready snapshots, invalid count/role/
+identity/address/readiness, stale snapshots, unchanged live revisions/completions,
+alias-safe normalization and rejection, and matching across chat/invite renewal.
+The AS smoke calls all four reflected wrappers on its actual one-member host,
+with explicit count 1, rejected count 2/default/not-ready output, selected port,
+wrong address and renewal continuity. This covers native and AS API use, not a
+constructed Blueprint graph or all serialized malformed-binding branches.
+
+`Saved/Logs/OnlinePublicReadyLobbyGate-01.log`: incremental build succeeded and
+all eight selected Direct/script tests passed, zero failed/skipped/contaminated,
+exit 0, tests 46 seconds. Two fresh boots covered discovery and one serial lane.
+Combined, discovery (CkPlugins-backup-2026.10.04-23.42.30.log) and external test
+(CkPlugins.log) logs contain no Error records, ensures, script errors or reload
+contamination. Existing nonfatal warnings remain. The known-red two-world Iris
+fixture and renderer-only tests remain excluded.
+
+Arguments: `--build --target=Editor --test --test-pattern=Online
+--project-prefix=Ck.Online.Direct --discover-fresh --parallel=1 --no-live
+--skip-renderer-tests --project=D:/Repos/CkPlugins
+--output=Saved/Logs/OnlinePublicReadyLobbyGate-01.log`.
+Source review corrected the short guide's unavailable IP Offline label to disabled
+G/no gameplay travel in Lobby. PUBLIC_READY_LOBBY_EDITOR_TESTING.md remains unchecked;
+it repeats Host J > Hosting > P / Client K, then readiness barrier, fresh gameplay
+proof and same-control-identity return. Actual two-process gameplay/color/focus,
+Blueprint graph, remote reachability and packaging acceptance remain deferred.
+
+Local delivery separates Foundation 1bca988fa (public API/consumer recipe), CkTests
+6965091d (actual consumer plus native/AS coverage), and c55c07fc (deferred guide).
+Contract/evidence documentation is a separate Foundation commit before a root
+checkpoint of only these two submodule pointers. No push or history rewrite.
 
 ## Direct invite renewal phase
 
