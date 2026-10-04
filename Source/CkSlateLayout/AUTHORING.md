@@ -105,15 +105,40 @@ shorthand lengths. Padding expansion is limited to four source components and
 | `min-width`, `min-height`, `max-width`, `max-height` | Nonnegative lengths; maximum must be at least minimum |
 | `horizontal-align` | `fill`, `left`, `center`, `right` |
 | `vertical-align` | `fill`, `top`, `center`, `bottom` |
-| `font-size`, `font-weight` | Text/button only; font size 1–512 in Slate units, `normal` or `bold` |
+| `font-size`, `font-weight` | Text/button/search; font size 1–512 in Slate units, `normal` or `bold` |
 | `font-family` | Text, button, menu-button and tabs only; `monospace` selects the native Mono face, `sans-serif` selects Regular. Omitted keeps the base face; bold takes precedence. Arbitrary font names, files and URLs are unsupported. |
 | `text-wrap` | Text and ordinary buttons; `wrap` (default) or `nowrap`. Controls soft wrapping; preserves explicit line breaks |
 | `overflow-wrap` | Text and ordinary buttons; `normal` (default) or `anywhere`. Anywhere permits character wrapping for long unbroken identifiers; `text-wrap: nowrap` still disables wrapping |
 | `text-overflow` | Text and ordinary buttons; `clip` (default) or `ellipsis`. Ellipsis requires `text-wrap: nowrap`; nowrap text clips to its allocated bounds |
-| `color` | Text/button only; `#RRGGBB` or `#RRGGBBAA` in sRGB |
+| `color` | Text/button/search; `#RRGGBB` or `#RRGGBBAA` in sRGB |
 | `background-color` | Container only; same color syntax |
 | `border-color` | Background-capable container; `#RRGGBB` or `#RRGGBBAA` in sRGB |
 | `border-width`, `border-radius` | Background-capable container; nonnegative length, optional `px`. A border color without a width defaults to 1; legacy background-only surfaces retain the 6-unit radius |
+
+Ordinary `<button>` styling is opt-in through `-ck-button-*` declarations. Background
+and border colors have normal, hover, pressed, disabled, and focus variants;
+`-ck-button-color`, `-ck-button-pressed-color`, `-ck-button-disabled-color`, and
+`-ck-button-focus-color` control its label. A focused button may also specify
+`-ck-button-focus-outline-color`, `-ck-button-focus-outline-width`, and
+`-ck-button-focus-outline-gap`; width and gap default to 2 Slate units and paint
+outside the button bounds. Focus appearance follows Slate keyboard focus. The
+host controls navigation and can target the currently committed ordinary button
+with `GetButton(id)`. Owners may set `FDataBindings::RestoreButtonFocusOnReload`
+to restore an enabled focused button by stable ID after an accepted reload. The
+default preserves the existing stateless focus-clears-on-reload contract.
+Rejected reloads preserve the accepted button and focus under either policy.
+All button colors use the supported color grammar, and widths/gaps must be
+finite nonnegative lengths.
+
+`-ck-button-text-align` aligns the label within an ordinary button: `left`
+(default), `center`, or `right`. `-ck-button-content-vertical-align` positions
+the label after wrapping inside the button: `fill` (default), `top`, `center`,
+or `bottom`. These properties do not align the button box in its parent;
+`horizontal-align` and `vertical-align` control that outer slot. Button content
+continues to fill the button's inner width so wrapped labels retain that width.
+Invalid alignment values reject the candidate document without replacing the
+accepted view.
+
 
 Alignment, growth, and sizing describe a child node in its parent. Region roots
 fill their native mounts; putting these slot properties on a region root is rejected.
@@ -212,7 +237,7 @@ The overlay does not make the empty layer affect table measurement.
 
 A bound text node cannot also contain literal text. Binding names are resolved by the control's required type. Missing or incorrectly typed bindings reject the complete document before controls are changed. Read attributes update with the model without a document reload; edit delegates write through the consumer's existing business logic. Use weak owner-bound getters and delegates and keep reads side-effect-free.
 
-A surviving search id must keep its kind and binding. A valid document may omit a search: commit detaches it and releases the view-owned instance. Adding it again creates a new control from the current bound model. Saving a stylesheet retains a surviving search and does not reset its text. Search placeholders can change on an accepted reload. Normal focus-loss/commit callbacks still apply when the focus path is rebuilt, as described above.
+A surviving search id must keep its kind and binding. A valid document may omit a search: commit detaches it and releases the view-owned instance. Adding it again creates a new control from the current bound model. Saving a stylesheet retains a surviving search and does not reset its text. Search placeholders, font size/weight/letter spacing, and text color can change on an accepted reload. Retained search font and color read committed style data; a rejected candidate cannot change the visible input. Search uses the view base font when no size is authored; its native single-line layout does not accept `font-family`, wrapping or text-overflow rules. Native typing notifications debounce for 0.25 seconds. Normal focus-loss/commit callbacks still apply when the focus path is rebuilt, as described above.
 
 Texture Health now authors its inventory table columns/cells, horizontal scroll, and empty overlay in the external files. Its consumer supplies the typed collection, stable domain keys, selection mapping, colors, tooltips, meter/status fields, and context-menu callback. Its resizable inventory/detail panes are authored through the shared splitter. The bootstrap layout-error chrome remains native host ownership; table context-menu content is still built by the consumer callback. General authored menus remain later work. The splitter migration passed 39 authoring tests and 20 Texture tests with inspected wide/narrow captures; full campaign acceptance remains open.
 
@@ -649,6 +674,18 @@ events through a `bool-changed` parameter and `changed-param` on the custom tag.
 View-resolved callbacks suppress dispatch during reload/publication and after
 view release. Editable events remain forbidden in readonly table/tree cells.
 
+Checkboxes accept `-ck-checkbox-size` (positive length, at most 512 Slate units),
+`-ck-checkbox-color` (unchecked native brush tint),
+`-ck-checkbox-background-color` (normal, hovered, and pressed background brush tint),
+`-ck-checkbox-checked-color` (checked native brush tint), and
+`-ck-checkbox-label-color` (label foreground). Each control owns a copy of the
+CoreStyle checkbox style; compatible reloads update that copy without replacing
+the widget or dispatching changes. Omitted declarations restore CoreStyle defaults.
+Modern styles may omit the unchecked image and paint the background separately.
+The background and checked-image tints remain separate where the underlying style
+uses distinct brushes; a checked brush that combines fill and glyph cannot color
+those parts independently.
+
 
 ## Shared retained numeric entry
 
@@ -896,6 +933,16 @@ when focus ancestry must be refreshed without leaving a popup. The view validate
 the target against the current focused path, transfers through a focusable
 ancestor, and restores the original leaf only if callbacks did not redirect focus.
 Other retained widgets use the existing clear/reacquire behavior.
+
+Selects accept `-ck-select-font-size` (number from 1 through 512),
+`-ck-select-color` (selected and popup text), `-ck-select-background-color`,
+`-ck-select-border-color`, `-ck-select-accent-color` (hover/pressed background and
+selected popup row tint), and `-ck-select-padding` (nonnegative length, at most 512).
+These style the retained native combo box, not its option model. When any box color
+is authored, the closed button uses a rounded color brush; otherwise its CoreStyle
+brushes remain intact. Compatible reloads keep the select and popup identity,
+apply prepared style without selection events, and restore CoreStyle defaults for
+omitted declarations. A held native select owns its copied styles after view release.
 
 ## Tabs
 
@@ -1156,3 +1203,92 @@ change its value-binding name, host user, or alpha policy. Reload preparation an
 publication must not emit consumer callbacks. Hidden/removed ancestry and owner
 release retire only this component's popup; callbacks from a retired opening are
 inert. Full controller and packaged acceptance remains a separate campaign gate.
+
+## Native action cards
+
+Register `FCkUiActionCard::Register(Registry)` and check the registration result
+before passing the registry snapshot to a view. An `action-card` is one focusable
+native button around an authored `content` slot. Images and text in that slot
+remain ordinary document nodes, so the whole card activates on click, Enter or
+Space without constructing a Widget Blueprint.
+
+```html
+<repeat id="items" bind="inventory" direction="horizontal" class="item-grid">
+  <action-card id="card" item-action="choose-item" selected-field="selected" class="item-card">
+    <slot name="content">
+      <column id="content">
+        <image id="icon" bind-field="image"/>
+        <text id="title" bind-field="title"/>
+      </column>
+    </slot>
+  </action-card>
+</repeat>
+```
+
+Bind the collection through `FDataBindings.Collections` and the stable-key
+callback through `FDataBindings.ItemActions`. Outside a repeat, use
+`action="choose-item"` with an ordinary view action. Optional `selected-bind`
+and `enabled-bind` read boolean attributes; `selected-field` and `enabled-field`
+read the corresponding repeat fields. Selection remains model-owned.
+
+Use `flex-wrap: wrap` on the horizontal repeat and explicit card bounds for a
+small inventory grid. The card exposes constrained slot measurement and accounts
+for its native padding. This presenter creates each card; use a table or tree
+when a large collection requires virtualization.
+
+The typed CSS properties are `-ck-action-card-background`,
+`-ck-action-card-hover-background`, `-ck-action-card-pressed-background`,
+`-ck-action-card-disabled-background`, `-ck-action-card-selected-background`,
+`-ck-action-card-border-color`, `-ck-action-card-selected-border-color`, and
+`-ck-action-card-focus-border-color` (colors), plus `-ck-action-card-radius`,
+`-ck-action-card-border-width`, and `-ck-action-card-padding` (nonnegative lengths,
+at most 512 Slate units). Selected fill and keyboard focus border are independent.
+
+A compatible reload retains the native card, content-slot mount and held press.
+Changing the action during a held press rejects the candidate. One pointer press
+is accepted at a time; unrelated releases cannot complete it. Removing a record,
+closing its parent view, or destroying the owner cancels its capture and makes
+externally held cards inert. Reinserting a key creates a new interaction scope.
+The CkTests UI Authoring gym's **[3] Inventory** screen exercises this contract.
+
+## Passive HUD meters and graphics
+
+Include [CkUiHudControls.h](Public/CkSlateLayout/CkUiHudControls.h), call
+`FCkUiHudControls::Register(Registry)`, and check its result before creating the
+view with the registry snapshot. Supply live `FDataBindings.Number` fractions
+and `FDataBindings.Color` tints. `hud-meter` requires `value-bind` and accepts
+optional `tint-bind`; the bound value is clamped to `[0, 1]` at presentation.
+`hud-graphic` requires a host-owned `FDataBindings.Images` brush through
+`image-bind` and accepts an optional `FDataBindings.Number` `opacity-bind`
+(default 1, clamped to `[0, 1]`). Keep the brush and its resource alive while
+the view uses them.
+
+```html
+<hud-meter id="health" value-bind="HealthFraction" tint-bind="HealthTint" class="health-meter" />
+<hud-meter id="cooldown" value-bind="CooldownFraction" class="cooldown-ring" />
+<hud-graphic id="damage" image-bind="DamageBrush" opacity-bind="DamageOpacity" />
+```
+
+```css
+.health-meter { width: 240px; height: 12px; -ck-hud-meter-segments: 12; }
+.cooldown-ring { width: 64px; height: 64px; -ck-hud-meter-radial: 1; }
+```
+
+Meter colors `-ck-hud-meter-fill`, `-ck-hud-meter-background`,
+`-ck-hud-meter-trail`, and `-ck-hud-meter-border` accept the standard hex color
+syntax. `-ck-hud-meter-border-width` and `-ck-hud-meter-radius` are lengths from
+0 through 128 Slate units (optional `px`). `-ck-hud-meter-segments` is a
+unitless integer from 1 through 64; `-ck-hud-meter-radial` is unitless 0 or 1.
+`-ck-hud-meter-trail-delay` and `-ck-hud-meter-response` are unitless seconds
+from 0 through 5; `-ck-hud-meter-low-threshold` is unitless from 0 through 1.
+The meter eases its leading fill toward the bound value, holds a loss trail
+briefly before it eases down, and pulses the fill at or below the low threshold.
+The radial form draws a native Slate arc; no material asset is required.
+
+Both controls are passive and retain native identity across compatible source
+reloads. An invalid candidate leaves the accepted view in place. Releasing the
+owning view freezes a held meter and makes a held graphic stop reading its image.
+For an on-screen UMG host, make the host hit-test invisible and keep gameplay
+input mode and pause state with the player. The
+[CkTests combat HUD proof](../../../CkTests/Documentation/UI/CombatHudProof/README.md)
+shows three code-driven visual themes using these controls.
