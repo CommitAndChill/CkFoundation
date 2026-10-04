@@ -16,6 +16,7 @@ namespace ck::direct
     {
     public:
         static auto ValidateSpec(const FCk_OnlineDirect_Spec& InSpec) -> bool;
+        static auto ValidateHostAddress(const FString& InAddress) -> bool;
         static auto ValidateText(const FString& InText, int32 InMaxCharacters) -> bool;
         static auto ValidateDescriptor(const FString& InDescriptor) -> bool;
         explicit FTransport(const FCk_OnlineDirect_Spec& InSpec);

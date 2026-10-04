@@ -126,6 +126,10 @@ private:
     UPROPERTY(BlueprintReadOnly, meta = (AllowPrivateAccess = true))
     FGuid _LocalMemberId;
 
+    /** Validated literal IPv4 address of the active lobby host; empty before admission. */
+    UPROPERTY(BlueprintReadOnly, meta = (AllowPrivateAccess = true))
+    FString _HostAddress;
+
     UPROPERTY(BlueprintReadOnly, meta = (AllowPrivateAccess = true))
     TArray<FCk_OnlineDirect_Member> _Members;
 
@@ -146,6 +150,7 @@ public:
     CK_PROPERTY(_ServiceGeneration);
     CK_PROPERTY(_LobbyEpoch);
     CK_PROPERTY(_LocalMemberId);
+    CK_PROPERTY(_HostAddress);
     CK_PROPERTY(_Members);
     CK_PROPERTY(_Messages);
     CK_PROPERTY(_JoinDescriptor);

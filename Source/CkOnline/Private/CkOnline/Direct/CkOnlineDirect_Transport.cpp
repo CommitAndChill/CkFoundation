@@ -153,6 +153,7 @@ struct FTransport::FImpl
     FGuid Epoch;
     FGuid Capability;
     FGuid JoinWire;
+    FString PendingHostAddress;
     double Expiry = 0;
     double LastNow = 0;
     int32 Sequence = 0;
@@ -192,11 +193,13 @@ struct FTransport::FImpl
             ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(Listener);
             Listener = nullptr;
         }
-        const bool WasOpen = Snapshot.Get_State() != ECk_OnlineDirect_State::Offline;
+        const bool WasOpen = Snapshot.Get_State() != ECk_OnlineDirect_State::Offline ||
+            !Snapshot.Get_HostAddress().IsEmpty();
         Hosting = false;
         Epoch.Invalidate(); Capability.Invalidate(); JoinWire.Invalidate(); Expiry = 0; Sequence = 0;
+        PendingHostAddress.Empty();
         Snapshot.Set_State(ECk_OnlineDirect_State::Offline).Set_LobbyEpoch(FGuid())
-            .Set_LocalMemberId(FGuid()).Set_JoinDescriptor(TEXT(""))
+            .Set_LocalMemberId(FGuid()).Set_HostAddress(TEXT("")).Set_JoinDescriptor(TEXT(""))
             .Set_LastError(TEXT(""));
         Snapshot.Get_Members().Reset(); Snapshot.Get_Messages().Reset();
         if (WasOpen) Changed();
@@ -206,11 +209,14 @@ struct FTransport::FImpl
         ClearPending(ECk_OnlineDirect_Result::TransportError);
         Peers.Reset();
         JoinWire.Invalidate();
+        PendingHostAddress.Empty();
         const bool Different = Snapshot.Get_State() != ECk_OnlineDirect_State::Failed ||
             Snapshot.Get_LastError() != Reason || !Snapshot.Get_Members().IsEmpty() ||
-            !Snapshot.Get_Messages().IsEmpty() || Snapshot.Get_LobbyEpoch().IsValid();
+            !Snapshot.Get_Messages().IsEmpty() || Snapshot.Get_LobbyEpoch().IsValid() ||
+            !Snapshot.Get_HostAddress().IsEmpty();
         Snapshot.Set_State(ECk_OnlineDirect_State::Failed).Set_LastError(Reason)
-            .Set_LobbyEpoch(FGuid()).Set_LocalMemberId(FGuid()).Set_JoinDescriptor(TEXT(""));
+            .Set_LobbyEpoch(FGuid()).Set_LocalMemberId(FGuid()).Set_HostAddress(TEXT(""))
+            .Set_JoinDescriptor(TEXT(""));
         Snapshot.Get_Members().Reset(); Snapshot.Get_Messages().Reset();
         if (Different) Changed();
     }
@@ -326,7 +332,7 @@ struct FTransport::FImpl
         Member.Set_Id(Local).Set_Name(Spec.Get_Name()).Set_Ready(false);
         Snapshot.Get_Members().Add(Member);
         Snapshot.Set_State(ECk_OnlineDirect_State::Hosting).Set_LobbyEpoch(Epoch)
-            .Set_LocalMemberId(Local).Set_LastError(TEXT(""))
+            .Set_LocalMemberId(Local).Set_HostAddress(Spec.Get_AdvertisedAddress()).Set_LastError(TEXT(""))
             .Set_JoinDescriptor(FString::Printf(TEXT("ckd:1|%s:%d|%s|%s"),
                 *Spec.Get_AdvertisedAddress(), Spec.Get_Port(), *GuidText(Epoch), *GuidText(Capability)));
         Changed(); Complete(Ticket, ECk_OnlineDirect_Result::Succeeded);
@@ -341,9 +347,10 @@ struct FTransport::FImpl
         double Deadline = 0;
         if (!TryDeadline(Now, Spec.Get_OperationTimeoutSeconds(), Deadline))
         { Complete(Ticket, ECk_OnlineDirect_Result::InvalidInput, TEXT("Join deadline cannot advance.")); return; }
-        Close(ECk_OnlineDirect_Result::Cancelled);
         FIPv4Address Address; int32 Port = 0; FGuid RequestedEpoch, Key;
-        ParseDescriptor(Descriptor, Address, Port, RequestedEpoch, Key);
+        if (!ParseDescriptor(Descriptor, Address, Port, RequestedEpoch, Key))
+        { Complete(Ticket, ECk_OnlineDirect_Result::InvalidInput); return; }
+        Close(ECk_OnlineDirect_Result::Cancelled);
         FSocket* Socket = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateSocket(NAME_Stream, TEXT("CkOnlineDirectPeer"), false);
         if (!Socket || !Socket->SetNonBlocking(true))
         {
@@ -364,6 +371,7 @@ struct FTransport::FImpl
         if (!Queue(*Peer, Json)) { Complete(Ticket, ECk_OnlineDirect_Result::TransportError); return; }
         Peers.Add(MoveTemp(Peer));
         Epoch = RequestedEpoch;
+        PendingHostAddress = Address.ToString();
         Pending.Add({Wire, Ticket, ECk_OnlineDirect_Action::Join, Deadline});
         JoinWire = Wire;
         Snapshot.Set_State(ECk_OnlineDirect_State::Joining).Set_LastError(TEXT(""));
@@ -485,6 +493,7 @@ struct FTransport::FImpl
             if (CompleteWire(Wire, Result) && Snapshot.Get_State() == ECk_OnlineDirect_State::Joining)
             {
                 Peers[0]->Socket->Close();
+                PendingHostAddress.Empty();
                 Snapshot.Set_State(ECk_OnlineDirect_State::Failed).Set_LastError(TEXT("Join rejected"));
                 Changed();
             }
@@ -503,6 +512,7 @@ struct FTransport::FImpl
                 Snapshot.Get_LocalMemberId().IsValid() && Type == TEXT("roster"))) return false;
         if (Type == TEXT("roster"))
         {
+            if (Snapshot.Get_State() == ECk_OnlineDirect_State::Joining && PendingHostAddress.IsEmpty()) return false;
             const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
             if (!Json->TryGetArrayField(TEXT("m"), Items) || !Items || Items->Num() < 1 || Items->Num() > 8) return false;
             TArray<FCk_OnlineDirect_Member> Roster;
@@ -537,7 +547,8 @@ struct FTransport::FImpl
             {
                 if (!CompleteWire(JoinWire, ECk_OnlineDirect_Result::Succeeded)) return false;
                 JoinWire.Invalidate();
-                Snapshot.Set_State(ECk_OnlineDirect_State::Joined);
+                Snapshot.Set_State(ECk_OnlineDirect_State::Joined).Set_HostAddress(PendingHostAddress);
+                PendingHostAddress.Empty();
                 Changed();
             }
             return true;
@@ -677,6 +688,8 @@ auto FTransport::ValidateSpec(const FCk_OnlineDirect_Spec& Spec) -> bool
         FMath::IsFinite(Spec.Get_OperationTimeoutSeconds()) &&
         Spec.Get_OperationTimeoutSeconds() >= 0.1 && Spec.Get_OperationTimeoutSeconds() <= 30;
 }
+auto FTransport::ValidateHostAddress(const FString& Text) -> bool
+{ FIPv4Address Address; return ParseIpv4(Text, Address); }
 auto FTransport::ValidateText(const FString& Text, int32 MaxCharacters) -> bool
 { return MaxCharacters > 0 && IsValidString(Text, FMath::Min(MaxCharacters, 240), 1024); }
 auto FTransport::ValidateDescriptor(const FString& Text) -> bool

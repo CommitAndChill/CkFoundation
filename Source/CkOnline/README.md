@@ -30,6 +30,18 @@ an expiring capability. Treat it as a join secret. Invite expiry prevents new
 admission while existing peers remain connected. Rehost produces a new epoch;
 a previous descriptor cannot silently admit into that new lobby.
 
+`Snapshot.Get_HostAddress()` exposes the validated literal IPv4 host address
+after successful Host or authoritative Joined admission. It stays empty while
+Joining and clears on leave, stop or connection failure. A client reads its invite
+target here, independently of its own advertised-address draft. This address is
+public routing information; it does not expose the invite capability or prove a
+gameplay member's identity. Consumers choose their separate gameplay port.
+
+The ready-lobby CkTests gym freezes this address and uses gameplay port 7787;
+control continues on TCP 7788. Its default remains loopback. An explicit reachable
+LAN/Tailscale address is supported by the handoff recipe, with cross-machine
+acceptance tracked separately in CkTests/Script/CkOnline/DEFERRED_EDITOR_CHECKS.md.
+
 This private-network profile provides neither TLS nor account authentication.
 Reachable LAN/Tailscale addresses can be selected explicitly; public discovery,
 NAT traversal, friends, Steam, voice and durable messages are outside these gates.
