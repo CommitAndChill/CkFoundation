@@ -17,8 +17,9 @@ a fresh `FCk_Request_OnlineDirect` with a valid operation GUID and call
 to OnCompleted for the authoritative result and OnChanged for immutable snapshot
 values, or poll Get_Snapshot/Get_LastCompletion/Get_CompletedCount in a view.
 
-Actions are Host, Join (Text contains a copied descriptor), Leave, SetReady and
-SendText. Host assigns member identity, ready state, text sender and sequence.
+Actions are Host, Join (Text contains a copied descriptor), Leave, SetReady,
+SendText and RenewInvite. Host assigns member identity, ready state, text sender
+and sequence.
 Public operation GUIDs are distinct from private transport correlation tickets.
 A completion owns its terminal result before callbacks; stale responses cannot
 complete a reused public ID. Requests and pending work are bounded to 64.
@@ -29,6 +30,18 @@ eight members. A copied descriptor contains the endpoint, fresh lobby epoch and
 an expiring capability. Treat it as a join secret. Invite expiry prevents new
 admission while existing peers remain connected. Rehost produces a new epoch;
 a previous descriptor cannot silently admit into that new lobby.
+
+Host-only RenewInvite rotates the capability and restarts the immutable spec's
+configured invite lifetime without restarting the lobby. Use
+`Request(ECk_OnlineDirect_Action::RenewInvite, "", false)` on the GI facade or enqueue that
+action through native `TryRequest`. Wait for Succeeded before copying the new
+`Snapshot.Get_JoinDescriptor()`. Renewal publishes one changed snapshot while
+preserving generation, lobby epoch, endpoint, identities, readiness and transcript.
+Old invites processed after rotation reject as Unauthorized; existing admitted
+members stay connected. Joined, Joining, Offline and Failed services reject renewal
+as InvalidState. Invalid deadlines reject as InvalidInput without changing the
+invite or the renewal Execute clock cache. Host ticks and transport polling still
+advance their monotonic clocks independently.
 
 `Snapshot.Get_HostAddress()` exposes the validated literal IPv4 host address
 after successful Host or authoritative Joined admission. It stays empty while

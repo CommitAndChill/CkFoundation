@@ -9,7 +9,7 @@ enum class ECk_OnlineDirect_State : uint8 { Offline, Hosting, Joining, Joined, F
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_OnlineDirect_State);
 
 UENUM(BlueprintType)
-enum class ECk_OnlineDirect_Action : uint8 { Host, Join, Leave, SetReady, SendText };
+enum class ECk_OnlineDirect_Action : uint8 { Host, Join, Leave, SetReady, SendText, RenewInvite };
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_OnlineDirect_Action);
 
 UENUM(BlueprintType)

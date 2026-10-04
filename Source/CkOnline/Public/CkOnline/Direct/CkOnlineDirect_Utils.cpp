@@ -33,6 +33,7 @@ auto UCk_Utils_OnlineDirect_UE::TryRequest(FCk_Handle_OnlineDirect& InService,
     switch (InRequest.Get_Action())
     {
         case ECk_OnlineDirect_Action::Host:
+        case ECk_OnlineDirect_Action::RenewInvite:
         case ECk_OnlineDirect_Action::Leave:
         case ECk_OnlineDirect_Action::SetReady: break;
         case ECk_OnlineDirect_Action::Join:

@@ -377,12 +377,61 @@ struct FTransport::FImpl
         Snapshot.Set_State(ECk_OnlineDirect_State::Joining).Set_LastError(TEXT(""));
         Changed();
     }
+    auto RenewInvite(double Now, FGuid Ticket) -> void
+    {
+        const auto LiveHost = Hosting && Snapshot.Get_State() == ECk_OnlineDirect_State::Hosting &&
+            Listener != nullptr && Epoch.IsValid() && Capability.IsValid();
+        if (NOT LiveHost)
+        {
+            Complete(Ticket, ECk_OnlineDirect_Result::InvalidState);
+            return;
+        }
+        const auto SpecIsValid = FTransport::ValidateSpec(Spec);
+        if (NOT SpecIsValid)
+        {
+            Complete(Ticket, ECk_OnlineDirect_Result::InvalidInput);
+            return;
+        }
+        auto InviteExpiry = 0.0;
+        const auto DeadlineIsValid = TryDeadline(Now, Spec.Get_InviteLifetimeSeconds(), InviteExpiry);
+        if (NOT DeadlineIsValid)
+        {
+            Complete(Ticket, ECk_OnlineDirect_Result::InvalidInput, TEXT("Invite deadline cannot advance."));
+            return;
+        }
+        const auto RenewedCapability = FGuid::NewGuid();
+        const auto CapabilityIsValid = RenewedCapability.IsValid() && RenewedCapability != Capability;
+        if (NOT CapabilityIsValid)
+        {
+            Complete(Ticket, ECk_OnlineDirect_Result::TransportError);
+            return;
+        }
+        const auto Descriptor = FString::Printf(TEXT("ckd:1|%s:%d|%s|%s"),
+            *Spec.Get_AdvertisedAddress(), Spec.Get_Port(), *GuidText(Epoch), *GuidText(RenewedCapability));
+        const auto DescriptorIsValid = FTransport::ValidateDescriptor(Descriptor);
+        if (NOT DescriptorIsValid)
+        {
+            Complete(Ticket, ECk_OnlineDirect_Result::TransportError);
+            return;
+        }
+        Capability = RenewedCapability;
+        Expiry = InviteExpiry;
+        Snapshot.Set_JoinDescriptor(Descriptor);
+        LastNow = Now;
+        Changed();
+        Complete(Ticket, ECk_OnlineDirect_Result::Succeeded);
+    }
     auto Execute(ECk_OnlineDirect_Action Action, FGuid Ticket, const FString& Text, bool Ready, double Now) -> void
     {
         if (!FMath::IsFinite(Now) || Now < 0) { Complete(Ticket, ECk_OnlineDirect_Result::InvalidInput); return; }
-        Now = FMath::Max(Now, LastNow);
-        LastNow = Now;
         if (!Ticket.IsValid()) { Complete(Ticket, ECk_OnlineDirect_Result::InvalidInput); return; }
+        Now = FMath::Max(Now, LastNow);
+        if (Action == ECk_OnlineDirect_Action::RenewInvite)
+        {
+            RenewInvite(Now, Ticket);
+            return;
+        }
+        LastNow = Now;
         if (Pending.Num() >= MaxPending) { Complete(Ticket, ECk_OnlineDirect_Result::Full); return; }
         if (Action == ECk_OnlineDirect_Action::Host) { Host(Now, Ticket); return; }
         if (Action == ECk_OnlineDirect_Action::Join) { Join(Text, Now, Ticket); return; }
