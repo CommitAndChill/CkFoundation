@@ -246,10 +246,15 @@ namespace ck_ui_document
             || InProperty == TEXT("-ck-button-background") || InProperty == TEXT("-ck-button-border-color")
             || InProperty == TEXT("-ck-button-hover-background") || InProperty == TEXT("-ck-button-hover-border-color")
             || InProperty == TEXT("-ck-button-pressed-background") || InProperty == TEXT("-ck-button-pressed-border-color")
+            || InProperty == TEXT("-ck-button-pressed-color")
             || InProperty == TEXT("-ck-button-disabled-background") || InProperty == TEXT("-ck-button-disabled-border-color")
             || InProperty == TEXT("-ck-button-color") || InProperty == TEXT("-ck-button-disabled-color")
+            || InProperty == TEXT("-ck-button-focus-background") || InProperty == TEXT("-ck-button-focus-border-color")
+            || InProperty == TEXT("-ck-button-focus-color") || InProperty == TEXT("-ck-button-focus-outline-color")
+            || InProperty == TEXT("-ck-button-focus-outline-width") || InProperty == TEXT("-ck-button-focus-outline-gap")
             || InProperty == TEXT("-ck-button-radius") || InProperty == TEXT("-ck-button-outline-width")
             || InProperty == TEXT("-ck-button-padding-x") || InProperty == TEXT("-ck-button-padding-y")
+            || InProperty == TEXT("-ck-button-text-align") || InProperty == TEXT("-ck-button-content-vertical-align")
             || InProperty == TEXT("-ck-menu-button-background") || InProperty == TEXT("-ck-menu-button-border-color")
             || InProperty == TEXT("-ck-menu-button-hover-background") || InProperty == TEXT("-ck-menu-button-hover-border-color")
             || InProperty == TEXT("-ck-menu-button-pressed-background") || InProperty == TEXT("-ck-menu-button-pressed-border-color")
@@ -302,6 +307,23 @@ namespace ck_ui_document
         return InProperty.EndsWith(TEXT("background"), ESearchCase::CaseSensitive)
             || InProperty.EndsWith(TEXT("border-color"), ESearchCase::CaseSensitive)
             || InProperty.EndsWith(TEXT("-color"), ESearchCase::CaseSensitive);
+    }
+
+    auto TryParseButtonTextAlignment(const FString& InValue, ETextJustify::Type& OutAlignment) -> bool
+    {
+        if (InValue == TEXT("left")) { OutAlignment = ETextJustify::Left; return true; }
+        if (InValue == TEXT("center")) { OutAlignment = ETextJustify::Center; return true; }
+        if (InValue == TEXT("right")) { OutAlignment = ETextJustify::Right; return true; }
+        return false;
+    }
+
+    auto TryParseButtonContentVerticalAlignment(const FString& InValue, EVerticalAlignment& OutAlignment) -> bool
+    {
+        if (InValue == TEXT("fill")) { OutAlignment = VAlign_Fill; return true; }
+        if (InValue == TEXT("top")) { OutAlignment = VAlign_Top; return true; }
+        if (InValue == TEXT("center")) { OutAlignment = VAlign_Center; return true; }
+        if (InValue == TEXT("bottom")) { OutAlignment = VAlign_Bottom; return true; }
+        return false;
     }
 
     auto ParseStylesheet(const FString& InStylesheet, TArray<FStyleRule>& OutRules, TArray<FString>& OutErrors, const FString& InSource) -> bool
@@ -373,6 +395,20 @@ namespace ck_ui_document
         }
         if (IsButtonVisualProperty(InProperty) || IsMenuButtonVisualProperty(InProperty) || IsTabsVisualProperty(InProperty) || IsTableVisualProperty(InProperty) || IsTreeVisualProperty(InProperty))
         {
+            if (InProperty == TEXT("-ck-button-text-align"))
+            {
+                ETextJustify::Type Alignment = ETextJustify::Left;
+                if (!TryParseButtonTextAlignment(Value, Alignment))
+                { InOutState.Error(TEXT("invalid CSS value for '") + InProperty + TEXT("'")); return false; }
+                return true;
+            }
+            if (InProperty == TEXT("-ck-button-content-vertical-align"))
+            {
+                EVerticalAlignment Alignment = VAlign_Fill;
+                if (!TryParseButtonContentVerticalAlignment(Value, Alignment))
+                { InOutState.Error(TEXT("invalid CSS value for '") + InProperty + TEXT("'")); return false; }
+                return true;
+            }
             if (InProperty == TEXT("-ck-menu-button-arrow"))
             {
                 if (Value != TEXT("visible") && Value != TEXT("hidden"))
@@ -534,6 +570,18 @@ namespace ck_ui_document
         {
             if (InOutNode.Kind != ECkUiNodeKind::Button) { return InvalidForNode(); }
             InOutNode.ButtonVisualStyle.Enabled = true;
+            if (InProperty == TEXT("-ck-button-text-align"))
+            {
+                if (!TryParseButtonTextAlignment(Value, InOutNode.ButtonVisualStyle.TextAlignment))
+                { InOutState.Error(FString::Printf(TEXT("node '%s': invalid CSS value for '%s'"), *InOutNode.Id, *InProperty)); return false; }
+                return true;
+            }
+            if (InProperty == TEXT("-ck-button-content-vertical-align"))
+            {
+                if (!TryParseButtonContentVerticalAlignment(Value, InOutNode.ButtonVisualStyle.ContentVerticalAlignment))
+                { InOutState.Error(FString::Printf(TEXT("node '%s': invalid CSS value for '%s'"), *InOutNode.Id, *InProperty)); return false; }
+                return true;
+            }
             if (IsVisualColorProperty(InProperty))
             {
                 FLinearColor Color;
@@ -544,10 +592,15 @@ namespace ck_ui_document
                 else if (InProperty == TEXT("-ck-button-hover-border-color")) { InOutNode.ButtonVisualStyle.HoverBorderColor = Color; }
                 else if (InProperty == TEXT("-ck-button-pressed-background")) { InOutNode.ButtonVisualStyle.PressedBackground = Color; }
                 else if (InProperty == TEXT("-ck-button-pressed-border-color")) { InOutNode.ButtonVisualStyle.PressedBorderColor = Color; }
+                else if (InProperty == TEXT("-ck-button-pressed-color")) { InOutNode.ButtonVisualStyle.PressedColor = Color; }
                 else if (InProperty == TEXT("-ck-button-disabled-background")) { InOutNode.ButtonVisualStyle.DisabledBackground = Color; }
                 else if (InProperty == TEXT("-ck-button-disabled-border-color")) { InOutNode.ButtonVisualStyle.DisabledBorderColor = Color; }
                 else if (InProperty == TEXT("-ck-button-color")) { InOutNode.ButtonVisualStyle.Color = Color; }
-                else { InOutNode.ButtonVisualStyle.DisabledColor = Color; }
+                else if (InProperty == TEXT("-ck-button-disabled-color")) { InOutNode.ButtonVisualStyle.DisabledColor = Color; }
+                else if (InProperty == TEXT("-ck-button-focus-background")) { InOutNode.ButtonVisualStyle.FocusBackground = Color; }
+                else if (InProperty == TEXT("-ck-button-focus-border-color")) { InOutNode.ButtonVisualStyle.FocusBorderColor = Color; }
+                else if (InProperty == TEXT("-ck-button-focus-color")) { InOutNode.ButtonVisualStyle.FocusColor = Color; }
+                else { InOutNode.ButtonVisualStyle.FocusOutlineColor = Color; }
                 return true;
             }
             float Length = 0.0f;
@@ -556,6 +609,8 @@ namespace ck_ui_document
             { InOutState.Error(FString::Printf(TEXT("node '%s': invalid CSS length value for '%s'"), *InOutNode.Id, *InProperty)); return false; }
             if (InProperty == TEXT("-ck-button-radius")) { InOutNode.ButtonVisualStyle.Radius = Length; }
             else if (InProperty == TEXT("-ck-button-outline-width")) { InOutNode.ButtonVisualStyle.OutlineWidth = Length; }
+            else if (InProperty == TEXT("-ck-button-focus-outline-width")) { InOutNode.ButtonVisualStyle.FocusOutlineWidth = Length; }
+            else if (InProperty == TEXT("-ck-button-focus-outline-gap")) { InOutNode.ButtonVisualStyle.FocusOutlineGap = Length; }
             else if (InProperty == TEXT("-ck-button-padding-x")) { InOutNode.ButtonVisualStyle.ContentPadding.Left = Length; InOutNode.ButtonVisualStyle.ContentPadding.Right = Length; }
             else { InOutNode.ButtonVisualStyle.ContentPadding.Top = Length; InOutNode.ButtonVisualStyle.ContentPadding.Bottom = Length; }
             return true;

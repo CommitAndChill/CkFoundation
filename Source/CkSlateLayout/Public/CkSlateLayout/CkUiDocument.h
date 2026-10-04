@@ -118,13 +118,22 @@ struct FCkUiButtonVisualStyle
     TOptional<FLinearColor> HoverBorderColor;
     TOptional<FLinearColor> PressedBackground;
     TOptional<FLinearColor> PressedBorderColor;
+    TOptional<FLinearColor> PressedColor;
     TOptional<FLinearColor> DisabledBackground;
     TOptional<FLinearColor> DisabledBorderColor;
     TOptional<FLinearColor> Color;
     TOptional<FLinearColor> DisabledColor;
+    TOptional<FLinearColor> FocusBackground;
+    TOptional<FLinearColor> FocusBorderColor;
+    TOptional<FLinearColor> FocusColor;
+    TOptional<FLinearColor> FocusOutlineColor;
+    TOptional<float> FocusOutlineWidth;
+    TOptional<float> FocusOutlineGap;
     TOptional<float> Radius;
     TOptional<float> OutlineWidth;
     FMargin ContentPadding = FMargin(9.0f, 6.0f);
+    ETextJustify::Type TextAlignment = ETextJustify::Left;
+    EVerticalAlignment ContentVerticalAlignment = VAlign_Fill;
 };
 
 /** Optional authored presentation for a built-in menu button. Any -ck-menu-button-* declaration enables it. */

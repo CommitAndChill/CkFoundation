@@ -2,6 +2,7 @@
 
 #include "CkSlateLayout/CkUiCollection.h"
 
+#include "Brushes/SlateRoundedBoxBrush.h"
 #include "Containers/ObservableArray.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Application/SlateUser.h"
@@ -30,6 +31,10 @@ namespace ck_ui_select
         FCkUiOnStringChanged Changed;
         FString ValueBindingName;
         FString OptionsBindingName;
+        FComboBoxStyle NativeStyle;
+        FTableRowStyle RowStyle;
+        FSlateFontInfo Font;
+        TOptional<FLinearColor> TextColor;
     };
 
     class SCkUiSelect final : public SComboBox<FOptionPtr>
@@ -37,29 +42,67 @@ namespace ck_ui_select
     public:
         SLATE_BEGIN_ARGS(SCkUiSelect) {}
             SLATE_ATTRIBUTE(FText, DisplayText)
-            SLATE_ATTRIBUTE(FSlateFontInfo, Font)
+            SLATE_ARGUMENT(FComboBoxStyle, NativeStyle)
+            SLATE_ARGUMENT(FTableRowStyle, RowStyle)
+            SLATE_ARGUMENT(FSlateFontInfo, Font)
+            SLATE_ARGUMENT(TOptional<FLinearColor>, TextColor)
             SLATE_EVENT(TSlateDelegates<FOptionPtr>::FOnSelectionChanged, OnSelectionChanged)
         SLATE_END_ARGS()
 
         auto Construct(const FArguments& InArgs) -> void
         {
+            _NativeStyle = InArgs._NativeStyle;
+            _RowStyle = InArgs._RowStyle;
+            _Font = InArgs._Font;
+            _TextColor = InArgs._TextColor;
+            const TWeakPtr<SCkUiSelect> WeakSelect = StaticCastSharedRef<SCkUiSelect>(AsShared());
             SComboBox<FOptionPtr>::Construct(SComboBox<FOptionPtr>::FArguments()
-                .ComboBoxStyle(&FCoreStyle::Get().GetWidgetStyle<FComboBoxStyle>(TEXT("ComboBox")))
-                .ItemStyle(&FCoreStyle::Get().GetWidgetStyle<FTableRowStyle>(TEXT("ComboBox.Row")))
+                .ComboBoxStyle(&_NativeStyle)
+                .ItemStyle(&_RowStyle)
                 .OptionsSource(_Options)
                 .OnSelectionChanged(InArgs._OnSelectionChanged)
-                .OnGenerateWidget_Lambda([Font = InArgs._Font](FOptionPtr InOption)
+                .OnGenerateWidget_Lambda([WeakSelect](FOptionPtr InOption)
                 {
                     return SNew(STextBlock)
                         .Text_Lambda([InOption]() { return InOption.IsValid() ? InOption->Label : FText::GetEmpty(); })
-                        .Font(Font);
+                        .Font_Lambda([WeakSelect]()
+                        {
+                            const TSharedPtr<SCkUiSelect> Select = WeakSelect.Pin();
+                            return Select.IsValid() ? Select->_Font : FSlateFontInfo{};
+                        })
+                        .ColorAndOpacity_Lambda([WeakSelect]()
+                        {
+                            const TSharedPtr<SCkUiSelect> Select = WeakSelect.Pin();
+                            return Select.IsValid() && Select->_TextColor.IsSet()
+                                ? FSlateColor(Select->_TextColor.GetValue()) : FSlateColor::UseForeground();
+                        });
                 })
                 .IsEnabled(InArgs._IsEnabled)
                 [
                     SNew(STextBlock)
                     .Text(InArgs._DisplayText)
-                    .Font(InArgs._Font)
+                    .Font_Lambda([WeakSelect]()
+                    {
+                        const TSharedPtr<SCkUiSelect> Select = WeakSelect.Pin();
+                        return Select.IsValid() ? Select->_Font : FSlateFontInfo{};
+                    })
+                    .ColorAndOpacity_Lambda([WeakSelect]()
+                    {
+                        const TSharedPtr<SCkUiSelect> Select = WeakSelect.Pin();
+                        return Select.IsValid() && Select->_TextColor.IsSet()
+                            ? FSlateColor(Select->_TextColor.GetValue()) : FSlateColor::UseForeground();
+                    })
                 ]);
+        }
+
+        auto ApplyStyle(const FConfiguration& InConfiguration) -> void
+        {
+            _NativeStyle = InConfiguration.NativeStyle;
+            _RowStyle = InConfiguration.RowStyle;
+            _Font = InConfiguration.Font;
+            _TextColor = InConfiguration.TextColor;
+            SetButtonContentPadding(_NativeStyle.ComboButtonStyle.ContentPadding);
+            Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Paint);
         }
 
         auto ReplaceOptions(const TArray<TSharedPtr<const FCkUiRecord>>& InRecords) -> void
@@ -177,6 +220,12 @@ namespace ck_ui_select
         }
 
         TSharedRef<FOptionSource> _Options = MakeShared<FOptionSource>();
+        // SComboBox and its rows borrow style pointers. Keep the copies on the native widget
+        // so a held select remains paintable after its retained component is released.
+        FComboBoxStyle _NativeStyle;
+        FTableRowStyle _RowStyle;
+        FSlateFontInfo _Font;
+        TOptional<FLinearColor> _TextColor;
         TFunction<void()> _SynchronizeCallback;
         TFunction<bool()> _CanEditCallback;
         bool _ApplyingSelection = false;
@@ -191,7 +240,7 @@ namespace ck_ui_select
         {
         }
 
-        auto Initialize(const FString& InId, const FSlateFontInfo& InBaseFont) -> void
+        auto Initialize(const FString& InId) -> void
         {
             const TWeakPtr<FSelect> WeakSelect = AsShared();
             TSharedPtr<SCkUiSelect> Select;
@@ -206,7 +255,10 @@ namespace ck_ui_select
                     const TSharedPtr<FSelect> Control = WeakSelect.Pin();
                     return Control.IsValid() && Control->CanDispatch();
                 }))
-                .Font(InBaseFont)
+                .NativeStyle(_Configuration.NativeStyle)
+                .RowStyle(_Configuration.RowStyle)
+                .Font(_Configuration.Font)
+                .TextColor(_Configuration.TextColor)
                 .OnSelectionChanged_Lambda([WeakSelect](FOptionPtr InOption, const ESelectInfo::Type InInfo)
                 {
                     if (const TSharedPtr<FSelect> Control = WeakSelect.Pin()) { Control->OnSelectionChanged(MoveTemp(InOption), InInfo); }
@@ -366,6 +418,7 @@ namespace ck_ui_select
             const bool SameOptions = _Configuration.Options == InConfiguration.Options;
             if (!SameOptions) { UnbindCollection(); }
             _Configuration = MoveTemp(InConfiguration);
+            _Widget->ApplyStyle(_Configuration);
             if (!SameOptions)
             {
                 BindCollection();
@@ -384,6 +437,50 @@ namespace ck_ui_select
 
     auto MakeConfiguration(const FCkUiCustomWidgetArguments& InArguments, FConfiguration& OutConfiguration, FString& OutFailure) -> bool
     {
+        OutConfiguration.NativeStyle = FCoreStyle::Get().GetWidgetStyle<FComboBoxStyle>(TEXT("ComboBox"));
+        OutConfiguration.RowStyle = FCoreStyle::Get().GetWidgetStyle<FTableRowStyle>(TEXT("ComboBox.Row"));
+        OutConfiguration.Font = InArguments.BaseFont;
+        if (const FCkUiCustomStyleValue* FontSize = InArguments.Style.CustomProperties.Find(TEXT("-ck-select-font-size")))
+        {
+            if (!FMath::IsFinite(FontSize->Number) || FontSize->Number < 1.0f || FontSize->Number > 512.0f)
+            { OutFailure = TEXT("Select font size must be from 1 through 512."); return false; }
+            OutConfiguration.Font.Size = FMath::RoundToInt(FontSize->Number);
+        }
+        if (const FCkUiCustomStyleValue* Color = InArguments.Style.CustomProperties.Find(TEXT("-ck-select-color")))
+        { OutConfiguration.TextColor = Color->Color; }
+        const FCkUiCustomStyleValue* Background = InArguments.Style.CustomProperties.Find(TEXT("-ck-select-background-color"));
+        const FCkUiCustomStyleValue* Border = InArguments.Style.CustomProperties.Find(TEXT("-ck-select-border-color"));
+        const FCkUiCustomStyleValue* Accent = InArguments.Style.CustomProperties.Find(TEXT("-ck-select-accent-color"));
+        if (Background != nullptr || Border != nullptr || Accent != nullptr)
+        {
+            const FLinearColor Normal = Background != nullptr ? Background->Color : FLinearColor(0.10f, 0.14f, 0.18f, 1.0f);
+            const FLinearColor Stroke = Border != nullptr ? Border->Color : FLinearColor::Transparent;
+            const FLinearColor Hovered = Accent != nullptr ? Accent->Color : Normal;
+            FLinearColor Disabled = Normal;
+            Disabled.A *= 0.5f;
+            FComboButtonStyle Combo = OutConfiguration.NativeStyle.ComboButtonStyle;
+            FButtonStyle Button = Combo.ButtonStyle;
+            Button.SetNormal(FSlateRoundedBoxBrush(Normal, 4.0f, Stroke, 1.0f));
+            Button.SetHovered(FSlateRoundedBoxBrush(Hovered, 4.0f, Stroke, 1.0f));
+            Button.SetPressed(FSlateRoundedBoxBrush(Hovered, 4.0f, Stroke, 1.0f));
+            Button.SetDisabled(FSlateRoundedBoxBrush(Disabled, 4.0f, Stroke, 1.0f));
+            Combo.SetButtonStyle(Button);
+            if (Border != nullptr) { Combo.MenuBorderBrush.TintColor = FSlateColor(Border->Color); }
+            OutConfiguration.NativeStyle.SetComboButtonStyle(Combo);
+            if (Accent != nullptr)
+            {
+                OutConfiguration.RowStyle.ActiveBrush.TintColor = FSlateColor(Accent->Color);
+                OutConfiguration.RowStyle.ActiveHoveredBrush.TintColor = FSlateColor(Accent->Color);
+            }
+        }
+        if (const FCkUiCustomStyleValue* Padding = InArguments.Style.CustomProperties.Find(TEXT("-ck-select-padding")))
+        {
+            if (!FMath::IsFinite(Padding->Number) || Padding->Number > 512.0f)
+            { OutFailure = TEXT("Select padding must be at most 512."); return false; }
+            FComboButtonStyle Combo = OutConfiguration.NativeStyle.ComboButtonStyle;
+            Combo.SetContentPadding(FMargin(Padding->Number));
+            OutConfiguration.NativeStyle.SetComboButtonStyle(Combo);
+        }
         const TAttribute<FString>* Value = InArguments.StringBindings.Find(TEXT("value"));
         const TSharedPtr<FCkUiCollection>* Options = InArguments.Collections.Find(TEXT("options"));
         const FCkUiOnStringChanged* Changed = InArguments.StringChanged.Find(TEXT("changed"));
@@ -437,6 +534,14 @@ auto FCkUiSelect::Register(FCkUiWidgetRegistry& InRegistry) -> FCkUiLoadResult
 {
     auto Registration = FCkUiCustomWidgetRegistration{};
     Registration.Schema.Tag = TEXT("select");
+    Registration.Schema.StyleProperties = {
+        {TEXT("-ck-select-font-size"), ECkUiCustomStyleKind::Number},
+        {TEXT("-ck-select-color"), ECkUiCustomStyleKind::Color},
+        {TEXT("-ck-select-background-color"), ECkUiCustomStyleKind::Color},
+        {TEXT("-ck-select-border-color"), ECkUiCustomStyleKind::Color},
+        {TEXT("-ck-select-accent-color"), ECkUiCustomStyleKind::Color},
+        {TEXT("-ck-select-padding"), ECkUiCustomStyleKind::Length}
+    };
     Registration.Schema.Properties = {
         {TEXT("value"), ECkUiCustomPropertyKind::StringBinding, true},
         {TEXT("options"), ECkUiCustomPropertyKind::CollectionBinding, true},
@@ -450,7 +555,7 @@ auto FCkUiSelect::Register(FCkUiWidgetRegistry& InRegistry) -> FCkUiLoadResult
         auto Configuration = ck_ui_select::FConfiguration{};
         if (!ck_ui_select::MakeConfiguration(InArguments, Configuration, OutFailure)) { return {}; }
         const TSharedRef<ck_ui_select::FSelect> Select = MakeShared<ck_ui_select::FSelect>(MoveTemp(Configuration));
-        Select->Initialize(InArguments.Id, InArguments.BaseFont);
+        Select->Initialize(InArguments.Id);
         return Select;
     };
     return InRegistry.Register(MoveTemp(Registration));

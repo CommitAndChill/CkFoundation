@@ -14,6 +14,7 @@
 
 class SBox;
 class SSearchBox;
+class SButton;
 class SScrollBox;
 class SCkUiSplitter;
 class SCkUiTabs;
@@ -90,6 +91,8 @@ public:
         TMap<FString, FCkUiOnItemIntegerCommitted> ItemIntegerCommitted;
         /** Host-owned focus/input context, inherited by nested views. INDEX_NONE means no explicit owner. */
         int32 SlateUserIndex = INDEX_NONE;
+        /** Opt in to restoring enabled ordinary buttons by stable ID after an accepted reload. */
+        bool RestoreButtonFocusOnReload = false;
     };
 
     /** One participant in an all-or-nothing authored-document reload. */
@@ -113,6 +116,7 @@ public:
 
     /** Creates or returns the persistent native mount for one document region. */
     auto GetRegion(const FString& InName) -> TSharedRef<SWidget>;
+    auto IsOwnerReleased() const -> bool { return _OwnerInteractionsReleased; }
 
     /** Parses, validates and stages a complete document before changing any mounted region. */
     auto TryReload(
@@ -162,6 +166,8 @@ public:
     TSharedPtr<SCkUiTabs> GetTabs(const FString& InId) const;
     TSharedPtr<SCkUiMenuButton> GetMenuButton(const FString& InId) const;
     TSharedPtr<SCkUiRepeat> GetRepeat(const FString& InId) const;
+    /** An ordinary button in the currently committed document; old controls are never returned. */
+    TSharedPtr<SButton> GetButton(const FString& InId) const;
 
 private:
     explicit FCkUiView(
@@ -255,10 +261,13 @@ private:
     FDataBindings _Data;
     TSharedPtr<const FCkUiWidgetRegistrySnapshot> _CustomRegistry;
     TMap<FString, TSharedPtr<SBox>> _RegionMounts;
+    TMap<FString, TSharedPtr<SButton>> _CommittedButtons;
     TMap<FString, FRetainedRecord> _CommittedRetained;
     TMap<FString, TSharedPtr<FRepeatState>> _RepeatStates;
     TMap<FString, TSharedPtr<FCustomSlotSet>> _CustomSlots;
     TMap<FString, TAttribute<FText>> _CommittedSearchHints;
+    TMap<FString, FSlateFontInfo> _CommittedSearchFonts;
+    TMap<FString, TOptional<FLinearColor>> _CommittedSearchColors;
     FCkUiLoadResult _LastResult;
     FString _MarkupPath;
     FString _StylesheetPath;

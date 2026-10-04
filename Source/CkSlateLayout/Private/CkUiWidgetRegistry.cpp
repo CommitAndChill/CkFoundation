@@ -14,7 +14,7 @@ namespace ck_ui_widget_registry
             {.Kind = ECkUiNodeKind::Button, .Tag = TEXT("button"), .BindingKind = ECkUiBuiltinBindingKind::OptionalText, .bAllowsAction = true, .bRequiresAction = true, .bAllowsLiteralText = true, .bAllowsTextStyle = true},
             {.Kind = ECkUiNodeKind::MenuButton, .Tag = TEXT("menu-button"), .MaxChildren = 0, .bAllowsTextStyle = true},
             {.Kind = ECkUiNodeKind::Native, .Tag = TEXT("native"), .BindingKind = ECkUiBuiltinBindingKind::Native},
-            {.Kind = ECkUiNodeKind::Search, .Tag = TEXT("search"), .BindingKind = ECkUiBuiltinBindingKind::SearchText, .bAllowsPlaceholder = true},
+            {.Kind = ECkUiNodeKind::Search, .Tag = TEXT("search"), .BindingKind = ECkUiBuiltinBindingKind::SearchText, .bAllowsPlaceholder = true, .bAllowsTextStyle = true},
             {.Kind = ECkUiNodeKind::Image, .Tag = TEXT("image"), .BindingKind = ECkUiBuiltinBindingKind::Image},
             {.Kind = ECkUiNodeKind::Scroll, .Tag = TEXT("scroll"), .MinChildren = 1, .MaxChildren = 1, .bAllowsGap = true, .bRequiresZeroGap = true, .bAllowsPadding = true, .bAllowsBackground = true},
             {.Kind = ECkUiNodeKind::Splitter, .Tag = TEXT("splitter"), .MinChildren = 2, .MaxChildren = INDEX_NONE, .bAllowsGap = true, .bRequiresZeroGap = true, .bAllowsPadding = true, .bAllowsBackground = true},
