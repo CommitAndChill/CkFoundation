@@ -253,9 +253,12 @@ struct FCkUiView::FStagedDocument
         EOrientation Direction = Orient_Vertical;
     };
     TMap<FString, TSharedPtr<SWidget>> Regions;
+    TMap<FString, TSharedPtr<SButton>> Buttons;
     TArray<FRetainedRecord> Retained;
     TArray<TUniquePtr<ICkUiPreparedWidgetUpdate>> PreparedUpdates;
     TMap<FString, TAttribute<FText>> SearchHints;
+    TMap<FString, FSlateFontInfo> SearchFonts;
+    TMap<FString, TOptional<FLinearColor>> SearchColors;
     TArray<TSharedPtr<SWidget>> CustomWidgets;
     TArray<TSharedPtr<SWidget>> OwnedWidgets;
     TArray<FScrollContent> ScrollContents;
@@ -274,6 +277,7 @@ struct FCkUiView::FCommitState
     {
         int32 UserIndex = INDEX_NONE;
         TSharedPtr<SWidget> Widget;
+        FString ButtonId;
         bool RetainedSurvives = false;
         TSharedPtr<ICkUiRetainedWidget> Component;
     };
@@ -413,6 +417,11 @@ auto FCkUiView::GetRepeat(const FString& InId) const -> TSharedPtr<SCkUiRepeat>
 {
     const FRetainedRecord* Record = FindRetained(InId);
     return Record != nullptr && Record->Kind == ERetainedKind::Repeat ? StaticCastSharedPtr<SCkUiRepeat>(Record->Widget) : nullptr;
+}
+
+auto FCkUiView::GetButton(const FString& InId) const -> TSharedPtr<SButton>
+{
+    return _CommittedButtons.FindRef(InId);
 }
 
 auto FCkUiView::CanDispatchEvents() const -> bool
@@ -2104,7 +2113,12 @@ auto FCkUiView::StageNode(const FCkUiNode& InNode, FStagedDocument& InOutStaged,
         const auto IsEnabled = [WeakOwner, EnabledBinding, ExpectedRevision]() -> bool
         {
             const TSharedPtr<FCkUiView> Owner = WeakOwner.Pin();
-            if (!Owner.IsValid() || !Owner->CanDispatchEvents() || Owner->_Revision != ExpectedRevision) { return false; }
+            // Focus eligibility is checked while a successful reload is being reconciled.
+            // Keep the committed button logically enabled during that transaction; the click
+            // handler below still blocks all action dispatch until the reload guard clears.
+            if (!Owner.IsValid() || Owner->_OwnerInteractionsReleased || Owner->_Revision != ExpectedRevision
+                || (Owner->_Data.CanDispatchEvents.IsSet() && !Owner->_Data.CanDispatchEvents.Get(true)))
+            { return false; }
             return EnabledBinding.IsEmpty() || Owner->_Data.Visibility.FindRef(EnabledBinding).Get(false);
         };
         const TAttribute<bool> Enabled = TAttribute<bool>::CreateLambda(IsEnabled);
@@ -2113,17 +2127,45 @@ auto FCkUiView::StageNode(const FCkUiNode& InNode, FStagedDocument& InOutStaged,
         const FMargin ContentPadding = bUsesAuthoredStyle
             ? InNode.ButtonVisualStyle.ContentPadding
             : FMargin(4.0f, 2.0f);
+        const TAttribute<FSlateColor> BaseTextColor = TextColor(InNode);
+        const TSharedRef<TWeakPtr<SButton>> ButtonForColor = MakeShared<TWeakPtr<SButton>>();
+        const FCkUiButtonVisualStyle VisualStyle = InNode.ButtonVisualStyle;
+        const bool bHasColorBinding = !InNode.ColorBinding.IsEmpty();
+        const TAttribute<FSlateColor> StyledTextColor = TAttribute<FSlateColor>::CreateLambda(
+            [BaseTextColor, ButtonForColor, VisualStyle, bHasColorBinding]() -> FSlateColor
+            {
+                const TSharedPtr<SButton> Current = ButtonForColor->Pin();
+                const FSlateColor Normal = bHasColorBinding || !VisualStyle.Color.IsSet()
+                    ? BaseTextColor.Get(FSlateColor::UseForeground()) : FSlateColor(VisualStyle.Color.GetValue());
+                if (!Current.IsValid()) { return Normal; }
+                if (!Current->IsEnabled())
+                { return FSlateColor(VisualStyle.DisabledColor.Get(FLinearColor{0.56f, 0.64f, 0.71f, 0.55f})); }
+                if (Current->IsPressed() && VisualStyle.PressedColor.IsSet())
+                { return FSlateColor(VisualStyle.PressedColor.GetValue()); }
+                if (StaticCastSharedPtr<SCkUiStyledButton>(Current)->IsAuthoredFocused() && VisualStyle.FocusColor.IsSet())
+                { return FSlateColor(VisualStyle.FocusColor.GetValue()); }
+                return Normal;
+            });
         const auto Label = SNew(SCkFlexText).Text(MakeTextAttribute()).Font(MakeFont())
             .AllowWrapping(InNode.Style.AllowWrapping).OverflowPolicy(InNode.Style.OverflowPolicy).WrappingPolicy(InNode.Style.WrappingPolicy)
+            .Justification(bUsesAuthoredStyle ? InNode.ButtonVisualStyle.TextAlignment : ETextJustify::Left)
+            .VerticalAlignment(bUsesAuthoredStyle ? InNode.ButtonVisualStyle.ContentVerticalAlignment : VAlign_Fill)
             .Clipping(InNode.Style.AllowWrapping ? EWidgetClipping::Inherit : EWidgetClipping::ClipToBounds)
-            .ColorAndOpacity(TextColor(InNode));
-        const FOnClicked Clicked = FOnClicked::CreateLambda([Action, IsEnabled]() mutable
-        { if (IsEnabled()) { Action.ExecuteIfBound(); } return FReply::Handled(); });
+            .ApplyDisabledEffect(!(bUsesAuthoredStyle && VisualStyle.DisabledColor.IsSet()))
+            .ColorAndOpacity(bUsesAuthoredStyle ? StyledTextColor : BaseTextColor);
+        const FOnClicked Clicked = FOnClicked::CreateLambda([Action, IsEnabled, WeakOwner]() mutable
+        {
+            const TSharedPtr<FCkUiView> Owner = WeakOwner.Pin();
+            if (Owner.IsValid() && Owner->CanDispatchEvents() && IsEnabled()) { Action.ExecuteIfBound(); }
+            return FReply::Handled();
+        });
         const TSharedRef<SButton> Button = bUsesAuthoredStyle
             ? StaticCastSharedRef<SButton>(SNew(SCkUiStyledButton).Tag(FName(*InNode.Id)).VisualStyle(InNode.ButtonVisualStyle)
                 .ToolTipText(TooltipText(InNode)).IsEnabled(Enabled).OnClicked(Clicked)[Label])
             : SNew(SButton).Tag(FName(*InNode.Id)).ButtonStyle(ButtonStyle).ContentPadding(ContentPadding).ToolTipText(TooltipText(InNode))
                 .IsEnabled(Enabled).OnClicked(Clicked)[Label];
+        *ButtonForColor = Button;
+        InOutStaged.Buttons.Add(InNode.Id, Button);
         const TWeakPtr<SButton> WeakButton = Button;
         const TWeakPtr<SCkFlexText> WeakLabel = Label;
         const auto PaddingSize = [WeakButton, ButtonStyle, ContentPadding, bUsesAuthoredStyle]() -> FVector2D
@@ -2179,6 +2221,30 @@ auto FCkUiView::StageNode(const FCkUiNode& InNode, FStagedDocument& InOutStaged,
                     const TSharedPtr<FCkUiView> View = WeakView.Pin();
                     if (!*SuppressInitialWrite && View.IsValid() && View->CanDispatchEvents()) { TextChanged.ExecuteIfBound(InText); }
                 });
+            Search->SetFont(TAttribute<FSlateFontInfo>::CreateLambda([WeakView, Id, BaseFont = _BaseFont]()
+            {
+                const TSharedPtr<FCkUiView> View = WeakView.Pin();
+                if (!View.IsValid()) { return BaseFont; }
+                const FSlateFontInfo* Font = View->_CommittedSearchFonts.Find(Id);
+                return Font != nullptr ? *Font : View->_BaseFont;
+            }));
+            const auto MakeColor = [WeakView, Id](bool InFocused) -> TAttribute<FSlateColor>
+            {
+                return TAttribute<FSlateColor>::CreateLambda([WeakView, Id, InFocused]()
+                {
+                    const TSharedPtr<FCkUiView> View = WeakView.Pin();
+                    if (View.IsValid())
+                    {
+                        if (const TOptional<FLinearColor>* Color = View->_CommittedSearchColors.Find(Id);
+                            Color != nullptr && Color->IsSet())
+                        { return FSlateColor{Color->GetValue()}; }
+                    }
+                    const auto& Style = FCoreStyle::Get().GetWidgetStyle<FSearchBoxStyle>(TEXT("SearchBox"));
+                    return InFocused ? Style.TextBoxStyle.FocusedForegroundColor : Style.TextBoxStyle.ForegroundColor;
+                });
+            };
+            Search->SetTextBoxForegroundColor(MakeColor(false));
+            Search->SetFocusedForegroundColor(MakeColor(true));
             // SSearchBox consumes InitialText by value in its Construct implementation. Install the
             // original attribute while the new control is still detached so later model updates stay
             // live without turning the initial binding install into an authored text-change callback.
@@ -2188,6 +2254,8 @@ auto FCkUiView::StageNode(const FCkUiNode& InNode, FStagedDocument& InOutStaged,
         InOutStaged.Retained.Add(FRetainedRecord{InNode.Id, ERetainedKind::Search, InNode.Binding, FString{}, Search, nullptr, SNew(SBox).Tag(FName(*InNode.Id))});
         InOutStaged.SearchHints.Add(InNode.Id, InNode.PlaceholderBinding.IsEmpty()
             ? TAttribute<FText>(FText::FromString(InNode.Placeholder)) : _Data.Text.FindRef(InNode.PlaceholderBinding));
+        InOutStaged.SearchFonts.Add(InNode.Id, MakeFont());
+        InOutStaged.SearchColors.Add(InNode.Id, InNode.Style.Color);
         return ApplyVisibility(ApplyStyle(InNode.Style, InOutStaged.Retained.Last().Port.ToSharedRef()));
     }
     if (InNode.Kind == ECkUiNodeKind::Table)
@@ -2851,10 +2919,6 @@ FCkUiView::~FCkUiView()
 
     // Let retained controls release owned transient state before removing focus that still belongs
     // to a window-held region after this view is released.
-    for (const auto& [Name, Mount] : _RegionMounts)
-    {
-        if (Mount.IsValid()) { ReleaseTransientInteractions(Mount.ToSharedRef(), true); }
-    }
     for (const auto& [Id, Record] : _CommittedRetained)
     {
         if (Record.Kind == ERetainedKind::Tabs) { StaticCastSharedPtr<SCkUiTabs>(Record.Widget)->Deactivate(); }
@@ -2951,6 +3015,11 @@ auto FCkUiView::CaptureCommit(FStagedDocument& InStaged) -> FCommitState
             }
             if (!bFocusedAuthored) { return; }
             auto Focused = FCommitState::FFocusedUser{.UserIndex = User.GetUserIndex(), .Widget = Candidate};
+            for (const auto& [ButtonId, Button] : _CommittedButtons)
+            {
+                if (_Data.RestoreButtonFocusOnReload && Button == Candidate)
+                { Focused.ButtonId = ButtonId; break; }
+            }
             for (const auto& [Id, Existing] : _CommittedRetained)
             {
                 if (!ck_ui_surface::HasWidget(FocusedPath, Existing.Widget)) { continue; }
@@ -2991,8 +3060,11 @@ void FCkUiView::PublishConfiguration(FStagedDocument&& InStaged, FCommitState& I
         if (const TSharedPtr<SBox>* Mount = _RegionMounts.Find(Name); Mount != nullptr && Mount->IsValid())
         { (*Mount)->SetContent(Root.ToSharedRef()); }
     }
+    _CommittedButtons = MoveTemp(InStaged.Buttons);
     _CommittedRetained = MoveTemp(NextRetained);
     _CommittedSearchHints = MoveTemp(InStaged.SearchHints);
+    _CommittedSearchFonts = MoveTemp(InStaged.SearchFonts);
+    _CommittedSearchColors = MoveTemp(InStaged.SearchColors);
     InOutState.PreviousRepeats = MoveTemp(_RepeatStates);
     _RepeatStates = MoveTemp(InStaged.Repeats);
     for (const auto& [Id, Previous] : InOutState.PreviousRepeats)
@@ -3106,6 +3178,33 @@ void FCkUiView::ReconcileInteractions(FCommitState& InOutState)
         for (const FCommitState::FFocusedUser& Focused : FocusedUsers)
         {
             if (Slate.GetUserFocusedWidget(Focused.UserIndex) != Focused.Widget) { continue; }
+            if (!Focused.ButtonId.IsEmpty())
+            {
+                const TSharedPtr<SButton> Replacement = _CommittedButtons.FindRef(Focused.ButtonId);
+                if (Replacement.IsValid() && !_OwnerInteractionsReleased)
+                {
+                    // The button's enabled getter first ran while this revision was still staged.
+                    // Refresh Slate's cached attribute after publication, before testing focus eligibility.
+                    const int64 PublishedRevision = _Revision;
+                    if (Replacement->HasRegisteredSlateAttribute() && Replacement->IsAttributesUpdatesEnabled())
+                    {
+                        FSlateAttributeMetaData::UpdateExceptVisibilityAttributes(*Replacement,
+                            FSlateAttributeMetaData::EInvalidationPermission::AllowInvalidationIfConstructed);
+                    }
+                    // Bound getters can reenter owner code and redirect focus. Do not let the
+                    // generic fallback clear that new focus or an owner-released interaction.
+                    if (!FSlateApplication::IsInitialized()) { break; }
+                    if (_OwnerInteractionsReleased || _Revision != PublishedRevision
+                        || _CommittedButtons.FindRef(Focused.ButtonId) != Replacement
+                        || Slate.GetUserFocusedWidget(Focused.UserIndex) != Focused.Widget)
+                    { continue; }
+                    if (Replacement->IsEnabled())
+                    {
+                        Slate.SetUserFocus(Focused.UserIndex, Replacement, EFocusCause::SetDirectly);
+                        if (Slate.GetUserFocusedWidget(Focused.UserIndex) != Focused.Widget) { continue; }
+                    }
+                }
+            }
             if (Focused.RetainedSurvives && Focused.Component.IsValid())
             {
                 Focused.Component->BeginFocusTransfer();

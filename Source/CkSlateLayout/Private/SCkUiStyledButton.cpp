@@ -1,6 +1,7 @@
 #include "CkSlateLayout/SCkUiStyledButton.h"
 
 #include "Brushes/SlateRoundedBoxBrush.h"
+#include "Rendering/DrawElements.h"
 
 namespace ck_ui_styled_button
 {
@@ -29,7 +30,33 @@ namespace ck_ui_styled_button
 
 void SCkUiStyledButton::Construct(const FArguments& InArgs)
 {
+    using namespace ck_ui_styled_button;
     _ButtonStyle = MakeButtonStyle(InArgs._VisualStyle);
+    _FocusedButtonStyle = _ButtonStyle;
+    const auto& VisualStyle = InArgs._VisualStyle;
+    _HasAuthoredFocusStyle = VisualStyle.FocusBackground.IsSet() || VisualStyle.FocusBorderColor.IsSet()
+        || VisualStyle.FocusColor.IsSet() || VisualStyle.FocusOutlineColor.IsSet()
+        || VisualStyle.FocusOutlineWidth.IsSet() || VisualStyle.FocusOutlineGap.IsSet();
+    const float Radius = VisualStyle.Radius.Get(4.0f);
+    const float BorderWidth = VisualStyle.OutlineWidth.Get(1.0f);
+    const FLinearColor FocusBackground = ReadColor(VisualStyle.FocusBackground,
+        ReadColor(VisualStyle.HoverBackground, DefaultHoverBackground));
+    const FLinearColor FocusBorder = ReadColor(VisualStyle.FocusBorderColor,
+        ReadColor(VisualStyle.HoverBorderColor, DefaultHoverBorder));
+    _FocusedButtonStyle.SetNormal(FSlateRoundedBoxBrush(FocusBackground, Radius, FocusBorder, BorderWidth));
+    _FocusedButtonStyle.SetHovered(FSlateRoundedBoxBrush(FocusBackground, Radius, FocusBorder, BorderWidth));
+    const FSlateColor FocusForeground(ReadColor(VisualStyle.FocusColor,
+        ReadColor(VisualStyle.Color, DefaultForeground)));
+    _FocusedButtonStyle.SetNormalForeground(FocusForeground);
+    _FocusedButtonStyle.SetHoveredForeground(FocusForeground);
+    _FocusOutlineGap = VisualStyle.FocusOutlineGap.Get(2.0f);
+    _FocusOutlineWidth = VisualStyle.FocusOutlineWidth.Get(2.0f);
+    if (_HasAuthoredFocusStyle && _FocusOutlineWidth > 0.0f)
+    {
+        _FocusOutlineBrush = MakeShared<FSlateRoundedBoxBrush>(FLinearColor::Transparent,
+            Radius + _FocusOutlineGap + _FocusOutlineWidth,
+            ReadColor(VisualStyle.FocusOutlineColor, FocusBorder), _FocusOutlineWidth);
+    }
     SButton::Construct(SButton::FArguments()
         .ButtonStyle(&_ButtonStyle)
         .ContentPadding(InArgs._VisualStyle.ContentPadding)
@@ -42,6 +69,41 @@ void SCkUiStyledButton::Construct(const FArguments& InArgs)
     SetEnabled(InArgs._IsEnabled);
     SetToolTipText(InArgs._ToolTipText);
     SetTag(InArgs._Tag);
+}
+
+auto SCkUiStyledButton::GetFocusBrush() const -> const FSlateBrush*
+{
+    // Authored focus paints its own ring; a second platform ring can cover the label.
+    return _HasAuthoredFocusStyle ? nullptr : SButton::GetFocusBrush();
+}
+
+auto SCkUiStyledButton::OnFocusReceived(const FGeometry& InGeometry, const FFocusEvent& InFocusEvent) -> FReply
+{
+    _FocusActive = true;
+    if (_HasAuthoredFocusStyle) { SetButtonStyle(&_FocusedButtonStyle); }
+    return SButton::OnFocusReceived(InGeometry, InFocusEvent);
+}
+
+void SCkUiStyledButton::OnFocusLost(const FFocusEvent& InFocusEvent)
+{
+    SButton::OnFocusLost(InFocusEvent);
+    _FocusActive = false;
+    SetButtonStyle(&_ButtonStyle);
+}
+
+auto SCkUiStyledButton::OnPaint(const FPaintArgs& InArgs, const FGeometry& InGeometry,
+    const FSlateRect& InCullingRect, FSlateWindowElementList& OutDrawElements, int32 InLayerId,
+    const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const -> int32
+{
+    const int32 ContentLayer = SButton::OnPaint(InArgs, InGeometry, InCullingRect, OutDrawElements,
+        InLayerId, InWidgetStyle, bParentEnabled);
+    if (!_FocusActive || !IsEnabled() || !_FocusOutlineBrush.IsValid()) { return ContentLayer; }
+    const float Extent = _FocusOutlineGap + _FocusOutlineWidth;
+    FSlateDrawElement::MakeBox(OutDrawElements, ContentLayer + 1,
+        InGeometry.ToInflatedPaintGeometry(FVector2D{Extent, Extent}),
+        _FocusOutlineBrush.Get(), ESlateDrawEffect::None,
+        InWidgetStyle.GetColorAndOpacityTint() * _FocusOutlineBrush->GetTint(InWidgetStyle));
+    return ContentLayer + 1;
 }
 
 auto SCkUiStyledButton::MakeButtonStyle(const FCkUiButtonVisualStyle& InVisualStyle) -> FButtonStyle
@@ -57,6 +119,7 @@ auto SCkUiStyledButton::MakeButtonStyle(const FCkUiButtonVisualStyle& InVisualSt
     const FLinearColor DisabledBackground = ReadColor(InVisualStyle.DisabledBackground, MakeDisabledColor(Background));
     const FLinearColor DisabledBorder = ReadColor(InVisualStyle.DisabledBorderColor, MakeDisabledColor(Border));
     const FLinearColor Foreground = ReadColor(InVisualStyle.Color, DefaultForeground);
+    const FLinearColor PressedForeground = ReadColor(InVisualStyle.PressedColor, Foreground);
     const FLinearColor DisabledForeground = ReadColor(InVisualStyle.DisabledColor, DefaultDisabledForeground);
     const float Radius = InVisualStyle.Radius.Get(4.0f);
     const float OutlineWidth = InVisualStyle.OutlineWidth.Get(1.0f);
@@ -68,7 +131,7 @@ auto SCkUiStyledButton::MakeButtonStyle(const FCkUiButtonVisualStyle& InVisualSt
         .SetDisabled(FSlateRoundedBoxBrush(DisabledBackground, Radius, DisabledBorder, OutlineWidth))
         .SetNormalForeground(FSlateColor(Foreground))
         .SetHoveredForeground(FSlateColor(Foreground))
-        .SetPressedForeground(FSlateColor(Foreground))
+        .SetPressedForeground(FSlateColor(PressedForeground))
         .SetDisabledForeground(FSlateColor(DisabledForeground))
         .SetNormalPadding(FMargin(0.0f))
         .SetPressedPadding(FMargin(0.0f));

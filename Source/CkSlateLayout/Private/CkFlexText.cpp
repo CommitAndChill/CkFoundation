@@ -25,9 +25,11 @@ void SCkFlexText::Construct(const FArguments& InArgs)
     _Margin = InArgs._Margin;
     _LineHeightPercentage = InArgs._LineHeightPercentage;
     _Justification = InArgs._Justification;
+    _VerticalAlignment = InArgs._VerticalAlignment;
     _WrappingPolicy = InArgs._WrappingPolicy;
     _AllowWrapping = InArgs._AllowWrapping;
     _OverflowPolicy = InArgs._OverflowPolicy;
+    _ApplyDisabledEffect = InArgs._ApplyDisabledEffect;
     _TextStyle = InArgs._TextStyle != nullptr ? *InArgs._TextStyle : FTextBlockStyle::GetDefault();
 
     _TextLayout = MakeUnique<FSlateTextBlockLayout>(
@@ -190,8 +192,33 @@ int32 SCkFlexText::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeom
     }
     // Disabling soft wrapping retains explicit newlines, while the text layout's
     // overflow policy clips or ellipsizes during paint inside this finite geometry.
-    UpdateAndMeasure(Width, _AllowWrapping.Get(true), AllottedGeometry.Scale);
-    return _TextLayout->OnPaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, ShouldBeEnabled(bParentEnabled));
+    const FVector2D TextSize = UpdateAndMeasure(Width, _AllowWrapping.Get(true), AllottedGeometry.Scale);
+    const FVector2D LocalSize = AllottedGeometry.GetLocalSize();
+    double OffsetY = 0.0;
+    if (ck_slate_layout_flex_text::IsFiniteNonNegative(LocalSize.Y)
+        && ck_slate_layout_flex_text::IsFiniteNonNegative(TextSize.Y))
+    {
+        switch (_VerticalAlignment)
+        {
+        case VAlign_Center: OffsetY = FMath::Max(0.0, (LocalSize.Y - TextSize.Y) * 0.5); break;
+        case VAlign_Bottom: OffsetY = FMath::Max(0.0, LocalSize.Y - TextSize.Y); break;
+        case VAlign_Fill:
+        case VAlign_Top:
+        default: break;
+        }
+    }
+    const bool bPaintEnabled = !_ApplyDisabledEffect || ShouldBeEnabled(bParentEnabled);
+    // Preserve the original geometry for Fill/Top and for text taller than its slot.
+    if (OffsetY <= 0.0f || !ck_slate_layout_flex_text::IsFiniteNonNegative(LocalSize.X))
+    {
+        return _TextLayout->OnPaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId,
+            InWidgetStyle, bPaintEnabled);
+    }
+    const FGeometry TextGeometry = AllottedGeometry.MakeChild(
+        FVector2f(static_cast<float>(LocalSize.X), static_cast<float>(LocalSize.Y - OffsetY)),
+        FSlateLayoutTransform(FVector2f(0.0f, static_cast<float>(OffsetY))));
+    return _TextLayout->OnPaint(Args, TextGeometry, MyCullingRect, OutDrawElements, LayerId,
+        InWidgetStyle, bPaintEnabled);
 }
 
 FVector2D SCkFlexText::ComputeDesiredSize(const float LayoutScaleMultiplier) const

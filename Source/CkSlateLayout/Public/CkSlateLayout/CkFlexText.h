@@ -29,9 +29,11 @@ public:
         , _Margin()
         , _LineHeightPercentage(1.0f)
         , _Justification(ETextJustify::Left)
+        , _VerticalAlignment(VAlign_Fill)
         , _WrappingPolicy(ETextWrappingPolicy::DefaultWrapping)
         , _AllowWrapping(true)
         , _OverflowPolicy(ETextOverflowPolicy::Clip)
+        , _ApplyDisabledEffect(true)
         , _TextShapingMethod()
         , _TextFlowDirection()
         , _LineBreakPolicy()
@@ -45,9 +47,12 @@ public:
         SLATE_ATTRIBUTE(FMargin, Margin)
         SLATE_ATTRIBUTE(float, LineHeightPercentage)
         SLATE_ATTRIBUTE(ETextJustify::Type, Justification)
+        SLATE_ARGUMENT(EVerticalAlignment, VerticalAlignment)
         SLATE_ATTRIBUTE(ETextWrappingPolicy, WrappingPolicy)
         SLATE_ATTRIBUTE(bool, AllowWrapping)
         SLATE_ATTRIBUTE(ETextOverflowPolicy, OverflowPolicy)
+        /** Paint-only; does not change widget enabled state or input routing. */
+        SLATE_ARGUMENT(bool, ApplyDisabledEffect)
         SLATE_ARGUMENT(TOptional<ETextShapingMethod>, TextShapingMethod)
         SLATE_ARGUMENT(TOptional<ETextFlowDirection>, TextFlowDirection)
         SLATE_ARGUMENT(TSharedPtr<IBreakIterator>, LineBreakPolicy)
@@ -80,9 +85,11 @@ private:
     TAttribute<FMargin> _Margin;
     TAttribute<float> _LineHeightPercentage;
     TAttribute<ETextJustify::Type> _Justification;
+    EVerticalAlignment _VerticalAlignment = VAlign_Fill;
     TAttribute<ETextWrappingPolicy> _WrappingPolicy;
     TAttribute<bool> _AllowWrapping;
     TAttribute<ETextOverflowPolicy> _OverflowPolicy;
+    bool _ApplyDisabledEffect = true;
     FTextBlockStyle _TextStyle;
     mutable TUniquePtr<FSlateTextBlockLayout> _TextLayout;
     float _ArrangedWidth = YGUndefined;
