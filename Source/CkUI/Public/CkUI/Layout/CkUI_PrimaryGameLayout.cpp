@@ -375,7 +375,7 @@ auto
                 InConfig.Get_InputMode(),
                 InConfig.Get_MouseCaptureMode());
 
-            if (InConfig.Get_TransitionDuration() > FCk_Time::ZeroSecond())
+            if (InConfig.Get_TransitionDuration() >= FCk_Time::ZeroSecond())
             {
                 Wrapper->SetTransitionSettings(
                     InConfig.Get_TransitionType(),
