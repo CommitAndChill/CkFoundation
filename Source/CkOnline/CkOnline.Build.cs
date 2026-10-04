@@ -8,6 +8,6 @@ public class CkOnline : CkModuleRules
         {
             "Core", "CoreUObject", "Engine", "CkCore", "CkEcs", "CkEcsExt", "CkLog"
         });
-        PrivateDependencyModuleNames.AddRange(new string[] { "GameplayTags" });
+        PrivateDependencyModuleNames.AddRange(new string[] { "Sockets", "Networking", "Json", "GameplayTags" });
     }
 }
