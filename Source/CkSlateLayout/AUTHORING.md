@@ -1292,3 +1292,20 @@ For an on-screen UMG host, make the host hit-test invisible and keep gameplay
 input mode and pause state with the player. The
 [CkTests combat HUD proof](../../../CkTests/Documentation/UI/CombatHudProof/README.md)
 shows three code-driven visual themes using these controls.
+
+## Radial selection
+
+Register `RegisterRadialUiControls` from `CkUiRadialSelector.h` in the owner's registry before creating its view. `radial-selector` is a retained native control; the surrounding game host owns pause, visibility and command deployment.
+
+```html
+<radial-selector id="power-wheel" items-bind="Powers" selection-bind="Selection"
+ select="SelectPower" activate="QueuePower" class="wheel">
+ <slot name="content"><text id="selection-label" bind="PowerName" /></slot>
+</radial-selector>
+```
+
+`items-bind` references a keyed collection with Text fields `actor` and `glyph`, Number fields `angle` and `cooldown`, and Bool fields `enabled` and `queued`. An optional Text `label` belongs to the host. Angles run clockwise from right (top is -90 degrees), must be finite and separated by at least 15 degrees. Cooldown is normalized to 0..1. Empty or malformed collections reject configuration; invalid retained reloads leave the accepted root untouched.
+
+`select` reports hover or keyboard selection, including unavailable items so a host can explain their state. `activate` reports an enabled, ready item on mouse-up or Enter. Model updates and source reloads do not invoke these events. Set `FDataBindings::SlateUserIndex` and `CanDispatchEvents` for the owning input context. Releasing the view freezes the root and suppresses callbacks through external references.
+
+The optional `content` slot mounts authored center content once and remains hit-test invisible. CSS supports `-ck-radial-tile-size` (20..128px), and Color properties `-ck-radial-ring`, `-ck-radial-selected`, `-ck-radial-queued` and `-ck-radial-disabled`. The Mass Effect squad-power gym exercises this control with independent actor queues and atomic queue release.
