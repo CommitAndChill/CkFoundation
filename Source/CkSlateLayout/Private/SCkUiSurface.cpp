@@ -2870,6 +2870,26 @@ auto FCkUiView::ReleaseOwnerInteractions() -> void
     { return; }
 
     _OwnerInteractionsReleased = true;
+    // Repeat items and custom slots own independent retained components. Snapshot them before
+    // releasing capture can invoke callbacks, and retire every child while its path is mounted.
+    auto ChildViews = TArray<TSharedPtr<FCkUiView>>{};
+    for (const auto& [Id, Repeat] : _RepeatStates)
+    {
+        if (!Repeat.IsValid()) { continue; }
+        for (const auto& Item : Repeat->Items)
+        {
+            if (Item.View.IsValid()) { ChildViews.AddUnique(Item.View); }
+        }
+    }
+    for (const auto& [Id, Container] : _CustomSlots)
+    {
+        if (!Container.IsValid()) { continue; }
+        for (const auto& [Name, Slot] : Container->Slots)
+        {
+            if (Slot.IsValid() && Slot->View.IsValid()) { ChildViews.AddUnique(Slot->View); }
+        }
+    }
+    for (const auto& Child : ChildViews) { Child->ReleaseOwnerInteractions(); }
     if (!FSlateApplication::IsInitialized())
     {
         for (const auto& [Id, Record] : _CommittedRetained)
@@ -2919,6 +2939,7 @@ FCkUiView::~FCkUiView()
 
     // Let retained controls release owned transient state before removing focus that still belongs
     // to a window-held region after this view is released.
+    ReleaseOwnerInteractions();
     for (const auto& [Id, Record] : _CommittedRetained)
     {
         if (Record.Kind == ERetainedKind::Tabs) { StaticCastSharedPtr<SCkUiTabs>(Record.Widget)->Deactivate(); }
