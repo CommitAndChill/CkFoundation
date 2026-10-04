@@ -1,0 +1,18 @@
+# Gameplay control-loss recovery
+
+Written 2026-10-04. Moving evidence/status lives in ../PROGRESS.md. Retire when the permanent connection recipe replaces the test fixture.
+
+The user authorized advancing while the guided panel's visual check is pending. This gate exercises the next failure boundary of the Direct vertical slice: ready/control loss during established gameplay. It stays in CkTests, reusing existing Direct requests and the IP helper's observed-binding recovery; no production protocol, authentication, engine, driver or orchestration change is included.
+
+Research read the native IP subsystem/GameState/proof component, FLobbyBinding, Direct transport/feature/facade, real TCP loopback test, AS smoke test and gym panels. Neighboring behavior is the existing Tick invalid-binding branch followed by deferred DoReturnToGym and exact return-world recognition. Native review confirmed that public GUIDs/epochs do not identify a gameplay member; private credentials and pre-login admission remain a separate architectural contract.
+
+1. Add two explicit reflected test actions guarded by live game thread, active bridged IP state, current owned exact-two-ready binding/generation/role and replicated session/epoch. F6 queues existing SetReady(false); F7 stops only that facade's validated generation. Reject before control mutation, and accept only one fault per gameplay entry. Do not manufacture a failure result or directly issue return travel.
+   -> Verify incremental C++/AS compilation and extend the existing AS smoke test to call both actions outside a bridged session while its actual fake service is running; rejection must preserve service generation, pending/completed counts, adapter cancellation/shutdown, IP state and bridge. This covers that rejection branch, not every active/foreign Direct guard.
+2. Append details-only F6/F7 actions without changing existing IP row indices or the guided first view. Preserve existing key routing, disabled semantics and new-entry reset.
+   -> Verify source index alignment and native guard review. [EDITOR-VERIFY] Join Host J, wait Hosting, P / Client K; ready both, Host G then Client G/P. Client F6 returns both to Lobby with changed readiness but retained control identities/epoch. Ready again and re-enter. F7 returns both with actual control loss; a fresh Host J/P, Client K recovers into a new lobby.
+3. Add a short self-contained recovery guide and keep UI appearance acceptance separate.
+   -> [EDITOR-VERIFY] Script/CkOnline/DIRECT_RECOVERY_EDITOR_TESTING.md repeats map, two separate Standalone windows, joining and the three observations. No automated whole-test PASS or member-authentication claim.
+
+Entry baseline: root 2ccf30f, Foundation 2cb3c8f65, Tests 0df75364. Gate 7's build and seven Direct plus two panel tests passed immediately before this phase; one Direct startup asset-cache write error was recorded. Those tests do not establish rendered recovery. Gate 6/7 changes remain uncommitted, unrelated dirt and the two temporary research commits remain preserved, and the known-red same-process Iris fixture keeps its verdict.
+
+Verification, 2026-10-04: OnlineControlRecoveryGate-01 passed the incremental build and all seven selected Direct/script tests, zero failed/skipped/contaminated, exit 0, with two fresh boots and no Error, ensure or script-error records. The extended AS test covered both outside-bridge rejection calls against the actual running fake service. Active F6/F7 recovery, renderer appearance/focus and Blueprint graph execution remain manual observations; known-red same-process IP and renderer-only tests were excluded. No commit or push was created.

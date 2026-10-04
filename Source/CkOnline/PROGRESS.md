@@ -3,6 +3,23 @@
 Updated 2026-10-04. This is the current evidence ledger; gate files define the
 contracts. Keep verified automation separate from unobserved editor acceptance.
 
+## Local commit checkpoint, 2026-10-04
+
+The user requested committing the completed work while remaining AFK. Foundation
+`0f97cab77` stores the admitted host-address API. CkTests stores the shared panel
+controls in `5be31772`, native lobby/gameplay binding and recovery in `145e40a5`,
+and the guided online interface in `a48098fc`. Permanent gate contracts, evidence
+and editor instructions are documented separately. The root checkpoint updates
+only Foundation/CkTests pointers; unrelated dirty work and both separate
+[DROP BEFORE MERGE] research commits remain preserved. No push or history rewrite
+was requested. The evidence sections below retain their test-time status; their
+earlier uncommitted notes do not describe this delivery checkpoint.
+
+Gates 7/8/9 manual checks remain deferred by the user. Committing the green native
+and script slices does not mark rendered recovery, colors, focus or remote
+gameplay accepted. Joining is repeated in each guide: Host J, wait Hosting, P /
+Client K locally; remote Client F2/O pastes the new host invite, Enter/F3 joins.
+
 | Gate | Current evidence | Human acceptance |
 |---|---|---|
 | 1: persistent actorless host | All 15 existing focused tests pass again in OnlineDirectGates-08 | User tried gyms; individual checklist results unspecified |
@@ -10,6 +27,212 @@ contracts. Keep verified automation separate from unobserved editor acceptance.
 | 3: persistent Direct lobby | Focused native TCP lobby, ready, expiry, cleanup, admission and malformed-wire tests pass in OnlineCommitGate-01 | User reports the five-step Lobby/Chat checklist passed on 2026-10-03; optional checks remain unconfirmed |
 | 4: Direct text/shareable joins | Production TCP feature passes ordered text, sender identity, invalid-input and peer-isolation checks in OnlineCommitGate-01 | Same reported pass; logs do not independently prove roster/readiness/message delivery |
 | 5: editor evidence checkpoints | Build and seven focused Direct/script tests pass in OnlineEvidenceGate-01; existing real loopback test covers checkpoint IDs and redaction | Pending; press V in both Lobby windows and again in both Chat windows |
+| 6: ready-lobby gameplay round trip | CkTests-only handoff implemented; build and seven focused Direct/script tests pass in OnlineLobbyGameplayGate-01 | User reports the four-step round trip works on 2026-10-04; separate from the known-red same-process Iris fixture |
+| 7: easier editor testing | Incremental build, seven focused Direct tests and two panel-control tests pass in OnlineGuidedPanelGate-01 / OnlineGuidedPanelControls-01 | Deferred by user on 2026-10-04; panel/focus/round-trip recheck |
+| 8: control-loss recovery | Incremental build and seven focused Direct/script tests pass in OnlineControlRecoveryGate-01 | Deferred by user on 2026-10-04; separate three-check recovery gate |
+| 9: advertised gameplay endpoint | Incremental build and seven focused Direct/script tests pass in OnlineAdvertisedEndpointGate-01 | Deferred by user; local gameplay and two-machine checks remain unverified |
+
+## Current work: advertised gameplay endpoint
+
+The user explicitly deferred the latest gym checks while AFK and authorized the
+next phase. CkTests/Script/CkOnline/DEFERRED_EDITOR_CHECKS.md is the short index;
+it preserves Gate 6's earlier reported pass separately from Gates 7/8/9. No
+reminder was scheduled. Contract: Plan/Gate_09_AdvertisedGameplayEndpoint.md.
+
+Entry tips are root 2ccf30f, Foundation 2cb3c8f65, CkTests 0df75364 and CkAuto
+f1983a7e. Gate 8's immediately preceding incremental build/seven-test clean-log
+result is the baseline. Prior phase changes remain uncommitted. Independent
+research confirmed the invite already carries the validated host IPv4 address;
+the gameplay consumer alone hardcodes loopback. No wire field is necessary.
+
+Publish an address-only snapshot value after Host binds or Join's authoritative
+roster completes, keeping the pre-admission candidate private. Freeze that address
+in the ready lobby binding, compare it during revalidation and reject a mismatched
+gameplay target before travel. Shared Lobby/Chat G uses that address on gym port
+7787; standalone IP and valid custom native port arguments keep their behavior.
+No member credential/admission, engine, firewall or process orchestration change
+is introduced. The two-machine editor result will remain deferred even if local
+socket tests pass. The short new guide repeats setup and joining: Host J, wait
+Hosting, P / Client K locally; across machines Host F2/L sets a reachable IPv4
+before J/P, Client F2/O pastes the new invite, Enter/F3 joins it.
+
+`Saved/Logs/OnlineAdvertisedEndpointGate-01.log`: incremental C++ build and all
+seven selected Direct/socket/AS tests passed, zero failed/skipped/contaminated,
+exit 0, tests 39 seconds. Two fresh editor boots covered inline discovery and
+one serial lane. Fresh combined, discovery and external test logs contain no
+Error records, ensures or script errors. The new getter loaded in the shared
+Lobby/Chat AngelScript panel. Renderer-only tests and the known-red same-process
+DirectIp fixture were excluded; their verdicts are unchanged.
+
+The existing real TCP loopback test now advertises 127.0.0.2 while the client
+keeps its default 127.0.0.1. It verifies the actual invite/join/rejoin address,
+unpublished Joining, rejected/expired/full admission and leave/host-loss clearing.
+The same live ready snapshots seed binding capture/matching checks. Copied
+malformed or changed snapshots reject atomically; the actual endpoint guard
+rejects wrong address/DNS/options/invalid ports and clears output, while retaining
+valid custom-port behavior. This is socket/binding/parser evidence, not rendered
+gameplay travel, active foreign-profile rejection or remote-machine reachability.
+Two bounded independent source reviews found no material Gate 9 issue.
+
+Arguments: `--build --test --test-pattern=Online
+--project-prefix=Ck.Online.Direct --parallel=1 --no-live --skip-renderer-tests
+--project=D:\Repos\CkPlugins --output=Saved/Logs/OnlineAdvertisedEndpointGate-01.log`.
+Short human guide: CkTests/Script/CkOnline/ADVERTISED_ENDPOINT_EDITOR_TESTING.md.
+It specifies one player per machine for the deferred remote check and repeats
+how to join. Final branch tips and unrelated dirty paths are unchanged; all phase
+work remains uncommitted, with both temporary research commits separate.
+
+## Control-loss recovery phase
+
+The user authorized the next phase while Gate 7's visual check is pending.
+Entry revisions and unrelated dirt are unchanged. The immediately preceding
+baseline is seven green Direct tests plus two green panel-control tests; no
+equivalent rerun preceded new code. Gate 8's contract is
+Plan/Gate_08_ControlLossRecovery.md.
+
+Read the IP subsystem/GameState/proof component, FLobbyBinding, Direct
+transport/feature/facade, real loopback test, AS smoke test and gym panels.
+The proven neighboring path is Tick's observed binding loss, deferred return
+and exact Lobby-world recognition. This phase adds explicit test controls over
+that real path: F6 queues SetReady(false); F7 stops the same validated owned
+Direct generation. Guards reject before mutation outside an established owned
+bridge; one fault is accepted per gameplay entry. Both actions live in details,
+preserving the guided first view and existing keys/row indices.
+
+The AS smoke test exercises rejection while its actual fake service remains
+Running, with no changed generation, operation counts, cancellation/shutdown,
+IP state or bridge. That does not prove the active-bridge or foreign Direct
+guard branches. Cleanup now runs at explicit finish and entity EndPlay, stopping
+only the test's recorded generation. Rendered return remains a separate human
+gate in CkTests/Script/CkOnline/DIRECT_RECOVERY_EDITOR_TESTING.md, which repeats
+Host J, wait Hosting, P / Client K joining and three recovery observations.
+
+Independent source research confirmed the remaining identity gap: public
+member GUIDs and the replicated epoch are correlation, not credentials. A
+private per-member proof plus gameplay admission policy needs its own contract;
+no new ticket, PreLogin authentication or public-internet security claim is
+introduced by this recovery gate.
+
+`Saved/Logs/OnlineControlRecoveryGate-01.log`: incremental build and all seven
+selected Direct/socket/AS tests passed, zero failed/skipped/contaminated, exit
+0, tests 29 seconds. Two fresh editor boots covered inline discovery and one
+serial lane. Fresh combined and external test logs contain no Error records,
+ensures or script errors. The extended AS test executed both rejection calls
+against its actual running fake service and verified no downstream mutation;
+the active gameplay fault/return observations still require a human.
+
+Arguments: `--build --test --test-pattern=Online
+--project-prefix=Ck.Online.Direct --parallel=1 --no-live --skip-renderer-tests
+--project=D:\Repos\CkPlugins --output=Saved/Logs/OnlineControlRecoveryGate-01.log`.
+Renderer-only tests and the known-red same-process DirectIp fixture were not
+selected. Root/Foundation/Tests branch tips remain unchanged. CkAuto's current
+HEAD was observed at `f1983a7e11fd1d9b83ed5c374cc92fb4c41a22f8`; compared with
+the earlier `9457fe709`, only unrelated project-storage files changed. Its root
+gitlink, that work, all other unrelated dirt and both temporary research commits
+remain preserved. This phase remains uncommitted.
+
+## Guided editor testing phase
+
+The user accepted the prior four-step round trip and requested an easier test
+flow and readable color feedback. Latest rendered logs show the host establishing
+an IP listen session; they do not independently contain matching gameplay/control
+checkpoint records or the client RPC proof. The reported visual pass remains
+its own evidence, and does not turn the failing same-process Iris test green.
+
+Read the shared row model, Slate renderer, Compact filter, AS row builders/HUD,
+existing compact/native and numbered-shortcut/AS tests, Online panels and native
+text-input helper. The neighboring implementation is the shared
+`SCkGym_ControlPanel` using CkStyle's semantic palette. This phase stays within
+CkTests test tooling; production online wire, admission and travel contracts
+are unchanged. Contract: Plan/Gate_07_GuidedEditorTesting.md.
+
+Online panels start with the next action and concise connection/readiness/chat/
+proof feedback. F2 reveals technical details; existing H/Tab behavior remains.
+Explicit row tones use the existing Info/Ok/Warn/Err palette with text labels.
+Opt-in compact wrapping prevents instructions/errors being clipped. Legacy
+gyms retain their row defaults. Host J/P and Client K join a copied invite;
+B/Enter sends chat, Escape cancels. Manual O/Enter/F3 and saved-draft I remain
+available. No automatic whole-test PASS is manufactured from local observations.
+The F2 choice follows source review: D is reserved for pawn movement.
+
+Entry branch tips remain root `2ccf30f`, Foundation `2cb3c8f65`, Tests `0df75364`.
+Prior Gate 6 changes are still uncommitted and preserved. Baseline Online coverage
+is seven green tests from OnlineLobbyGameplayGate-01; the legacy CompactRows
+assertions remain in the extended native test. New rendered behavior is pending.
+
+Final focused verification: `Saved/Logs/OnlineGuidedPanelGate-01.log` rebuilt
+incrementally and passed seven Direct/socket/script tests in 30 seconds;
+`Saved/Logs/OnlineGuidedPanelControls-01.log` reused those binaries and passed
+native CompactRows and AS NumberedShiftShortcuts in 28 seconds. Both exited 0,
+with zero failed, skipped or contaminated selected tests, and no ensures or
+script errors. Three fresh editor boots were used: discovery plus one Direct
+lane, then the cached panel-control lane. Toolbox's single AND-token pattern
+cannot select both families together. Renderer-only tests were waived; the
+known-red same-process DirectIp fixture was not selected.
+
+The Direct run has one startup LogAssetRegistry error opening
+`Intermediate/CachedAssetRegistry_0.bin.tmp`. Its concurrent discovery process
+wrote that cache successfully 28 ms later. Cache-write contention is plausible,
+but the OS reason is unlogged; do not describe this startup log as error-free.
+The panel-control run contains no Error, ensure or script-error records.
+
+Review corrected the movement-key conflict (F2 replaces D), preserved manual
+invite drafts on rejected clipboard join, rolled back only a profile newly
+started by that failed join, and preserved the previous draft on empty chat
+Enter. Lobby/Chat G is disabled until exactly two members are ready and IP is
+Offline. User verification is now three checks in
+`CkTests/Script/CkOnline/ONLINE_PANEL_EDITOR_TESTING.md`; it repeats setup and
+Host J, wait Hosting, P / Client K joining. Changes remain uncommitted, with
+the removable research commits and unrelated checkout work preserved.
+
+## Ready-lobby gameplay round-trip phase
+
+Entry revisions: root `2ccf30f`, Foundation `2cb3c8f65`, CkTests `0df75364`.
+The selected CkAuto remains `9457fe709` with unrelated storage-tooling work;
+the root's older CkAuto pointer is preserved. Foundation/Tests were clean at
+entry, and the six unrelated root changes remain outside this work.
+
+Read the IP fixture's subsystem, GameState/proof component, existing AS panels
+and TCP loopback test. The reusable neighbor is the existing IP helper's normal
+listen/client travel and deferred return handling. Its original entry/return
+paths require the IP gym, so this phase adds explicit ready-lobby entry paths
+and a fixed Online Lobby return mode. No provider/wire/authentication expansion
+is included. Two independent source reads confirmed that a matching lobby epoch
+correlates the session but cannot authenticate a Direct member as a PlayerState.
+
+The frozen binding rejects invalid, unready or changed identity/roster before
+travel and throughout the active handoff. TCP remains GameInstance-owned. Native
+coverage extends the existing real loopback test; the actual rendered connection
+and return are human checks. Contract: Plan/Gate_06_LobbyGameplayRoundTrip.md.
+Instructions: CkTests/Script/CkOnline/LOBBY_GAMEPLAY_EDITOR_TESTING.md.
+
+Lobby/Chat **G** now captures the owned ready two-member binding before starting
+the existing IP fixture. Gameplay replicates the control lobby epoch separately
+from its session marker; client **P** uses the owned controller's RPC proof.
+Bridged **X** returns to Online Lobby without stopping TCP. The return readback
+reports preservation only when the frozen binding still matches. Rejected
+Host/Join calls leave an active bridge intact. Control/evidence loss starts a
+fresh bounded return deadline, including after a long-running session.
+
+`Saved/Logs/OnlineLobbyGameplayGate-01.log`: incremental C++ build and all
+**seven selected tests passed**, zero failed/skipped/contaminated, process exit
+0. The fresh combined log has no ensures or script errors. Two fresh editor
+boots ran: inline discovery and one serial lane; tests took 36 seconds.
+The extended real TCP loopback test covers unready/default/malformed bindings,
+atomic output rejection, retained per-process identity and matching roster,
+chat-independent binding validity, and rejection of changed identity/readiness.
+This verifies socket/binding behavior and script compilation, not rendered
+two-process gameplay travel, proof, or return. Exact runtime GameMode return
+recognition and failure recovery remain editor observations.
+
+Arguments: `--build --test --test-pattern=Online
+--project-prefix=Ck.Online.Direct --parallel=1 --no-live --skip-renderer-tests
+--project=D:\Repos\CkPlugins --output=Saved/Logs/OnlineLobbyGameplayGate-01.log`.
+The known-red DirectIp fixture and renderer-only tests were not selected; their
+verdicts are unchanged. No authentication, two-machine or orchestration claim
+is made. This phase remains uncommitted; the prior checkpoint commits and both
+temporary research commits remain separate and unchanged. The final checkout
+check found only the expected phase paths and pre-existing unrelated dirt.
 
 ## Evidence checkpoint phase, 2026-10-04
 
