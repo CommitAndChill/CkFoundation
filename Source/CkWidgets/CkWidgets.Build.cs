@@ -47,6 +47,7 @@ public class CkWidgets : CkModuleRules
 
                 "CkThirdParty",
                 "CkLog",
+                "CkSlateLayout",
             }
             );
 

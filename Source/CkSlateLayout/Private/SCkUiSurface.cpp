@@ -3081,6 +3081,8 @@ void FCkUiView::PublishConfiguration(FStagedDocument&& InStaged, FCommitState& I
         if (const TSharedPtr<SBox>* Mount = _RegionMounts.Find(Name); Mount != nullptr && Mount->IsValid())
         { (*Mount)->SetContent(Root.ToSharedRef()); }
     }
+    _CommittedRegionNames.Reset();
+    for (const auto& [Name, Root] : InStaged.Regions) { _CommittedRegionNames.Add(Name); }
     _CommittedButtons = MoveTemp(InStaged.Buttons);
     _CommittedRetained = MoveTemp(NextRetained);
     _CommittedSearchHints = MoveTemp(InStaged.SearchHints);

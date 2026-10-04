@@ -116,6 +116,8 @@ public:
 
     /** Creates or returns the persistent native mount for one document region. */
     auto GetRegion(const FString& InName) -> TSharedRef<SWidget>;
+    /** True only for a region in the last accepted document, not a pre-created empty mount. */
+    auto HasRegion(const FString& InName) const -> bool { return _CommittedRegionNames.Contains(InName); }
     auto IsOwnerReleased() const -> bool { return _OwnerInteractionsReleased; }
 
     /** Parses, validates and stages a complete document before changing any mounted region. */
@@ -261,6 +263,7 @@ private:
     FDataBindings _Data;
     TSharedPtr<const FCkUiWidgetRegistrySnapshot> _CustomRegistry;
     TMap<FString, TSharedPtr<SBox>> _RegionMounts;
+    TSet<FString> _CommittedRegionNames;
     TMap<FString, TSharedPtr<SButton>> _CommittedButtons;
     TMap<FString, FRetainedRecord> _CommittedRetained;
     TMap<FString, TSharedPtr<FRepeatState>> _RepeatStates;
