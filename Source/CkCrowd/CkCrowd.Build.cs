@@ -29,6 +29,7 @@ public class CkCrowd : CkModuleRules
             "CkLabel",
             "CkLog",
             "CkRecord",
+            "CkResourceLoader",
             "CkSettings",
 
             "CkPhysics",

@@ -26,6 +26,7 @@ public class CkGroundNav : CkModuleRules
             "CkNavigation",
             "CkPmg",
             "CkRecord",
+            "CkResourceLoader",
             "CkSettings",
             "CkShapes",
             "CkThirdParty",

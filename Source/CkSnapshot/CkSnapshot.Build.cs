@@ -22,6 +22,7 @@ public class CkSnapshot : CkModuleRules
             "CkLabel",  // GameplayLabel — v3 ConstructSpawned identity (spec §4.2)
             "CkLoadingScreen", // the load holds the screen up for its whole duration, not just the travel
             "CkLog",
+            "CkRecord",
             "CkSettings", // UCk_Plugin_ProjectSettings_UE — the posture fence's project-supplied inputs
             "CkThirdParty",
         });
