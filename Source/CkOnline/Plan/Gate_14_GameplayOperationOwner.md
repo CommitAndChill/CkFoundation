@@ -1,10 +1,11 @@
 # Promote gameplay entry and return into Foundation
 
 Prepared 2026-10-04 at root 2a1ec73, Foundation 57592becc and CkTests 8b468864.
-Status: proposed contract; no implementation or new runtime evidence yet.
+Status: implementation and focused automated gate are complete under the
+authorized contract below. Two-window editor observations remain unchecked.
 Gate13's eight passing tests were the automated baseline at proposal creation.
-See PROGRESS.md for subsequent independent fixes and current evidence. Human
-checks remain deferred in CkTests/Script/CkOnline/AFK_RETURN_EDITOR_TESTING.md.
+See PROGRESS.md for current evidence. Human checks remain deferred in
+CkTests/Script/CkOnline/PUBLIC_CONNECTION_EDITOR_TESTING.md.
 
 ## Smallest useful slice
 
@@ -22,7 +23,7 @@ Foundation already supplies a guarded feature host, curated local processors,
 monotonic ticking and generation invalidation. Reuse those contracts without
 changing CkEcs, global registration or core shutdown semantics.
 
-## Proposed ownership and public contract
+## Selected ownership and public contract
 
 1. A typed connection feature owns canonical request/state/completion data in
    a persistent ECS registry; Utils queue bounded requests. A thin GameInstance
@@ -60,24 +61,20 @@ changing CkEcs, global registration or core shutdown semantics.
    until cancellation/return has settled; reject old-world/old-driver teardown
    events, including events arriving after an entry completion. Remove native
    subscriptions during physical shutdown after guarded dispatch unwinds.
-5. A9-A11 in .claude/reports/ADJUDICATIONS.md record the unsettled behavior
-   policies. Recommendation: preserve the gym's continuous control authority and
-   automatic failed-entry return as the first consumer contract. No production
-   default is established before the maintainer's ruling.
+5. DECISIONS.md entries 112-114 settle the first consumer contract: continuous
+   ready-control authority and one bounded configured return after control loss,
+   failed entry, or established transport loss. The first slice has no caller
+   policy overrides; a later API change may add them deliberately.
 
-A9 and A10 are independent: A9's continuous-authority choice means configured
-return on control loss even after successful entry, regardless of A10's entry
-failure choice. Post-readiness transport loss also needs an explicit contract;
-recommend the same bounded configured return as today's gym. Any caller-selected
-variant must use explicit policy values, reject unspecified/invalid values, and
-have the gym explicitly select its existing behavior. Zero-initialized data must
-not silently choose a policy. This is an alternative contract, not an accepted
-default or maintainer ruling.
+A9 and A10 were independent rulings, and A11 separately settled established
+transport loss. The recorded decisions are the accepted first-slice contract;
+zero-initialized data does not select a caller policy because this API exposes
+no policy field.
 
-Source review recommends a private stock-IP adapter with OnlineSubsystemUtils
-as a private CkOnline dependency and an explicit Foundation plugin reference,
-matching CkTests' existing dependency arrangement. Those changes are proposed,
-not applied. Preflight the configured GameNetDriver's already-loaded valid class
+The implementation uses a private stock-IP adapter with OnlineSubsystemUtils as
+a private CkOnline dependency and an explicit Foundation plugin reference,
+matching CkTests' dependency arrangement. Preflight the configured
+GameNetDriver's already-loaded valid class
 and require exact UIpNetDriver for this adapter; no LoadClass or CDO/resource
 operation in preflight. After travel require a valid exact-stock non-default,
 non-archetype driver owning the observed world. For hosts require no
@@ -97,12 +94,13 @@ That invariant supports exact constructed stock objects, not arbitrary subclasse
 or corrupted internals. UnrealEngine.cpp:14646-14665 resolves configured/fallback classes
 and calls IsAvailable on their CDO. Do not call arbitrary driver resource methods
 to discover whether their prerequisites hold.
-Return's no-queued-travel invariant is proposed, not existing runtime evidence:
-the current fixture does not assert Context.TravelURL or World.NextURL on return.
-The selected engine declares them in Engine.h:346 and World.h:1971;
+The retained real failed-ClientTravel fixture now checks both
+Context.TravelURL and World.NextURL after the replacement Lobby return. The
+selected engine declares them in Engine.h:346 and World.h:1971;
 UnrealEngine.cpp:15237-15243 queues SetClientTravel through Context.TravelURL.
-Extend the real recovery readback accordingly; do not clear another owner's
-queued travel merely to manufacture a passing observation.
+The same fixture also verifies Foundation's separate failed-entry and successful
+Return terminals; do not clear another owner's queued travel to manufacture a
+passing observation.
 
 ## Evidence and editor acceptance
 
@@ -132,3 +130,26 @@ Preserve unrelated work and both separate [DROP BEFORE MERGE] ancestors. Keep
 implementation, consumer/tests, evidence and root pointer checkpoints reviewable.
 Steam credentials/App ID, remote/Tailscale, packaging and broad EIK removal remain
 separate gates; no new checkout, artifact deletion, push or history rewrite.
+
+## Authorized implementation contract, 2026-10-04
+
+The maintainer authorized proceeding without waiting after the recommended
+recovery choices. DECISIONS.md entries 112-114 resolve A9-A11: automatic bounded
+configured return for control loss, failed entry and established transport loss;
+no policy overrides in the first slice. Earlier proposed-policy text above is
+historical and is superseded by this contract.
+
+Implement the Connection feature quartet, guarded feature and separate GI
+facade under Public/CkOnline/Connection, plus one private stock-IP adapter.
+Use generated operation GUIDs and the connection host generation as complete
+keys; confirmations/cancellation target both values. Queue canonical bounded
+paths/IDs/weak observations, never unrooted class references. The adapter owns
+engine observation and subscription lifetime; the ECS feature owns canonical
+transaction/session state and deadlines. No CkEcs or global scheduler changes.
+
+Migrate the ready-lobby gym route to this owner, keeping standalone transport
+fixture and gym-specific replicated admission/RPC proof in CkTests. Retain the
+existing real queued-travel and failed ClientTravel fixture, add owner-specific
+correlation/terminal/reentrant coverage and compatible host siblings. Plan one
+incremental final build/test invocation, with two fresh boots (discovery plus
+one serial lane); extend only if concrete failures require repair.

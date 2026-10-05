@@ -10,31 +10,66 @@ user instructions authorized implementation, gyms and local commits while AFK.
 Use this permanent guide, PROGRESS.md and Plan/ gate contracts for current work;
 retained implementation must not depend on the two removable research commits.
 
-The latest scoped gate is queued-travel admission. OnlineQueuedTravelGate-01.log
-records an incremental build and eight passing Direct/script tests after a real
-red reproduction. That result covers the selected tests, not the whole delivery
-roadmap. Human checks of new panels, F8/F9 and recovery remain deferred.
+The latest scoped gate is the Foundation gameplay connection owner. Its focused
+Editor build and 15 tests across two serial lanes passed; the previous queued-travel gate remains
+documented in PROGRESS.md. This result covers selected tests, not the whole
+delivery roadmap. Human checks of new panels and gameplay recovery remain
+deferred.
 
 | Original delivery phase | Current evidence / remaining requirement |
 |---|---|
 | A: scope/provider compatibility | Selected source, engine and guides reconciled; first production consumer and licensed Steam setup remain unresolved |
 | B: persistent service host | Guarded actorless ECS host has focused native/script evidence; human graph and optional-AS evidence remain separate |
 | C: actual transports | Earlier two-window Direct round trip reported working; newer changes are unchecked; Steam, two-machine and installed Direct startup remain unverified |
-| D: Direct vertical slice | Persistent TCP lobby/ready/text/invites and gym gameplay bridge exist; production gameplay owner is proposed, Direct-only staging remains unverified |
+| D: Direct vertical slice | Persistent TCP lobby/ready/text/invites and gym gameplay bridge exist; the Foundation gameplay connection owner and focused native/script gate passed; two-window editor checks and Direct-only staging remain unverified |
 | E: Steam/social | No live account/App ID/invite or transport gate completed |
 | F: turnkey integration | Reusable binding/listen targets and guided gyms exist; production recipe, second game, graph execution and optional-AS build remain incomplete |
 | G/H: migration and future providers | Consumer migration/removal, release staging, EOS/EGS, voice and expanded topology remain separate scope |
 
-The next production slice is Plan/Gate_14_GameplayOperationOwner.md. A9-A11 in
-.claude/reports/ADJUDICATIONS.md await control-lobby authority, failed-entry return
-and established transport-loss rulings. Keep existing gym behavior; do not create
-production defaults or substitute more preparation helpers for that owner.
+The current implementation gate is Plan/Gate_14_GameplayOperationOwner.md.
+DECISIONS.md entries 112-114 resolve A9-A11: the ready control lobby remains
+authoritative through gameplay, and control loss, failed entry, or established
+transport loss starts one bounded return to the configured Lobby. The first
+public owner has no caller policy overrides. Its focused native, script and real
+failed-travel checks passed; successful two-window entry/readiness and Blueprint
+graph use remain human editor observations.
 
-Editor cards live in CkTests/Script/CkOnline/DEFERRED_EDITOR_CHECKS.md. Start with
-AFK_RETURN_EDITOR_TESTING.md for the combined normal path; F8 and F9 have separate
-short cards. Each uses two separate Standalone windows, Separate Server Off and
-RunUnderOneProcess Off, then Host J > Hosting > P / Client K; both R. Gate status
-must stay unchecked until the user reports the named observations.
+Editor cards live in CkTests/Script/CkOnline/DEFERRED_EDITOR_CHECKS.md. The
+current owner check is PUBLIC_CONNECTION_EDITOR_TESTING.md. Open the TestGyms
+level with two separate Standalone windows, Separate Server Off and Run Under
+One Process Off; in both windows use Tab > CkOnline > Online Lobby, then Host J,
+wait Hosting, press P / Client K, and have both press R. The card checks the
+Foundation Idle -> Active -> Return -> Idle lifecycle and automatic return after
+host loss. Gate status stays unchecked until those observations are reported.
+
+## Gameplay connection owner
+
+`UCk_OnlineConnection_Subsystem_UE` owns a separate persistent Foundation host
+and stock Unreal IP travel adapter for gameplay. It does not stop when the Direct
+control profile changes state. Build `FCk_OnlineConnection_Spec` from the live
+Direct service and `FCk_OnlineDirect_ReadyLobbyBinding`, an explicit expected
+member count, loaded gameplay and return GameModes, soft map targets, and a
+host listen port or client endpoint. `Host` and `Join` return a generated
+operation ID plus owner generation when queued; callers observe completion and
+snapshot state through the typed handle utilities or the GameInstance facade.
+
+The owner accepts entry only from its owned idle world and a matching ready
+binding. It reports transport establishment as `AwaitingGameReady`; the game
+must submit `ConfirmGameReady` with the exact entry key only after its own
+admission/readiness checks pass. Entry completes once as `Active`. `Return` uses
+the current entry key while entering or session key while active. `Cancel` is
+available during entry and also initiates the configured Lobby return. Each
+return is separately correlated and bounded; failed return ends in `Failed`
+without retrying. Control loss, failed entry and established transport loss
+automatically use that same configured return, with the original entry result
+kept separate from the recovery result.
+
+The adapter currently requires the exact stock `UIpNetDriver` and `UIpConnection`
+types. It validates actual replacement-world readback before reporting transport
+success. It does not authenticate gameplay members; each consuming game retains
+its own replicated admission policy. See
+`CkTests/Script/CkOnline/PUBLIC_CONNECTION_EDITOR_TESTING.md` for the two-window
+test sequence and the observations still awaiting editor confirmation.
 
 ## Direct consumer recipe
 

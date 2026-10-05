@@ -799,3 +799,61 @@ channel, not the fake Gate 1 adapter or UE gameplay replication. Entering gamepl
 still depends on truthful Gate 2 evidence.
 Steam/account/App ID setup, two-machine/Tailscale evidence, packaging, Blueprint
 graph execution and rendered human acceptance remain separate observations.
+
+## Foundation gameplay connection owner phase, 2026-10-04
+
+Policy rulings 112-114 authorize continuous ready-control authority and one
+bounded configured Lobby return after failed entry, control loss, or established
+transport loss. CkFoundation now owns this flow in a separate GameInstance
+service with a curated ECS feature, generated operation/generation keys, typed
+completion and snapshot values, explicit game-readiness confirmation, and a
+private exact-stock IP transport adapter. Queued requests discard their transient
+map/class spec after producing canonical intent strings, so queued commands do
+not retain class references. The adapter validates the actual replacement world
+and transport and returns only once to an idle configured Lobby.
+
+CkTests routes ready-lobby gameplay through this Foundation owner and keeps gym
+member/epoch admission and RPC proof in the test plugin. The existing real
+failed-ClientTravel/replacement-Lobby test now verifies one failed entry terminal,
+a separately correlated successful Return terminal, preserved Lobby state,
+cleared Session/Operation keys and empty Context.TravelURL/World.NextURL. The gym
+card is `CkTests/Script/CkOnline/PUBLIC_CONNECTION_EDITOR_TESTING.md`; it repeats
+the two-Standalone join sequence and covers successful entry/readiness, manual
+return, and client return after host transport loss. All human checks remain
+unchecked until the user reports the observations.
+
+`Saved/Logs/OnlineConnectionOwnerGate-02.log`: incremental Editor build succeeded;
+the selected Direct/script baseline was 8 passing tests and the final focused
+two serial lanes passed 15 tests (the same 8 plus 7 connection protocol tests),
+with zero failed, skipped or contaminated tests and process exit 0. The lanes include
+the real failed ClientTravel recovery path and checks the newly published
+AngelScript surface through the AutoTest. Two fresh editor boots ran:
+inline discovery plus one serial lane. Renderer-only tests were skipped. The
+fresh discovery (`CkPlugins_2.log`) and lane (`CkPlugins.log`) editor logs have
+no engine Error/Fatal records, failed ensures, AngelScript compilation errors
+or reload contamination. The Toolbox wrapper did report that its pre-build
+cached list of 5,999 tests lacked the new `Ck.Online.Connection` root; it marked
+that cache stale, ran inline discovery against the rebuilt binaries, found all
+seven new connection tests, and then executed all seven successfully. This stale
+cache split the selected work into two serial test lanes after discovery, so the
+actual run used three fresh editor boots: discovery, the 8-test cached Direct
+lane, and the 7-test refreshed Connection lane. The initial plan budgeted two;
+the extra lane followed from the stale-cache result, not a source or test failure.
+The first compile attempt stopped before any editor boot because the new fixture
+called a private Utils helper; the fixture now uses the public typed-handle
+validity check, and the final build succeeded.
+
+Final Toolbox arguments:
+
+```text
+--build --target=Editor --test --test-pattern=Online
+--project-prefix=Ck.Online.Connection --project-prefix=Ck.Online.Direct
+--parallel=1 --no-live --skip-renderer-tests
+--project=D:/Repos/CkPlugins
+--output=Saved/Logs/OnlineConnectionOwnerGate-02.log
+```
+
+This is focused automated evidence. It does not verify the two-window successful
+listen/client path, rendered panel values, Blueprint graph execution, optional
+AngelScript-disabled compilation, cross-machine play, or packaging. Steam App ID
+and two-account validation also remain separate provider work.
