@@ -7,6 +7,37 @@
 
 auto
     UCk_Utils_OnlineDirect_UE::
+    TryBuildListenTarget(
+        const TSoftObjectPtr<UWorld>& InMap,
+        TSubclassOf<AGameModeBase> InGameMode,
+        const FString& InHostAddress,
+        int32 InPort,
+        FCk_OnlineDirect_ListenTarget& OutTarget)
+    -> bool
+{
+    return FCk_OnlineDirect_ListenTarget::TryBuild(InMap, InGameMode, InHostAddress, InPort, OutTarget);
+}
+
+auto
+    UCk_Utils_OnlineDirect_UE::
+    TryBuildReadyLobbyListenTarget(
+        const FCk_OnlineDirect_ReadyLobbyBinding& InBinding,
+        const TSoftObjectPtr<UWorld>& InMap,
+        TSubclassOf<AGameModeBase> InGameMode,
+        int32 InPort,
+        FCk_OnlineDirect_ListenTarget& OutTarget)
+    -> bool
+{
+    if (NOT IsInGameThread() || NOT InBinding.Get_IsValid() || NOT InBinding.Get_Hosting())
+    {
+        OutTarget = {};
+        return false;
+    }
+    return FCk_OnlineDirect_ListenTarget::TryBuild(InMap, InGameMode, InBinding.Get_HostAddress(), InPort, OutTarget);
+}
+
+auto
+    UCk_Utils_OnlineDirect_UE::
     TryCaptureReadyLobby(
         const FCk_OnlineDirect_Snapshot& InSnapshot,
         bool InHosting,

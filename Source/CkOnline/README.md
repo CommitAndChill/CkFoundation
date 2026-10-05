@@ -72,8 +72,28 @@ ports remain caller-selected. Both parsers clear rejected output and support
 using the same string as input and output. These helpers do not start travel or
 authorize a connection.
 
-The ready-lobby CkTests gym freezes this address and uses gameplay port 7787;
-control continues on TCP 7788. Its default remains loopback. An explicit reachable
+`TryBuildListenTarget(Map, GameMode, HostAddress, Port, Target)` prepares a
+`FCk_OnlineDirect_ListenTarget` with getter-only travel URL and gameplay endpoint.
+The map is a soft UWorld reference with a canonical full object path such as
+`/Game/Maps/Lobby.Lobby`, at most 512 characters, with no subobject or URL options.
+The asset name must match the package basename. The GameMode must be an already
+loaded, valid GameModeBase subclass without abstract, deprecated or replaced-class
+flags. The host address is canonical
+literal unicast IPv4 and the explicit gameplay port is 1..65535. Validation runs
+on the game thread and resets the entire target on rejection.
+
+`TryBuildReadyLobbyListenTarget(Binding, Map, GameMode, Port, Target)` additionally
+requires an intrinsically valid hosting binding and uses its captured address.
+Both builders round-trip exactly the local map, port, game mode and listen options.
+They do not load maps or classes, start a listener, travel or change configuration.
+A valid unloaded map path does not prove that the asset exists or is cooked.
+Consumers still verify live ownership, binding, world and driver prerequisites
+before issuing travel and report success only after their actual listener is ready.
+
+The ready-lobby CkTests gym freezes this address and defaults gameplay to port 7787;
+F2 details expose F4 to select a gameplay port while the consumer is offline.
+Both windows must select the same port; the control invite does not advertise it.
+Control continues on TCP 7788. Its default remains loopback. An explicit reachable
 LAN/Tailscale address is supported by the handoff recipe, with cross-machine
 acceptance tracked separately in CkTests/Script/CkOnline/DEFERRED_EDITOR_CHECKS.md.
 

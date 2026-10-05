@@ -4,6 +4,7 @@
 #include "CkEcs/Signal/CkSignal_Fragment_Data.h"
 #include "CkOnline/Direct/CkOnlineDirect_Fragment_Data.h"
 #include "CkOnline/Direct/CkOnlineDirect_ReadyLobbyBinding.h"
+#include "CkOnline/Direct/CkOnlineDirect_ListenTarget.h"
 
 #include "CkOnlineDirect_Utils.generated.h"
 
@@ -34,6 +35,26 @@ private:
     static FCk_Handle_OnlineDirect DoCastChecked(FCk_Handle InHandle);
 
 public:
+
+    /** Prepare local listen intent from a canonical map object path and loaded mode. Rejection resets OutTarget. */
+    UFUNCTION(BlueprintPure, Category = "Ck|Online|Direct")
+    static bool
+    TryBuildListenTarget(
+        const TSoftObjectPtr<UWorld>& InMap,
+        TSubclassOf<AGameModeBase> InGameMode,
+        const FString& InHostAddress,
+        int32 InPort,
+        FCk_OnlineDirect_ListenTarget& OutTarget);
+
+    /** Require hosting correlation before preparing listen intent; current ownership remains the consumer's check. */
+    UFUNCTION(BlueprintPure, Category = "Ck|Online|Direct")
+    static bool
+    TryBuildReadyLobbyListenTarget(
+        const FCk_OnlineDirect_ReadyLobbyBinding& InBinding,
+        const TSoftObjectPtr<UWorld>& InMap,
+        TSubclassOf<AGameModeBase> InGameMode,
+        int32 InPort,
+        FCk_OnlineDirect_ListenTarget& OutTarget);
 
     /** Capture all ready members using the caller's explicit roster-count policy. Rejection resets OutBinding. */
     UFUNCTION(BlueprintPure, Category = "Ck|Online|Direct")
