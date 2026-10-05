@@ -31,6 +31,9 @@ public:
     UFUNCTION(BlueprintPure, Category = "Ck|UI|Authoring")
     bool HasConfiguredView() const;
 
+    /** Native owner identity check; never changes or realizes the surface. */
+    auto IsConfiguredWith(const TSharedPtr<FCkUiView>& InView) const -> bool;
+
     auto ReleaseSlateResources(bool bReleaseChildren) -> void override;
 
 protected:
