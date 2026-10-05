@@ -30,6 +30,8 @@ namespace ck_ui_radial
         FLinearColor Queued = FLinearColor(1.0f, 0.63f, 0.20f);
         FLinearColor Disabled = FLinearColor(0.92f, 0.20f, 0.17f);
         float TileSize = 42.0f;
+        int32 GlyphFontSize = 18;
+        int32 LabelFontSize = 13;
         bool SectorMode = false;
     };
 
@@ -178,6 +180,23 @@ namespace ck_ui_radial
             }
             Out.Visual.SectorMode = Mode->Number == 1.0f;
         }
+        const auto FontSize = [&InArguments, &OutFailure](const TCHAR* Name, int32& Target) -> bool
+        {
+            const FCkUiCustomStyleValue* Value = InArguments.Style.CustomProperties.Find(Name);
+            if (Value == nullptr) { return true; }
+            const bool Valid = Value->Kind == ECkUiCustomStyleKind::Length
+                && FMath::IsFinite(Value->Number) && Value->Number >= 8.0f && Value->Number <= 48.0f;
+            if (!Valid)
+            {
+                OutFailure = FString::Printf(TEXT("Radial selector font size '%s' must be a finite length in [8, 48]."), Name);
+                return false;
+            }
+            Target = FMath::RoundToInt(Value->Number);
+            return true;
+        };
+        if (!FontSize(TEXT("-ck-radial-glyph-font-size"), Out.Visual.GlyphFontSize)
+            || !FontSize(TEXT("-ck-radial-label-font-size"), Out.Visual.LabelFontSize))
+        { return false; }
         return true;
     }
 
@@ -563,8 +582,8 @@ auto SCkUiRadialSelector::OnPaint(const FPaintArgs& InArgs, const FGeometry& InG
         }
         const FString Selected = GetSelectedKey();
         const float Tile = Visual.TileSize;
-        const FSlateFontInfo GlyphFont = FCoreStyle::GetDefaultFontStyle("Bold", 18);
-        const FSlateFontInfo LabelFont = FCoreStyle::GetDefaultFontStyle("Regular", 13);
+        const FSlateFontInfo GlyphFont = FCoreStyle::GetDefaultFontStyle("Bold", Visual.GlyphFontSize);
+        const FSlateFontInfo LabelFont = FCoreStyle::GetDefaultFontStyle("Regular", Visual.LabelFontSize);
         TSharedPtr<FSlateFontMeasure> FontMeasure;
         if (Visual.SectorMode)
         { FontMeasure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService(); }
@@ -720,6 +739,8 @@ auto RegisterRadialUiControls(FCkUiWidgetRegistry& InRegistry) -> FCkUiLoadResul
         {TEXT("-ck-radial-disabled"), ECkUiCustomStyleKind::Color},
         {TEXT("-ck-radial-tile-size"), ECkUiCustomStyleKind::Length},
         {TEXT("-ck-radial-sector-mode"), ECkUiCustomStyleKind::Number},
+        {TEXT("-ck-radial-glyph-font-size"), ECkUiCustomStyleKind::Length},
+        {TEXT("-ck-radial-label-font-size"), ECkUiCustomStyleKind::Length},
     };
     Registration.RetainedFactory = [](const FCkUiCustomWidgetArguments& InArguments, FString& OutFailure)
         -> TSharedPtr<ICkUiRetainedWidget>
