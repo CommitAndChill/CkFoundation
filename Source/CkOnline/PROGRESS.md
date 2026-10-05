@@ -7,8 +7,9 @@ contracts. Keep verified automation separate from unobserved editor acceptance.
 
 After the Foundation gameplay connection owner, the next feature family is the
 optional Steam/social profile. Plan/Gate_17_SteamLobbyProfile.md bounds the first
-slice to Steam identity readiness, one OSS-owned lobby session, and warm/cold
-invite normalization. It defers persistent cross-provider friends, chat, voice,
+slice to Steam identity readiness, one OSS-owned lobby session, and warm invite
+normalization when no session search is active. It defers cold-launch invites to
+an installed-build gate and persistent cross-provider friends, chat, voice,
 EOS/EGS and fallback behavior. No implementation or Steam runtime acceptance is
 claimed yet.
 
@@ -19,8 +20,12 @@ there is no project App ID or Steam account configuration in this checkout.
 Source review found `FOnlineFriendsSteam::SendInvite` and `AcceptInvite` return
 unsupported, whereas session invites and the overlay require a real lobby/game
 session. Therefore, Steam invitations must be built on the OSS session owner,
-and live invite behavior remains a two-account editor check. Keep Steam absent
-from Direct-only tests and do not infer availability from a compiled interface.
+and live invite behavior remains a two-machine/two-account editor check. Steam
+OSS drops an accepted lobby invite while a search is already active, before Ck
+can observe it; Ck-only serialization cannot fix an already-running engine
+search. Gate17 records this overlap as a limitation rather than claiming lost-
+invite recovery. Keep Steam absent from Direct-only tests and do not infer
+availability from a compiled interface.
 
 ## Earlier local commit checkpoint, 2026-10-04
 
