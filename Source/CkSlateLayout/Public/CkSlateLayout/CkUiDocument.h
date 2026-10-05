@@ -95,6 +95,8 @@ struct FCkUiStyle
     TOptional<int32> LetterSpacing;
     /** Optional face selection; omitted inherits the consumer's base font. */
     TOptional<bool> Monospace;
+    /** Named registered family, resolved by the view before staging widgets. */
+    FString FontFamily;
     bool Bold = false;
     bool AllowWrapping = true;
     ETextWrappingPolicy WrappingPolicy = ETextWrappingPolicy::DefaultWrapping;
@@ -165,6 +167,8 @@ struct FCkUiTabsVisualStyle
     TOptional<float> UnderlineHeight;
     TOptional<float> FontSize;
     TOptional<bool> Bold;
+    TOptional<float> HeaderWidth;
+    EHorizontalAlignment HeaderAlign = HAlign_Left;
     FMargin HeaderPadding = FMargin(8.0f, 6.0f);
 };
 
@@ -187,6 +191,7 @@ struct FCkUiTableVisualStyle
 struct FCkUiTreeVisualStyle
 {
     bool Enabled = false;
+    TOptional<FLinearColor> Background;
     TOptional<FLinearColor> RowBackground;
     TOptional<FLinearColor> RowHoverBackground;
     TOptional<FLinearColor> RowSelectedBackground;

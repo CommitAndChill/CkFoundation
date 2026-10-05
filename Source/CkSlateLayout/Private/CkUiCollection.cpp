@@ -213,6 +213,7 @@ struct FCkUiCollectionTransaction
             OutPrepared->NextRecords.Add(Update.Record);
             OutPrepared->RecordUpdates.Add(MoveTemp(Update));
         }
+        if (!OutPrepared->Changed && OutPrepared->NextRecords != InCollection->_Records) { OutPrepared->Changed = true; }
         return FCkUiLoadResult{.Succeeded = true};
     }
 

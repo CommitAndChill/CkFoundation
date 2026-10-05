@@ -37,6 +37,13 @@ namespace ck_ui_tree
         TFunction<void(SCkUiTree::FNode, const FPointerEvent&)> OnItemRightClicked;
         TFunction<bool(const FKeyEvent&)> OnContextMenuKey;
         FOnKeyDown OnHostKeyDown;
+        TFunction<void()> OnNativeTick;
+
+        virtual void Tick(const FGeometry& InGeometry, const double InTime, const float InDeltaTime) override
+        {
+            STreeView<SCkUiTree::FNode>::Tick(InGeometry, InTime, InDeltaTime);
+            if (OnNativeTick) { OnNativeTick(); }
+        }
 
         virtual void Private_OnItemRightClicked(SCkUiTree::FNode InNode, const FPointerEvent& InMouseEvent) override
         {
@@ -56,6 +63,17 @@ namespace ck_ui_tree
         }
 
         void OpenLegacyContextMenu(const FPointerEvent& InMouseEvent) { OnRightMouseButtonUp(InMouseEvent); }
+
+        void ApplyVisualStyle(const FCkUiTreeVisualStyle& InVisualStyle)
+        {
+            TreeStyle = FCoreStyle::Get().GetWidgetStyle<FTableViewStyle>(TEXT("TreeView"));
+            if (InVisualStyle.Background.IsSet())
+            { TreeStyle.SetBackgroundBrush(FSlateRoundedBoxBrush{InVisualStyle.Background.GetValue(), 0.0f}); }
+            SetStyle(&TreeStyle);
+        }
+
+    private:
+        FTableViewStyle TreeStyle;
     };
 }
 
@@ -76,6 +94,15 @@ struct SCkUiTree::FImpl final : public TSharedFromThis<FImpl>
     TArray<TWeakPtr<FRow>> LiveRows;
     TOptional<FString> SelectedKey;
     TOptional<FString> ContextMenuKey;
+    struct FSelectionRequest
+    {
+        TOptional<FString> Key;
+        bool Notify = false;
+        int32 Attempts = 0;
+    };
+    TOptional<FSelectionRequest> SelectionRequest;
+    ECkUiTreeSelectionRequestState SelectionRequestState = ECkUiTreeSelectionRequestState::None;
+    FString SelectionRequestError;
     ck_ui_tree::FConfiguration Configuration;
     FDelegateHandle CollectionChangedHandle;
     FString LastCellError;
@@ -85,6 +112,58 @@ struct SCkUiTree::FImpl final : public TSharedFromThis<FImpl>
     bool bPreparing = false;
     bool bNotifying = false;
     bool bApplyingEffectiveExpansion = false;
+    bool bOwnerReleased = false;
+
+    void CancelSelectionRequest()
+    {
+        SelectionRequest.Reset();
+        SelectionRequestState = ECkUiTreeSelectionRequestState::None;
+        SelectionRequestError.Reset();
+    }
+
+    void RejectSelectionRequest(const TCHAR* InError)
+    {
+        SelectionRequest.Reset();
+        SelectionRequestState = ECkUiTreeSelectionRequestState::Rejected;
+        SelectionRequestError = InError;
+    }
+
+    void PublishSelectionRequest()
+    {
+        if (!SelectionRequest.IsSet() || bOwnerReleased) { return; }
+        const TSharedPtr<FImpl> KeepAlive = AsShared();
+        if (bProjectionDirty || bPreparing || bRefreshing || bNotifying || !Tree.IsValid() || Tree->IsPendingRefresh())
+        {
+            if (++SelectionRequest.GetValue().Attempts >= 4)
+            { RejectSelectionRequest(TEXT("tree projection did not settle within four native ticks")); }
+            return;
+        }
+        const FSelectionRequest Request = SelectionRequest.GetValue();
+        const FNode Node = Request.Key.IsSet() ? Collection->FindNode(Request.Key.GetValue()) : FNode{};
+        if (!Configuration.Selectable || (Request.Key.IsSet() && (!Node.IsValid() || !FilteredKeys.Contains(Request.Key.GetValue()))))
+        { RejectSelectionRequest(TEXT("requested tree key is missing, filtered or not selectable")); return; }
+
+        // Native Direct notifications are suppressed. Publish the semantic key only after checking
+        // the current native node, then clear pending state before an optional reentrant callback.
+        const bool bChanged = SelectedKey != Request.Key;
+        if (Node.IsValid()) { ck_ui_selection::SelectOnly(*Tree, Node); }
+        else { Tree->ClearSelection(); }
+        const TArray<FNode> NativeSelection = Tree->GetSelectedItems();
+        const bool bApplied = Node.IsValid() ? NativeSelection.Num() == 1 && NativeSelection[0] == Node : NativeSelection.IsEmpty();
+        if (!bApplied)
+        {
+            Tree->ClearSelection();
+            const FNode Previous = SelectedKey.IsSet() ? Collection->FindNode(SelectedKey.GetValue()) : FNode{};
+            if (Previous.IsValid() && FilteredKeys.Contains(Previous->GetKey())) { ck_ui_selection::SelectOnly(*Tree, Previous); }
+            RejectSelectionRequest(TEXT("native tree did not accept the requested selection"));
+            return;
+        }
+        SelectedKey = Request.Key;
+        SelectionRequest.Reset();
+        SelectionRequestState = ECkUiTreeSelectionRequestState::Applied;
+        SelectionRequestError.Reset();
+        if (bChanged && Request.Notify) { Notify(Request.Key, ESelectInfo::Direct); }
+    }
 
     ~FImpl()
     {
@@ -242,10 +321,11 @@ struct SCkUiTree::FImpl final : public TSharedFromThis<FImpl>
 
     void Notify(TOptional<FString> InKey, const ESelectInfo::Type InInfo)
     {
-        if (!Configuration.OnSelectionChanged.IsBound() || bNotifying) { return; }
+        if (bOwnerReleased || !Configuration.OnSelectionChanged.IsBound() || bNotifying) { return; }
         const TSharedPtr<FImpl> KeepAlive = AsShared();
+        const FOnCkUiTreeSelectionChanged Callback = Configuration.OnSelectionChanged;
         TGuardValue<bool> Guard(bNotifying, true);
-        Configuration.OnSelectionChanged.Execute(MoveTemp(InKey), InInfo);
+        Callback.Execute(MoveTemp(InKey), InInfo);
     }
 
     void ApplyExpansion(const FNode& InNode, const bool bExpand)
@@ -347,8 +427,9 @@ struct SCkUiTree::FImpl final : public TSharedFromThis<FImpl>
     void OnSelectionChanged(FNode InNode, const ESelectInfo::Type InInfo)
     {
         const TSharedPtr<FImpl> KeepAlive = AsShared();
-        if (!Configuration.Selectable) { return; }
+        if (bOwnerReleased || !Configuration.Selectable) { return; }
         if (InInfo == ESelectInfo::Direct) { return; }
+        CancelSelectionRequest();
         if (!InNode.IsValid())
         {
             if (!SelectedKey.IsSet()) { return; }
@@ -447,6 +528,7 @@ private:
 void SCkUiTree::FImpl::Commit(ck_ui_tree::FConfiguration&& InConfiguration,
     TArray<TPair<TSharedPtr<FRow>, TSharedPtr<FCkUiView>>>&& InCells)
 {
+    if (bOwnerReleased) { return; }
     const TSharedPtr<FImpl> KeepAlive = AsShared();
     Configuration = MoveTemp(InConfiguration);
     RowStyle = FCoreStyle::Get().GetWidgetStyle<FTableRowStyle>(TEXT("TableView.Row"));
@@ -473,6 +555,7 @@ void SCkUiTree::FImpl::Commit(ck_ui_tree::FConfiguration&& InConfiguration,
         Tree->ClearSelection();
     }
     Tree->SetSelectionMode(Configuration.Selectable ? ESelectionMode::Single : ESelectionMode::None);
+    Tree->ApplyVisualStyle(VisualStyle);
     auto PreviousCells = TArray<TSharedPtr<FCkUiView>>{};
     for (TPair<TSharedPtr<FRow>, TSharedPtr<FCkUiView>>& Pair : InCells)
     { if (Pair.Key.IsValid()) { PreviousCells.Add(Pair.Key->ReplaceCell(MoveTemp(Pair.Value), Configuration.RowHeight)); } }
@@ -515,6 +598,7 @@ void SCkUiTree::Construct(const FArguments& InArgs)
     SAssignNew(_Impl->Tree, ck_ui_tree::FTree)
         .TreeItemsSource(&_Impl->FilteredRoots)
         .SelectionMode(ESelectionMode::Single)
+        .AllowInvisibleItemSelection(true)
         .ClearSelectionOnClick(true)
         .OnGenerateRow_Lambda([WeakImpl = TWeakPtr<FImpl>(_Impl)](FNode InNode, const TSharedRef<STableViewBase>& InOwner) -> TSharedRef<ITableRow>
         {
@@ -537,6 +621,8 @@ void SCkUiTree::Construct(const FArguments& InArgs)
         return Impl.IsValid() && Impl->OnContextMenuKey(InKeyEvent);
     };
     _Impl->CollectionChangedHandle = _Impl->Collection->OnChanged().AddSP(_Impl.ToSharedRef(), &FImpl::OnCollectionChanged);
+    _Impl->Tree->OnNativeTick = [WeakImpl = TWeakPtr<FImpl>(_Impl)]()
+    { if (const TSharedPtr<FImpl> Impl = WeakImpl.Pin()) { Impl->PublishSelectionRequest(); } };
     ChildSlot[_Impl->Tree.ToSharedRef()];
 }
 
@@ -544,7 +630,7 @@ SCkUiTree::~SCkUiTree() = default;
 
 void SCkUiTree::SetHostKeyDownHandler(FOnKeyDown InHandler)
 {
-    if (_Impl.IsValid() && _Impl->Tree.IsValid()) { _Impl->Tree->OnHostKeyDown = MoveTemp(InHandler); }
+    if (_Impl.IsValid() && !_Impl->bOwnerReleased && _Impl->Tree.IsValid()) { _Impl->Tree->OnHostKeyDown = MoveTemp(InHandler); }
 }
 
 void SCkUiTree::ReleaseContextMenu()
@@ -552,10 +638,21 @@ void SCkUiTree::ReleaseContextMenu()
     if (_Impl.IsValid()) { _Impl->ReleaseContextMenu(); }
 }
 
+void SCkUiTree::ReleaseOwnerInteraction()
+{
+    if (!_Impl.IsValid()) { return; }
+    _Impl->bOwnerReleased = true;
+    _Impl->CancelSelectionRequest();
+    _Impl->Configuration.OnSelectionChanged.Unbind();
+    _Impl->Configuration.OnAuthoredContextMenu.Unbind();
+    if (_Impl->Tree.IsValid()) { _Impl->Tree->OnHostKeyDown.Unbind(); }
+    _Impl->ReleaseContextMenu();
+}
+
 void SCkUiTree::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
 {
     SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
-    if (!_Impl.IsValid()) { return; }
+    if (!_Impl.IsValid() || _Impl->bOwnerReleased) { return; }
     if (_Impl->Configuration.Filter.Get(FText::GetEmpty()).ToString() != _Impl->AppliedFilter) { _Impl->bProjectionDirty = true; }
     if (_Impl->bProjectionDirty) { _Impl->RebuildProjection(); }
     if (_Impl->ContextMenu.IsValid()) { _Impl->ContextMenu->Tick(); }
@@ -573,6 +670,7 @@ auto SCkUiTree::Prepare(const FCkUiNode& InDefinition, FCellFactory InFactory, T
 {
     OutFailure.Reset();
     if (!_Impl.IsValid() || !_Impl->Collection.IsValid()) { OutFailure = TEXT("tree has no collection"); return {}; }
+    if (_Impl->bOwnerReleased) { OutFailure = TEXT("tree owner has released interaction"); return {}; }
     if (_Impl->bPreparing || _Impl->bRefreshing || _Impl->bNotifying) { OutFailure = TEXT("tree configuration cannot be prepared during tree activity"); return {}; }
     if (!InFactory) { OutFailure = TEXT("tree cell factory is required"); return {}; }
     if (InDefinition.Kind != ECkUiNodeKind::Tree || InDefinition.Children.Num() != 1 || !FMath::IsFinite(InDefinition.RowHeight) || InDefinition.RowHeight < 1.0f || InDefinition.RowHeight > 1024.0f)
@@ -628,10 +726,11 @@ auto SCkUiTree::Prepare(const FCkUiNode& InDefinition, FCellFactory InFactory, T
 
 auto SCkUiTree::TrySelectKey(TOptional<FString> InKey, const bool InNotify) -> bool
 {
-    if (!_Impl.IsValid() || !_Impl->Tree.IsValid() || _Impl->bPreparing || _Impl->bRefreshing || _Impl->bNotifying) { return false; }
+    if (!_Impl.IsValid() || _Impl->bOwnerReleased || !_Impl->Tree.IsValid() || _Impl->bPreparing || _Impl->bRefreshing || _Impl->bNotifying) { return false; }
     if (!_Impl->Configuration.Selectable) { return false; }
     if (!InKey.IsSet())
     {
+        _Impl->CancelSelectionRequest();
         const bool bHadSelection = _Impl->SelectedKey.IsSet();
         _Impl->SelectedKey.Reset();
         _Impl->Tree->ClearSelection();
@@ -640,6 +739,7 @@ auto SCkUiTree::TrySelectKey(TOptional<FString> InKey, const bool InNotify) -> b
     }
     const FNode Node = _Impl->Collection->FindNode(InKey.GetValue());
     if (!Node.IsValid() || !_Impl->FilteredKeys.Contains(InKey.GetValue())) { return false; }
+    _Impl->CancelSelectionRequest();
     const bool bChanged = !_Impl->SelectedKey.IsSet() || _Impl->SelectedKey.GetValue() != InKey.GetValue();
     _Impl->SelectedKey = InKey;
     ck_ui_selection::SelectOnly(*_Impl->Tree, Node);
@@ -647,9 +747,32 @@ auto SCkUiTree::TrySelectKey(TOptional<FString> InKey, const bool InNotify) -> b
     return true;
 }
 
+auto SCkUiTree::TryRequestSelectKey(TOptional<FString> InKey, const bool InNotify) -> bool
+{
+    if (!_Impl.IsValid() || _Impl->bOwnerReleased || !_Impl->Collection.IsValid() || !_Impl->Tree.IsValid()
+        || _Impl->bPreparing || (_Impl->bRefreshing && !_Impl->bNotifying) || !_Impl->Configuration.Selectable) { return false; }
+    if (InKey.IsSet() && (InKey.GetValue().IsEmpty() || !_Impl->Collection->FindNode(InKey.GetValue()).IsValid())) { return false; }
+    _Impl->SelectionRequest = FImpl::FSelectionRequest{MoveTemp(InKey), InNotify, 0};
+    _Impl->SelectionRequestState = ECkUiTreeSelectionRequestState::Pending;
+    _Impl->SelectionRequestError.Reset();
+    return true;
+}
+
+void SCkUiTree::CancelSelectionRequest()
+{ if (_Impl.IsValid()) { _Impl->CancelSelectionRequest(); } }
+
+auto SCkUiTree::GetSelectionRequestState() const -> ECkUiTreeSelectionRequestState
+{ return _Impl.IsValid() ? _Impl->SelectionRequestState : ECkUiTreeSelectionRequestState::None; }
+
+const FString& SCkUiTree::GetSelectionRequestError() const
+{
+    static const FString Empty;
+    return _Impl.IsValid() ? _Impl->SelectionRequestError : Empty;
+}
+
 auto SCkUiTree::TrySetExpanded(const FString& InKey, const bool bInExpanded) -> bool
 {
-    if (!_Impl.IsValid() || !_Impl->Tree.IsValid() || _Impl->bPreparing || _Impl->bRefreshing || _Impl->bNotifying) { return false; }
+    if (!_Impl.IsValid() || _Impl->bOwnerReleased || !_Impl->Tree.IsValid() || _Impl->bPreparing || _Impl->bRefreshing || _Impl->bNotifying) { return false; }
     const FNode Node = _Impl->Collection->FindNode(InKey);
     if (!Node.IsValid()) { return false; }
     if (bInExpanded) { _Impl->UserExpandedKeys.Add(InKey); }

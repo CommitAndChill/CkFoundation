@@ -1,4 +1,5 @@
 #include "CkSlateLayout/SCkUiSurface.h"
+#include "CkSlateLayout/CkUiFontRegistry.h"
 #include "CkSlateLayout/CkUiFloatSeries.h"
 #include "CkUiWidgetRegistry.h"
 
@@ -37,6 +38,15 @@
 
 namespace ck_ui_surface
 {
+    auto IsRequirementName(const FString& InValue) -> bool
+    {
+        if (InValue.IsEmpty() || !(FChar::IsAlpha(InValue[0]) || InValue[0] == TEXT('_') || InValue[0] == TEXT('-')))
+        { return false; }
+        for (const TCHAR Character : InValue)
+        { if (!(FChar::IsAlnum(Character) || Character == TEXT('_') || Character == TEXT('-'))) { return false; } }
+        return true;
+    }
+
     auto NativeVisibility(const TWeakPtr<SWidget>& InNative) -> EVisibility
     {
         const TSharedPtr<SWidget> Native = InNative.Pin();
@@ -318,21 +328,29 @@ struct FCkUiView::FNestedUpdate
     }
 };
 
-auto FCkUiView::Create(FNativeBindings InBindings, FActions InActions, FTokens InTokens, FSlateFontInfo InBaseFont, FDataBindings InData, TSharedPtr<const FCkUiWidgetRegistrySnapshot> InCustomRegistry) -> TSharedRef<FCkUiView>
+auto FCkUiView::Create(FNativeBindings InBindings, FActions InActions, FTokens InTokens, FSlateFontInfo InBaseFont, FDataBindings InData, TSharedPtr<const FCkUiWidgetRegistrySnapshot> InCustomRegistry, TSharedPtr<const FCkUiFontRegistrySnapshot> InFontRegistry) -> TSharedRef<FCkUiView>
 {
-    return MakeShareable(new FCkUiView(MoveTemp(InBindings), MoveTemp(InActions), MoveTemp(InTokens), MoveTemp(InBaseFont), MoveTemp(InData), MoveTemp(InCustomRegistry)));
+    return MakeShareable(new FCkUiView(MoveTemp(InBindings), MoveTemp(InActions), MoveTemp(InTokens), MoveTemp(InBaseFont), MoveTemp(InData), MoveTemp(InCustomRegistry), MoveTemp(InFontRegistry)));
 }
 
-FCkUiView::FCkUiView(FNativeBindings InBindings, FActions InActions, FTokens InTokens, FSlateFontInfo InBaseFont, FDataBindings InData, TSharedPtr<const FCkUiWidgetRegistrySnapshot> InCustomRegistry)
+FCkUiView::FCkUiView(FNativeBindings InBindings, FActions InActions, FTokens InTokens, FSlateFontInfo InBaseFont, FDataBindings InData, TSharedPtr<const FCkUiWidgetRegistrySnapshot> InCustomRegistry, TSharedPtr<const FCkUiFontRegistrySnapshot> InFontRegistry)
     : _Bindings(MoveTemp(InBindings))
     , _Actions(MoveTemp(InActions))
     , _Tokens(MoveTemp(InTokens))
     , _BaseFont(MoveTemp(InBaseFont))
     , _Data(MoveTemp(InData))
     , _CustomRegistry(MoveTemp(InCustomRegistry))
+    , _FontRegistry(MoveTemp(InFontRegistry))
 {
-    if (_BaseFont.Size <= 0.0f)
+    if (!FMath::IsFinite(_BaseFont.Size) || _BaseFont.Size <= 0.0f)
     { _BaseFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 10); }
+    else if (!_BaseFont.HasValidFont())
+    {
+        const auto DefaultFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 10);
+        _BaseFont.CompositeFont = DefaultFont.CompositeFont;
+        if (_BaseFont.TypefaceFontName.IsNone())
+        { _BaseFont.TypefaceFontName = DefaultFont.TypefaceFontName; }
+    }
     _LastResult.Succeeded = true;
 }
 
@@ -525,13 +543,80 @@ auto FCkUiView::MakeContextMenuBinding(const FCkUiNode& InNode, const TMap<FStri
     });
 }
 
+auto FCkUiView::TryMakeFont(const FCkUiNode& InNode, FSlateFontInfo& OutFont, TArray<FString>& OutErrors) const -> bool
+{
+    auto Font = _BaseFont;
+    if (InNode.Style.Monospace.IsSet())
+    { Font.TypefaceFontName = InNode.Style.Monospace.GetValue() ? TEXT("Mono") : TEXT("Regular"); }
+    if (InNode.Style.Bold) { Font.TypefaceFontName = TEXT("Bold"); }
+    const bool NamedFamily = !InNode.Style.FontFamily.IsEmpty()
+        && InNode.Style.FontFamily != TEXT("monospace") && InNode.Style.FontFamily != TEXT("sans-serif");
+    if (NamedFamily) { Font.TypefaceFontName = InNode.Style.Bold ? TEXT("Bold") : TEXT("Regular"); }
+    if (InNode.Kind == ECkUiNodeKind::Tabs && InNode.TabsVisualStyle.Bold.IsSet())
+    { Font.TypefaceFontName = InNode.TabsVisualStyle.Bold.GetValue() ? TEXT("Bold") : TEXT("Regular"); }
+    if (NamedFamily)
+    {
+        FSlateFontInfo Registered;
+        if (!_FontRegistry.IsValid() || !_FontRegistry->TryResolve(InNode.Style.FontFamily, Font.TypefaceFontName, Registered))
+        {
+            OutErrors.Add(FString::Printf(TEXT("Node '%s' requires registered font family '%s' with face '%s'."),
+                *InNode.Id, *InNode.Style.FontFamily, *Font.TypefaceFontName.ToString()));
+            return false;
+        }
+        Font.FontObject = nullptr;
+        Font.CompositeFont = Registered.CompositeFont;
+    }
+    if (InNode.Style.FontSize.IsSet()) { Font.Size = FMath::RoundToInt(InNode.Style.FontSize.GetValue()); }
+    if (InNode.Style.LetterSpacing.IsSet()) { Font.LetterSpacing = InNode.Style.LetterSpacing.GetValue(); }
+    if (InNode.Kind == ECkUiNodeKind::Tabs && InNode.TabsVisualStyle.FontSize.IsSet())
+    { Font.Size = InNode.TabsVisualStyle.FontSize.GetValue(); }
+    OutFont = MoveTemp(Font);
+    return true;
+}
+
 auto FCkUiView::ValidateDocument(const FCkUiDocument& InDocument, const FString& InSource, TArray<FString>& OutErrors) const -> bool
 {
+    TFunction<const FCkUiNode*(const FCkUiNode&, const FString&)> FindConcreteNode;
+    FindConcreteNode = [&FindConcreteNode](const FCkUiNode& Node, const FString& Id) -> const FCkUiNode*
+    {
+        if (Node.Id == Id) { return &Node; }
+        // These children are templates/slots rendered by separately scoped views.
+        if (Node.Kind == ECkUiNodeKind::Repeat || Node.Kind == ECkUiNodeKind::Custom
+            || Node.Kind == ECkUiNodeKind::Table || Node.Kind == ECkUiNodeKind::Tree) { return nullptr; }
+        for (const FCkUiNode& Child : Node.Children)
+        { if (const FCkUiNode* Found = FindConcreteNode(Child, Id)) { return Found; } }
+        return nullptr;
+    };
+    TSet<FString> RequiredIds;
+    for (const FDataBindings::FButtonRequirement& Required : _Data.RequiredButtons)
+    {
+        const FCkUiNode* Region = InDocument.Regions.Find(Required.Region);
+        const FCkUiNode* Node = Region != nullptr ? FindConcreteNode(*Region, Required.Id) : nullptr;
+        if (!ck_ui_surface::IsRequirementName(Required.Id) || !ck_ui_surface::IsRequirementName(Required.Action)
+            || !ck_ui_surface::IsRequirementName(Required.EnabledBool) || !ck_ui_surface::IsRequirementName(Required.Region)
+            || RequiredIds.Contains(Required.Id) || !_Actions.FindRef(Required.Action).IsBound()
+            || !_Data.Visibility.FindRef(Required.EnabledBool).IsSet() || Node == nullptr
+            || Node->Kind != ECkUiNodeKind::Button || !Node->ItemAction.IsEmpty()
+            || Node->Action != Required.Action || Node->ButtonEnabledBinding != Required.EnabledBool)
+        { OutErrors.Add(ck_ui_surface::Error(InSource, FString::Printf(TEXT("Required ordinary button '%s' in region '%s' must match action '%s' and enabled binding '%s'."),
+            *Required.Id, *Required.Region, *Required.Action, *Required.EnabledBool))); }
+        RequiredIds.Add(Required.Id);
+    }
+    if (!OutErrors.IsEmpty()) { return false; }
     if (_Data.SlateUserIndex < INDEX_NONE)
     {
         OutErrors.Add(ck_ui_surface::Error(InSource, TEXT("Slate user context must be INDEX_NONE or a nonnegative user index.")));
         return false;
     }
+    TFunction<void(const FCkUiNode&)> ValidateFonts;
+    ValidateFonts = [this, &OutErrors, &ValidateFonts](const FCkUiNode& Node)
+    {
+        FSlateFontInfo Font;
+        TryMakeFont(Node, Font, OutErrors);
+        for (const FCkUiNode& Child : Node.Children) { ValidateFonts(Child); }
+    };
+    for (const auto& [Name, Node] : InDocument.Regions) { ValidateFonts(Node); }
+    if (!OutErrors.IsEmpty()) { return false; }
     for (const auto& [Id, Menu] : InDocument.Menus)
     {
         for (const FCkUiMenuEntry& Entry : Menu.Entries)
@@ -1148,6 +1233,7 @@ auto FCkUiView::MakeRepeatItem(const FCkUiNode& InNode, const TSharedPtr<FCkUiCo
     TArray<FString>& OutErrors) const -> TSharedPtr<FCkUiView>
 {
     auto Data = _Data;
+    Data.RequiredButtons.Reset();
     Data.Collections.Reset(); Data.Trees.Reset();
     auto Actions = _Actions;
     const TWeakPtr<FCkUiView> WeakOwner = const_cast<FCkUiView*>(this)->AsShared();
@@ -1398,7 +1484,7 @@ auto FCkUiView::MakeRepeatItem(const FCkUiNode& InNode, const TSharedPtr<FCkUiCo
     if (!OutErrors.IsEmpty()) { return {}; }
     FViewContext Candidate{MoveTemp(Data), MoveTemp(Actions), MoveTemp(GeneratedActionAliases), MoveTemp(GeneratedFieldAliases),
         MoveTemp(GeneratedItemEventAliases)};
-    const auto View = Existing.IsValid() ? Existing : FCkUiView::Create({}, MoveTemp(Candidate.Actions), {}, _BaseFont, MoveTemp(Candidate.Data), _CustomRegistry);
+    const auto View = Existing.IsValid() ? Existing : FCkUiView::Create({}, MoveTemp(Candidate.Actions), {}, _BaseFont, MoveTemp(Candidate.Data), _CustomRegistry, _FontRegistry);
     if (Existing.IsValid()) { OutReplacementContext = MoveTemp(Candidate); }
     if (!Existing.IsValid())
     {
@@ -1492,6 +1578,7 @@ auto FCkUiView::MakeCustomSlotView(const FCkUiNode& InRoot, const TSharedPtr<FCu
         View.Reset();
     }
     auto Data = _Data;
+    Data.RequiredButtons.Reset();
     const TWeakPtr<FCkUiView> WeakParent = const_cast<FCkUiView*>(this)->AsShared();
     const TWeakPtr<FRepeatScope> WeakScope = InSlot->Scope;
     Data.CanDispatchEvents = TAttribute<bool>::CreateLambda([WeakParent, WeakScope]()
@@ -1503,7 +1590,7 @@ auto FCkUiView::MakeCustomSlotView(const FCkUiNode& InRoot, const TSharedPtr<FCu
         _GeneratedRepeatItemEventAliases};
     if (!View.IsValid())
     {
-        View = FCkUiView::Create(MoveTemp(Bindings), MoveTemp(Candidate.Actions), _Tokens, _BaseFont, MoveTemp(Candidate.Data), _CustomRegistry);
+        View = FCkUiView::Create(MoveTemp(Bindings), MoveTemp(Candidate.Actions), _Tokens, _BaseFont, MoveTemp(Candidate.Data), _CustomRegistry, _FontRegistry);
         View->_GeneratedRepeatActionAliases = MoveTemp(Candidate.GeneratedRepeatActionAliases);
         View->_GeneratedRepeatFieldAliases = MoveTemp(Candidate.GeneratedRepeatFieldAliases);
         View->_GeneratedRepeatItemEventAliases = MoveTemp(Candidate.GeneratedRepeatItemEventAliases);
@@ -1842,6 +1929,7 @@ auto FCkUiView::MakeCellView(const FCkUiNode& InCell, TWeakPtr<const TRecord> We
     const bool InValidateOnly, TArray<FString>& OutErrors) const -> TSharedPtr<FCkUiView>
 {
     auto Data = _Data;
+    Data.RequiredButtons.Reset();
     // Table cells inherit ordinary bindings/actions, but cannot recursively own collections or selection callbacks.
     Data.Collections.Reset();
     Data.Trees.Reset();
@@ -1978,7 +2066,7 @@ auto FCkUiView::MakeCellView(const FCkUiNode& InCell, TWeakPtr<const TRecord> We
         for (FCkUiNode& Child : Node.Children) { BindFields(Child); }
     };
     BindFields(BoundCell);
-    const TSharedRef<FCkUiView> CellView = FCkUiView::Create({}, MoveTemp(Actions), {}, _BaseFont, MoveTemp(Data), _CustomRegistry);
+    const TSharedRef<FCkUiView> CellView = FCkUiView::Create({}, MoveTemp(Actions), {}, _BaseFont, MoveTemp(Data), _CustomRegistry, _FontRegistry);
     *WeakCellView = CellView;
     CellView->GetRegion(TEXT("cell"));
     auto Document = FCkUiDocument{};
@@ -2045,15 +2133,9 @@ auto FCkUiView::StageNode(const FCkUiNode& InNode, FStagedDocument& InOutStaged,
         }
         return InWidget;
     };
-    const auto MakeFont = [this, &InNode]()
-    {
-        auto Font = _BaseFont;
-        if (InNode.Style.FontSize.IsSet()) { Font.Size = FMath::RoundToInt(InNode.Style.FontSize.GetValue()); }
-        if (InNode.Style.LetterSpacing.IsSet()) { Font.LetterSpacing = InNode.Style.LetterSpacing.GetValue(); }
-        if (InNode.Style.Monospace.IsSet()) { Font.TypefaceFontName = InNode.Style.Monospace.GetValue() ? TEXT("Mono") : TEXT("Regular"); }
-        if (InNode.Style.Bold) { Font.TypefaceFontName = TEXT("Bold"); }
-        return Font;
-    };
+    FSlateFontInfo ResolvedFont;
+    if (!TryMakeFont(InNode, ResolvedFont, OutErrors)) { return nullptr; }
+    const auto MakeFont = [&ResolvedFont]() { return ResolvedFont; };
     const auto MakeTextAttribute = [this, &InNode]() -> TAttribute<FText>
     {
         return InNode.Binding.IsEmpty() ? TAttribute<FText>(FText::FromString(InNode.Text)) : _Data.Text.FindRef(InNode.Binding);
@@ -2657,8 +2739,6 @@ auto FCkUiView::StageNode(const FCkUiNode& InNode, FStagedDocument& InOutStaged,
         });
         const TAttribute<FString> Value = _Data.String.FindRef(InNode.Binding);
         FSlateFontInfo Font = MakeFont();
-        if (InNode.TabsVisualStyle.FontSize.IsSet()) { Font.Size = InNode.TabsVisualStyle.FontSize.GetValue(); }
-        if (InNode.TabsVisualStyle.Bold.IsSet()) { Font.TypefaceFontName = InNode.TabsVisualStyle.Bold.GetValue() ? TEXT("Bold") : TEXT("Regular"); }
         const FCkUiTabsVisualStyle VisualStyle = InNode.TabsVisualStyle;
         InOutStaged.TabsUpdates.Add([Tabs, Panels = MoveTemp(Panels), Value, Changed, CanDispatch, Font, VisualStyle]() mutable
         { Tabs->SetConfiguration(MoveTemp(Panels), Value, Changed, CanDispatch, Font, VisualStyle); });
@@ -2870,6 +2950,14 @@ auto FCkUiView::ReleaseOwnerInteractions() -> void
     { return; }
 
     _OwnerInteractionsReleased = true;
+    // Hidden or externally retained trees must not publish deferred owner requests later.
+    // Menu dismissal can reload the view through Slate focus listeners; snapshot before callbacks.
+    auto OwnedTrees = TArray<TSharedPtr<SCkUiTree>>{};
+    for (const auto& [Id, Record] : _CommittedRetained)
+    {
+        if (Record.Kind == ERetainedKind::Tree)
+        { OwnedTrees.Add(StaticCastSharedPtr<SCkUiTree>(Record.Widget)); }
+    }
     // Repeat items and custom slots own independent retained components. Snapshot them before
     // releasing capture can invoke callbacks, and retire every child while its path is mounted.
     auto ChildViews = TArray<TSharedPtr<FCkUiView>>{};
@@ -2889,6 +2977,7 @@ auto FCkUiView::ReleaseOwnerInteractions() -> void
             if (Slot.IsValid() && Slot->View.IsValid()) { ChildViews.AddUnique(Slot->View); }
         }
     }
+    for (const TSharedPtr<SCkUiTree>& Tree : OwnedTrees) { Tree->ReleaseOwnerInteraction(); }
     for (const auto& Child : ChildViews) { Child->ReleaseOwnerInteractions(); }
     if (!FSlateApplication::IsInitialized())
     {
@@ -2911,7 +3000,15 @@ auto FCkUiView::ReleaseOwnerInteractions() -> void
 
 FCkUiView::~FCkUiView()
 {
-    if (!FSlateApplication::IsInitialized() || !IsInGameThread()) { return; }
+    if (!IsInGameThread()) { return; }
+    auto OwnedTrees = TArray<TSharedPtr<SCkUiTree>>{};
+    for (const auto& [Id, Record] : _CommittedRetained)
+    {
+        if (Record.Kind == ERetainedKind::Tree)
+        { OwnedTrees.Add(StaticCastSharedPtr<SCkUiTree>(Record.Widget)); }
+    }
+    for (const TSharedPtr<SCkUiTree>& Tree : OwnedTrees) { Tree->ReleaseOwnerInteraction(); }
+    if (!FSlateApplication::IsInitialized()) { return; }
     FSlateApplication& Slate = FSlateApplication::Get();
 
     struct FFocusedUser final
@@ -3187,7 +3284,13 @@ void FCkUiView::ReconcileInteractions(FCommitState& InOutState)
     for (const auto& [Id, Previous] : PreviousRetained)
     {
         if (Previous.Kind == ERetainedKind::Table) { StaticCastSharedPtr<SCkUiTable>(Previous.Widget)->ReleaseContextMenu(); }
-        if (Previous.Kind == ERetainedKind::Tree) { StaticCastSharedPtr<SCkUiTree>(Previous.Widget)->ReleaseContextMenu(); }
+        if (Previous.Kind == ERetainedKind::Tree)
+        {
+            const FRetainedRecord* Next = _CommittedRetained.Find(Id);
+            const TSharedPtr<SCkUiTree> Tree = StaticCastSharedPtr<SCkUiTree>(Previous.Widget);
+            if (Next == nullptr || Next->Widget != Previous.Widget) { Tree->ReleaseOwnerInteraction(); }
+            else { Tree->ReleaseContextMenu(); }
+        }
         if (Previous.Kind != ERetainedKind::MenuButton) { continue; }
         const FRetainedRecord* Next = _CommittedRetained.Find(Id);
         const TSharedPtr<SCkUiMenuButton> Menu = StaticCastSharedPtr<SCkUiMenuButton>(Previous.Widget);

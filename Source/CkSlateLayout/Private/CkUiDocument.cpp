@@ -1,4 +1,5 @@
 #include "CkSlateLayout/CkUiDocument.h"
+#include "CkSlateLayout/CkUiFontRegistry.h"
 #include "CkSlateLayout/CkUiWidgetRegistry.h"
 #include "CkUiWidgetRegistry.h"
 
@@ -266,13 +267,14 @@ namespace ck_ui_document
             || InProperty == TEXT("-ck-tabs-underline-color") || InProperty == TEXT("-ck-tabs-underline-height")
             || InProperty == TEXT("-ck-tabs-font-size") || InProperty == TEXT("-ck-tabs-font-weight")
             || InProperty == TEXT("-ck-tabs-header-padding-x") || InProperty == TEXT("-ck-tabs-header-padding-y")
+            || InProperty == TEXT("-ck-tabs-header-width") || InProperty == TEXT("-ck-tabs-header-align")
             || InProperty == TEXT("-ck-table-header-background")
             || InProperty == TEXT("-ck-table-sort-indicator-color")
             || InProperty == TEXT("-ck-table-header-padding-x") || InProperty == TEXT("-ck-table-header-padding-y")
             || InProperty == TEXT("-ck-table-row-background") || InProperty == TEXT("-ck-table-row-hover-background")
             || InProperty == TEXT("-ck-table-row-selected-background") || InProperty == TEXT("-ck-table-row-separator-color")
             || InProperty == TEXT("-ck-table-row-separator-width")
-            || InProperty == TEXT("-ck-tree-row-background") || InProperty == TEXT("-ck-tree-row-hover-background")
+            || InProperty == TEXT("-ck-tree-background") || InProperty == TEXT("-ck-tree-row-background") || InProperty == TEXT("-ck-tree-row-hover-background")
             || InProperty == TEXT("-ck-tree-row-selected-background") || InProperty == TEXT("-ck-tree-row-selected-accent-color")
             || InProperty == TEXT("-ck-tree-row-selected-accent-width");
     }
@@ -421,6 +423,12 @@ namespace ck_ui_document
                 { InOutState.Error(TEXT("invalid CSS value for '") + InProperty + TEXT("'")); return false; }
                 return true;
             }
+            if (InProperty == TEXT("-ck-tabs-header-align"))
+            {
+                if (Value != TEXT("left") && Value != TEXT("center") && Value != TEXT("right"))
+                { InOutState.Error(TEXT("invalid CSS value for '") + InProperty + TEXT("'")); return false; }
+                return true;
+            }
             if (IsVisualColorProperty(InProperty))
             {
                 FLinearColor Color;
@@ -429,7 +437,9 @@ namespace ck_ui_document
             }
             float Length = 0.0f;
             const bool bFontSize = InProperty == TEXT("-ck-tabs-font-size");
-            if (!ParseFloat(Value, true, Length) || Length < 0.0f || (bFontSize && (Length < 1.0f || Length > 512.0f)))
+            const bool bHeaderWidth = InProperty == TEXT("-ck-tabs-header-width");
+            if (!ParseFloat(Value, true, Length) || Length < 0.0f || (bFontSize && (Length < 1.0f || Length > 512.0f))
+                || (bHeaderWidth && (Length <= 0.0f || Length > 4096.0f)))
             { InOutState.Error(TEXT("invalid CSS length value for '") + InProperty + TEXT("'")); return false; }
             return true;
         }
@@ -457,7 +467,7 @@ namespace ck_ui_document
         }
         if (InProperty == TEXT("font-family"))
         {
-            if (Value != TEXT("monospace") && Value != TEXT("sans-serif"))
+            if (Value != TEXT("monospace") && Value != TEXT("sans-serif") && !FCkUiFontRegistry::IsFamilyName(Value))
             { InOutState.Error(TEXT("invalid CSS font-family")); return false; }
             return true;
         }
@@ -661,6 +671,14 @@ namespace ck_ui_document
         {
             if (InOutNode.Kind != ECkUiNodeKind::Tabs) { return InvalidForNode(); }
             InOutNode.TabsVisualStyle.Enabled = true;
+            if (InProperty == TEXT("-ck-tabs-header-align"))
+            {
+                if (Value == TEXT("left")) { InOutNode.TabsVisualStyle.HeaderAlign = HAlign_Left; }
+                else if (Value == TEXT("center")) { InOutNode.TabsVisualStyle.HeaderAlign = HAlign_Center; }
+                else if (Value == TEXT("right")) { InOutNode.TabsVisualStyle.HeaderAlign = HAlign_Right; }
+                else { InOutState.Error(FString::Printf(TEXT("node '%s': invalid CSS alignment for '%s'"), *InOutNode.Id, *InProperty)); return false; }
+                return true;
+            }
             if (InProperty == TEXT("-ck-tabs-font-weight"))
             {
                 InOutNode.TabsVisualStyle.Bold = Value == TEXT("bold");
@@ -678,7 +696,13 @@ namespace ck_ui_document
             float Length = 0.0f;
             if (!ParseFloat(Value, true, Length) || Length < 0.0f)
             { InOutState.Error(FString::Printf(TEXT("node '%s': invalid CSS length value for '%s'"), *InOutNode.Id, *InProperty)); return false; }
-            if (InProperty == TEXT("-ck-tabs-underline-height")) { InOutNode.TabsVisualStyle.UnderlineHeight = Length; }
+            if (InProperty == TEXT("-ck-tabs-header-width"))
+            {
+                if (Length <= 0.0f || Length > 4096.0f)
+                { InOutState.Error(FString::Printf(TEXT("node '%s': invalid CSS header width"), *InOutNode.Id)); return false; }
+                InOutNode.TabsVisualStyle.HeaderWidth = Length;
+            }
+            else if (InProperty == TEXT("-ck-tabs-underline-height")) { InOutNode.TabsVisualStyle.UnderlineHeight = Length; }
             else if (InProperty == TEXT("-ck-tabs-font-size")) { InOutNode.TabsVisualStyle.FontSize = Length; }
             else if (InProperty == TEXT("-ck-tabs-header-padding-x")) { InOutNode.TabsVisualStyle.HeaderPadding.Left = Length; InOutNode.TabsVisualStyle.HeaderPadding.Right = Length; }
             else { InOutNode.TabsVisualStyle.HeaderPadding.Top = Length; InOutNode.TabsVisualStyle.HeaderPadding.Bottom = Length; }
@@ -718,7 +742,8 @@ namespace ck_ui_document
             {
                 FLinearColor Color;
                 if (!ParseColor(Value, Color)) { InOutState.Error(FString::Printf(TEXT("node '%s': invalid CSS color value for '%s'"), *InOutNode.Id, *InProperty)); return false; }
-                if (InProperty == TEXT("-ck-tree-row-background")) { InOutNode.TreeVisualStyle.RowBackground = Color; }
+                if (InProperty == TEXT("-ck-tree-background")) { InOutNode.TreeVisualStyle.Background = Color; }
+                else if (InProperty == TEXT("-ck-tree-row-background")) { InOutNode.TreeVisualStyle.RowBackground = Color; }
                 else if (InProperty == TEXT("-ck-tree-row-hover-background")) { InOutNode.TreeVisualStyle.RowHoverBackground = Color; }
                 else if (InProperty == TEXT("-ck-tree-row-selected-background")) { InOutNode.TreeVisualStyle.RowSelectedBackground = Color; }
                 else { InOutNode.TreeVisualStyle.SelectedAccentColor = Color; }
@@ -736,7 +761,8 @@ namespace ck_ui_document
         if (InProperty == TEXT("background-color") && (bCustom || !Schema->bAllowsBackground)) { return InvalidForNode(); }
         if ((InProperty == TEXT("border-color") || InProperty == TEXT("border-width") || InProperty == TEXT("border-radius"))
             && (bCustom || !Schema->bAllowsBackground)) { return InvalidForNode(); }
-        if ((InProperty == TEXT("font-size") || InProperty == TEXT("font-family") || InProperty == TEXT("font-weight") || InProperty == TEXT("letter-spacing") || InProperty == TEXT("color")) && (bCustom || !Schema->bAllowsTextStyle)) { return InvalidForNode(); }
+        const bool bIsTabsFontFamily = InProperty == TEXT("font-family") && InOutNode.Kind == ECkUiNodeKind::Tabs;
+        if ((InProperty == TEXT("font-size") || InProperty == TEXT("font-family") || InProperty == TEXT("font-weight") || InProperty == TEXT("letter-spacing") || InProperty == TEXT("color")) && (bCustom || (!Schema->bAllowsTextStyle && !bIsTabsFontFamily))) { return InvalidForNode(); }
         if (InProperty == TEXT("font-family") && InOutNode.Kind != ECkUiNodeKind::Text && InOutNode.Kind != ECkUiNodeKind::Button && InOutNode.Kind != ECkUiNodeKind::MenuButton && InOutNode.Kind != ECkUiNodeKind::Tabs) { return InvalidForNode(); }
         if ((InProperty == TEXT("text-wrap") || InProperty == TEXT("overflow-wrap") || InProperty == TEXT("text-overflow")) && InOutNode.Kind != ECkUiNodeKind::Text && InOutNode.Kind != ECkUiNodeKind::Button) { return InvalidForNode(); }
         if (InProperty == TEXT("padding")) { if (!ParsePadding(Value, InOutNode.Style.Padding)) { InOutState.Error(TEXT("invalid padding on '") + InOutNode.Id + TEXT("'")); return false; } return true; }
@@ -783,7 +809,10 @@ namespace ck_ui_document
         }
         if (InProperty == TEXT("font-family"))
         {
-            InOutNode.Style.Monospace = Value == TEXT("monospace");
+            InOutNode.Style.FontFamily = Value;
+            if (Value == TEXT("monospace") || Value == TEXT("sans-serif"))
+            { InOutNode.Style.Monospace = Value == TEXT("monospace"); }
+            else { InOutNode.Style.Monospace.Reset(); }
             return true;
         }
         if (InProperty == TEXT("letter-spacing"))

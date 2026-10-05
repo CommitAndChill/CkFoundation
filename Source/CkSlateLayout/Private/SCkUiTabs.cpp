@@ -210,12 +210,14 @@ bool SCkUiTabs::IsRetainedHeader(const TSharedPtr<SWidget>& InWidget) const
 
 void SCkUiTabs::UpdateHeaderAppearance()
 {
+    if (_Headers.IsValid()) { _Headers->SetHorizontalAlignment(_VisualStyle.HeaderAlign); }
     for (FEntry& Entry : _Entries)
     {
         if (Entry.Header.IsValid())
         {
             Entry.Header->SetButtonStyle(_VisualStyle.Enabled ? &_FlatHeaderStyle : &_CoreHeaderStyle);
             Entry.Header->SetContentPadding(_VisualStyle.Enabled ? _VisualStyle.HeaderPadding : FMargin(4.0f, 2.0f));
+            Entry.Header->SetHAlign(_VisualStyle.HeaderWidth.IsSet() ? HAlign_Center : HAlign_Fill);
             Entry.Header->Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Paint);
         }
         if (Entry.HeaderLabel.IsValid())
@@ -228,6 +230,8 @@ void SCkUiTabs::UpdateHeaderAppearance()
             Entry.Underline->SetHeightOverride(_VisualStyle.Enabled ? _VisualStyle.UnderlineHeight.Get(2.0f) : 0.0f);
             Entry.Underline->SetVisibility(_VisualStyle.Enabled ? EVisibility::Visible : EVisibility::Collapsed);
         }
+        if (Entry.HeaderPresentation.IsValid())
+        { Entry.HeaderPresentation->SetWidthOverride(_VisualStyle.HeaderWidth.IsSet() ? FOptionalSize(_VisualStyle.HeaderWidth.GetValue()) : FOptionalSize()); }
         if (Entry.HeaderPresentation.IsValid()) { Entry.HeaderPresentation->Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Paint); }
     }
 }
@@ -299,6 +303,7 @@ void SCkUiTabs::Reconcile()
             SAssignNew(Entry.Header, SButton)
                 .ButtonStyle(_VisualStyle.Enabled ? &_FlatHeaderStyle : &_CoreHeaderStyle)
                 .ContentPadding(_VisualStyle.Enabled ? _VisualStyle.HeaderPadding : FMargin(4.0f, 2.0f))
+                .HAlign(_VisualStyle.HeaderWidth.IsSet() ? HAlign_Center : HAlign_Fill)
                 .IsEnabled_Lambda([WeakTabs = TWeakPtr<SCkUiTabs>(SharedThis(this)), Key = Entry.Key]()
                 { const TSharedPtr<SCkUiTabs> Owner = WeakTabs.Pin(); return Owner.IsValid() && Owner->_Active && Owner->_CanDispatchEvents.Get(false) && Owner->IsKeyEnabled(Key); })
                 .OnClicked_Lambda([WeakTabs = TWeakPtr<SCkUiTabs>(SharedThis(this)), Key = Entry.Key]()
@@ -324,6 +329,7 @@ void SCkUiTabs::Reconcile()
                     })
                 ];
             SAssignNew(Entry.HeaderPresentation, SBox)
+                .WidthOverride(_VisualStyle.HeaderWidth.IsSet() ? FOptionalSize(_VisualStyle.HeaderWidth.GetValue()) : FOptionalSize())
                 .Visibility_Lambda([WeakTabs = TWeakPtr<SCkUiTabs>(SharedThis(this)), Key = Entry.Key]()
                 { const TSharedPtr<SCkUiTabs> Owner = WeakTabs.Pin(); return Owner.IsValid() && Owner->IsKeyVisible(Key) ? EVisibility::Visible : EVisibility::Collapsed; })
                 [
