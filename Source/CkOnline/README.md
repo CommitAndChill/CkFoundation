@@ -1,5 +1,43 @@
 # CkOnline Direct consumer guide
 
+## Current continuation checkpoint, 2026-10-04
+
+Implementation is underway on the selected existing CkPlugins checkout and
+feature/online-services-research branch. The 2026-10-02 research transfer under
+docs/research/online-services remains historical: its research-only authorization
+and zero-runtime-evidence statements do not describe the current branch. Later
+user instructions authorized implementation, gyms and local commits while AFK.
+Use this permanent guide, PROGRESS.md and Plan/ gate contracts for current work;
+retained implementation must not depend on the two removable research commits.
+
+The latest scoped gate is queued-travel admission. OnlineQueuedTravelGate-01.log
+records an incremental build and eight passing Direct/script tests after a real
+red reproduction. That result covers the selected tests, not the whole delivery
+roadmap. Human checks of new panels, F8/F9 and recovery remain deferred.
+
+| Original delivery phase | Current evidence / remaining requirement |
+|---|---|
+| A: scope/provider compatibility | Selected source, engine and guides reconciled; first production consumer and licensed Steam setup remain unresolved |
+| B: persistent service host | Guarded actorless ECS host has focused native/script evidence; human graph and optional-AS evidence remain separate |
+| C: actual transports | Earlier two-window Direct round trip reported working; newer changes are unchecked; Steam, two-machine and installed Direct startup remain unverified |
+| D: Direct vertical slice | Persistent TCP lobby/ready/text/invites and gym gameplay bridge exist; production gameplay owner is proposed, Direct-only staging remains unverified |
+| E: Steam/social | No live account/App ID/invite or transport gate completed |
+| F: turnkey integration | Reusable binding/listen targets and guided gyms exist; production recipe, second game, graph execution and optional-AS build remain incomplete |
+| G/H: migration and future providers | Consumer migration/removal, release staging, EOS/EGS, voice and expanded topology remain separate scope |
+
+The next production slice is Plan/Gate_14_GameplayOperationOwner.md. A9-A11 in
+.claude/reports/ADJUDICATIONS.md await control-lobby authority, failed-entry return
+and established transport-loss rulings. Keep existing gym behavior; do not create
+production defaults or substitute more preparation helpers for that owner.
+
+Editor cards live in CkTests/Script/CkOnline/DEFERRED_EDITOR_CHECKS.md. Start with
+AFK_RETURN_EDITOR_TESTING.md for the combined normal path; F8 and F9 have separate
+short cards. Each uses two separate Standalone windows, Separate Server Off and
+RunUnderOneProcess Off, then Host J > Hosting > P / Client K; both R. Gate status
+must stay unchecked until the user reports the named observations.
+
+## Direct consumer recipe
+
 The Direct profile provides an actorless lobby and text control channel over real
 TCP. The GameInstance-owned online host retains one private ECS registry and
 native socket resources across gym/map travel. Gameplay connections are a

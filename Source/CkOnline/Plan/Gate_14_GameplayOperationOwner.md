@@ -2,8 +2,9 @@
 
 Prepared 2026-10-04 at root 2a1ec73, Foundation 57592becc and CkTests 8b468864.
 Status: proposed contract; no implementation or new runtime evidence yet.
-Gate13's eight passing tests remain the last automated baseline. Human checks
-remain deferred in CkTests/Script/CkOnline/AFK_RETURN_EDITOR_TESTING.md.
+Gate13's eight passing tests were the automated baseline at proposal creation.
+See PROGRESS.md for subsequent independent fixes and current evidence. Human
+checks remain deferred in CkTests/Script/CkOnline/AFK_RETURN_EDITOR_TESTING.md.
 
 ## Smallest useful slice
 
