@@ -84,6 +84,15 @@ auto
 
 auto
     UCk_UI_AuthoredSurface_UE::
+    IsConfiguredWith(
+        const TSharedPtr<FCkUiView>& InView) const
+    -> bool
+{
+    return IsInGameThread() && !_ReleasingSlateResources && InView.IsValid() && _View == InView && HasConfiguredView();
+}
+
+auto
+    UCk_UI_AuthoredSurface_UE::
     ReleaseSlateResources(
         bool bReleaseChildren)
     -> void
