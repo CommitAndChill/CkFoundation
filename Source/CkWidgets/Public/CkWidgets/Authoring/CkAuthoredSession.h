@@ -7,6 +7,8 @@
 
 #include "CkAuthoredSession.generated.h"
 
+class FCkUiAuthoredImageStorage;
+class UTexture2D;
 class FCkUiView;
 class FCkUiCollection;
 class FCkUiAuthoredInputReleaseGuard;
@@ -66,6 +68,25 @@ public:
     CK_PROPERTY(_Name);
     CK_PROPERTY(_Value);
     CK_DEFINE_CONSTRUCTORS(FCk_UI_AuthoredBool, _Name, _Value);
+};
+
+/** Named texture resource; object handles are copied and validated at admission. */
+USTRUCT(BlueprintType)
+struct CKWIDGETS_API FCk_UI_AuthoredImage
+{
+    GENERATED_BODY()
+public:
+    CK_GENERATED_BODY(FCk_UI_AuthoredImage);
+private:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
+    FString _Name;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
+    UTexture2D* _Texture = nullptr;
+public:
+    CK_PROPERTY(_Name);
+    CK_DEFINE_CONSTRUCTORS(FCk_UI_AuthoredImage, _Name);
+    auto Get_Texture() const -> UTexture2D*;
+    auto Set_Texture(UTexture2D* InValue) -> ThisType&;
 };
 
 /** Named font resources are admitted at initialization; empty optional paths omit those faces. */
@@ -136,6 +157,12 @@ private:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
     TArray<FCk_UI_AuthoredFontFamily> _FontFamilies;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
+    TArray<FCk_UI_AuthoredImage> _Images;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
+    bool _RegisterHudControls = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
+    bool _RegisterRadialControls = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
     TArray<FString> _Actions;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
     TArray<FCk_UI_AuthoredCollection> _Collections;
@@ -153,6 +180,9 @@ public:
     CK_PROPERTY(_Number);
     CK_PROPERTY(_Bool);
     CK_PROPERTY(_FontFamilies);
+    CK_PROPERTY(_Images);
+    CK_PROPERTY(_RegisterHudControls);
+    CK_PROPERTY(_RegisterRadialControls);
     CK_PROPERTY(_Actions);
     CK_PROPERTY(_Collections);
     CK_PROPERTY(_ItemActions);
@@ -195,6 +225,9 @@ public:
     bool TrySetNumber(const FString& InName, float InValue);
     UFUNCTION(BlueprintCallable, Category = "Ck|UI|Authoring")
     bool TrySetBool(const FString& InName, bool InValue);
+    /** Replaces a declared image atomically; null/stale textures and unknown names reject. */
+    UFUNCTION(BlueprintCallable, Category = "Ck|UI|Authoring")
+    bool TrySetImage(const FString& InName, UTexture2D* InTexture);
     UFUNCTION(BlueprintCallable, Category = "Ck|UI|Authoring")
     bool TryGetText(const FString& InName, FText& OutValue) const;
     UFUNCTION(BlueprintCallable, Category = "Ck|UI|Authoring")
@@ -271,6 +304,9 @@ private:
     TMap<FString, FText> _Text;
     TMap<FString, float> _Number;
     TMap<FString, bool> _Bool;
+    UPROPERTY(Transient)
+    TMap<FString, TObjectPtr<UTexture2D>> _ImageTextures;
+    TMap<FString, TSharedPtr<FCkUiAuthoredImageStorage>> _Images;
     TMap<FString, TSharedPtr<FCkUiCollection>> _Collections;
     TSharedPtr<FCkUiView> _View;
     TWeakObjectPtr<UCk_UI_AuthoredSurface_UE> _MountedSurface;

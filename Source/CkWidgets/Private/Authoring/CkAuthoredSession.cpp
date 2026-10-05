@@ -6,6 +6,11 @@
 #include "CkSlateLayout/CkUiFontRegistry.h"
 #include "CkSlateLayout/CkUiCheckbox.h"
 #include "CkSlateLayout/CkUiSlider.h"
+#include "CkSlateLayout/CkUiHudControls.h"
+#include "CkSlateLayout/CkUiRadialSelector.h"
+#include "CkCore/Ensure/CkEnsure.h"
+#include "Engine/Texture2D.h"
+#include "UObject/StrongObjectPtr.h"
 #include "CkSlateLayout/CkUiWidgetRegistry.h"
 #include "CkSlateLayout/SCkUiSurface.h"
 #include "Framework/Application/SlateApplication.h"
@@ -18,6 +23,7 @@
 #include "Input/Events.h"
 #include "Misc/Char.h"
 #include "Styling/CoreStyle.h"
+#include "Styling/SlateBrush.h"
 #include "Templates/UnrealTemplate.h"
 #include "Types/SlateAttributeMetaData.h"
 #include "Widgets/Input/SButton.h"
@@ -26,6 +32,43 @@
 #include "AngelscriptBinds.h"
 #include "StaticJIT/StaticJITBinds.h"
 #endif
+
+/** Attribute copies retain the brush address and resource after session retirement. */
+class FCkUiAuthoredImageStorage
+{
+public:
+    explicit FCkUiAuthoredImageStorage(UTexture2D* InTexture) : Texture(InTexture)
+    {
+        Brush.DrawAs = ESlateBrushDrawType::Image;
+        SetTexture(InTexture);
+    }
+    void SetTexture(UTexture2D* InTexture)
+    {
+        Texture.Reset(InTexture);
+        Brush.SetResourceObject(InTexture);
+        Brush.ImageSize = FVector2D(InTexture->GetSizeX(), InTexture->GetSizeY());
+    }
+    FSlateBrush Brush;
+    TStrongObjectPtr<UTexture2D> Texture;
+};
+
+auto
+    FCk_UI_AuthoredImage::
+    Get_Texture() const
+    -> UTexture2D*
+{
+    return _Texture;
+}
+
+auto
+    FCk_UI_AuthoredImage::
+    Set_Texture(
+        UTexture2D* InValue)
+    -> ThisType&
+{
+    _Texture = InValue;
+    return *this;
+}
 
 auto
     FCk_UI_AuthoredSession_Config::
@@ -49,9 +92,29 @@ namespace ck_ui_authored_session
 {
 #if WITH_ANGELSCRIPT_CK
     auto
-        RegisterInteractionOwnerAccessors()
+        RegisterObjectHandleAccessors()
         -> void
     {
+        auto ImageClass = FAngelscriptBinds::ExistingClass("FCk_UI_AuthoredImage");
+        const auto* ImageType = ImageClass.GetTypeInfo();
+        if (ImageType != nullptr)
+        {
+            if (ImageType->GetMethodByName("Get_Texture") == nullptr)
+            {
+                ImageClass.Method("UTexture2D Get_Texture() const",
+                    [](const FCk_UI_AuthoredImage* Self) -> UTexture2D* { return Self->Get_Texture(); });
+                FAngelscriptBinds::SetPreviousBindNoDiscard(true);
+                FScriptFunctionNativeForm::BindNativeMethod(ImageClass, "Get_Texture", true);
+            }
+            if (ImageType->GetMethodByName("Set_Texture") == nullptr)
+            {
+                ImageClass.Method("FCk_UI_AuthoredImage& Set_Texture(UTexture2D InValue)",
+                    METHODPR_TRIVIAL(FCk_UI_AuthoredImage&, FCk_UI_AuthoredImage, Set_Texture, (UTexture2D*)));
+                FAngelscriptBinds::SetPreviousBindNoDiscard(false);
+                FScriptFunctionNativeForm::BindNativeMethod(ImageClass, "Set_Texture", true);
+            }
+            FAngelscriptBinds::SetPreviousBindNoDiscard(false);
+        }
         auto ExistingClass = FAngelscriptBinds::ExistingClass("FCk_UI_AuthoredSession_Config");
         const auto* TypeInfo = ExistingClass.GetTypeInfo();
         if (TypeInfo == nullptr) { return; }
@@ -75,9 +138,9 @@ namespace ck_ui_authored_session
         FAngelscriptBinds::SetPreviousBindNoDiscard(false);
     }
 
-    const bool InteractionOwnerAccessorsRegistered = []()
+    const bool ObjectHandleAccessorsRegistered = []()
     {
-        FCkAngelScriptPropertyFunctionRegistration::RegisterPropertyFunction(&RegisterInteractionOwnerAccessors);
+        FCkAngelScriptPropertyFunctionRegistration::RegisterPropertyFunction(&RegisterObjectHandleAccessors);
         return true;
     }();
 #endif
@@ -248,6 +311,24 @@ auto
         if (!AdmitName(Entry.Get_Name(), Names, OutErrors)) { return false; }
         Bool.Add(Entry.Get_Name(), Entry.Get_Value());
     }
+    auto Images = TMap<FString, TSharedPtr<FCkUiAuthoredImageStorage>>{};
+    auto ImageTextures = TMap<FString, TObjectPtr<UTexture2D>>{};
+    for (const FCk_UI_AuthoredImage& Entry : InConfig.Get_Images())
+    {
+        const bool NameValid = IsName(Entry.Get_Name()) && !Names.Contains(Entry.Get_Name());
+        CK_ENSURE_IF_NOT(NameValid, TEXT("Authored image requires a unique identifier.")) {}
+        if (!NameValid) { return Fail(OutErrors, TEXT("Authored image requires a unique identifier across declarations.")); }
+        UTexture2D* Texture = Entry.Get_Texture();
+        const bool TextureValid = IsValid(Texture);
+        CK_ENSURE_IF_NOT(TextureValid, TEXT("Authored image requires a valid texture.")) {}
+        if (!TextureValid) { return Fail(OutErrors, TEXT("Authored image requires a valid texture.")); }
+        const bool DimensionsValid = Texture->GetSizeX() > 0 && Texture->GetSizeY() > 0;
+        CK_ENSURE_IF_NOT(DimensionsValid, TEXT("Authored image requires positive texture dimensions.")) {}
+        if (!DimensionsValid) { return Fail(OutErrors, TEXT("Authored image requires positive texture dimensions.")); }
+        Names.Add(Entry.Get_Name());
+        Images.Add(Entry.Get_Name(), MakeShared<FCkUiAuthoredImageStorage>(Texture));
+        ImageTextures.Add(Entry.Get_Name(), Texture);
+    }
     for (const FString& Name : InConfig.Get_Actions())
     { if (!AdmitName(Name, Names, OutErrors)) { return false; } }
 
@@ -325,12 +406,34 @@ auto
     const FCkUiLoadResult CheckboxResult = FCkUiCheckbox::Register(Registry);
     if (!CheckboxResult.Succeeded) { OutErrors = CheckboxResult.Errors; return false; }
 
+    if (InConfig.Get_RegisterHudControls())
+    {
+        const FCkUiLoadResult Result = FCkUiHudControls::Register(Registry);
+        const bool Registered = Result.Succeeded;
+        CK_ENSURE_IF_NOT(Registered, TEXT("Authored HUD controls could not be registered.")) {}
+        if (!Registered) { OutErrors = Result.Errors; return false; }
+    }
+    if (InConfig.Get_RegisterRadialControls())
+    {
+        const FCkUiLoadResult Result = RegisterRadialUiControls(Registry);
+        const bool Registered = Result.Succeeded;
+        CK_ENSURE_IF_NOT(Registered, TEXT("Authored radial controls could not be registered.")) {}
+        if (!Registered) { OutErrors = Result.Errors; return false; }
+    }
+
     const TWeakObjectPtr<UCk_UI_AuthoredSession_UE> Weak{this};
     auto Data = FCkUiView::FDataBindings{};
     Data.RequiredButtons = MoveTemp(RequiredButtons);
     Data.Collections = Collections;
     for (const FString& Name : InConfig.Get_ItemActions())
     {
+        Data.StringChanged.Add(Name, FCkUiOnStringChanged::CreateLambda([Weak, Name](const FString& Proposed)
+        {
+            // A listener may mutate the model or retire the session; copy the key before dispatch.
+            const FString Key = Proposed;
+            auto* Owner = Weak.Get();
+            if (Owner != nullptr && Owner->CanDispatchEvents()) { Owner->OnItemAction.Broadcast(Name, Key); }
+        }));
         Data.ItemActions.Add(Name, FCkUiOnItemAction::CreateLambda([Weak, Name](FString Key)
         {
             auto* Owner = Weak.Get();
@@ -349,6 +452,15 @@ auto
         // Native reload guards and the reflected callbacks below still suppress event dispatch.
         return Owner != nullptr && Owner->Get_IsUsable() && (!Owner->_InputOwnerBound || Owner->Get_IsInputActive());
     });
+    for (const auto& Entry : Images)
+    {
+        const TSharedPtr<FCkUiAuthoredImageStorage> Storage = Entry.Value;
+        Data.Images.Add(Entry.Key, TAttribute<const FSlateBrush*>::CreateLambda([Weak, Storage]() -> const FSlateBrush*
+        {
+            const auto* Owner = Weak.Get();
+            return Owner != nullptr && Owner->Get_IsUsable() ? &Storage->Brush : nullptr;
+        }));
+    }
     for (const auto& Entry : Text)
     {
         const FString Name = Entry.Key;
@@ -358,6 +470,13 @@ auto
             const auto* Owner = Weak.Get();
             if (Owner != nullptr) { Owner->TryGetText(Name, Value); }
             return Value;
+        }));
+        Data.String.Add(Name, TAttribute<FString>::CreateLambda([Weak, Name]()
+        {
+            FText Value;
+            const auto* Owner = Weak.Get();
+            if (Owner != nullptr) { Owner->TryGetText(Name, Value); }
+            return Value.ToString();
         }));
         Data.TextChanged.Add(Name, FOnTextChanged::CreateLambda([Weak, Name](const FText& Proposed)
         {
@@ -431,6 +550,8 @@ auto
         Candidate->ReleaseOwnerInteractions();
         return Fail(OutErrors, TEXT("Authored interaction context changed during initialization."));
     }
+    _Images = MoveTemp(Images);
+    _ImageTextures = MoveTemp(ImageTextures);
     _Text = MoveTemp(Text);
     _Number = MoveTemp(Number);
     _Bool = MoveTemp(Bool);
@@ -562,6 +683,29 @@ auto
     bool* Value = _Bool.Find(InName);
     if (Value == nullptr) { return false; }
     *Value = InValue;
+    return true;
+}
+
+auto
+    UCk_UI_AuthoredSession_UE::
+    TrySetImage(
+        const FString& InName,
+        UTexture2D* InTexture)
+    -> bool
+{
+    if (!Get_IsUsable()) { return false; }
+    const bool TextureValid = IsValid(InTexture);
+    CK_ENSURE_IF_NOT(TextureValid, TEXT("Authored image replacement requires a valid texture.")) {}
+    if (!TextureValid) { return false; }
+    const bool DimensionsValid = InTexture->GetSizeX() > 0 && InTexture->GetSizeY() > 0;
+    CK_ENSURE_IF_NOT(DimensionsValid, TEXT("Authored image replacement requires positive texture dimensions.")) {}
+    if (!DimensionsValid) { return false; }
+    const TSharedPtr<FCkUiAuthoredImageStorage> Storage = _Images.FindRef(InName);
+    const bool Declared = Storage.IsValid();
+    CK_ENSURE_IF_NOT(Declared, TEXT("Authored image replacement requires a declared image.")) {}
+    if (!Declared) { return false; }
+    Storage->SetTexture(InTexture);
+    _ImageTextures.FindChecked(InName) = InTexture;
     return true;
 }
 
@@ -867,6 +1011,8 @@ auto
     _Number.Reset();
     _Bool.Reset();
     _Collections.Reset();
+    _Images.Reset();
+    _ImageTextures.Reset();
     _InteractionOwner.Reset();
     _InputPlayer.Reset();
     _InputWorld.Reset();
