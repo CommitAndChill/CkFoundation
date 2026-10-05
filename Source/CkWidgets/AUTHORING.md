@@ -37,6 +37,51 @@ One session may mount on one surface during its lifetime. Invalid mount candidat
 
 Text maps to text/search bindings, booleans to visibility/enabled/checkbox values, and numbers to numeric bindings. The session internally registers the existing slider and checkbox. A slider's required `interaction` refers to its number declaration and emits a proposal on commit; optional `changed` also emits live proposals. Use both only when the consumer intentionally handles both. Actions refer to the declared action list.
 
+Optional `Config.Set_RegisterHudControls(true)` registers the existing
+`hud-meter` and `hud-graphic` controls; `Set_RegisterRadialControls(true)`
+registers `radial-selector`. Both default to false. Registration is completed
+before view publication, and a failed registration rejects the full session.
+The native [HUD and radial grammar](../CkSlateLayout/AUTHORING.md) remains the
+source of control properties and collection schema requirements.
+
+`Config.Set_Images` declares named texture resources. In AngelScript:
+
+```angelscript
+FCk_UI_AuthoredImage Frame("hud-frame");
+Frame.Set_Texture(FrameTexture); // UTexture2D loaded/owned by the host
+TArray<FCk_UI_AuthoredImage> Images;
+Images.Add(Frame);
+Config.Set_Images(Images);
+Config.Set_RegisterHudControls(true);
+Config.Set_RegisterRadialControls(true);
+```
+
+The Blueprint struct exposes Name and Texture; C++ uses the same Name
+constructor and `Set_Texture(UTexture2D*)` accessor. Textures must be valid
+nonnull objects with positive dimensions, and image names share the scalar/action/collection namespace.
+Invalid names, duplicates, null/stale textures and zero dimensions reject initialization before
+any view or model publication. The caller can correct the configuration and
+retry. `TrySetImage(Name, Texture)` replaces only an admitted image; invalid
+textures or dimensions, wrong-type/unknown names and retired sessions reject without mutation.
+Bind the resource with `hud-graphic image-bind="hud-frame"`. Each resource has a stable session-owned
+brush and a reflected strong texture reference. Copied native image attributes
+also retain the brush and texture, keeping externally held graphics safe across
+session release and GC; retired attributes return null. Resource retention ends
+when those native references are dropped. Release freezes native controls and
+suppresses further events and updates.
+
+Every declared Text scalar also supplies a native String binding using its
+current `FText.ToString()` value. For radial selection, declare a Text scalar
+such as `selected-spell` and author `selection-bind="selected-spell"`. Declare
+`select-spell` and `activate-spell` in `Config.Set_ItemActions`, then author
+`select="select-spell" activate="activate-spell"`. Both emit the existing
+`OnItemAction(ActionName, Key)` event with a copied stable key. Event handlers
+accept selection explicitly with `TrySetText("selected-spell", FText::FromString(Key))`;
+activation can deploy the keyed command. The bridge does not mutate selection
+on proposals. Dispatch uses the same admitted input-owner and operation guards
+as ordinary item actions and remains safe when a listener replaces records or
+releases the session.
+
 The session supplies Core's Regular composite as its base font; supported CSS
 size/weight choices derive from that valid source. The later native
 [default-font repair](../../../CkTests/Documentation/UI/DefaultFontProof/README.md)
