@@ -36,6 +36,67 @@ Client K locally; remote Client F2/O pastes the new host invite, Enter/F3 joins.
 | 12: public ready-lobby binding | Incremental build and eight focused Direct/script tests pass in OnlinePublicReadyLobbyGate-01 | Deferred while user is AFK; readiness barrier and gameplay round trip through Foundation validation |
 | 13: configured listen target | Incremental build and eight focused Direct/script tests pass in OnlineConfiguredListenTargetGate-01 | Deferred while user is AFK; invalid-port preservation and actual gameplay on caller-selected port 7789 |
 | 14: production gameplay operation owner | Contract proposed; source ownership and runner surfaces inspected; no implementation or runtime gate yet | Pending contract rulings A9-A11; existing gym behavior preserved |
+| 15: gym failure-event ownership | Old behavior reproduced red; incremental build and eight focused Direct/script tests pass in OnlineFailureIsolationGate-01 | Deferred while user is AFK; numbered F8 rejection observation and genuine Host X-first recovery |
+
+## Gym failure-event ownership phase, 2026-10-04
+
+Entry revisions: root 64b54aa, Foundation d26ee05ac, CkTests 8b468864. Contract
+written before implementation: Plan/Gate_15_GymFailureOwnership.md. Gate14 remains
+a proposal pending A9-A11; this independent fix changes only the CkTests observer
+and its diagnostic, not Foundation gameplay policy or engine configuration.
+
+The gym previously accepted any network failure on its GI-owned world and could
+mistake null pending-driver equality for ownership. Selected-engine source shows
+the network-failure multicast fires before engine filtering. The observer now
+validates thread, active phase, GI/context and exact current/pending driver before
+changing state. Narrow host-creation and missing-pending-driver cases preserve
+legitimate null callbacks. Those compatibility branches were source-reviewed;
+they were not separately fault-injected in this run.
+
+The existing real pending ClientTravel fixture now broadcasts malformed null and
+foreign-driver ConnectionLost inputs through the subscribed observer. It checks
+unchanged operational state/error, actual world/pending object/driver, queued
+travel, ready binding, control revision and completion count, then retains the
+genuine failed-travel return to a replacement Lobby world. No resource methods
+are called on the constructor-created foreign driver. These negative inputs do
+not represent an actual remote disconnect.
+
+OnlineFailureIsolationRed-01.log: incremental build passed, the extended existing
+test failed on the expected old state/error mutation; zero skipped/contaminated,
+exit 1, tests 29s. OnlineFailureIsolationGate-01.log: final incremental build and
+all eight compatible Direct/script tests passed, zero failed/skipped/contaminated,
+exit 0, tests 1m 2s. Each invocation used two fresh boots (inline discovery and one
+serial lane), four in total. No source edits occurred during either invocation.
+Fresh final combined, discovery (CkPlugins.log) and external test (CkPlugins_2.log)
+logs have zero Error/Fatal records, ensures, script errors or reload contamination.
+Expected malformed-input warnings and existing nonfatal warnings remain. The
+known-red same-process Iris fixture and renderer-only population stay excluded.
+
+Final arguments: `--build --target=Editor --test --test-pattern=Online
+--project-prefix=Ck.Online.Direct --parallel=1 --no-live --skip-renderer-tests
+--project=D:/Repos/CkPlugins --output=Saved/Logs/OnlineFailureIsolationGate-01.log`.
+The red invocation used the same flags with the exact
+GameplayEntryFailureReturnsToLobby pattern and OnlineFailureIsolationRed-01.log.
+
+The gym appends F8 and a colored detail readback. A new OBSERVED number requires
+unchanged established world/driver, session/proof, ready binding and travel state;
+CHANGED reports an alteration without rolling it back. Diagnostic state is
+separate from operational errors, resets on new entry and guards re-entry. The
+new reflected surface and AS panel compile; running F8 in two windows and
+Blueprint graph execution have not been observed.
+
+FAILURE_ISOLATION_EDITOR_TESTING.md is a short, unchecked three-check card. It
+repeats separate Standalone setup and joining: Host J, wait Hosting, P / Client K;
+both R; Host G, wait IP Hosting / Client G, then Client P. Both F8 observations
+must preserve the live session and permit newer proof. Host X first must still
+cause automatic Client return with the retained ready control identity; manual
+Client X is not a substitute. Earlier editor checks remain deferred separately.
+
+Local delivery is split into observer/regression, gym diagnostic and deferred
+instructions. CkTests e287c3ff holds the fix and b2e0b9e7 the gym API/panel. Only
+Foundation/CkTests pointers are updated in the root checkpoint. Unrelated work
+and both separate [DROP BEFORE MERGE] ancestors remain preserved. No push, history
+rewrite, alternate checkout or artifact cleanup was performed.
 
 ## Production gameplay ownership proposal, 2026-10-04
 
