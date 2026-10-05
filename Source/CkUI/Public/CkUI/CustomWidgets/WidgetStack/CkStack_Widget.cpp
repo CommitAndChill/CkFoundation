@@ -1,4 +1,4 @@
-﻿// Copyright 2025 CkFoundation. All Rights Reserved.
+// Copyright 2025 CkFoundation. All Rights Reserved.
 
 #include "CkUI/CustomWidgets/WidgetStack/CkStack_Widget.h"
 
@@ -187,11 +187,34 @@ auto
         bool bReleaseChildren)
     -> void
 {
+    // Teardown can invoke widget callbacks; revoke admissions before any of them run.
+    _WidgetAdmissions.Reset();
     Super::ReleaseSlateResources(bReleaseChildren);
 
     // The stack's own Slate is going away (world/layout teardown) — kept trees must go with it,
     // or they would outlive the viewport they were built for.
     _KeptAliveSlate.Empty();
+}
+
+auto
+    UCk_WidgetStack_UE::
+    OnWidgetAddedToList(
+        UCommonActivatableWidget& InWidget)
+    -> void
+{
+    for (auto Iterator = _WidgetAdmissions.CreateIterator(); Iterator; ++Iterator)
+    {
+        if (NOT Iterator.Key().IsValid() || NOT ContainsWidget(Iterator.Key().Get()))
+        { Iterator.RemoveCurrent(); }
+    }
+    const auto GenerationAvailable = _AdmissionGeneration < MAX_uint64;
+    CK_ENSURE_IF_NOT(GenerationAvailable, TEXT("Widget admission generations exhausted for stack [{}]"), this) {}
+    if (GenerationAvailable)
+    { _WidgetAdmissions.Add(&InWidget, ++_AdmissionGeneration); }
+    else
+    { _WidgetAdmissions.Reset(); }
+    // Publish before Slate construction/activation, both of which can reenter the stack.
+    Super::OnWidgetAddedToList(InWidget);
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -219,6 +242,18 @@ auto
     -> bool
 {
     return GetWidgetList().Contains(InWidget);
+}
+
+auto
+    UCk_WidgetStack_UE::
+    Get_WidgetAdmissionGeneration(
+        UCommonActivatableWidget* InWidget) const
+    -> uint64
+{
+    if (NOT IsInGameThread() || ck::Is_NOT_Valid(InWidget) || NOT ContainsWidget(InWidget))
+    { return 0; }
+    const auto* Generation = _WidgetAdmissions.Find(InWidget);
+    return Generation != nullptr ? *Generation : 0;
 }
 
 // --------------------------------------------------------------------------------------------------------------------
