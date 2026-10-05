@@ -3,7 +3,7 @@
 Updated 2026-10-04. This is the current evidence ledger; gate files define the
 contracts. Keep verified automation separate from unobserved editor acceptance.
 
-## Local commit checkpoint, 2026-10-04
+## Earlier local commit checkpoint, 2026-10-04
 
 The user requested committing the completed work while remaining AFK. Foundation
 `0f97cab77` stores the admitted host-address API. CkTests stores the shared panel
@@ -34,6 +34,80 @@ Client K locally; remote Client F2/O pastes the new host invite, Enter/F3 joins.
 | 10: gameplay failure recovery | Incremental build and eight focused Direct/script tests pass in OnlineGameplayRecoveryGate-02, including real failed ClientTravel and retained ready lobby | Deferred while user is AFK; early Client G and Host X-first observations |
 | 11: Direct invite renewal | Incremental build and eight focused Direct/script tests pass in OnlineInviteRenewalGate-02 | Deferred while user is AFK; rotate invite without changing the live lobby, reject old invite and join fresh |
 | 12: public ready-lobby binding | Incremental build and eight focused Direct/script tests pass in OnlinePublicReadyLobbyGate-01 | Deferred while user is AFK; readiness barrier and gameplay round trip through Foundation validation |
+| 13: configured listen target | Incremental build and eight focused Direct/script tests pass in OnlineConfiguredListenTargetGate-01 | Deferred while user is AFK; invalid-port preservation and actual gameplay on caller-selected port 7789 |
+
+## Configured listen target phase
+
+Gate12 is committed at root 01b4fbd, Foundation d3a2b3b06 and CkTests c55c07fc;
+both plugin checkouts were clean at entry. Contract written before implementation:
+Plan/Gate_13_ConfiguredListenTarget.md. The user authorized continued phases and
+local commits while AFK. Unrelated root work and both removable research ancestors
+remain intact. No checkout duplication, artifact deletion, push or history rewrite.
+
+Foundation now exposes getter-only FCk_OnlineDirect_ListenTarget and reflected
+generic/ready-host builders. Caller supplies the soft map, loaded GameMode class,
+canonical IPv4 address and port. Functional validation precedes class operations;
+default, malformed, abstract, deprecated or replaced classes cannot publish intent.
+Map paths are bounded canonical mounted package/object paths with matching asset
+names and no subobject. Exact local FURL map/port/game/listen options round-trip
+before both target strings publish atomically. Failure resets both strings. The
+helpers do not load assets, travel, bind drivers, authenticate or prove map cooking.
+Class-flag rejection is source-reviewed; no flag-specific runtime assertion was run.
+
+The actual IP consumer uses these outputs before arming travel. Its loaded gym
+mode, map, ownership/live binding, driver/context checks, deadlines and recovery
+remain consumer policy. The gym appends F4 in details after existing row42/Y and
+uses one validated port for both G roles. Default is still 7787; the control TCP
+invite stays on 7788 and does not advertise gameplay ports. Both windows must
+choose the same port. Invalid decimal/range input preserves the previous value;
+editing is limited to recognized offline gym worlds with no active driver, pending
+connection or queued context/world travel. Text commit closes the modal first and
+rechecks the same setter guards after focus callbacks.
+
+Existing real ready TCP tests now cover generic/bound targets, exact URL options,
+malformed map/mode/address/ports, default/client binding rejection, cleared output
+and unchanged live control state/completions. The real failed-entry recovery test
+edits/rejects/restores ports in its actual Offline Lobby, then rejects editing while
+actual ClientTravel is pending without cancelling entry or changing the ready lobby.
+Its FObjectKey identity and timing bounds remain. The AS smoke calls both reflected
+builders using the consumer's typed map/mode and its actual ready host. Native/AS
+calls are runtime evidence; Blueprint graph execution and serialized stale-class
+branches are not established by this run.
+
+`Saved/Logs/OnlineConfiguredListenTargetGate-01.log`: incremental editor build and
+all eight focused tests passed, zero failed/skipped/contaminated, exit 0, tests 46s.
+The detached run waited for another machine-local build without modifying that
+checkout. Exactly two fresh boots covered discovery and one serial test lane.
+Combined, discovery (CkPlugins-backup-2026.10.05-00.21.55.log) and external test
+(CkPlugins.log) logs contain zero Error/Fatal records, ensures, script errors or
+reload contamination. Existing nonfatal warnings remain. The known-red two-world
+Iris fixture and renderer-only population remain excluded.
+
+Arguments: `--build --target=Editor --test --test-pattern=Online
+--project-prefix=Ck.Online.Direct --discover-fresh --parallel=1 --no-live
+--skip-renderer-tests --project=D:/Repos/CkPlugins
+--output=Saved/Logs/OnlineConfiguredListenTargetGate-01.log`.
+
+The short CONFIGURED_GAMEPLAY_PORT_EDITOR_TESTING.md stays unchecked. The 215-word
+AFK_RETURN_EDITOR_TESTING.md combines the latest normal path into three checks,
+repeats exact separate-Standalone setup and Host J > Hosting > P / Client K joining,
+and requires one new completed renewal before reading Succeeded. Old-invite and
+recovery-fault checks remain separately deferred. The same completion correction
+was made in the earlier renewal guide. Neither card marks all outstanding gates
+accepted. Actual two-process driver binding on 7789, proof, colors/focus, remote
+reachability and packaging remain human/separate observations.
+
+Local delivery: Foundation 70fd352bb holds the API/recipe; CkTests 43ce9194 holds
+consumer/gym/coverage and 8b468864 holds deferred guides. Contract/evidence is a
+separate Foundation documentation commit before the root's two-pointer checkpoint.
+
+Next recommendation: consolidate the deferred editor observations before another
+helper gate. More helpers would duplicate the proven preparation path. The next
+substantive implementation needs either a defined production gameplay lifecycle/
+travel owner and caller contract, or the Steam application's App ID and licensed
+test-account setup. Those product/lifecycle decisions remain with the maintainer;
+no broad migration or provider configuration has been started. Deferred human
+acceptance does not make this completed code gate blocked.
 
 ## Public ready-lobby binding phase
 
