@@ -3,6 +3,25 @@
 Updated 2026-10-04. This is the current evidence ledger; gate files define the
 contracts. Keep verified automation separate from unobserved editor acceptance.
 
+## Next feature gate: Steam lobby profile foundation
+
+After the Foundation gameplay connection owner, the next feature family is the
+optional Steam/social profile. Plan/Gate_17_SteamLobbyProfile.md bounds the first
+slice to Steam identity readiness, one OSS-owned lobby session, and warm/cold
+invite normalization. It defers persistent cross-provider friends, chat, voice,
+EOS/EGS and fallback behavior. No implementation or Steam runtime acceptance is
+claimed yet.
+
+The selected engine source is present at `D:/Repos/UnrealEngineAngelscript` and
+includes the Steam OSS plugin and Steamworks dependency. The current project
+enables OnlineSubsystem and OnlineSubsystemUtils but not OnlineSubsystemSteam;
+there is no project App ID or Steam account configuration in this checkout.
+Source review found `FOnlineFriendsSteam::SendInvite` and `AcceptInvite` return
+unsupported, whereas session invites and the overlay require a real lobby/game
+session. Therefore, Steam invitations must be built on the OSS session owner,
+and live invite behavior remains a two-account editor check. Keep Steam absent
+from Direct-only tests and do not infer availability from a compiled interface.
+
 ## Earlier local commit checkpoint, 2026-10-04
 
 The user requested committing the completed work while remaining AFK. Foundation

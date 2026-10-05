@@ -22,17 +22,25 @@ deferred.
 | B: persistent service host | Guarded actorless ECS host has focused native/script evidence; human graph and optional-AS evidence remain separate |
 | C: actual transports | Earlier two-window Direct round trip reported working; newer changes are unchecked; Steam, two-machine and installed Direct startup remain unverified |
 | D: Direct vertical slice | Persistent TCP lobby/ready/text/invites and gym gameplay bridge exist; the Foundation gameplay connection owner and focused native/script gate passed; two-window editor checks and Direct-only staging remain unverified |
-| E: Steam/social | No live account/App ID/invite or transport gate completed |
+| E: Steam/social | Next: Gate 17 adds one optional Steam OSS lobby/session path; no live App ID/account/invite gate completed. See Plan/Gate_17_SteamLobbyProfile.md |
 | F: turnkey integration | Reusable binding/listen targets and guided gyms exist; production recipe, second game, graph execution and optional-AS build remain incomplete |
 | G/H: migration and future providers | Consumer migration/removal, release staging, EOS/EGS, voice and expanded topology remain separate scope |
 
-The current implementation gate is Plan/Gate_14_GameplayOperationOwner.md.
+The latest completed implementation gate is Plan/Gate_14_GameplayOperationOwner.md.
 DECISIONS.md entries 112-114 resolve A9-A11: the ready control lobby remains
 authoritative through gameplay, and control loss, failed entry, or established
 transport loss starts one bounded return to the configured Lobby. The first
 public owner has no caller policy overrides. Its focused native, script and real
 failed-travel checks passed; successful two-window entry/readiness and Blueprint
 graph use remain human editor observations.
+
+The next implementation gate is Plan/Gate_17_SteamLobbyProfile.md. The local
+engine Steam OSS source supports lobby invites through a real OSS session, while
+its `IOnlineFriends::SendInvite` and `AcceptInvite` methods explicitly report
+unsupported. The project currently leaves OnlineSubsystemSteam disabled and has
+no project App ID. Keep Steam optional; prove fake-backed operation semantics
+before the separate two-account editor acceptance. Do not treat a Steam session
+invite as membership or gameplay admission.
 
 Editor cards live in CkTests/Script/CkOnline/DEFERRED_EDITOR_CHECKS.md. The
 current owner check is PUBLIC_CONNECTION_EDITOR_TESTING.md. Open the TestGyms
