@@ -37,6 +37,77 @@ Client K locally; remote Client F2/O pastes the new host invite, Enter/F3 joins.
 | 13: configured listen target | Incremental build and eight focused Direct/script tests pass in OnlineConfiguredListenTargetGate-01 | Deferred while user is AFK; invalid-port preservation and actual gameplay on caller-selected port 7789 |
 | 14: production gameplay operation owner | Contract proposed; source ownership and runner surfaces inspected; no implementation or runtime gate yet | Pending contract rulings A9-A11; existing gym behavior preserved |
 | 15: gym failure-event ownership | Old behavior reproduced red; incremental build and eight focused Direct/script tests pass in OnlineFailureIsolationGate-01 | Deferred while user is AFK; numbered F8 rejection observation and genuine Host X-first recovery |
+| 16: queued-travel admission | Real queued Lobby destination overwrite reproduced red; incremental build and eight focused Direct/script tests pass in OnlineQueuedTravelGate-01 | Deferred while user is AFK; numbered Client F9 observation after real local reload, then ordinary gameplay proof/return |
+
+## Queued-travel admission phase, 2026-10-04
+
+Entry revisions: root ff05791, Foundation f6b18ceaa and CkTests b49c4c01. Contract
+written before implementation: Plan/Gate_16_QueuedTravelAdmission.md. Independent
+source review found an existing ownership gap, not a new recovery-policy choice.
+Engine SetClientTravel overwrites the current context destination/type; Browse
+can replace pending network travel. The old Host/Join admission did not check
+those busy conditions before publishing state or issuing its own travel.
+
+The consumer now requires the exact owned current GI/world/engine context, no
+PendingNetGame, and empty Context.TravelURL and World.NextURL. Host/Join check
+before preparation and immediately before binding/state/deadline publication;
+wrong-thread/deinitialized requests reject without diagnostics or travel.
+Offline and successful return use the same idle-context definition. Rejected
+entry may expose the existing rejection diagnostic, but never clears the prior
+travel or publishes an operational subset. Cancellation and recovery policies
+are unchanged; production Gate14 and A9-A11 remain pending.
+
+The existing real one-PIE recovery fixture queues a valid local Lobby reload with
+engine SetClientTravel, then attempts a ready-lobby Join before an engine tick.
+It asserts false idle readback, entry rejection, unchanged actual queued URL/type,
+world, control binding/revision/completions and no new gameplay bridge. It awaits
+the real reload into a different idle Lobby, updates the next departure identity,
+then retains genuine pending Join, malformed-event rejection and bounded failed
+ClientTravel return. Final return explicitly checks both queued URLs are empty.
+No engine fields are manually fabricated, restored or cleared by the test.
+
+OnlineQueuedTravelRed-01.log: incremental build passed; the test failed on false
+idle, competing entry admission, overwritten URL, Joining state and new bridge.
+Total 1 failed, zero skipped/contaminated, exit 1, tests 38s. Final
+OnlineQueuedTravelGate-01.log: incremental build and all eight compatible
+Direct/script tests passed, zero failed/skipped/contaminated, exit 0, tests 57s.
+Each invocation used inline discovery and one serial lane: four fresh boots total.
+Source remained frozen during each invocation. Fresh final combined, discovery
+(CkPlugins.log) and external test (CkPlugins_2.log) logs contain zero Error/Fatal
+records, ensures, script errors or reload contamination. Existing nonfatal and
+negative-input warnings remain; the known-red same-process Iris fixture and
+renderer-only population stay excluded.
+
+Final arguments: `--build --target=Editor --test --test-pattern=Online
+--project-prefix=Ck.Online.Direct --parallel=1 --no-live --skip-renderer-tests
+--project=D:/Repos/CkPlugins --output=Saved/Logs/OnlineQueuedTravelGate-01.log`.
+The red invocation used the exact GameplayEntryFailureReturnsToLobby pattern and
+OnlineQueuedTravelRed-01.log. Runtime coverage of a queued server NextURL,
+Offline-plus-pending context or Host rejection is not inferred from the client
+queued-reload case; their common guard was source-reviewed.
+
+F9 is a client-ready Lobby diagnostic. It queues a genuine local reload, calls
+the competing entry path, then observes a new idle Lobby with retained ready
+control identity, revision and completion count. A new numbered OBSERVED requires
+both observations before its deadline; CHANGED reports failure without rollback.
+Diagnostic state is separate from operational state, guards re-entry, and resets
+on a new admitted gameplay entry. Its fixed detail rows44/45 precede the variable
+transcript, preserving existing action rows0-43. The reflected surface and AS panel
+compile; native assertions independently cover core entry behavior. Actual F9
+execution, rendered status and Blueprint graph execution remain unobserved.
+
+QUEUED_TRAVEL_EDITOR_TESTING.md has three unchecked checks and repeats two separate
+Standalone windows, Separate Server Off/RunUnderOneProcess Off, Host J > Hosting >
+P / Client K; both R. Client F9 must yield a new OBSERVED after the real reload;
+the busy-travel rejection in Bridge last error is expected. Then Host G > IP
+Hosting / Client G/P proves normal gameplay still works, followed by Client X /
+Host X return. Earlier F8/control-loss/remote and other checks remain deferred.
+
+Permanent README now distinguishes the current implementation from the dated
+research-only transfer and maps remaining delivery phases to actual evidence.
+Only owned changes and Foundation/CkTests root pointers are checkpointed. Unrelated
+work and both separate [DROP BEFORE MERGE] ancestors are preserved; no alternate
+checkout, artifact cleanup, history rewrite or push is performed.
 
 ## Gym failure-event ownership phase, 2026-10-04
 
