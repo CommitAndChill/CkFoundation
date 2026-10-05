@@ -2,6 +2,8 @@
 
 #include "CkSlateLayout/CkUiCollection.h"
 
+#include "Fonts/FontMeasure.h"
+#include "Framework/Application/SlateApplication.h"
 #include "InputCoreTypes.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
@@ -28,6 +30,7 @@ namespace ck_ui_radial
         FLinearColor Queued = FLinearColor(1.0f, 0.63f, 0.20f);
         FLinearColor Disabled = FLinearColor(0.92f, 0.20f, 0.17f);
         float TileSize = 42.0f;
+        bool SectorMode = false;
     };
 
     struct FConfiguration
@@ -164,6 +167,16 @@ namespace ck_ui_radial
                 return false;
             }
             Out.Visual.TileSize = Size->Number;
+        }
+        if (const FCkUiCustomStyleValue* Mode = InArguments.Style.CustomProperties.Find(TEXT("-ck-radial-sector-mode")))
+        {
+            if (Mode->Kind != ECkUiCustomStyleKind::Number || !FMath::IsFinite(Mode->Number)
+                || (Mode->Number != 0.0f && Mode->Number != 1.0f))
+            {
+                OutFailure = TEXT("Radial selector sector mode must be 0 or 1.");
+                return false;
+            }
+            Out.Visual.SectorMode = Mode->Number == 1.0f;
         }
         return true;
     }
@@ -486,7 +499,59 @@ auto SCkUiRadialSelector::OnPaint(const FPaintArgs& InArgs, const FGeometry& InG
         const float Radius = 0.39f * static_cast<float>(FMath::Min(Size.X, Size.Y));
         const auto Visual = Owner->Visual();
         const FLinearColor Tint = InWidgetStyle.GetColorAndOpacityTint();
-        for (int32 Segment = 0; Segment < 6; ++Segment)
+        if (Visual.SectorMode)
+        {
+            TArray<float> Angles;
+            Angles.Reserve(Items.Num());
+            for (const auto& Item : Items)
+            { Angles.Add(FMath::Fmod(FMath::Fmod(Item.Angle, 360.0f) + 360.0f, 360.0f)); }
+            Angles.Sort();
+            for (int32 Index = 0; Index < Angles.Num(); ++Index)
+            {
+                const float Start = Angles[Index];
+                const float Next = Index + 1 < Angles.Num() ? Angles[Index + 1] : Angles[0] + 360.0f;
+                const float Boundary = FMath::DegreesToRadians((Start + Next) * 0.5f);
+                const FVector2f Direction(FMath::Cos(Boundary), FMath::Sin(Boundary));
+                ck_ui_radial::Line(OutDrawElements, InLayer, InGeometry,
+                    {Center + Direction * (Radius * 0.34f), Center + Direction * (Radius * 1.13f)},
+                    Visual.Ring * Tint, 1.4f);
+            }
+            for (int32 Circle = 0; Circle < 2; ++Circle)
+            {
+                TArray<FVector2f> Outline;
+                const float CircleRadius = Radius * (Circle == 0 ? 0.34f : 1.13f);
+                for (int32 Step = 0; Step <= 96; ++Step)
+                {
+                    const float Angle = static_cast<float>(Step) * TWO_PI / 96.0f;
+                    Outline.Add(Center + FVector2f(FMath::Cos(Angle), FMath::Sin(Angle)) * CircleRadius);
+                }
+                ck_ui_radial::Line(OutDrawElements, InLayer, InGeometry, MoveTemp(Outline),
+                    Visual.Ring * Tint, Circle == 0 ? 2.0f : 2.8f);
+            }
+            const FString SelectedKey = GetSelectedKey();
+            const auto* SelectedItem = Items.FindByPredicate([&SelectedKey](const auto& Item) { return Item.Key == SelectedKey; });
+            if (SelectedItem != nullptr && Angles.Num() > 1)
+            {
+                float SelectedAngle = FMath::Fmod(FMath::Fmod(SelectedItem->Angle, 360.0f) + 360.0f, 360.0f);
+                const int32 Index = Angles.IndexOfByKey(SelectedAngle);
+                if (Index != INDEX_NONE)
+                {
+                    const float Previous = Index > 0 ? Angles[Index - 1] : Angles.Last() - 360.0f;
+                    const float Next = Index + 1 < Angles.Num() ? Angles[Index + 1] : Angles[0] + 360.0f;
+                    const float Begin = (Previous + SelectedAngle) * 0.5f;
+                    const float End = (SelectedAngle + Next) * 0.5f;
+                    TArray<FVector2f> Highlight;
+                    for (int32 Step = 0; Step <= 18; ++Step)
+                    {
+                        const float Angle = FMath::DegreesToRadians(FMath::Lerp(Begin, End, static_cast<float>(Step) / 18.0f));
+                        Highlight.Add(Center + FVector2f(FMath::Cos(Angle), FMath::Sin(Angle)) * (Radius * 1.13f));
+                    }
+                    ck_ui_radial::Line(OutDrawElements, InLayer + 1, InGeometry, MoveTemp(Highlight),
+                        Visual.Selected * Tint, 8.0f);
+                }
+            }
+        }
+        else for (int32 Segment = 0; Segment < 6; ++Segment)
         {
             TArray<FVector2f> Arc;
             for (int32 Step = 0; Step <= 12; ++Step)
@@ -498,6 +563,11 @@ auto SCkUiRadialSelector::OnPaint(const FPaintArgs& InArgs, const FGeometry& InG
         }
         const FString Selected = GetSelectedKey();
         const float Tile = Visual.TileSize;
+        const FSlateFontInfo GlyphFont = FCoreStyle::GetDefaultFontStyle("Bold", 18);
+        const FSlateFontInfo LabelFont = FCoreStyle::GetDefaultFontStyle("Regular", 13);
+        TSharedPtr<FSlateFontMeasure> FontMeasure;
+        if (Visual.SectorMode)
+        { FontMeasure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService(); }
         for (const auto& Item : Items)
         {
             const FVector2f Position = ck_ui_radial::Position(Size, Item.Angle);
@@ -512,8 +582,29 @@ auto SCkUiRadialSelector::OnPaint(const FPaintArgs& InArgs, const FGeometry& InG
                 Position + FVector2f(-Half, -Half * 0.65f)};
             ck_ui_radial::Line(OutDrawElements, InLayer + 1, InGeometry, Frame, Rim * Tint,
                 Item.Key == Selected ? 3.0f : 1.5f);
-            ck_ui_radial::Glyph(OutDrawElements, InLayer + 2, InGeometry, Position, Half * 0.52f,
-                Item.Glyph, (Item.Enabled ? Rim : Visual.Disabled) * Tint);
+            if (Visual.SectorMode)
+            {
+                const FLinearColor Ink = !Item.Enabled ? Visual.Disabled
+                    : Item.Queued ? Visual.Queued
+                    : Item.Key == Selected ? Visual.Selected
+                    : FMath::Lerp(Visual.Ring, Visual.Selected, 0.65f);
+                const FVector2D GlyphSize = FontMeasure->Measure(Item.Glyph, GlyphFont);
+                const FVector2f GlyphPosition = Position - FVector2f(GlyphSize) * 0.5f;
+                FSlateDrawElement::MakeText(OutDrawElements, InLayer + 2,
+                    InGeometry.ToPaintGeometry(FSlateLayoutTransform(GlyphPosition)), Item.Glyph,
+                    GlyphFont, ESlateDrawEffect::None, Ink * Tint);
+                const FVector2D LabelSize = FontMeasure->Measure(Item.Actor, LabelFont);
+                const FVector2f LabelPosition(Position.X - static_cast<float>(LabelSize.X) * 0.5f,
+                    Position.Y + Half + 2.0f);
+                FSlateDrawElement::MakeText(OutDrawElements, InLayer + 2,
+                    InGeometry.ToPaintGeometry(FSlateLayoutTransform(LabelPosition)), Item.Actor,
+                    LabelFont, ESlateDrawEffect::None, Ink * Tint);
+            }
+            else
+            {
+                ck_ui_radial::Glyph(OutDrawElements, InLayer + 2, InGeometry, Position, Half * 0.52f,
+                    Item.Glyph, (Item.Enabled ? Rim : Visual.Disabled) * Tint);
+            }
             if (Item.Cooldown > 0.0f)
             {
                 FSlateDrawElement::MakeBox(OutDrawElements, InLayer + 3,
@@ -628,6 +719,7 @@ auto RegisterRadialUiControls(FCkUiWidgetRegistry& InRegistry) -> FCkUiLoadResul
         {TEXT("-ck-radial-queued"), ECkUiCustomStyleKind::Color},
         {TEXT("-ck-radial-disabled"), ECkUiCustomStyleKind::Color},
         {TEXT("-ck-radial-tile-size"), ECkUiCustomStyleKind::Length},
+        {TEXT("-ck-radial-sector-mode"), ECkUiCustomStyleKind::Number},
     };
     Registration.RetainedFactory = [](const FCkUiCustomWidgetArguments& InArguments, FString& OutFailure)
         -> TSharedPtr<ICkUiRetainedWidget>
