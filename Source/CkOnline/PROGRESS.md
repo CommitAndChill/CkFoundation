@@ -35,6 +35,45 @@ Client K locally; remote Client F2/O pastes the new host invite, Enter/F3 joins.
 | 11: Direct invite renewal | Incremental build and eight focused Direct/script tests pass in OnlineInviteRenewalGate-02 | Deferred while user is AFK; rotate invite without changing the live lobby, reject old invite and join fresh |
 | 12: public ready-lobby binding | Incremental build and eight focused Direct/script tests pass in OnlinePublicReadyLobbyGate-01 | Deferred while user is AFK; readiness barrier and gameplay round trip through Foundation validation |
 | 13: configured listen target | Incremental build and eight focused Direct/script tests pass in OnlineConfiguredListenTargetGate-01 | Deferred while user is AFK; invalid-port preservation and actual gameplay on caller-selected port 7789 |
+| 14: production gameplay operation owner | Contract proposed; source ownership and runner surfaces inspected; no implementation or runtime gate yet | Pending contract rulings A9-A11; existing gym behavior preserved |
+
+## Production gameplay ownership proposal, 2026-10-04
+
+Entry revisions: root 2a1ec73, Foundation 57592becc, CkTests 8b468864. Both
+plugin checkouts are clean and match the root gitlinks; unrelated root/CkAuto
+work remains untouched. Gate13 is locally committed and the eight-test baseline
+remains valid for that code. Current contract: Plan/Gate_14_GameplayOperationOwner.md.
+
+The next useful slice promotes the existing CkTests-only Host/Join/Return owner
+into Foundation's persistent feature model. Connection ownership must survive
+Direct profile stop. Caller-specific game readiness, maps/modes and RPC proof
+stay in the consumer. Transport establishment is not account authentication.
+Read-only ownership review identifies continuous control authority, failed-entry
+return and established transport-loss recovery as real product choices; A9-A11
+record the alternatives. Current gym behavior remains unchanged pending rulings.
+
+The selected CkAuto binary exposes manifest-driven Gauntlet, but its implementation
+source is not vendored here. No supported two-role runner/rendezvous route was
+confirmed in CLI/help/docs and the CkTests AS bridge. This does not establish a
+universal single-process limit. No raw editor launch, parallel lock bypass or
+same-process Iris retry was attempted. Successful two-process gameplay remains
+the separate editor observation; infrastructure automation needs its own contract.
+
+Independent reviews reconciled operation identity, continued readiness deadlines,
+separate connection-host ownership and phase/world/context/driver filtering of
+engine events that carry no operation ID. A private exact-stock IP adapter and
+explicit OnlineSubsystemUtils module/plugin dependencies are proposed against
+selected-engine source. No dependency or driver configuration has been changed.
+The native review also corrected readback order: validate an exact-stock client's
+connection/ownership/open state before the driver's resource accessor, which
+internally reads that connection's private resolver. Hosts require no server
+connection. Constructor/cleanup source supports the stock resolver lifetime;
+arbitrary subclasses or CDOs are outside the proposed adapter contract.
+
+This phase has produced documentation and source evidence only. No new build,
+editor boot, gameplay implementation or runtime success is claimed. The compact
+AFK return card remains the user-facing check for the already committed work.
+Steam/application setup, remote/packaging and Blueprint execution remain separate.
 
 ## Configured listen target phase
 
@@ -589,8 +628,8 @@ patch or global networking configuration change is used.
 After two failed approaches, do not repeat speculative same-process attempts.
 The separate-process editor gym is ready for human verification. A future clean
 automated gameplay gate needs two-role process orchestration with a combined
-verdict and cleanup; the existing Toolbox Gauntlet bridge runs one role only.
-That orchestration has not been implemented or run.
+verdict and cleanup. No supported two-role orchestration route has been confirmed
+in the inspected Toolbox surface. That orchestration has not been implemented or run.
 
 Work stays in D:/Repos/CkPlugins. Root feature/online-services-research and both
 [DROP BEFORE MERGE] docs commits remain unchanged. Foundation/CkTests actual

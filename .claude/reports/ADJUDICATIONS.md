@@ -152,3 +152,60 @@ below the bar (DECISIONS §47, §73, §93; N1–N6 routed as frontier nomination
   as a match-all filter would.
 - **Not decided:** B changes runtime overlap semantics for empty-filter probes; needs a
   maintainer call. Interim: behavior preserved (A), asymmetry only fixed.
+
+## A9. Direct control-lobby authority over established gameplay
+
+- **Context (2026-10-04):** Gate14 proposes promoting the CkTests gameplay operation
+  owner into Foundation. No online gameplay policy was found in DECISIONS.md.
+- **Side A (continuous authority):** a changed ready roster, binding or stopped
+  profile ends gameplay and returns to the lobby. Keeps the party and game in
+  agreement; matches the current gym, but a ready toggle can interrupt a match.
+- **Side B (entry barrier only):** require the binding through entry, then keep
+  gameplay independent. Supports long-running matches and independent control
+  lifetimes; the game must decide how later roster/control loss affects play.
+- **Evidence:** CkTests/Source/CkTests/Private/CkOnline/
+  CkOnlineDirectIpTest_Subsystem.cpp:452-460 continuously calls
+  Get_BridgeStillValid before the active host/join/readiness checks. Foundation
+  Direct readiness/roster are control state, not gameplay authentication.
+- **Interim stance:** preserve the existing gym's A behavior; do not establish
+  a production default. Recommend A for the first migrated consumer. An explicit
+  caller-selectable policy is also possible, but needs a deliberate API contract.
+- **Ruling needed:** first production default and whether callers may override it.
+
+## A10. Automatic return after failed gameplay entry
+
+- **Context (2026-10-04):** gameplay travel failure is separate from successful
+  Direct lobby membership. The production operation needs a recovery contract.
+- **Side A (automatic configured return):** recover to the caller's validated
+  lobby map/mode after entry fails, with a bounded return deadline and no retry
+  loop if return fails. Gives the turnkey flow the gym already demonstrates.
+- **Side B (caller-directed recovery):** report the typed failure and wait for
+  an explicit Return request. Keeps menu/loading/error-flow control with games,
+  but every consumer must supply and exercise recovery.
+- **Evidence:** the same IP subsystem at 450-544 defers failed entry into
+  DoReturnToGym; 621-655 filter engine failures. CkOnlineDirectRecovery.spec.cpp
+  covers actual failed ClientTravel and replacement-world standalone recovery.
+- **Interim stance:** preserve the gym's A behavior; no new production default
+  before a ruling. Recommend A for the first migrated consumer.
+- **Ruling needed:** production failure behavior and caller override contract.
+
+## A11. Recovery after an established gameplay connection is lost
+
+- **Context (2026-10-04):** A9 concerns control state; A10 concerns failed entry.
+  Neither settles the game's behavior after transport loss following readiness.
+- **Side A (automatic configured return):** end the active session and perform
+  one bounded return to the caller's lobby. Restores a usable turnkey flow;
+  failed return terminates without a travel loop.
+- **Side B (caller-directed recovery):** report transport loss and let the game
+  choose return, reconnect or another error flow. Supports custom recovery,
+  but leaves each consumer responsible for getting out of the failed state.
+- **Evidence:** CkTests/Source/CkTests/Private/CkOnline/
+  CkOnlineDirectIpTest_Subsystem.cpp:461-469 schedules bridged recovery after
+  established evidence loss; 606-612 returns after an open client connection
+  closes.
+- **Proposed invariant:** completed entry cannot receive a second terminal
+  completion for loss; the new owner must report loss/recovery separately.
+- **Interim stance:** keep existing gym recovery unchanged. Recommend A for
+  the first migrated consumer; no production default is established. Explicit
+  caller selection remains an alternative contract pending a ruling.
+- **Ruling needed:** post-readiness transport-loss behavior and caller overrides.
