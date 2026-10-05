@@ -1,4 +1,4 @@
-﻿// Copyright 2025 CkFoundation. All Rights Reserved.
+// Copyright 2025 CkFoundation. All Rights Reserved.
 
 #pragma once
 
@@ -106,6 +106,9 @@ public:
     UFUNCTION(BlueprintPure, Category = "Ck|UI|StackWidget")
     bool ContainsWidget(UCommonActivatableWidget* InWidget) const;
 
+    /** Nonzero identity for one list admission; covering preserves it, removal/re-push replaces it. */
+    auto Get_WidgetAdmissionGeneration(UCommonActivatableWidget* InWidget) const -> uint64;
+
     // ----------------------------------------------------------------------------------------------------------------
 
 public:
@@ -136,6 +139,7 @@ protected:
 #endif
 
     virtual auto ReleaseSlateResources(bool bReleaseChildren) -> void override;
+    virtual auto OnWidgetAddedToList(UCommonActivatableWidget& InWidget) -> void override;
 
     // ----------------------------------------------------------------------------------------------------------------
 
@@ -153,6 +157,9 @@ private:
      * cleared with this stack's own Slate.
      */
     TMap<FObjectKey, TSharedPtr<SWidget>> _KeptAliveSlate;
+
+    uint64 _AdmissionGeneration = 0;
+    TMap<TWeakObjectPtr<UCommonActivatableWidget>, uint64> _WidgetAdmissions;
 
     // ----------------------------------------------------------------------------------------------------------------
 
