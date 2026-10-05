@@ -11,6 +11,14 @@ class FCkUiView;
 
 DECLARE_DELEGATE_TwoParams(FOnCkUiTreeSelectionChanged, TOptional<FString>, ESelectInfo::Type);
 
+enum class ECkUiTreeSelectionRequestState : uint8
+{
+    None,
+    Pending,
+    Applied,
+    Rejected
+};
+
 /** Virtualized native tree whose read-only authored row uses FCkUiView. */
 class CKSLATELAYOUT_API SCkUiTree final : public SCompoundWidget
 {
@@ -34,7 +42,14 @@ public:
     /** Optional native host key hook. Authored Shift+F10 context menus retain precedence; an unhandled reply falls through to STreeView. */
     void SetHostKeyDownHandler(FOnKeyDown InHandler);
     void ReleaseContextMenu();
+    /** Permanently retire owner input and deferred work, including on externally retained widgets. */
+    void ReleaseOwnerInteraction();
     auto TrySelectKey(TOptional<FString> InKey, bool InNotify = false) -> bool;
+    /** Queue selection after native projection refresh. True means admitted, not applied. Latest admitted request wins. */
+    auto TryRequestSelectKey(TOptional<FString> InKey, bool InNotify = false) -> bool;
+    void CancelSelectionRequest();
+    auto GetSelectionRequestState() const -> ECkUiTreeSelectionRequestState;
+    const FString& GetSelectionRequestError() const;
     auto TrySetExpanded(const FString& InKey, bool bInExpanded) -> bool;
     auto GetSelectedKey() const -> TOptional<FString>;
     auto GetExpandedKeys() const -> TSet<FString>;

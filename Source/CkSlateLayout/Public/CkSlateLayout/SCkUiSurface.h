@@ -22,6 +22,7 @@ class SCkUiMenuButton;
 class SCkUiRepeat;
 class FCkUiCollection;
 class FCkUiFloatSeries;
+class FCkUiFontRegistrySnapshot;
 struct FSlateBrush;
 class FWidgetPath;
 
@@ -51,6 +52,15 @@ public:
 
     struct FDataBindings
     {
+        /** Source contracts apply only to concrete buttons in this view, never nested scoped views. */
+        struct FButtonRequirement
+        {
+            FString Id;
+            FString Action;
+            FString EnabledBool;
+            FString Region = TEXT("main");
+        };
+        TArray<FButtonRequirement> RequiredButtons;
         TMap<FString, TAttribute<FText>> Text;
         TMap<FString, TAttribute<FString>> String;
         TMap<FString, FOnTextChanged> TextChanged;
@@ -112,7 +122,8 @@ public:
         FTokens InTokens = {},
         FSlateFontInfo InBaseFont = FSlateFontInfo(),
         FDataBindings InData = {},
-        TSharedPtr<const FCkUiWidgetRegistrySnapshot> InCustomRegistry = {}) -> TSharedRef<FCkUiView>;
+        TSharedPtr<const FCkUiWidgetRegistrySnapshot> InCustomRegistry = {},
+        TSharedPtr<const FCkUiFontRegistrySnapshot> InFontRegistry = {}) -> TSharedRef<FCkUiView>;
 
     /** Creates or returns the persistent native mount for one document region. */
     auto GetRegion(const FString& InName) -> TSharedRef<SWidget>;
@@ -178,7 +189,8 @@ private:
         FTokens InTokens,
         FSlateFontInfo InBaseFont,
         FDataBindings InData,
-        TSharedPtr<const FCkUiWidgetRegistrySnapshot> InCustomRegistry);
+        TSharedPtr<const FCkUiWidgetRegistrySnapshot> InCustomRegistry,
+        TSharedPtr<const FCkUiFontRegistrySnapshot> InFontRegistry);
 
     enum class ERetainedKind : uint8 { Native, Search, Custom, Table, Scroll, Splitter, Tree, Tabs, MenuButton, Repeat };
     struct FRetainedRecord
@@ -220,6 +232,7 @@ private:
 
 
     auto ValidateDocument(const FCkUiDocument& InDocument, const FString& InSource, TArray<FString>& OutErrors) const -> bool;
+    auto TryMakeFont(const FCkUiNode& InNode, FSlateFontInfo& OutFont, TArray<FString>& OutErrors) const -> bool;
     auto BuildMenuEntries(const TMap<FString, FCkUiMenu>& InMenus, const FString& InMenuId,
         TOptional<FString> InContextKey = {}) const -> TArray<FCkUiMenuSession::FEntry>;
     auto MakeContextMenuBinding(const FCkUiNode& InNode, const TMap<FString, FCkUiMenu>& InMenus) const -> FOnCkUiContextMenuOpening;
@@ -262,6 +275,7 @@ private:
     FSlateFontInfo _BaseFont;
     FDataBindings _Data;
     TSharedPtr<const FCkUiWidgetRegistrySnapshot> _CustomRegistry;
+    TSharedPtr<const FCkUiFontRegistrySnapshot> _FontRegistry;
     TMap<FString, TSharedPtr<SBox>> _RegionMounts;
     TSet<FString> _CommittedRegionNames;
     TMap<FString, TSharedPtr<SButton>> _CommittedButtons;

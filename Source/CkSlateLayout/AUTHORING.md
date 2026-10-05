@@ -105,8 +105,8 @@ shorthand lengths. Padding expansion is limited to four source components and
 | `min-width`, `min-height`, `max-width`, `max-height` | Nonnegative lengths; maximum must be at least minimum |
 | `horizontal-align` | `fill`, `left`, `center`, `right` |
 | `vertical-align` | `fill`, `top`, `center`, `bottom` |
-| `font-size`, `font-weight` | Text/button/search; font size 1–512 in Slate units, `normal` or `bold` |
-| `font-family` | Text, button, menu-button and tabs only; `monospace` selects the native Mono face, `sans-serif` selects Regular. Omitted keeps the base face; bold takes precedence. Arbitrary font names, files and URLs are unsupported. |
+| `font-size`, `font-weight` | Text/button/search; Slate font point-size value 1–512, `normal` or `bold` |
+| `font-family` | Text, button, menu-button and tabs only; `monospace` selects the base Mono face, `sans-serif` selects base Regular. A registered lowercase family name selects its explicit Regular/Bold face. Omitted keeps the base face; bold takes precedence. Lists, quoted names, files and URLs are unsupported. |
 | `text-wrap` | Text and ordinary buttons; `wrap` (default) or `nowrap`. Controls soft wrapping; preserves explicit line breaks |
 | `overflow-wrap` | Text and ordinary buttons; `normal` (default) or `anywhere`. Anywhere permits character wrapping for long unbroken identifiers; `text-wrap: nowrap` still disables wrapping |
 | `text-overflow` | Text and ordinary buttons; `clip` (default) or `ellipsis`. Ellipsis requires `text-wrap: nowrap`; nowrap text clips to its allocated bounds |
@@ -114,6 +114,47 @@ shorthand lengths. Padding expansion is limited to four source components and
 | `background-color` | Container only; same color syntax |
 | `border-color` | Background-capable container; `#RRGGBB` or `#RRGGBBAA` in sRGB |
 | `border-width`, `border-radius` | Background-capable container; nonnegative length, optional `px`. A border color without a width defaults to 1; legacy background-only surfaces retain the 6-unit radius |
+
+Font-size numbers pass directly to `FSlateFontInfo::Size`, including when the
+accepted length has a `px` suffix. This subset does not convert browser CSS pixels
+to points. Slate rasterizes points at its font render DPI, and the full line box
+includes the selected face's ascent/descent. A row height equal to the font-size
+number can therefore be too small. Measure natural text at the actual layout
+scale and inspect native captures; do not infer fit from source numbers alone.
+
+### Registered font families
+
+`FCkUiFontRegistry` holds immutable named families. Supply `CreateSnapshot()` as the
+last optional argument to `FCkUiView::Create`; repeat items, custom slots and authored
+table/tree cells share that snapshot. Family names start with `a`–`z` and contain only
+lowercase letters, digits and hyphens; `monospace` and `sans-serif` retain their existing
+generic meaning. CSS does not inherit styles: declare `font-family` on each supported
+text/control node, or use a shared class. A missing family or required effective face
+rejects the complete document before factories run and preserves the accepted revision.
+Tabs accept `font-family` together with `-ck-tabs-font-weight` and `-ck-tabs-font-size`.
+Ordinary `font-size`, `font-weight` and `letter-spacing` remain unsupported on tabs;
+the header retains the host base tracking. Its explicit weight selects the required face.
+Font size, tracking, material and outline remain local font-info values; family lookup
+does not mutate the shared composite.
+
+For UMG consumers, `CkWidgets/Authoring/CkUiFontResources.h` provides
+`FCkUiFontResources::Register(registry, registration)`. Declare a required Regular file,
+an optional Bold file and optional Regular/Bold fallback files using
+`FCkUiFontFamilyRegistration`. A Bold fallback requires primary Bold and a Regular
+fallback. Every declared resource must load nonempty bytes and open through Slate's
+FreeType-backed memory API before the family is admitted. Validation establishes face
+opening, not exhaustive OpenType conformance or every glyph outline. The helper retains
+the admitted bytes in transient inline font faces; the shared composite collects all
+primary and fallback objects, including while an externally held text widget outlives
+the view/catalog. Names cannot be replaced or duplicated. Registration and the mounted
+font ownership lifecycle run on the game thread.
+
+The lower-level catalog accepts a trusted shared immutable composite with owned face
+data; its owner must collect all face objects. `CkSlateLayout` does not depend on Engine;
+Unreal resource creation belongs to `CkWidgets`. Resource modules still declare file
+and license staging. Development Editor rendering does not establish packaged lookup.
+This does not add generic family declarations to search, registered controls or table
+headers; those retain their own schemas and the host's base font.
 
 Ordinary `<button>` styling is opt-in through `-ck-button-*` declarations. Background
 and border colors have normal, hover, pressed, disabled, and focus variants;
@@ -150,6 +191,13 @@ and virtualization. Appearance inside a native binding remains its responsibilit
 ## Native integration and ownership
 
 `FCkUiView::Create` accepts named native widgets, actions, tokens, a base font, and optional typed `FDataBindings`.
+
+An omitted or explicitly empty base font uses Core's Regular composite while retaining
+its positive size (the default font-info size is 24). A positive source-less font keeps
+its tracking, outline, material and supplied face name; only a missing source and empty
+face name are filled. Explicit composite/UFont sources remain unchanged. Nonfinite or
+nonpositive sizes use Core Regular 10. This checks optional source presence, not the
+validity of an arbitrary supplied font object.
 
 Hosts can refresh their CSS token set with `TryReloadWithTokens(markup, stylesheet, tokens, source)`
 or `PollFiles(tokens)`. Candidate tokens and the document publish together only after the complete
@@ -578,11 +626,15 @@ Bind a `FCkUiTreeCollection` through `FDataBindings.Trees`, and a selection dele
 
 The native STreeView owns indentation, expanders, keyboard navigation and virtualization. Row field bindings use the same types as table cells. Editable/retained custom row controls and multicolumn trees are not yet supported.
 
-Tree row presentation is opt-in and only valid on `<tree>`: `-ck-tree-row-background`, `-ck-tree-row-hover-background`, `-ck-tree-row-selected-background`, `-ck-tree-row-selected-accent-color`, and `-ck-tree-row-selected-accent-width`. Colors use the normal CSS color grammar; accent width is a finite nonnegative CSS length. The accent is drawn only when both accent declarations are present and the width is nonzero; it is a hit-test-invisible selected-row decoration, while native `STreeView` continues to own selection and input.
+Tree presentation is opt-in and only valid on `<tree>`: `-ck-tree-background`, `-ck-tree-row-background`, `-ck-tree-row-hover-background`, `-ck-tree-row-selected-background`, `-ck-tree-row-selected-accent-color`, and `-ck-tree-row-selected-accent-width`. Colors use the normal CSS color grammar; accent width is a finite nonnegative CSS length. The viewport background is independent of row backgrounds: use `-ck-tree-background: #00000000` for a transparent list, including empty space below its rows. Omitting it restores the engine's default tree background. The accent is drawn only when both accent declarations are present and the width is nonzero; it is a hit-test-invisible selected-row decoration, while native `STreeView` continues to own selection and input. These brushes are owned by the retained tree and update on compatible reload without replacing native rows or selection.
 
 `FCkUiTreeNodeData` contains Key, optional ParentKey and Fields. Unset parent means root; an empty supplied parent is invalid. Publish using TrySetNodes: fields, roots, child adjacency and revision change together, then one OnChanged fires. Duplicate keys, absent parents, cycles, depth over256, malformed fields or excess limits reject without publication. Nodes retain shared identity by key. Limits match flat collections except the additional depth limit; roots and siblings preserve input order.
 
 `GetTree(id)` exposes SCkUiTree. TrySelectKey and TrySetExpanded operate on stable keys. User expansion survives filtering and valid reload. Filtering includes text matches plus ancestors and temporarily expands matching paths; clearing the filter restores user expansion. A selected node removed by filtering or model publication clears selection once. GetVisibleNodeCount reports all nodes in the filtered projection, including collapsed descendants; GetLiveRowCount reports realized native rows.
+
+After `TrySetNodes`, or inside a selection callback, use `TryRequestSelectKey(key, notify=false)` rather than immediately selecting against an old projection. Its boolean means **admitted**, not applied: inspect `GetSelectionRequestState()` for `Pending`, `Applied`, or `Rejected`, and `GetSelectionRequestError()` on rejection. An unset key requests a clear; an empty/missing supplied key rejects admission without disturbing an existing request. The latest admitted request replaces prior pending work. The tree resolves the stable key against the latest collection after its native `STreeView` refresh, verifies the exact native selected node, and optionally emits one semantic `Direct` notification only when the key changed. A key removed or filtered before application rejects without notifying. Four unsettled native ticks reject with a diagnostic; a hidden tree stays pending until it ticks. This API does not expand collapsed ancestors or scroll into view. Programmatic selection supports collapsed descendants, matching the immediate API; the native tree permits invisible selection so the adapter/native key survives compatible refreshes. Filtering and model removal still clear genuinely excluded keys.
+
+`CancelSelectionRequest()` clears the request, status and error. Native user selection and successful immediate `TrySelectKey` take precedence and cancel pending work. Compatible/rejected document reloads preserve requests; an accepted non-selectable configuration rejects a pending request on its next native tick. `FCkUiView::ReleaseOwnerInteractions`, owner destruction and accepted removal permanently retire the tree's owner interaction and cancel pending work, including on externally retained widgets. A released tree cannot admit selection requests, rebind its host key hook or prepare a configuration to revive the old owner. Create a new view/control for a new owner.
 
 Tree declarations remain selectable by default. `<tree selectable="false">` switches the native tree to `ESelectionMode::None`; it has no selected key, never invokes a selection callback, and rejects `selection-action`. `<tree projection-field="visible">` requires a required Bool field in the bound tree schema and is mutually exclusive with `filter-bind`. It retains the full collection and stable node keys, rendering only true nodes whose ancestors are also true; it neither expands matching paths nor prunes user expansion. `<tree expand-on-row-click="true">` makes an unmodified left click on a parent row toggle its expansion after native child controls have declined the event. Child rows, modified clicks, right clicks, and the native expander retain their normal behavior.
 
@@ -968,6 +1020,15 @@ selected panel unchanged. External changes are silent. Inactive panel hosts are
 collapsed, while their child widgets remain owned. Compatible reload retains tabs
 and headers by key; changing a surviving tabs id's value binding rejects.
 Arrow/Home/End navigation changes header focus; native button activation selects.
+
+Tabs also accept `-ck-tabs-header-width` and `-ck-tabs-header-align`. Width is a
+finite positive CSS length up to 4096 pixels and applies equally to every native
+header; omission restores natural label widths. Alignment accepts `left`,
+`center`, or `right` and positions each wrapped row within the allotted strip;
+omission uses `left`. A fixed header centers its label. Compatible reload updates
+these presentations without replacing keyed headers or changing the model.
+Malformed values reject before publication. Native geometry and retained reload
+coverage live in `Ck.UiAuthoring.Tabs.VisualStyle`.
 
 Current implementation has shared native selected-header tint. Full authored
 state styling, explicit tab accessibility roles, generic descendant popup/capture
