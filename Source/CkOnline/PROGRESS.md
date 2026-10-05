@@ -3,15 +3,17 @@
 Updated 2026-10-04. This is the current evidence ledger; gate files define the
 contracts. Keep verified automation separate from unobserved editor acceptance.
 
-## Next feature gate: Steam lobby profile foundation
+## Current feature gate: Steam lobby profile foundation
 
 After the Foundation gameplay connection owner, the next feature family is the
 optional Steam/social profile. Plan/Gate_17_SteamLobbyProfile.md bounds the first
-slice to Steam identity readiness, one OSS-owned lobby session, and warm invite
-normalization when no session search is active. It defers cold-launch invites to
-an installed-build gate and persistent cross-provider friends, chat, voice,
-EOS/EGS and fallback behavior. No implementation or Steam runtime acceptance is
-claimed yet.
+slice to Steam identity readiness and create/find/join/leave for one OSS-owned
+lobby session. The incremental Editor build and 43 focused tests passed, including
+13 Steam protocol tests; the colored SteamLobby gym is compiled but human
+acceptance remains pending. Full evidence is recorded below. Overlay
+invites and warm intent normalization follow this membership slice; cold-launch
+invites require an installed-build gate. Persistent cross-provider friends,
+chat, voice, EOS/EGS and fallback remain deferred.
 
 The selected engine source is present at `D:/Repos/UnrealEngineAngelscript` and
 includes the Steam OSS plugin and Steamworks dependency. The current project
@@ -59,9 +61,10 @@ Client K locally; remote Client F2/O pastes the new host invite, Enter/F3 joins.
 | 11: Direct invite renewal | Incremental build and eight focused Direct/script tests pass in OnlineInviteRenewalGate-02 | Deferred while user is AFK; rotate invite without changing the live lobby, reject old invite and join fresh |
 | 12: public ready-lobby binding | Incremental build and eight focused Direct/script tests pass in OnlinePublicReadyLobbyGate-01 | Deferred while user is AFK; readiness barrier and gameplay round trip through Foundation validation |
 | 13: configured listen target | Incremental build and eight focused Direct/script tests pass in OnlineConfiguredListenTargetGate-01 | Deferred while user is AFK; invalid-port preservation and actual gameplay on caller-selected port 7789 |
-| 14: production gameplay operation owner | Contract proposed; source ownership and runner surfaces inspected; no implementation or runtime gate yet | Pending contract rulings A9-A11; existing gym behavior preserved |
+| 14: production gameplay operation owner | Incremental build and 15 focused tests pass in OnlineConnectionOwnerGate-02; rulings 112-114 resolve A9-A11 | Deferred while user is AFK; Foundation-owned entry/readiness/return and established transport loss |
 | 15: gym failure-event ownership | Old behavior reproduced red; incremental build and eight focused Direct/script tests pass in OnlineFailureIsolationGate-01 | Deferred while user is AFK; numbered F8 rejection observation and genuine Host X-first recovery |
 | 16: queued-travel admission | Real queued Lobby destination overwrite reproduced red; incremental build and eight focused Direct/script tests pass in OnlineQueuedTravelGate-01 | Deferred while user is AFK; numbered Client F9 observation after real local reload, then ordinary gameplay proof/return |
+| 17: optional Steam lobby profile | Incremental Editor build and 43 focused tests pass in OnlineSteamLobbyGate-02, including 13 fake-backed Steam protocol tests | Deferred while user is AFK; unavailable diagnostic here, live membership/leave requires configured App ID and two computers/accounts |
 
 ## Queued-travel admission phase, 2026-10-04
 
@@ -851,8 +854,8 @@ the selected Direct/script baseline was 8 passing tests and the final focused
 two serial lanes passed 15 tests (the same 8 plus 7 connection protocol tests),
 with zero failed, skipped or contaminated tests and process exit 0. The lanes include
 the real failed ClientTravel recovery path and checks the newly published
-AngelScript surface through the AutoTest. Two fresh editor boots ran:
-inline discovery plus one serial lane. Renderer-only tests were skipped. The
+AngelScript surface through the AutoTest. Three fresh editor boots ran:
+inline discovery and two serial lanes. Renderer-only tests were skipped. The
 fresh discovery (`CkPlugins_2.log`) and lane (`CkPlugins.log`) editor logs have
 no engine Error/Fatal records, failed ensures, AngelScript compilation errors
 or reload contamination. The Toolbox wrapper did report that its pre-build
@@ -881,3 +884,87 @@ This is focused automated evidence. It does not verify the two-window successful
 listen/client path, rendered panel values, Blueprint graph execution, optional
 AngelScript-disabled compilation, cross-machine play, or packaging. Steam App ID
 and two-account validation also remain separate provider work.
+
+## Optional Steam lobby profile phase, 2026-10-04
+
+Gate17 now has a Foundation Steam feature quartet, reflected explicit spec,
+typed completions/snapshots, and a GameInstance facade sharing the existing
+single-profile service host. The private OSS provider observes an already active
+named Steam instance and owns one unique session under an exclusive process
+lease. It uses generic OSS interfaces only; no Steam module dependency, global
+plugin/config enablement, App ID or fallback was added. Identity uses a
+provider-qualified account ID separately from display name. Public discovery
+is limited to the Ck lobby protocol, current build compatibility and bounded
+valid rows with both presence/lobby flags true.
+
+Create/find/join/leave are correlated by private tickets and account/search
+generations. Local cancellation/deadline completion does not destroy a pending
+create/join or cancel an active engine search. It reserves the provider lane
+until the callback settles, then cleans late membership with one leave. The
+retired observer survives ECS shutdown and shows CleaningUp/CleanupUnknown;
+stopping is not a cleanup retry. Only live OSS authority can confirm session
+removal. Provider loss preserves an unknown outcome while ending observation
+of that captured instance. The facade retains post-stop cleanup readback and
+rejects a new start while ownership is unconfirmed.
+
+CkTests adds 13 native protocol tests through the real service host and production
+session transport, using a controlled value-only provider. They cover invalid
+spec/admission, optional-provider absence/logged-out state, lifecycle and stale/full
+selections, atomic malformed search rejection, synchronous/duplicate/stale
+callbacks, deadline-edge results, abandoned searches, late create/join cleanup,
+failed leave, identity/provider loss and shutdown reentry. These tests do not
+exercise Steam SDK callbacks or prove the private OSS adapter's live behavior.
+
+`Saved/Logs/OnlineSteamLobbyGate-01.log`: incremental Editor build succeeded
+(34 actions), fresh discovery found 6,019 tests, and 43 of 44 selected tests
+passed. The broad `Ck.Online` selection mistakenly included the recorded
+`Ck.Online.DirectIp.RealHostJoinProofDisconnectRejoin` red. It reproduced the
+same DataStream first-packet and ObjectReferenceCache PIE-ID Iris ensures;
+that verdict remains red. All 13 Steam tests passed. No source fix or ensure
+suppression was applied to bypass that unrelated fixture.
+
+`Saved/Logs/OnlineSteamLobbyGate-02.log`: the final fresh serial lane against
+the same built code passed 43/43, with zero failures, skips or contamination,
+process exit 0 and 65 seconds test duration. It selected Steam, Host, Utils,
+Feature, Direct and Connection roots plus the matching project AutoTests;
+it includes the real failed-ClientTravel recovery sibling. The fresh
+`Saved/Logs/CkPlugins.log` and final Toolbox log have no Error/Fatal records,
+failed ensures, script compilation errors or reload contamination. All loaded
+AngelScript, including the new gym and registry entry, compiled successfully.
+
+Actual fresh editor boots: three. The first invocation used discovery and one
+lane, as budgeted; the overly broad test root required one additional focused
+fresh lane. No rebuild or source edit occurred between those invocations.
+Final arguments:
+
+```text
+--test --test-pattern=Online
+--project-prefix=Ck.Online.Steam --project-prefix=Ck.Online.Host
+--project-prefix=Ck.Online.Utils --project-prefix=Ck.Online.Feature
+--project-prefix=Ck.Online.Direct --project-prefix=Ck.Online.Connection
+--parallel=1 --no-live --skip-renderer-tests
+--project=D:/Repos/CkPlugins
+--output=Saved/Logs/OnlineSteamLobbyGate-02.log
+```
+
+Source baseline before this slice: Foundation `a41b13ed0`, CkTests `77f81f5e4`,
+actual CkAuto `f1983a7e1` (root retains its unrelated recorded `55fcdb6e0`),
+selected engine `0b36f2621` with association
+`{22D2B5AE-4AE5-C485-F291-F79F407369F4}`. The executable reported Toolbox v1.51.
+Foundation-local C++/AngelScript AGENTS guides remain absent; established feature
+patterns and the authoritative root rules were used. The build skill wrapper's
+`.Codex` target was absent; the available canonical
+`CkAuto/.claude/skills/build-test/SKILL.md` was read instead.
+
+The colored compact SteamLobby gym and short three-item card are compiled.
+Rendered acceptance and live Steam membership/leave remain deferred while the
+user is AFK. Open TestGyms with Players 1, Standalone, Separate Server Off,
+Run Under One Process Off, New Editor Window (PIE), then Tab > CkOnline > Steam
+Lobby. Here S can check the unavailable diagnostic. Live joining needs two
+computers/accounts and the project's App ID: both S; host J creates, client K
+finds, N selects and P joins. The card is
+`CkTests/Script/CkOnline/STEAM_LOBBY_EDITOR_TESTING.md` and repeats joining in
+every check. No roster, chat, invitation, gameplay admission, installed build,
+packaging, optional-AS or renderer-only acceptance follows from this gate.
+Overlay invitations and warm join intents are the next bounded Steam slice;
+the engine's dropped-invite-during-search limitation remains unresolved.

@@ -1,6 +1,6 @@
 # Gate 17: Steam lobby profile foundation
 
-Prepared 2026-10-04 on `feature/online-services-research` after the persistent
+Updated 2026-10-04 on `feature/online-services-research` after the persistent
 Foundation gameplay connection owner. This gate starts the Steam/social
 delivery phase. It does not claim Steam runtime support until its editor check
 is observed with the project's App ID and two licensed accounts.
@@ -55,7 +55,7 @@ before adding broad friends/presence or voice features. The lobby/session owner
 must be singular: Ck state mirrors the selected OSS session authority and must
 not create a second native Steam lobby for the same operation.
 
-The initial slice should cover:
+The initial implementation slice is lobby membership only:
 
 1. Explicit Steam profile initialization with typed unavailable, logged-out,
    ready and failed observations. No silent Direct fallback.
@@ -63,22 +63,46 @@ The initial slice should cover:
    operations, with operation IDs, deadlines, generation checks and terminal
    completion before notifications. Require matching `bUsesPresence` and
    `bUseLobbiesIfAvailable` values, and use the `SEARCH_LOBBIES` query flag.
-3. Show the Steam invite overlay only while the owned lobby session is valid.
-   Bind warm invite acceptance before any search; copy accepted lobby results
-   into one bounded correlated join intent and feed them through the same
-   admission path. Serialize Ck-started searches and invite joins, while
-   documenting that the engine can drop an invite accepted during an already
-   active search. Do not claim lossless invite delivery in that overlap or fall
-   back to the unsupported FindSessionById.
-4. A test seam for fake session callbacks. Cover synchronous callback,
+3. A test seam for fake session callbacks. Cover synchronous callback,
    duplicate/stale callback, cancellation, timeout, account-generation change,
    lobby-full/rejected join and shutdown re-entry without Steam or credentials.
-5. A CkTests Steam Lobby gym with explicit setup diagnostics and no automatic
+4. A CkTests Steam Lobby gym with explicit setup diagnostics and no automatic
    pass. Keep display name and provider account ID separate; never use names as
    identity. Do not expose SDK IDs or invite payloads in diagnostic logs.
 
+The spec requires an explicit local-user index (currently Steam user zero),
+capacity 1-16, at most 50 search rows, a bounded label and cleanup grace. The
+adapter observes an already initialized named Steam OSS instance; the consuming
+project owns enabling/configuring it. It does not initialize a default provider,
+alter driver configuration or load the Steam SDK itself. One process owns one
+Steam session adapter lease, including retired operations. Other Steam session
+owners and concurrent independent OSS searches are outside this contract.
+
+These are discoverable Steam lobbies, filtered by the Ck lobby protocol and the
+project's build compatibility. Ranked queues and automatic matchmaking are
+deferred. OSS owns the named session and native membership; the Ck snapshot is
+an observation, not a second native lobby owner or an authoritative roster.
+
+Cancellation and deadline expiry complete the local operation once. A create,
+join or search remains reserved until its OSS callback settles. Do not destroy
+a pending create/join or call CancelFindSessions: the selected engine can finish
+that work late after removing its named session/search state. A late successful
+membership is followed by one DestroySession and confirmed named-session
+removal. The cleanup observer outlives the ECS host, without retrying or admitting
+another Steam operation. After the bounded grace it reports CleanupUnknown and
+continues reserving that single lease; it does not claim a clean leave. If the
+captured OSS instance disappears, retirement ends with an unknown outcome.
+Stopping the profile is not a cleanup retry. The facade retains cleanup readback
+and refuses a new Steam start while ownership is unconfirmed.
+
+Move Steam overlay invitations and warm/cold invite normalization to the next
+Steam social gate. The engine drops warm invite acceptance during an active
+search before Ck can observe it, so the API and UX for that limitation need a
+separate bounded decision. Gate17 exposes no invite operation and does not claim
+invite support.
+
 Defer a persistent cross-provider friend graph, offline inbox, chat, voice,
-EOS/EGS, public matchmaking, dedicated servers and Direct-to-Steam fallback.
+EOS/EGS, automatic matchmaking, dedicated servers and Direct-to-Steam fallback.
 Defer cold-launch invites to a separate installed-build gate because Steam must
 launch the registered game executable with its lobby command-line intent; an
 editor PIE session launched directly from Unreal Editor does not prove that
@@ -105,33 +129,29 @@ On each computer, open
 Settings choose **Number of Players 1** and **Play Net Mode Play Standalone**;
 keep **Launch Separate Server Off** and **Run Under One Process Off**. Launch
 **New Editor Window (PIE)** on both computers. In each process open
-**Tab > CkOnline > Steam Lobby**. Join the same lobby by using the explicit
-**Find/Join** action shown by the gym; on the joining computer, select the host's
-listed lobby and wait for **Joined** before checking either roster.
+**Tab > CkOnline > Steam Lobby**. On both computers press **S** to start the
+explicit profile. The host presses **J** to create; the client presses **K** to
+find, **N** to select the host's result if needed, then **P** to join. Wait for
+**Joined** before comparing lobby IDs. Steam sign-in happens in the Steam client;
+**L** only refreshes account status.
 
 1. Host selects **Create Lobby** and waits for OSS session success plus a Steam
    lobby ID. Joining computer selects **Find/Join**, selects that host listing,
    and waits for **Joined**. Both panels must show the same lobby ID and the
-   expected two-member roster.
-2. Host selects **Invite Overlay**, invites the other account, and the joining
-   computer accepts while no search is active. Confirm its visible invitation
-   enters the same correlated join pipeline and reaches exactly one membership.
-   Then both leave; host creates a fresh lobby and repeats while the joining
-   computer is already running to check the warm in-game invite. Do not run a
-   separate lobby search during either invite acceptance. An invite accepted
-   during an already-running search is a known engine limitation and is not a
-   pass/fail check for this gate.
-3. Each computer selects **Leave**. Confirm both Ck views become unjoined and a
-   later create starts a new lobby ID. Check a deliberate Steam-unavailable
+   same nonempty lobby ID. A member roster is outside this first slice.
+2. Each computer selects **Leave**. Confirm both Ck views become unjoined and a
+   later create starts a new lobby ID. Leave passes only with a successful
+   completion, Ready state and no lobby ID; CleaningUp/Unknown is not a pass.
+   Check a deliberate Steam-unavailable
    launch reports unavailable and offers explicit Direct selection without
    starting Direct automatically. Cold-launch acceptance is not an editor pass;
    it needs a later installed-build check through the registered Steam launch
    path.
 
 For every join above, the host is the computer that pressed **Create Lobby**;
-the other computer joins by selecting the host's listed lobby with **Find/Join**
-or by accepting the host's Steam overlay invite. Wait for **Joined** on the
-joining gym before treating lobby membership as successful.
+the other computer joins by selecting the host's listed lobby with **Find/Join**.
+Wait for **Joined** on the joining gym before treating lobby membership as
+successful.
 
 The test card must repeat this exact two-computer, one-process-per-computer join
 setup and key sequence.
@@ -142,7 +162,7 @@ machine Tailscale or installed-build claim follows from this editor check.
 ## Current blocker and preserved work
 
 The project App ID, two Steam accounts and first consuming game are not present
-in this checkout. Code can proceed through the fake-backed gate, but live invite
+in this checkout. Code can proceed through the fake-backed gate, but live lobby
 acceptance cannot be claimed or self-tested here. Do not add secrets or App IDs
 to source/config or overwrite project provider configuration to make the gym
 appear green.

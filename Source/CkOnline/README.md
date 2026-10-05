@@ -1,4 +1,4 @@
-# CkOnline Direct consumer guide
+# CkOnline consumer guide
 
 ## Current continuation checkpoint, 2026-10-04
 
@@ -10,8 +10,9 @@ user instructions authorized implementation, gyms and local commits while AFK.
 Use this permanent guide, PROGRESS.md and Plan/ gate contracts for current work;
 retained implementation must not depend on the two removable research commits.
 
-The latest scoped gate is the Foundation gameplay connection owner. Its focused
-Editor build and 15 tests across two serial lanes passed; the previous queued-travel gate remains
+The latest scoped gate is the optional Steam lobby profile. Its incremental
+Editor build and 43 focused tests passed, including 13 Steam protocol tests;
+the Foundation gameplay connection owner and previous queued-travel gate remain
 documented in PROGRESS.md. This result covers selected tests, not the whole
 delivery roadmap. Human checks of new panels and gameplay recovery remain
 deferred.
@@ -22,11 +23,11 @@ deferred.
 | B: persistent service host | Guarded actorless ECS host has focused native/script evidence; human graph and optional-AS evidence remain separate |
 | C: actual transports | Earlier two-window Direct round trip reported working; newer changes are unchecked; Steam, two-machine and installed Direct startup remain unverified |
 | D: Direct vertical slice | Persistent TCP lobby/ready/text/invites and gym gameplay bridge exist; the Foundation gameplay connection owner and focused native/script gate passed; two-window editor checks and Direct-only staging remain unverified |
-| E: Steam/social | Next: Gate 17 adds one optional Steam OSS lobby/session path; no live App ID/account/invite gate completed. See Plan/Gate_17_SteamLobbyProfile.md |
+| E: Steam/social | Gate 17 membership implementation and focused code gate passed; SteamLobby gym compiled, live App ID/account acceptance pending; overlay/warm invites follow this slice. See Plan/Gate_17_SteamLobbyProfile.md |
 | F: turnkey integration | Reusable binding/listen targets and guided gyms exist; production recipe, second game, graph execution and optional-AS build remain incomplete |
 | G/H: migration and future providers | Consumer migration/removal, release staging, EOS/EGS, voice and expanded topology remain separate scope |
 
-The latest completed implementation gate is Plan/Gate_14_GameplayOperationOwner.md.
+The gameplay connection implementation gate is Plan/Gate_14_GameplayOperationOwner.md.
 DECISIONS.md entries 112-114 resolve A9-A11: the ready control lobby remains
 authoritative through gameplay, and control loss, failed entry, or established
 transport loss starts one bounded return to the configured Lobby. The first
@@ -34,13 +35,45 @@ public owner has no caller policy overrides. Its focused native, script and real
 failed-travel checks passed; successful two-window entry/readiness and Blueprint
 graph use remain human editor observations.
 
-The next implementation gate is Plan/Gate_17_SteamLobbyProfile.md. The local
+The current implementation gate is Plan/Gate_17_SteamLobbyProfile.md. The local
 engine Steam OSS source supports lobby invites through a real OSS session, while
 its `IOnlineFriends::SendInvite` and `AcceptInvite` methods explicitly report
 unsupported. The project currently leaves OnlineSubsystemSteam disabled and has
 no project App ID. Keep Steam optional; prove fake-backed operation semantics
 before the separate two-account editor acceptance. Do not treat a Steam session
 invite as membership or gameplay admission.
+
+## Steam lobby consumer recipe
+
+Start `UCk_OnlineSteam_Subsystem_UE` explicitly with `FCk_OnlineSteam_Spec` and
+`LocalUserIndex = 0`. The default unspecified index is rejected. A different
+profile must first stop its own generation. Steam OSS must already be enabled,
+configured and initialized by the consuming project; absence is a typed
+Unavailable observation and never starts Direct automatically. Steam client
+sign-in supplies identity; the Login request only confirms that account.
+
+CreateLobby, FindLobbies, JoinLobby and LeaveLobby queue fresh operation IDs.
+Join uses the index and SearchGeneration from the same immutable search snapshot;
+stale/full selections do not reach OSS. Only protocol-compatible lobbies with
+matching presence/lobby flags are selectable. Account IDs are provider-qualified
+and distinct from display names. A successful create/join requires an owned OSS
+session and nonempty lobby ID; a successful leave requires its confirmed removal.
+This slice has no roster, chat, invitation or gameplay admission API.
+
+Cancel and timeout are local terminals. Pending OSS work retains its lease;
+late successful membership triggers one cleanup leave after the create/join
+callback. CleaningUp and CleanupUnknown mean ownership is still reserved, and
+Stop does not clear that fact or retry cleanup. Cleanup observation survives
+the ECS host; the facade shows it after Stop and refuses a new Steam start
+until settlement. If OSS disappears first, the outcome stays unknown.
+The retired observer releases its resources when that provider instance ends.
+
+The short card is `CkTests/Script/CkOnline/STEAM_LOBBY_EDITOR_TESTING.md`. For live
+joining, use two computers with distinct licensed accounts and the project's
+App ID; on each open TestGyms with Players 1, Standalone, Separate Server Off,
+Run Under One Process Off, New Editor Window (PIE), then Tab > CkOnline >
+Steam Lobby. Both press S; host J creates, client K finds, N selects if needed,
+P joins. Compare Joined and the same lobby ID. Live acceptance is unobserved.
 
 Editor cards live in CkTests/Script/CkOnline/DEFERRED_EDITOR_CHECKS.md. The
 current owner check is PUBLIC_CONNECTION_EDITOR_TESTING.md. Open the TestGyms
