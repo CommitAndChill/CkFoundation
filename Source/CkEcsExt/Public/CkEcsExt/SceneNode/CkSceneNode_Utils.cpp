@@ -132,7 +132,7 @@ namespace ck_scene_node_fresh_anchor
         { return false; }
         auto* const World = WorldRoot.Get<TWeakObjectPtr<UWorld>>().Get();
         if (NOT IsValid(World) || World->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
-            NOT World->IsGameWorld())
+            NOT World->IsGameWorld() || World->bIsTearingDown)
         { return false; }
         const auto* const Subsystem = World->GetSubsystem<UCk_EcsWorld_Subsystem_UE>();
         if (NOT IsValid(Subsystem) ||
