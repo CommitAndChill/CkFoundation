@@ -8,6 +8,12 @@
 #include "CkEcs/Handle/CkHandle_Utils.h"
 #include "CkEcs/Handle/CkDebugCallstack_Macros.h"
 #include "CkEcs/Processor/CkProcessor.h"
+#include "CkEcs/Registry/CkRegistry_SlotTable.h"
+#include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
+
+#include "CkRecord/RecordEntry/CkRecordEntry_Fragment.h"
+
+#include "Engine/World.h"
 
 #include "CkEcsExt/EntityHolder/CkEntityHolder_Utils.h"
 
@@ -95,6 +101,202 @@ auto
 
     return NewTimerEntity;
 }
+
+namespace ck_timer_capture
+{
+    auto HasCurrentOwnerContext(const FCk_Handle& InOwner) -> bool
+    {
+        if (NOT IsInGameThread() || InOwner == FCk_Handle{})
+        { return false; }
+
+        const auto Registry = InOwner.Get_RegistryView();
+        const auto RegistryHandle = Registry.Get_RegistryHandle();
+        if (ck::registry_table::Get_IsInParallelRegion(RegistryHandle) ||
+            NOT ck::IsValid(InOwner) ||
+            InOwner.Has_Any<ck::FTag_DestroyEntity_Initiate,
+                ck::FTag_DestroyEntity_EndPlay, ck::FTag_DestroyEntity_Teardown,
+                ck::FTag_DestroyEntity_Await, ck::FTag_DestroyEntity_Finalize>())
+        { return false; }
+
+        const auto WorldRoot = FCk_Handle{Registry.Get_TransientEntity(), RegistryHandle};
+        if (NOT ck::IsValid(WorldRoot) ||
+            WorldRoot.Has_Any<ck::FTag_DestroyEntity_Initiate,
+                ck::FTag_DestroyEntity_EndPlay, ck::FTag_DestroyEntity_Teardown,
+                ck::FTag_DestroyEntity_Await, ck::FTag_DestroyEntity_Finalize>() ||
+            NOT WorldRoot.Has<TWeakObjectPtr<UWorld>>())
+        { return false; }
+
+        // A valid handle in the registry is not necessarily attached to this world.
+        // Follow only live direct owners and reject malformed or circular chains.
+        auto Current = InOwner;
+        TArray<FCk_Handle> Visited;
+        while (Current != WorldRoot)
+        {
+            if (Current == FCk_Handle{} ||
+                Current.Get_RegistryView().Get_RegistryHandle() != RegistryHandle ||
+                NOT ck::IsValid(Current) ||
+                Current.Has_Any<ck::FTag_DestroyEntity_Initiate,
+                    ck::FTag_DestroyEntity_EndPlay, ck::FTag_DestroyEntity_Teardown,
+                    ck::FTag_DestroyEntity_Await, ck::FTag_DestroyEntity_Finalize>() ||
+                NOT Current.Has<ck::FFragment_LifetimeOwner>() ||
+                Visited.Contains(Current))
+            { return false; }
+            Visited.Add(Current);
+            Current = Current.Get<ck::FFragment_LifetimeOwner>().Get_Entity();
+        }
+
+        auto* const World = WorldRoot.Get<TWeakObjectPtr<UWorld>>().Get();
+        if (NOT ck::IsValid(World) ||
+            World->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+            World->bIsTearingDown)
+        { return false; }
+
+        auto* const EcsWorld = World->GetSubsystem<UCk_EcsWorld_Subsystem_UE>();
+        if (NOT ck::IsValid(EcsWorld) ||
+            EcsWorld->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+            EcsWorld->Get_LoadHold() == ECk_EcsWorld_LoadHold::Teardown ||
+            UCk_Utils_EcsWorld_Subsystem_UE::TryGet_TransientEntityForWorld(*World) != WorldRoot)
+        { return false; }
+
+        return UCk_Utils_EntityLifetime_UE::Get_CanCreateEntity(InOwner);
+    }
+
+    auto HasValidSpec(const FCk_Timer_Spec& InParams) -> bool
+    {
+        return FMath::IsFinite(InParams.Get_Duration().Get_Seconds()) &&
+            (InParams.Get_CountDirection() == ECk_Timer_CountDirection::CountUp ||
+             InParams.Get_CountDirection() == ECk_Timer_CountDirection::CountDown) &&
+            (InParams.Get_Behavior() == ECk_Timer_Behavior::StopOnDone ||
+             InParams.Get_Behavior() == ECk_Timer_Behavior::ResetOnDone ||
+             InParams.Get_Behavior() == ECk_Timer_Behavior::PauseOnDone) &&
+            InParams.Get_StartingState() == ECk_Timer_State::Paused;
+    }
+
+    auto HasFrozenContext(const FCk_Handle& InOwner, const FCk_Handle& InWorldRoot,
+        const UWorld* InWorld) -> bool
+    {
+        if (NOT HasCurrentOwnerContext(InOwner))
+        { return false; }
+        const auto Registry = InOwner.Get_RegistryView();
+        const auto CurrentRoot = FCk_Handle{Registry.Get_TransientEntity(), Registry.Get_RegistryHandle()};
+        return CurrentRoot == InWorldRoot &&
+            CurrentRoot.Get<TWeakObjectPtr<UWorld>>().Get() == InWorld;
+    }
+}
+
+auto
+    UCk_Utils_Timer_UE::
+    TryAddCapturedPaused(
+        const FCk_Handle& InOwner,
+        const FCk_Timer_Spec& InParams)
+    -> FCk_Timer_AddCapturedResult
+{
+    auto Result = FCk_Timer_AddCapturedResult{};
+    if (NOT ck_timer_capture::HasCurrentOwnerContext(InOwner) ||
+        NOT ck_timer_capture::HasValidSpec(InParams) ||
+        InOwner.Has<ck::FFragment_RecordOfTimers>() ||
+        InOwner.Has<ck::FFragment_RecordOfEntityExtensions>())
+    { return Result; }
+
+    const auto OwnerRegistry = InOwner.Get_RegistryView();
+    const auto FrozenWorldRoot = FCk_Handle{OwnerRegistry.Get_TransientEntity(),
+        OwnerRegistry.Get_RegistryHandle()};
+    auto* const FrozenWorld = FrozenWorldRoot.Get<TWeakObjectPtr<UWorld>>().Get();
+
+    // The allocator stamps lifetime ownership before invoking this callback. The first
+    // callback action retains its raw return, before label/fragment/record composition.
+    auto Owner = InOwner;
+    auto Composed = false;
+    Result.bAllocationAttempted = true;
+    const auto Returned = UCk_Utils_EntityLifetime_UE::Request_CreateEntity(Owner,
+        [&](FCk_Handle InNewEntity)
+    {
+        Result.RawEntity = InNewEntity;
+        if (NOT ck_timer_capture::HasFrozenContext(Owner, FrozenWorldRoot, FrozenWorld) ||
+            InNewEntity == FCk_Handle{} ||
+            InNewEntity.Get_RegistryView().Get_RegistryHandle() !=
+                Owner.Get_RegistryView().Get_RegistryHandle() ||
+            NOT ck::IsValid(InNewEntity) ||
+            InNewEntity.Has_Any<ck::FTag_DestroyEntity_Initiate,
+                ck::FTag_DestroyEntity_EndPlay, ck::FTag_DestroyEntity_Teardown,
+                ck::FTag_DestroyEntity_Await, ck::FTag_DestroyEntity_Finalize>() ||
+            InNewEntity.Has_Any<ck::FFragment_Timer, ck::FFragment_Timer_Params,
+                ck::FTag_Timer_NeedsSetup, ck::FTag_Timer_NeedsUpdate,
+                ck::FTag_Timer_Countdown, ck::FFragment_RecordEntry>() ||
+            NOT InNewEntity.Has<ck::FFragment_LifetimeOwner>() ||
+            InNewEntity.Get<ck::FFragment_LifetimeOwner>().Get_Entity() != Owner)
+        { return; }
+
+        if (InParams.Get_TimerName().IsValid())
+        { UCk_Utils_GameplayLabel_UE::Add(InNewEntity, InParams.Get_TimerName()); }
+#if NOT CK_DISABLE_ECS_HANDLE_DEBUGGING
+        else
+        { UCk_Utils_Handle_UE::Set_DebugName(InNewEntity, "Timer: No Name Specified"); }
+#endif
+        InNewEntity.Add<ck::FFragment_Timer_Params>(InParams.Get_Behavior());
+        InNewEntity.Add<ck::FFragment_Timer>(FCk_Chrono{InParams.Get_Duration()});
+        InNewEntity.Add<ck::FTag_Timer_NeedsSetup>();
+        if (InParams.Get_CountDirection() == ECk_Timer_CountDirection::CountDown)
+        { InNewEntity.Add<ck::FTag_Timer_Countdown>(); }
+        Composed = true;
+    });
+
+    if (NOT Composed || Returned != Result.RawEntity ||
+        NOT ck_timer_capture::HasFrozenContext(Owner, FrozenWorldRoot, FrozenWorld) ||
+        Result.RawEntity == FCk_Handle{} ||
+        Result.RawEntity.Get_RegistryView().Get_RegistryHandle() !=
+            Owner.Get_RegistryView().Get_RegistryHandle() ||
+        NOT ck::IsValid(Result.RawEntity) ||
+        Result.RawEntity.Has_Any<ck::FTag_DestroyEntity_Initiate,
+            ck::FTag_DestroyEntity_EndPlay, ck::FTag_DestroyEntity_Teardown,
+            ck::FTag_DestroyEntity_Await, ck::FTag_DestroyEntity_Finalize>())
+    { return Result; }
+
+    auto& Raw = Result.RawEntity;
+    if (NOT Raw.Has<ck::FFragment_LifetimeOwner>() ||
+        Raw.Get<ck::FFragment_LifetimeOwner>().Get_Entity() != Owner ||
+        NOT Raw.Has<ck::FFragment_Timer_Params>() ||
+        NOT Raw.Has<ck::FFragment_Timer>() ||
+        NOT Raw.Has<ck::FTag_Timer_NeedsSetup>() ||
+        Raw.Has<ck::FTag_Timer_Countdown>() !=
+            (InParams.Get_CountDirection() == ECk_Timer_CountDirection::CountDown) ||
+        Raw.Has<ck::FTag_Timer_NeedsUpdate>() ||
+        Raw.Get<ck::FFragment_Timer_Params>().Get_Behavior() != InParams.Get_Behavior())
+    { return Result; }
+
+    auto Timer = ck::StaticCast<FCk_Handle_Timer>(Raw);
+    // This captured API owns first creation of the timer record. An existing
+    // record's private policy cannot be safely inspected from CkTimer.
+    if (Owner.Has<ck::FFragment_RecordOfTimers>() ||
+        Owner.Has<ck::FFragment_RecordOfEntityExtensions>())
+    { return Result; }
+    RecordOfTimers_Utils::AddIfMissing(Owner, ECk_Record_EntryHandlingPolicy::Default);
+    if (NOT ck_timer_capture::HasFrozenContext(Owner, FrozenWorldRoot, FrozenWorld) ||
+        Raw.Get_RegistryView().Get_RegistryHandle() !=
+            Owner.Get_RegistryView().Get_RegistryHandle() ||
+        NOT ck::IsValid(Raw) ||
+        NOT Owner.Has<ck::FFragment_RecordOfTimers>() ||
+        Owner.Has<ck::FFragment_RecordOfEntityExtensions>())
+    { return Result; }
+    RecordOfTimers_Utils::Request_Connect(Owner, Timer,
+        ECk_Record_LabelRequirementPolicy::Optional);
+    if (NOT ck_timer_capture::HasFrozenContext(Owner, FrozenWorldRoot, FrozenWorld) ||
+        Raw.Get_RegistryView().Get_RegistryHandle() !=
+            Owner.Get_RegistryView().Get_RegistryHandle() ||
+        NOT ck::IsValid(Raw) || NOT Raw.Has<ck::FFragment_RecordEntry>() ||
+        NOT Owner.Has<ck::FFragment_RecordOfTimers>() ||
+        Owner.Has<ck::FFragment_RecordOfEntityExtensions>() ||
+        NOT RecordOfTimers_Utils::Get_ContainsEntry(Owner, Timer))
+    { return Result; }
+
+    // Request_Connect appends its forward entry and RecordEntry backlink in the
+    // same synchronous call, with no caller delegate here. The reverse private
+    // field has no public read API; this does not claim independent backlink proof.
+    Result.Timer = Timer;
+    return Result;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
 
 auto
     UCk_Utils_Timer_UE::
