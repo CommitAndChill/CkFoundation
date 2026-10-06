@@ -32,6 +32,30 @@ public:
         UPARAM(ref) FCk_Handle_Transform& InAttachTo,
         FTransform InLocalTransform);
 
+    // Restricted fresh-leaf Anchor construction on a caller-retained raw entity in a live
+    // runtime World. Call on the game thread outside the registry's parallel region. The raw
+    // child must be a fresh direct lifetime child of the parent; extension-bearing records,
+    // reparenting, existing fragments, and aliases between out and input handles are rejected.
+    // Valid transforms must fit the documented numeric composition safety envelope
+    // (abs(translation/scale component) <= sqrt(sqrt(max double))/32 per operand).
+    // Ordinary failure clears only a distinct OutSceneNode; it never destroys InRawChild.
+    // Success commits the complete node before the synchronous editor observer, which may
+    // retire it; callers must revalidate the returned identity before generation admission.
+    UFUNCTION(BlueprintCallable, Category = "Ck|Utils|SceneNode")
+    static bool TryAdd_Anchor(
+        UPARAM(ref) FCk_Handle& InRawChild,
+        UPARAM(ref) FCk_Handle_Transform& InAttachTo,
+        FTransform InLocalTransform,
+        FCk_Handle_SceneNode& OutSceneNode);
+
+    UFUNCTION(BlueprintCallable, Category = "Ck|Utils|SceneNode")
+    static bool TryAdd_AnchorToUnrealComponent(
+        UPARAM(ref) FCk_Handle& InRawChild,
+        UPARAM(ref) FCk_Handle_Transform& InAttachTo,
+        USceneComponent* InSceneComponent,
+        FTransform InLocalTransform,
+        FCk_Handle_SceneNode& OutSceneNode);
+
     // InLocalTransform is the offset from the owner (KeepRelative semantics): the node's world becomes
     // InLocalTransform * ownerWorld and tracks the owner as it moves. Identity == glued exactly to the
     // owner. Offset is runtime-mutable via Request_UpdateOffset.
@@ -90,6 +114,13 @@ public:
         int32 InTopN = 20);
 
 private:
+    static bool TryAdd_FreshAnchorImpl(
+        FCk_Handle& InRawChild,
+        FCk_Handle_Transform& InAttachTo,
+        USceneComponent* InSceneComponent,
+        FTransform InLocalTransform,
+        FCk_Handle_SceneNode& OutSceneNode);
+
     static FCk_Handle_SceneNode
     DoAdd(
         FCk_Handle_Transform& InHandle,
