@@ -30,6 +30,14 @@ namespace ck
 
 // --------------------------------------------------------------------------------------------------------------------
 
+// Native-only capture of an Add attempt. A raw identity is not a cleanup or readiness grant.
+struct CKTIMER_API FCk_Timer_AddCapturedResult
+{
+    FCk_Handle RawEntity{};
+    FCk_Handle_Timer Timer{};
+    bool bAllocationAttempted = false;
+};
+
 UCLASS(NotBlueprintable, Meta = (ScriptMixin = "FCk_Handle_Timer"))
 class CKTIMER_API UCk_Utils_Timer_UE : public UCk_Utils_Ecs_Base_UE
 {
@@ -53,6 +61,18 @@ public:
     Add(
         UPARAM(ref) FCk_Handle& InHandle,
         const FCk_Timer_Spec& InParams);
+
+    // Native-only dormant Timer construction. Requires StartingState == Paused,
+    // a game-thread, live owner with an exact represented runtime-world
+    // lifetime chain, no registry parallel region, and no existing Timer record or record
+    // extensions on that owner. Rejected preflight returns all-default without allocation.
+    // Does not call a caller completion callback or destroy a partial allocation.
+    // RawEntity remains retained if allocation was attempted and later composition fails;
+    // attempted with default RawEntity is opaque, not proof that nothing was allocated.
+    static auto
+    TryAddCapturedPaused(
+        const FCk_Handle& InOwner,
+        const FCk_Timer_Spec& InParams) -> FCk_Timer_AddCapturedResult;
 
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Utils|Timer",
