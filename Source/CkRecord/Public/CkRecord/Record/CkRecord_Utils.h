@@ -8,6 +8,8 @@
 #include "CkRecord/RecordEntry/CkRecordEntry_Fragment.h"
 
 #include "CkEcs/Delegates/CkDelegates.h"
+#include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
+#include "CkEcs/Registry/CkRegistry_SlotTable.h"
 #include "CkLabel/Public/CkLabel/CkLabel_Fragment.h"
 #include "CkLabel/Public/CkLabel/CkLabel_Utils.h"
 
@@ -31,11 +33,14 @@ DECLARE_DWORD_COUNTER_STAT(TEXT("Record Entries Visited"), STAT_CkRecord_Entries
 
 // --------------------------------------------------------------------------------------------------------------------
 
+class UCk_Utils_SceneNode_UE;
+
 namespace ck
 {
     template <typename T_DerivedRecord>
     class TUtils_RecordOfEntities
     {
+        friend class ::UCk_Utils_SceneNode_UE;
     public:
         CK_GENERATED_BODY(TUtils_RecordOfEntities<T_DerivedRecord>);
 
@@ -230,6 +235,19 @@ namespace ck
             const FCk_Handle& InRecordHandle,
             T_Unary InFunc,
             T_Predicate InPredicate) -> void;
+
+    private:
+        // Internal SceneNode-only transaction for a fresh, unlabeled entry. It has no callback and
+        // does not mutate either entity on ordinary rejection. Existing Request_Connect is unchanged.
+        static auto
+        CanConnectFreshUnlabeled(
+            const FCk_Handle& InRecordHandle,
+            const FCk_Handle& InRawEntry) -> bool;
+
+        static auto
+        TryConnectFreshUnlabeled(
+            FCk_Handle& InRecordHandle,
+            MaybeTypeSafeHandle& InRecordEntry) -> bool;
 
     public:
         static auto
@@ -926,6 +944,90 @@ namespace ck
     }
 
     // --------------------------------------------------------------------------------------------------------------------
+
+    template <typename T_DerivedRecord>
+    auto
+        TUtils_RecordOfEntities<T_DerivedRecord>::
+        CanConnectFreshUnlabeled(
+            const FCk_Handle& InRecordHandle,
+            const FCk_Handle& InRawEntry)
+        -> bool
+    {
+        if (NOT IsInGameThread() ||
+            NOT ck::IsValid(InRecordHandle) || NOT ck::IsValid(InRawEntry) ||
+            InRecordHandle == InRawEntry ||
+            ck::registry_table::Get_IsInParallelRegion(
+                InRecordHandle.Get_RegistryView().Get_RegistryHandle()) ||
+            UCk_Utils_EntityLifetime_UE::Get_IsPendingDestroy(InRecordHandle,
+                ECk_EntityLifetime_DestructionPhase::BeginDestroy) ||
+            UCk_Utils_EntityLifetime_UE::Get_IsPendingDestroy(InRawEntry,
+                ECk_EntityLifetime_DestructionPhase::BeginDestroy) ||
+            InRecordHandle.Get_RegistryView().Get_RegistryHandle() !=
+                InRawEntry.Get_RegistryView().Get_RegistryHandle() ||
+            InRecordHandle.Has<FFragment_RecordOfEntityExtensions>() ||
+            InRawEntry.Has<FFragment_RecordEntry>() ||
+            UCk_Utils_GameplayLabel_UE::Has(InRawEntry))
+        { return false; }
+
+        if (InRecordHandle.Has<RecordType>())
+        {
+            const auto& Existing = InRecordHandle.Get<RecordType>();
+            if (Existing.Get_EntryHandlingPolicy() != ECk_Record_EntryHandlingPolicy::Default ||
+                NOT Existing._RecordEntriesTagNamePairs.IsEmpty())
+            { return false; }
+            const auto& Entries = Existing.Get_RecordEntries();
+            for (int32 Index = 0; Index < Entries.Num(); ++Index)
+            {
+                const auto& Current = Entries[Index];
+                if (NOT ck::IsValid(Current) ||
+                    UCk_Utils_EntityLifetime_UE::Get_IsPendingDestroy(Current,
+                        ECk_EntityLifetime_DestructionPhase::BeginDestroy) ||
+                    Current.Get_Entity() == InRawEntry.Get_Entity() ||
+                    Current.Get_RegistryView().Get_RegistryHandle() !=
+                        InRecordHandle.Get_RegistryView().Get_RegistryHandle() ||
+                    NOT Current.template Has<FFragment_RecordEntry>())
+                { return false; }
+                const auto& Backlink = Current.template Get<FFragment_RecordEntry>();
+                int32 MatchingBacklinks = 0;
+                for (const auto& LinkedRecord : Backlink._Records)
+                { if (LinkedRecord == InRecordHandle) { ++MatchingBacklinks; } }
+                const auto* const Cleanup = Backlink._DisconnectionFuncs.Find(InRecordHandle);
+                if (MatchingBacklinks != 1 || Cleanup == nullptr || NOT bool(*Cleanup))
+                { return false; }
+                for (int32 Prior = 0; Prior < Index; ++Prior)
+                { if (Entries[Prior] == Current) { return false; } }
+            }
+        }
+
+        return true;
+    }
+
+    template <typename T_DerivedRecord>
+    auto
+        TUtils_RecordOfEntities<T_DerivedRecord>::
+        TryConnectFreshUnlabeled(
+            FCk_Handle& InRecordHandle,
+            MaybeTypeSafeHandle& InRecordEntry)
+        -> bool
+    {
+        if (NOT ck::IsValid(InRecordEntry) ||
+            NOT CanConnectFreshUnlabeled(InRecordHandle, InRecordEntry))
+        { return false; }
+
+        // All ordinary rejection points are above; commit has no callback or fallible request.
+        auto& Record = InRecordHandle.AddOrGet<RecordType>(ECk_Record_EntryHandlingPolicy::Default);
+        UCk_Utils_RecordEntry_UE::Add(InRecordEntry);
+        auto& Entry = InRecordEntry.template Get<FFragment_RecordEntry>();
+        Record._RecordEntries.Emplace(InRecordEntry);
+        Entry._Records.Emplace(InRecordHandle);
+        Entry._DisconnectionFuncs.Add(InRecordHandle,
+        [](FCk_Handle InRecordEntity, FCk_Handle InRecordEntryEntity)
+        {
+            InRecordEntity.Get<RecordType>()._RecordEntries.Remove(
+                ck::StaticCast<MaybeTypeSafeHandle>(InRecordEntryEntity));
+        });
+        return true;
+    }
 
     template <typename T_DerivedRecord>
     auto

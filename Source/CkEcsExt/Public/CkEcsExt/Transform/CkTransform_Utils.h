@@ -30,6 +30,8 @@ namespace ck
 DECLARE_MULTICAST_DELEGATE_OneParam(FCk_Transform_OnAdded, const FCk_Handle_Transform&);
 #endif
 
+class UCk_Utils_SceneNode_UE;
+
 // --------------------------------------------------------------------------------------------------------------------
 
 UCLASS(NotBlueprintable, Meta = (ScriptMixin = "FCk_Handle_Transform"))
@@ -47,6 +49,12 @@ public:
     friend class ck::FProcessor_Transform_SyncFromMeshSocket_SceneNode;
     friend class ck::FProcessor_Transform_HandleRequests;
     friend class ck::FProcessor_Transform_SyncToActor;
+    friend class UCk_Utils_SceneNode_UE;
+
+private:
+    // SceneNode's fresh-leaf transaction stages these without an observer or request seeing a subset.
+    static bool TryStage_FreshSceneNodeTransform(FCk_Handle& InHandle, const FTransform& InWorldTransform);
+    static void Publish_StagedSceneNodeTransform(FCk_Handle_Transform& InHandle);
 
 #if WITH_EDITOR
 public:

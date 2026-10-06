@@ -3,6 +3,7 @@
 #include "CkEcsExt/CkEcsExt_Log.h"
 
 #include "CkEcs/Net/CkNet_Utils.h"
+#include "CkEcs/Registry/CkRegistry_SlotTable.h"
 
 #include <Components/MeshComponent.h>
 #include <Components/PrimitiveComponent.h>
@@ -33,6 +34,34 @@ namespace ck_transform_utils
         if (ck::IsValid(Transform))
         { Get_OnAdded().Broadcast(Transform); }
     }
+#endif
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+bool UCk_Utils_Transform_UE::TryStage_FreshSceneNodeTransform(
+    FCk_Handle& InHandle, const FTransform& InWorldTransform)
+{
+    if (!IsInGameThread() || !ck::IsValid(InHandle) ||
+        InWorldTransform.ContainsNaN() || NOT InWorldTransform.IsValid() ||
+        !InWorldTransform.GetRotation().IsNormalized() ||
+        ck::registry_table::Get_IsInParallelRegion(
+            InHandle.Get_RegistryView().Get_RegistryHandle()) ||
+        InHandle.Has_Any<ck::FFragment_Transform, ck::FFragment_Transform_Previous>() ||
+        UCk_Utils_OwningActor_UE::Has(InHandle))
+    { return false; }
+
+    InHandle.Add<ck::FFragment_Transform>(InWorldTransform);
+    InHandle.Add<ck::FFragment_Transform_Previous>(InWorldTransform);
+    return true;
+}
+
+void UCk_Utils_Transform_UE::Publish_StagedSceneNodeTransform(FCk_Handle_Transform& InHandle)
+{
+    // No staged operation can fail after this point. Queue before notifying a reentrant observer.
+    UCk_Utils_Transform_TypeUnsafe_UE::Request_ForceRefresh(InHandle, {});
+#if WITH_EDITOR
+    ck_transform_utils::BroadcastAdded(InHandle);
 #endif
 }
 
