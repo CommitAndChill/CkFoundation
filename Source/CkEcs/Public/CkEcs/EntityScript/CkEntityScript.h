@@ -97,6 +97,18 @@ public:
     virtual auto
     Get_EffectiveReplication() const -> ECk_Replication;
 
+    // Checked after spawn-parameter injection, before any construction state is published.
+    [[nodiscard]]
+    virtual auto
+    Get_IsConstructionContextReady(
+        UWorld* InExpectedWorld) const -> bool;
+
+    // Native construction-order policy: scripts that attach their own actor during Construct
+    // must acquire the replication driver after that actor becomes their owning actor.
+    [[nodiscard]]
+    virtual auto
+    Get_RequiresOwningActorBeforeReplicationDriver() const -> bool;
+
     // Snapshot respawn opt-in, with exactly two consumers:
     //  (a) UCk_EntityScript_WithActor_UE::Construct stamps FFragment_ActorSpawnIntent when this returns true, which
     //      is what makes the capture record an actor recipe and the load re-spawn the bridged actor.

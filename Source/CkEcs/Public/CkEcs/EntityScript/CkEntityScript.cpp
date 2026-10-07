@@ -6,6 +6,20 @@
 #include "CkEcs/EntityScript/CkEntityScript_Fragment.h"
 #include "CkEcs/Handle/CkHandle_Utils.h"
 
+#include <Engine/World.h>
+
+// -----------------------------------------------------------------------------------------------------------
+
+auto
+    UCk_EntityScript_UE::
+    Get_IsConstructionContextReady(
+        UWorld* InExpectedWorld) const
+    -> bool
+{
+    return ck::IsValid(InExpectedWorld) &&
+        NOT InExpectedWorld->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed);
+}
+
 // -----------------------------------------------------------------------------------------------------------
 
 auto
@@ -158,6 +172,14 @@ auto
     -> ECk_Replication
 {
     return _Replication;
+}
+
+auto
+    UCk_EntityScript_UE::
+    Get_RequiresOwningActorBeforeReplicationDriver() const
+    -> bool
+{
+    return false;
 }
 
 auto

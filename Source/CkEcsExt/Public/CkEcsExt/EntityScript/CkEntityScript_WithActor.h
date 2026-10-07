@@ -32,6 +32,15 @@ public:
     auto
     Get_EffectiveReplication() const -> ECk_Replication override;
 
+    [[nodiscard]]
+    auto
+    Get_IsConstructionContextReady(
+        UWorld* InExpectedWorld) const -> bool override;
+
+    [[nodiscard]]
+    auto
+    Get_RequiresOwningActorBeforeReplicationDriver() const -> bool override;
+
     auto
     EndPlay() -> void override;
 

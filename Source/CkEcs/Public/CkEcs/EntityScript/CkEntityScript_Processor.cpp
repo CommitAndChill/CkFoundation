@@ -87,30 +87,36 @@ namespace ck
             const FFragment_EntityScript_RequestSpawnEntity& InRequestFragment)
         -> void
     {
-        // A dying owner means this spawn lost the race with its owner's destroy cascade; cancel rather than
-        // materialize a zombie child that outlives its owner. Must run BEFORE the mid-construction defer below
-        // (else an owner dying mid-construction defers forever), and Is_NOT_Valid must short-circuit the Has
-        // queries — a finalized owner is a tombstone handle and any Has query on it would itself ensure.
-        if (const auto& LifetimeOwner = InRequestFragment.Get_Owner();
-            ck::Is_NOT_Valid(LifetimeOwner) ||
-            LifetimeOwner.Has_Any<FTag_DestroyEntity_Initiate, FTag_DestroyEntity_EndPlay,
-                FTag_DestroyEntity_Teardown, FTag_DestroyEntity_Await, FTag_DestroyEntity_Finalize>())
+        // The request entity can still be visited while tagged Initiate. Reject both a dying
+        // lifetime owner and a separately destroyed pending target before creating the script or
+        // calling Construct. Check handle validity before querying tags: finalized handles are tombstones.
+        const auto& LifetimeOwner = InRequestFragment.Get_Owner();
+        const auto& NewEntity = InRequestFragment.Get_NewEntity();
+        const auto OwnerReady = ck::IsValid(LifetimeOwner) &&
+            NOT LifetimeOwner.Has_Any<FTag_DestroyEntity_Initiate, FTag_DestroyEntity_EndPlay,
+                FTag_DestroyEntity_Teardown, FTag_DestroyEntity_Await, FTag_DestroyEntity_Finalize>();
+        const auto TargetReady = ck::IsValid(NewEntity) &&
+            NOT NewEntity.Has_Any<FTag_DestroyEntity_Initiate, FTag_DestroyEntity_EndPlay,
+                FTag_DestroyEntity_Teardown, FTag_DestroyEntity_Await, FTag_DestroyEntity_Finalize>();
+        if (NOT OwnerReady || NOT TargetReady)
         {
             ck_entity_script_spawn_trace::LogVisit(
                 TEXT("cancelled"),
                 InHandle,
                 InRequestFragment);
 
-            ck::ecs::Verbose(TEXT("Cancelling EntityScript spawn of [{}] — lifetime owner [{}] is destroyed or "
-                "pending-destroy (owner cascade applied late)"),
-                InRequestFragment.Get_EntityScriptClassArchetype(), LifetimeOwner);
+            ck::ecs::Verbose(TEXT("Cancelling EntityScript spawn: lifetime owner or pending target is "
+                "destroyed or pending-destroy"));
 
             InRequestFragment.TryFireCompletion(InRequestFragment.Get_NewEntity(),
                 ECk_Request_OperationResult::Failed_Cancelled);
 
-            if (auto OrphanedEntity = InRequestFragment.Get_NewEntity();
-                ck::IsValid(OrphanedEntity))
-            { UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(OrphanedEntity); }
+            if (InRequestFragment.Get_DestroyTargetOnFailure())
+            {
+                if (auto OrphanedEntity = InRequestFragment.Get_NewEntity();
+                    ck::IsValid(OrphanedEntity))
+                { UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(OrphanedEntity); }
+            }
 
             UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(InHandle);
             InHandle.Remove<MarkedDirtyBy>();
@@ -119,8 +125,7 @@ namespace ck
 
         // A child EntityScript spawned from inside a parent's Construct callback must wait for the parent to
         // finish its own pipeline — these two tags are the true "construction in progress" markers.
-        if (const auto& LifetimeOwner = InRequestFragment.Get_Owner();
-            LifetimeOwner.Has_Any<FTag_EntityScript_ContinueConstruction, FTag_EntityScript_FinishConstruction>())
+        if (LifetimeOwner.Has_Any<FTag_EntityScript_ContinueConstruction, FTag_EntityScript_FinishConstruction>())
         {
             ck_entity_script_spawn_trace::LogVisit(
                 TEXT("deferred"),
@@ -152,85 +157,204 @@ namespace ck
         auto Result = ECk_Request_OperationResult::Failed;
         const auto Guard = MakeCompletionGuard(InRequest, InRequest.Get_NewEntity(), Result);
 
+        // Spawn wrappers and explicitly owning Add callers transfer their newly allocated target.
+        // Ordinary direct Add callers retain their target and its existing settings.
+        const auto RetireOwnedTarget = [&]() -> void
+        {
+            if (NOT InRequest.Get_DestroyTargetOnFailure())
+            { return; }
+            auto Target = InRequest.Get_NewEntity();
+            if (ck::IsValid(Target))
+            { UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(Target); }
+        };
+
         const auto EntityScriptClassArchetype = InRequest.Get_EntityScriptClassArchetype();
 
 #if WITH_EDITOR
-        // Editor-preview spawns pass the spawner's INSTANCED script as the archetype (runtime spawns pass a CDO,
-        // which cannot die), and drag-drop destroys the preview actor — taking its script — after the request was
-        // enqueued. Expected churn, not an error: drop silently. The runtime ensure below stays reachable.
-        if (ck::Is_NOT_Valid(EntityScriptClassArchetype) && InHandle.Has<FTag_EditorOnlyEntity>())
+        // Editor preview churn is expected. The same ownership rule still applies.
+        if (NOT ck::IsValid(EntityScriptClassArchetype) && InHandle.Has<FTag_EditorOnlyEntity>())
         {
             ck::ecs::Verbose(TEXT("Dropping editor-only spawn request [{}] — instanced archetype died before processing (drag-drop preview churn)"), InHandle);
-
-            if (auto OrphanedEntity = InRequest.Get_NewEntity();
-                ck::IsValid(OrphanedEntity))
-            {
-                UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(OrphanedEntity);
-            }
+            RetireOwnedTarget();
             return;
         }
 #endif
 
-        CK_ENSURE_IF_NOT(ck::IsValid(EntityScriptClassArchetype),
-            TEXT("EntityScriptArchetype [{}] is INVALID. Cannot Spawn Entity"), EntityScriptClassArchetype)
-        { return; }
-
-        const auto& NewEntityScript = [&]() -> UCk_EntityScript_UE*
+        const auto ArchetypeReady = ck::IsValid(EntityScriptClassArchetype);
+        CK_ENSURE_IF_NOT(ArchetypeReady,
+            TEXT("EntityScriptArchetype [{}] is INVALID. Cannot Spawn Entity"), EntityScriptClassArchetype) {}
+        if (NOT ArchetypeReady)
         {
-            QUICK_SCOPE_CYCLE_COUNTER(FCk_Request_EntityScript_SpawnEntity_CreateObject)
-
-            switch (EntityScriptClassArchetype->Get_InstancingPolicy())
-            {
-                case ECk_EntityScript_InstancingPolicy::NotInstanced:
-                {
-                    return EntityScriptClassArchetype.Get();
-                }
-                case ECk_EntityScript_InstancingPolicy::InstancedPerEntity:
-                case ECk_EntityScript_InstancingPolicy::InstancedPerEntity_Poolable:
-                {
-                    const auto& LifetimeOwner = InRequest.Get_Owner();
-                    const auto& Outer = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(LifetimeOwner);
-
-                    CK_ENSURE_IF_NOT(ck::IsValid(Outer),
-                        TEXT("Failed to get valid World for Entity [{}] when trying to spawn EntityScript [{}]"),
-                        LifetimeOwner,
-                        EntityScriptClassArchetype)
-                    { return {}; }
-
-                    // both instanced policies go through the pooling subsystem (fragment holds a weak ptr):
-                    // Poolable recycles, plain InstancedPerEntity is pinned-unique. Spawn params inject below
-                    const auto IsPoolable = EntityScriptClassArchetype->Get_InstancingPolicy() ==
-                        ECk_EntityScript_InstancingPolicy::InstancedPerEntity_Poolable;
-
-                    const auto PoolParams = IsPoolable
-                        ? FCk_ObjectPooling_PoolParams{EntityScriptClassArchetype->Get_PoolParams()}
-                            .Set_RecyclePolicy(ECk_ObjectPooling_RecyclePolicy::Recycle)
-                        : FCk_ObjectPooling_PoolParams{}
-                            .Set_RecyclePolicy(ECk_ObjectPooling_RecyclePolicy::DestroyOnRelease);
-
-                    return UCk_Utils_Object_UE::Request_CreateNewObject<UCk_EntityScript_UE>(Outer,
-                        EntityScriptClassArchetype->GetClass(), EntityScriptClassArchetype.Get(),
-                        PoolParams, nullptr);
-                }
-                default:
-                {
-                    CK_INVALID_ENUM(EntityScriptClassArchetype->Get_InstancingPolicy());
-                    return EntityScriptClassArchetype.Get();
-                }
-            }
-        }();
-
-        CK_ENSURE_IF_NOT(ck::IsValid(NewEntityScript),
-            TEXT("Failed to Spawn New Entity using EntityScript [{}]"), EntityScriptClassArchetype)
-        { return; }
-
-        if (const auto& SpawnParams = InRequest.Get_SpawnParams();
-            ck::IsValid(SpawnParams))
-        {
-            UCk_Utils_EntityScript_UE::TryInjectEntityScriptSpawnParams(NewEntityScript, SpawnParams);
+            RetireOwnedTarget();
+            return;
         }
 
         auto NewEntity = InRequest.Get_NewEntity();
+        const auto LifetimeOwner = InRequest.Get_Owner();
+        const auto OwnerReady = ck::IsValid(LifetimeOwner) &&
+            NOT LifetimeOwner.Has_Any<FTag_DestroyEntity_Initiate, FTag_DestroyEntity_EndPlay,
+                FTag_DestroyEntity_Teardown, FTag_DestroyEntity_Await, FTag_DestroyEntity_Finalize>();
+        const auto TargetReady = ck::IsValid(NewEntity) &&
+            NOT NewEntity.Has_Any<FTag_DestroyEntity_Initiate, FTag_DestroyEntity_EndPlay,
+                FTag_DestroyEntity_Teardown, FTag_DestroyEntity_Await, FTag_DestroyEntity_Finalize>();
+        if (NOT OwnerReady || NOT TargetReady)
+        {
+            Result = ECk_Request_OperationResult::Failed_Cancelled;
+            RetireOwnedTarget();
+            return;
+        }
+        const auto OwnerCanCreate = UCk_Utils_EntityLifetime_UE::Get_CanCreateEntity(LifetimeOwner);
+        if (NOT OwnerCanCreate)
+        {
+            Result = ECk_Request_OperationResult::Failed_Cancelled;
+            RetireOwnedTarget();
+            return;
+        }
+
+        auto* OwnerWorld = static_cast<UWorld*>(nullptr);
+        auto* TargetWorld = static_cast<UWorld*>(nullptr);
+        const auto OwnerContextReady =
+            ck_entity_script_utils::TryResolveSpawnOwnerWorld(LifetimeOwner, OwnerWorld);
+        CK_ENSURE_IF_NOT(OwnerContextReady, TEXT("Queued EntityScript owner has no safe live World chain")) {}
+        if (NOT OwnerContextReady)
+        {
+            RetireOwnedTarget();
+            return;
+        }
+        const auto TargetContextReady =
+            ck_entity_script_utils::TryResolveSpawnOwnerWorld(NewEntity, TargetWorld);
+        CK_ENSURE_IF_NOT(TargetContextReady, TEXT("Queued EntityScript target has no safe live World chain")) {}
+        if (NOT TargetContextReady)
+        {
+            RetireOwnedTarget();
+            return;
+        }
+        const auto WorldsMatch = OwnerWorld == TargetWorld;
+        CK_ENSURE_IF_NOT(WorldsMatch, TEXT("Queued EntityScript owner and target resolve different Worlds")) {}
+        if (NOT WorldsMatch)
+        {
+            RetireOwnedTarget();
+            return;
+        }
+
+        const auto HasNetParams = NewEntity.Has<ck::FFragment_Net_Params>();
+        CK_ENSURE_IF_NOT(HasNetParams,
+            TEXT("Entity [{}] is missing NetParams before construction. EntityScript: [{}]. "
+                 "Did a caller enqueue FFragment_EntityScript_RequestSpawnEntity directly instead "
+                 "of going through UCk_Utils_EntityScript_UE::Add?"),
+            NewEntity, EntityScriptClassArchetype) {}
+        if (NOT HasNetParams)
+        {
+            RetireOwnedTarget();
+            return;
+        }
+        const auto& TargetSettings = NewEntity.Get<ck::FFragment_Net_Params>().Get_ConnectionSettings();
+        const auto TargetNetMode = TargetSettings.Get_NetMode();
+        const auto NetModeReady = TargetSettings.Get_Replication() != ECk_Replication::Replicates ||
+            TargetNetMode == ECk_Net_NetModeType::Client ||
+            TargetNetMode == ECk_Net_NetModeType::Host ||
+            TargetNetMode == ECk_Net_NetModeType::ClientAndHost;
+        CK_ENSURE_IF_NOT(NetModeReady, TEXT("Queued replicated EntityScript target has invalid net mode")) {}
+        if (NOT NetModeReady)
+        {
+            RetireOwnedTarget();
+            return;
+        }
+        const auto HasNoScript = NOT NewEntity.Has<FFragment_EntityScript>();
+        CK_ENSURE_IF_NOT(HasNoScript, TEXT("Queued EntityScript target already has a script")) {}
+        if (NOT HasNoScript)
+        {
+            RetireOwnedTarget();
+            return;
+        }
+
+        const auto ReplicationReady = ck_entity_script_utils::TryValidateSpawnReplication(
+            LifetimeOwner, EntityScriptClassArchetype.Get(), &NewEntity, TargetSettings.Get_Replication(), true);
+        if (NOT ReplicationReady)
+        {
+            Result = ECk_Request_OperationResult::Failed_Cancelled;
+            RetireOwnedTarget();
+            return;
+        }
+
+        const auto InstancingPolicy = EntityScriptClassArchetype->Get_InstancingPolicy();
+        const auto PolicyReady =
+            InstancingPolicy == ECk_EntityScript_InstancingPolicy::NotInstanced ||
+            InstancingPolicy == ECk_EntityScript_InstancingPolicy::InstancedPerEntity ||
+            InstancingPolicy == ECk_EntityScript_InstancingPolicy::InstancedPerEntity_Poolable;
+        CK_ENSURE_IF_NOT(PolicyReady, TEXT("Queued EntityScript has invalid instancing policy")) {}
+        if (NOT PolicyReady)
+        {
+            RetireOwnedTarget();
+            return;
+        }
+
+        auto* NewEntityScript = static_cast<UCk_EntityScript_UE*>(nullptr);
+        if (InstancingPolicy == ECk_EntityScript_InstancingPolicy::NotInstanced)
+        { NewEntityScript = EntityScriptClassArchetype.Get(); }
+        else
+        {
+            QUICK_SCOPE_CYCLE_COUNTER(FCk_Request_EntityScript_SpawnEntity_CreateObject)
+            const auto IsPoolable = InstancingPolicy ==
+                ECk_EntityScript_InstancingPolicy::InstancedPerEntity_Poolable;
+            const auto PoolParams = IsPoolable
+                ? FCk_ObjectPooling_PoolParams{EntityScriptClassArchetype->Get_PoolParams()}
+                    .Set_RecyclePolicy(ECk_ObjectPooling_RecyclePolicy::Recycle)
+                : FCk_ObjectPooling_PoolParams{}
+                    .Set_RecyclePolicy(ECk_ObjectPooling_RecyclePolicy::DestroyOnRelease);
+            NewEntityScript = UCk_Utils_Object_UE::Request_CreateNewObject<UCk_EntityScript_UE>(
+                OwnerWorld, EntityScriptClassArchetype->GetClass(), EntityScriptClassArchetype.Get(),
+                PoolParams, nullptr);
+        }
+
+        const auto ScriptReady = ck::IsValid(NewEntityScript);
+        CK_ENSURE_IF_NOT(ScriptReady,
+            TEXT("Failed to Spawn New Entity using EntityScript [{}]"), EntityScriptClassArchetype) {}
+        if (NOT ScriptReady)
+        {
+            RetireOwnedTarget();
+            return;
+        }
+
+        if (const auto& SpawnParams = InRequest.Get_SpawnParams(); ck::IsValid(SpawnParams))
+        { UCk_Utils_EntityScript_UE::TryInjectEntityScriptSpawnParams(NewEntityScript, SpawnParams); }
+
+        // Object acquisition and property injection can invoke external code. No script has been
+        // associated or published yet, so the instance can still be released safely on cancellation.
+        const auto StillReady = ck::IsValid(NewEntity) &&
+            NOT NewEntity.Has_Any<FTag_DestroyEntity_Initiate, FTag_DestroyEntity_EndPlay,
+                FTag_DestroyEntity_Teardown, FTag_DestroyEntity_Await, FTag_DestroyEntity_Finalize>();
+        if (NOT StillReady)
+        {
+            if (InstancingPolicy != ECk_EntityScript_InstancingPolicy::NotInstanced)
+            { UCk_Utils_Object_UE::TryReleaseToPool(NewEntityScript); }
+            Result = ECk_Request_OperationResult::Failed_Cancelled;
+            RetireOwnedTarget();
+            return;
+        }
+
+        const auto ConstructionContextReady = ck::IsValid(NewEntityScript) &&
+            NewEntityScript->Get_IsConstructionContextReady(TargetWorld);
+        if (NOT ConstructionContextReady)
+        {
+            if (InstancingPolicy != ECk_EntityScript_InstancingPolicy::NotInstanced)
+            { UCk_Utils_Object_UE::TryReleaseToPool(NewEntityScript); }
+            Result = ECk_Request_OperationResult::Failed_Cancelled;
+            RetireOwnedTarget();
+            return;
+        }
+
+        const auto InjectedReplicationReady = NewEntity.Has<ck::FFragment_Net_Params>() &&
+            ck_entity_script_utils::TryValidateSpawnReplication(LifetimeOwner, NewEntityScript, &NewEntity,
+                NewEntity.Get<ck::FFragment_Net_Params>().Get_ConnectionSettings().Get_Replication(), true, true);
+        if (NOT InjectedReplicationReady)
+        {
+            if (InstancingPolicy != ECk_EntityScript_InstancingPolicy::NotInstanced)
+            { UCk_Utils_Object_UE::TryReleaseToPool(NewEntityScript); }
+            Result = ECk_Request_OperationResult::Failed_Cancelled;
+            RetireOwnedTarget();
+            return;
+        }
 
         NewEntityScript->_AssociatedEntity = NewEntity;
         NewEntity.Add<FFragment_EntityScript>(NewEntityScript);
@@ -241,10 +365,8 @@ namespace ck
         // ---- Retain the construction recipe (save/load rebuild+hydrate, RuntimeSpawned) ----------
         // The recipe is pinned by a GC-safe holder UObject because fragments are not GC-traced. Always stamped;
         // the save capture filters by provenance, so entities that carry one needlessly never consult it.
-        if (const auto World = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(NewEntity);
-            ck::IsValid(World))
         {
-            auto* Recipe = NewObject<UCk_EntityScript_SpawnRecipe_UE>(World);
+            auto* Recipe = NewObject<UCk_EntityScript_SpawnRecipe_UE>(TargetWorld);
             Recipe->Populate(EntityScriptClassArchetype->GetClass(), InRequest.Get_SpawnParams());
             NewEntity.Add<ck::FFragment_SpawnRecipe>(TStrongObjectPtr<UCk_EntityScript_SpawnRecipe_UE>{Recipe});
         }
@@ -252,19 +374,12 @@ namespace ck
         ck::ecs::VeryVerbose(TEXT("[REP_DEBUG] SpawnProcessor — Entity=[{}] Replication=[{}]"),
             NewEntity, NewEntityScript->Get_EffectiveReplication());
 
-        // Net_Params is established upstream in UCk_Utils_EntityScript_UE::Add; this ensure catches a future
-        // caller that enqueues a spawn request while bypassing Add.
-        CK_ENSURE_IF_NOT(NewEntity.Has<ck::FFragment_Net_Params>(),
-            TEXT("Entity [{}] is missing NetParams before construction. EntityScript: [{}]. "
-                 "Did a caller enqueue FFragment_EntityScript_RequestSpawnEntity directly instead "
-                 "of going through UCk_Utils_EntityScript_UE::Add?"),
-            NewEntity, EntityScriptClassArchetype) {}
-
         // ---- Replication Driver (before Construct) ----------------------------------------
         // Non-actor-bearing replicated entities need their driver present BEFORE Construct so utilities called
         // during Construct find it. Entities that receive their own OwningActor later during Construct (WithActor)
-        // have no actor in the chain yet — TryAdd fails gracefully and OwningActor::Add supplies the driver.
-        UCk_Utils_EntityReplicationDriver_UE::TryAdd(NewEntity);
+        // defer driver creation until OwningActor::Add in Construct, even if an ancestor already owns an actor.
+        if (NOT NewEntityScript->Get_RequiresOwningActorBeforeReplicationDriver())
+        { UCk_Utils_EntityReplicationDriver_UE::TryAdd(NewEntity); }
 
         // ---- Construct --------------------------------------------------------------------
         switch (NewEntityScript->Construct(NewEntity, InRequest.Get_SpawnParams()))

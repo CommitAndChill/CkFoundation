@@ -4,12 +4,31 @@
 #include "CkEcs/CkEcsLog.h"
 
 #include <Engine/World.h>
+#include <GameFramework/Actor.h>
 #include "CkEcs/Handle/CkHandle_Utils.h"
 #include "CkEcs/OwningActor/CkOwningActor_Utils.h"
 #include "CkEcs/Snapshot/CkSaveKey_Fragment.h"
 #include "CkEcsExt/Transform/CkTransform_Utils.h"
 #include "CkEcsExt/OwningActor/CkActorSpawnIntent_Fragment.h"
 #include "CkLabel/CkLabel_Utils.h"
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    UCk_EntityScript_WithActor_UE::
+    Get_IsConstructionContextReady(
+        UWorld* InExpectedWorld) const
+    -> bool
+{
+    if (NOT Super::Get_IsConstructionContextReady(InExpectedWorld))
+    { return false; }
+    const auto ActorIsValid = ck::IsValid(_OwningActor);
+    if (NOT ActorIsValid)
+    { return false; }
+    if (_OwningActor->IsActorBeingDestroyed())
+    { return false; }
+    return _OwningActor->GetWorld() == InExpectedWorld;
+}
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -118,6 +137,14 @@ auto
     { return ECk_Replication::DoesNotReplicate; }
 
     return Super::Get_EffectiveReplication();
+}
+
+auto
+    UCk_EntityScript_WithActor_UE::
+    Get_RequiresOwningActorBeforeReplicationDriver() const
+    -> bool
+{
+    return true;
 }
 
 auto

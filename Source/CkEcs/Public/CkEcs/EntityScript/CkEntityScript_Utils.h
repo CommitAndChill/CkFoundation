@@ -6,6 +6,7 @@
 #include "CkEcs/Request/CkRequest_Completion.h"
 
 #include "CkCore/Macros/CkMacros.h"
+#include "CkCore/Enums/CkEnums.h"
 
 #include "CkEntityScript_Utils.generated.h"
 
@@ -13,6 +14,30 @@
 
 class UCk_EntityScript_UE;
 class UWorld;
+
+// Internal C++ admission preflight shared with the queued-request processor.
+namespace ck_entity_script_utils
+{
+    CKECS_API auto TryResolveSpawnOwnerWorld(const FCk_Handle& InEntity, UWorld*& OutWorld) -> bool;
+    // Pure admission/drain policy; actual actor policy is resolved after parameter injection.
+    CKECS_API auto TryValidateSpawnReplication(
+        const FCk_Handle& InDirectOwner, const UCk_EntityScript_UE* InScript,
+        const FCk_Handle* InTarget, ECk_Replication InTargetReplication,
+        bool InRequireGenericDriver = false, bool InInjectedContext = false) -> bool;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+// An additive, native-only observation of Add on a caller-retained target.
+// RequestCarrier is the raw allocator return even when admission fails.
+// AllocationAttempted distinguishes no allocation from an invalid allocator return.
+// Pending is valid only on successful admission. No field grants destroy permission.
+struct CKECS_API FCk_EntityScript_AddCapture
+{
+    FCk_Handle_PendingEntityScript Pending;
+    FCk_Handle RequestCarrier;
+    bool bAllocationAttempted = false;
+};
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -59,6 +84,15 @@ private:
     Get_InvalidHandle() { return {}; };
 
 public:
+    // Returns the currently associated script, or null for invalid, retiring, or non-script entities.
+    // NotInstanced scripts share their class default object; instanced scripts must still own this entity.
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|EntityScript",
+              DisplayName="[Ck][EntityScript] Try Get EntityScript")
+    static UCk_EntityScript_UE*
+    TryGet_EntityScript(
+        const FCk_Handle& InHandle);
+
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|EntityScript",
               DisplayName="[Ck][EntityScript] Get_ScriptClass")
@@ -118,14 +152,29 @@ public:
     TryGet_Entity_EntityScript_InOwnershipChain(
         const FCk_Handle& InHandle);
 
+private:
+    // No early-failure user callback: spawn wrappers retire their own rejected target first.
+    static auto
+    TryAdmit(
+        FCk_Handle& InScriptEntity,
+        const TWeakObjectPtr<UCk_EntityScript_UE>& InEntityScriptClassArchetype,
+        const FInstancedStruct& InSpawnParams,
+        const FCk_EntityScript_PostConstruction_Func& InOptionalFunc,
+        const FCk_Delegate_Request_OnCompleted& InDelegate,
+        bool InDestroyTargetOnFailure,
+        FCk_EntityScript_AddCapture* OutCapture = nullptr) -> FCk_Handle_PendingEntityScript;
+
 public:
+    // Native-only ownership opt-in for a fresh target. Failure retires it before the one completion callback.
+    // Existing callers retain their target and settings by leaving the final argument false.
     static auto
     Add(
         FCk_Handle& InScriptEntity,
         const TSubclassOf<UCk_EntityScript_UE>& InEntityScriptClass,
         const FInstancedStruct& InSpawnParams,
         const FCk_EntityScript_PostConstruction_Func& InOptionalFunc = nullptr,
-        const FCk_Delegate_Request_OnCompleted& InDelegate = {}) -> FCk_Handle_PendingEntityScript;
+        const FCk_Delegate_Request_OnCompleted& InDelegate = {},
+        bool InDestroyTargetOnFailure = false) -> FCk_Handle_PendingEntityScript;
 
     static auto
     Add(
@@ -133,7 +182,24 @@ public:
         const TWeakObjectPtr<UCk_EntityScript_UE>& InEntityScriptClassArchetype,
         const FInstancedStruct& InSpawnParams,
         const FCk_EntityScript_PostConstruction_Func& InOptionalFunc = nullptr,
-        const FCk_Delegate_Request_OnCompleted& InDelegate = {}) -> FCk_Handle_PendingEntityScript;
+        const FCk_Delegate_Request_OnCompleted& InDelegate = {},
+        bool InDestroyTargetOnFailure = false) -> FCk_Handle_PendingEntityScript;
+
+    // Native-only captured Add. Caller has already retained the fresh target and
+    // deliberately removed inherited FFragment_Net_Params, FTag_HasAuthority,
+    // FTag_NetMode_IsHost and FTag_NetMode_IsClient when that authored policy
+    // is required. This API does not do those four removals. The class must
+    // already have a valid materialized CDO; this path will not create one.
+    // No early-failure delegate callback and no target destruction. A failure
+    // result still retains an attempted raw request carrier for caller proof.
+    static auto
+    TryAddCaptured(
+        FCk_Handle& InScriptEntity,
+        const TSubclassOf<UCk_EntityScript_UE>& InEntityScriptClass,
+        const FInstancedStruct& InSpawnParams,
+        const FCk_EntityScript_PostConstruction_Func& InOptionalFunc = nullptr,
+        const FCk_Delegate_Request_OnCompleted& InDelegate = {})
+        -> FCk_EntityScript_AddCapture;
 
     static auto
     TryInjectEntityScriptSpawnParams(
