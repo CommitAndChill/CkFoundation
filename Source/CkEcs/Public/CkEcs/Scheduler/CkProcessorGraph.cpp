@@ -6,62 +6,134 @@
 #include "CkEcs/Processor/CkProcessor_NetModePolicy.h"
 
 // --------------------------------------------------------------------------------------------------------------------
-// Closure/reduction lifted from entt/graph/flow.hpp (private members of basic_flow, not exposed standalone) and
-// applied to an entt::adjacency_matrix directly. Both O(V^3) — acceptable at graph-build time only.
+// Closure/reduction follow entt/graph/flow.hpp (private members of basic_flow, not exposed standalone), applied to an
+// entt::adjacency_matrix. The graph is built once per world, so a PIE session with a server and two clients builds it
+// three times, which rules out the cell-at-a-time O(V^3) form. Both passes only ever combine whole rows
+// (row I gains row K, or loses row J), so they run on one bit per cell and a word at a time; the result is the same
+// matrix, cell for cell, for any input including cycles and self-loops.
 
 namespace ck::detail
 {
     using FDirectedAdjacencyMatrix = entt::adjacency_matrix<entt::directed_tag>;
 
+    struct FAdjacencyBitRows
+    {
+        explicit FAdjacencyBitRows(
+            const FDirectedAdjacencyMatrix& InMatrix)
+            : _Length(InMatrix.size())
+            , _WordsPerRow((InMatrix.size() + 63) / 64)
+        {
+            _Words.SetNumZeroed(static_cast<int32>(_Length * _WordsPerRow));
+
+            for (auto From = std::size_t{0}; From < _Length; ++From)
+            {
+                for (auto To = std::size_t{0}; To < _Length; ++To)
+                {
+                    if (InMatrix.contains(From, To))
+                    { Get_Row(From)[To / 64] |= (uint64{1} << (To % 64)); }
+                }
+            }
+        }
+
+        auto Get_Row(
+            std::size_t InRow) -> uint64*
+        {
+            return _Words.GetData() + (InRow * _WordsPerRow);
+        }
+
+        auto Get_Contains(
+            std::size_t InFrom,
+            std::size_t InTo) -> bool
+        {
+            return (Get_Row(InFrom)[InTo / 64] & (uint64{1} << (InTo % 64))) != 0;
+        }
+
+        auto DoClear(
+            std::size_t InFrom,
+            std::size_t InTo) -> void
+        {
+            Get_Row(InFrom)[InTo / 64] &= ~(uint64{1} << (InTo % 64));
+        }
+
+        auto DoWriteTo(
+            FDirectedAdjacencyMatrix& InOutMatrix) -> void
+        {
+            for (auto From = std::size_t{0}; From < _Length; ++From)
+            {
+                for (auto To = std::size_t{0}; To < _Length; ++To)
+                {
+                    const auto WantsEdge = Get_Contains(From, To);
+
+                    if (WantsEdge == InOutMatrix.contains(From, To))
+                    { continue; }
+
+                    if (WantsEdge)
+                    { InOutMatrix.insert(From, To); }
+                    else
+                    { InOutMatrix.erase(From, To); }
+                }
+            }
+        }
+
+        std::size_t _Length;
+        std::size_t _WordsPerRow;
+        TArray<uint64> _Words;
+    };
+
     static auto
     DoTransitiveClosure(
         FDirectedAdjacencyMatrix& InMatrix) -> void
     {
-        const auto Length = InMatrix.size();
+        auto Rows = FAdjacencyBitRows{InMatrix};
 
-        for (auto K = std::size_t{0}; K < Length; ++K)
+        for (auto K = std::size_t{0}; K < Rows._Length; ++K)
         {
-            for (auto I = std::size_t{0}; I < Length; ++I)
+            const auto* RowK = Rows.Get_Row(K);
+
+            for (auto I = std::size_t{0}; I < Rows._Length; ++I)
             {
-                for (auto J = std::size_t{0}; J < Length; ++J)
-                {
-                    if (InMatrix.contains(I, K) and InMatrix.contains(K, J))
-                    {
-                        InMatrix.insert(I, J);
-                    }
-                }
+                if (NOT Rows.Get_Contains(I, K))
+                { continue; }
+
+                auto* RowI = Rows.Get_Row(I);
+
+                for (auto Word = std::size_t{0}; Word < Rows._WordsPerRow; ++Word)
+                { RowI[Word] |= RowK[Word]; }
             }
         }
+
+        Rows.DoWriteTo(InMatrix);
     }
 
     static auto
     DoTransitiveReduction(
         FDirectedAdjacencyMatrix& InMatrix) -> void
     {
-        const auto Length = InMatrix.size();
+        auto Rows = FAdjacencyBitRows{InMatrix};
 
         // Drop self-loops first so they can't mask transitive edges.
-        for (auto V = std::size_t{0}; V < Length; ++V)
+        for (auto V = std::size_t{0}; V < Rows._Length; ++V)
         {
-            InMatrix.erase(V, V);
+            Rows.DoClear(V, V);
         }
 
-        for (auto J = std::size_t{0}; J < Length; ++J)
+        for (auto J = std::size_t{0}; J < Rows._Length; ++J)
         {
-            for (auto I = std::size_t{0}; I < Length; ++I)
+            const auto* RowJ = Rows.Get_Row(J);
+
+            for (auto I = std::size_t{0}; I < Rows._Length; ++I)
             {
-                if (InMatrix.contains(I, J))
-                {
-                    for (auto K = std::size_t{0}; K < Length; ++K)
-                    {
-                        if (InMatrix.contains(J, K))
-                        {
-                            InMatrix.erase(I, K);
-                        }
-                    }
-                }
+                if (NOT Rows.Get_Contains(I, J))
+                { continue; }
+
+                auto* RowI = Rows.Get_Row(I);
+
+                for (auto Word = std::size_t{0}; Word < Rows._WordsPerRow; ++Word)
+                { RowI[Word] &= ~RowJ[Word]; }
             }
         }
+
+        Rows.DoWriteTo(InMatrix);
     }
 
     // Stripping entt::type_name's "struct "/"class " prefix makes per-processor trace rows read the
