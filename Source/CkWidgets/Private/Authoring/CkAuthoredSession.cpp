@@ -95,6 +95,26 @@ namespace ck_ui_authored_session
         RegisterObjectHandleAccessors()
         -> void
     {
+        auto FieldClass = FAngelscriptBinds::ExistingClass("FCk_UI_AuthoredFieldValue");
+        const auto* FieldType = FieldClass.GetTypeInfo();
+        if (FieldType != nullptr)
+        {
+            if (FieldType->GetMethodByName("Get_Texture") == nullptr)
+            {
+                FieldClass.Method("UTexture2D Get_Texture() const",
+                    [](const FCk_UI_AuthoredFieldValue* Self) -> UTexture2D* { return Self->Get_Texture(); });
+                FAngelscriptBinds::SetPreviousBindNoDiscard(true);
+                FScriptFunctionNativeForm::BindNativeMethod(FieldClass, "Get_Texture", true);
+            }
+            if (FieldType->GetMethodByName("Set_Texture") == nullptr)
+            {
+                FieldClass.Method("FCk_UI_AuthoredFieldValue& Set_Texture(UTexture2D InValue)",
+                    METHODPR_TRIVIAL(FCk_UI_AuthoredFieldValue&, FCk_UI_AuthoredFieldValue, Set_Texture, (UTexture2D*)));
+                FAngelscriptBinds::SetPreviousBindNoDiscard(false);
+                FScriptFunctionNativeForm::BindNativeMethod(FieldClass, "Set_Texture", true);
+            }
+            FAngelscriptBinds::SetPreviousBindNoDiscard(false);
+        }
         auto ImageClass = FAngelscriptBinds::ExistingClass("FCk_UI_AuthoredImage");
         const auto* ImageType = ImageClass.GetTypeInfo();
         if (ImageType != nullptr)
@@ -768,7 +788,7 @@ auto
     if (!Collection.IsValid()) { return Fail(OutErrors, TEXT("Authored record replacement requires a declared collection.")); }
     TGuardValue<bool> OperationGuard(_OperationActive, true);
     TArray<FCkUiRecordData> Records;
-    if (!ck_ui_authored_collection::TryConvertRecords(InRecords, Records, OutErrors)) { return false; }
+    if (!ck_ui_authored_collection::TryConvertRecords(InRecords, Records, OutErrors, Collection.Get())) { return false; }
     const FCkUiLoadResult Result = Collection->TrySetRecords(MoveTemp(Records));
     OutErrors = Result.Errors;
     if (!Result.Succeeded) { return false; }

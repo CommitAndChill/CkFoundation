@@ -1,9 +1,49 @@
 #include "CkAuthoredCollectionAdapter.h"
+#include "CkCore/Ensure/CkEnsure.h"
+#include "Engine/Texture2D.h"
+#include "Styling/SlateBrush.h"
+#include "UObject/StrongObjectPtr.h"
+
+auto FCk_UI_AuthoredFieldValue::Get_Texture() const -> UTexture2D*
+{
+    return _Texture;
+}
+
+auto FCk_UI_AuthoredFieldValue::Set_Texture(UTexture2D* InValue) -> ThisType&
+{
+    _Texture = InValue;
+    return *this;
+}
 
 namespace ck_ui_authored_collection
 {
     namespace
     {
+        /** Native records own the brush; the brush keeps its texture alive even after session release. */
+        class FCkAuthoredRecordImageBrush final : public FSlateBrush
+        {
+        public:
+            explicit FCkAuthoredRecordImageBrush(UTexture2D* InTexture) : Texture(InTexture)
+            {
+                DrawAs = ESlateBrushDrawType::Image;
+                SetResourceObject(InTexture);
+                ImageSize = FVector2D(InTexture->GetSizeX(), InTexture->GetSizeY());
+            }
+
+        private:
+            TStrongObjectPtr<UTexture2D> Texture;
+        };
+
+        auto ValidTexture(UTexture2D* InTexture) -> bool
+        {
+            const bool TextureValid = IsValid(InTexture);
+            CK_ENSURE_IF_NOT(TextureValid, TEXT("Authored collection image requires a valid texture.")) {}
+            if (!TextureValid) { return false; }
+            const bool DimensionsValid = InTexture->GetSizeX() > 0 && InTexture->GetSizeY() > 0;
+            CK_ENSURE_IF_NOT(DimensionsValid, TEXT("Authored collection image requires positive texture dimensions.")) {}
+            return DimensionsValid;
+        }
+
         auto TryNativeKind(ECk_UI_AuthoredFieldKind InKind, ECkUiFieldKind& OutKind) -> bool
         {
             switch (InKind)
@@ -13,6 +53,7 @@ namespace ck_ui_authored_collection
             case ECk_UI_AuthoredFieldKind::Bool: OutKind = ECkUiFieldKind::Bool; return true;
             case ECk_UI_AuthoredFieldKind::Integer: OutKind = ECkUiFieldKind::Integer; return true;
             case ECk_UI_AuthoredFieldKind::Color: OutKind = ECkUiFieldKind::Color; return true;
+            case ECk_UI_AuthoredFieldKind::Image: OutKind = ECkUiFieldKind::Image; return true;
             default: return false;
             }
         }
@@ -28,6 +69,7 @@ namespace ck_ui_authored_collection
             case ECkUiFieldKind::Bool: Kind = ECk_UI_AuthoredFieldKind::Bool; break;
             case ECkUiFieldKind::Integer: Kind = ECk_UI_AuthoredFieldKind::Integer; break;
             case ECkUiFieldKind::Color: Kind = ECk_UI_AuthoredFieldKind::Color; break;
+            case ECkUiFieldKind::Image: Kind = ECk_UI_AuthoredFieldKind::Image; break;
             default: return false;
             }
             FCk_UI_AuthoredFieldValue Candidate{InName, Kind};
@@ -38,6 +80,14 @@ namespace ck_ui_authored_collection
             case ECk_UI_AuthoredFieldKind::Bool: Candidate.Set_Bool(InValue.Bool); break;
             case ECk_UI_AuthoredFieldKind::Integer: Candidate.Set_Integer(InValue.Integer); break;
             case ECk_UI_AuthoredFieldKind::Color: Candidate.Set_Color(InValue.Color); break;
+            case ECk_UI_AuthoredFieldKind::Image:
+            {
+                UTexture2D* Texture = InValue.Image.IsValid()
+                    ? Cast<UTexture2D>(InValue.Image->GetResourceObject()) : nullptr;
+                if (!ValidTexture(Texture)) { return false; }
+                Candidate.Set_Texture(Texture);
+                break;
+            }
             default: return false;
             }
             OutValue = MoveTemp(Candidate);
@@ -46,7 +96,7 @@ namespace ck_ui_authored_collection
     }
 
     auto TryConvertRecords(const TArray<FCk_UI_AuthoredRecord>& InRecords, TArray<FCkUiRecordData>& OutRecords,
-        TArray<FString>& OutErrors) -> bool
+        TArray<FString>& OutErrors, const FCkUiCollection* InPrevious) -> bool
     {
         TArray<FCkUiRecordData> Candidate;
         Candidate.Reserve(InRecords.Num());
@@ -74,6 +124,27 @@ namespace ck_ui_authored_collection
                 case ECk_UI_AuthoredFieldKind::Bool: Value.Bool = Field.Get_Bool(); break;
                 case ECk_UI_AuthoredFieldKind::Integer: Value.Integer = Field.Get_Integer(); break;
                 case ECk_UI_AuthoredFieldKind::Color: Value.Color = Field.Get_Color(); break;
+                case ECk_UI_AuthoredFieldKind::Image:
+                {
+                    UTexture2D* Texture = Field.Get_Texture();
+                    if (!ValidTexture(Texture))
+                    {
+                        OutErrors.Add(FString::Printf(TEXT("Authored collection record '%s' has an invalid image field '%s'."),
+                            *Record.Get_Key(), *Field.Get_Name()));
+                        return false;
+                    }
+                    const TSharedPtr<const FCkUiRecord> PreviousRecord = InPrevious != nullptr
+                        ? InPrevious->FindRecord(Record.Get_Key()) : nullptr;
+                    const FCkUiFieldValue* PreviousField = PreviousRecord.IsValid()
+                        ? PreviousRecord->FindField(Field.Get_Name()) : nullptr;
+                    if (PreviousField != nullptr && PreviousField->Kind == ECkUiFieldKind::Image
+                        && PreviousField->Image.IsValid()
+                        && PreviousField->Image->GetResourceObject() == Texture)
+                    { Value.Image = PreviousField->Image; }
+                    else
+                    { Value.Image = MakeShared<FCkAuthoredRecordImageBrush>(Texture); }
+                    break;
+                }
                 default: return false;
                 }
                 NativeRecord.Fields.Add(Field.Get_Name(), MoveTemp(Value));
