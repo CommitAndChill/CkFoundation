@@ -1,7 +1,9 @@
 #include "CkSlateLayout/CkUiHudControls.h"
 
 #include "Brushes/SlateRoundedBoxBrush.h"
+#include "Layout/Clipping.h"
 #include "Rendering/DrawElements.h"
+#include "Styling/CoreStyle.h"
 #include "Widgets/Images/SImage.h"
 
 namespace ck_ui_hud
@@ -229,6 +231,133 @@ namespace ck_ui_hud
         FGraphicConfiguration _Configuration;
         bool _Frozen = false;
     };
+
+    struct FOrbConfiguration
+    {
+        TAttribute<float> Value;
+        TAttribute<const FSlateBrush*> Liquid;
+        TAttribute<const FSlateBrush*> Frame;
+        float Response = 0.18f;
+    };
+
+    auto MakeOrbConfiguration(const FCkUiCustomWidgetArguments& InArguments,
+        FOrbConfiguration& Out, FString& OutFailure) -> bool
+    {
+        const auto* Value = InArguments.NumberBindings.Find(TEXT("value"));
+        const auto* Liquid = InArguments.ImageBindings.Find(TEXT("liquid"));
+        const auto* Frame = InArguments.ImageBindings.Find(TEXT("frame"));
+        if (InArguments.Id.IsEmpty() || Value == nullptr || !Value->IsSet()
+            || Liquid == nullptr || !Liquid->IsSet() || Frame == nullptr || !Frame->IsSet())
+        {
+            OutFailure = TEXT("HUD orb requires an id, value, liquid image, and frame image bindings.");
+            return false;
+        }
+        if (!ReadNumber(InArguments.Style, TEXT("-ck-hud-orb-response"), ECkUiCustomStyleKind::Number,
+            0.0f, 5.0f, Out.Response, OutFailure))
+        { return false; }
+        Out.Value = *Value;
+        Out.Liquid = *Liquid;
+        Out.Frame = *Frame;
+        return true;
+    }
+
+    class FOrb final : public ICkUiRetainedWidget, public TSharedFromThis<FOrb>
+    {
+    public:
+        explicit FOrb(FOrbConfiguration InConfiguration) : _Configuration(MoveTemp(InConfiguration)) {}
+        virtual ~FOrb() override { if (_Widget.IsValid()) { _Widget->Freeze(); } }
+        void Initialize(const FString& InId)
+        {
+            SAssignNew(_Widget, SCkUiHudOrb).Tag(FName(*InId));
+            _Widget->Configure(_Configuration.Value, _Configuration.Liquid, _Configuration.Frame,
+                _Configuration.Response);
+        }
+        virtual auto GetWidget() const -> TSharedRef<SWidget> override { return _Widget.ToSharedRef(); }
+        virtual void ReleaseOwnerInteraction() override { _Widget->Freeze(); }
+        virtual auto PrepareReload(const FCkUiCustomWidgetArguments& InArguments, FString& OutFailure) const
+            -> TUniquePtr<ICkUiPreparedWidgetUpdate> override
+        {
+            FOrbConfiguration Candidate;
+            if (!MakeOrbConfiguration(InArguments, Candidate, OutFailure)) { return {}; }
+            return MakeUnique<FUpdate>(ConstCastSharedRef<FOrb>(AsShared()), MoveTemp(Candidate));
+        }
+    private:
+        class FUpdate final : public ICkUiPreparedWidgetUpdate
+        {
+        public:
+            FUpdate(TSharedRef<FOrb> InOwner, FOrbConfiguration InConfiguration)
+                : Owner(MoveTemp(InOwner)), Configuration(MoveTemp(InConfiguration)) {}
+            virtual void Commit() noexcept override
+            {
+                Owner->_Configuration = MoveTemp(Configuration);
+                Owner->_Widget->Configure(Owner->_Configuration.Value, Owner->_Configuration.Liquid,
+                    Owner->_Configuration.Frame, Owner->_Configuration.Response);
+            }
+            TSharedRef<FOrb> Owner;
+            FOrbConfiguration Configuration;
+        };
+        TSharedPtr<SCkUiHudOrb> _Widget;
+        FOrbConfiguration _Configuration;
+    };
+
+    struct FAbilityConfiguration
+    {
+        TAttribute<float> Cooldown;
+        TAttribute<const FSlateBrush*> Image;
+    };
+
+    auto MakeAbilityConfiguration(const FCkUiCustomWidgetArguments& InArguments,
+        FAbilityConfiguration& Out, FString& OutFailure) -> bool
+    {
+        const auto* Cooldown = InArguments.NumberBindings.Find(TEXT("cooldown"));
+        const auto* Image = InArguments.ImageBindings.Find(TEXT("image"));
+        if (InArguments.Id.IsEmpty() || Cooldown == nullptr || !Cooldown->IsSet()
+            || Image == nullptr || !Image->IsSet())
+        {
+            OutFailure = TEXT("HUD ability requires an id, cooldown, and image bindings.");
+            return false;
+        }
+        Out.Cooldown = *Cooldown;
+        Out.Image = *Image;
+        return true;
+    }
+
+    class FAbility final : public ICkUiRetainedWidget, public TSharedFromThis<FAbility>
+    {
+    public:
+        explicit FAbility(FAbilityConfiguration InConfiguration) : _Configuration(MoveTemp(InConfiguration)) {}
+        virtual ~FAbility() override { if (_Widget.IsValid()) { _Widget->Freeze(); } }
+        void Initialize(const FString& InId)
+        {
+            SAssignNew(_Widget, SCkUiHudAbility).Tag(FName(*InId));
+            _Widget->Configure(_Configuration.Cooldown, _Configuration.Image);
+        }
+        virtual auto GetWidget() const -> TSharedRef<SWidget> override { return _Widget.ToSharedRef(); }
+        virtual void ReleaseOwnerInteraction() override { _Widget->Freeze(); }
+        virtual auto PrepareReload(const FCkUiCustomWidgetArguments& InArguments, FString& OutFailure) const
+            -> TUniquePtr<ICkUiPreparedWidgetUpdate> override
+        {
+            FAbilityConfiguration Candidate;
+            if (!MakeAbilityConfiguration(InArguments, Candidate, OutFailure)) { return {}; }
+            return MakeUnique<FUpdate>(ConstCastSharedRef<FAbility>(AsShared()), MoveTemp(Candidate));
+        }
+    private:
+        class FUpdate final : public ICkUiPreparedWidgetUpdate
+        {
+        public:
+            FUpdate(TSharedRef<FAbility> InOwner, FAbilityConfiguration InConfiguration)
+                : Owner(MoveTemp(InOwner)), Configuration(MoveTemp(InConfiguration)) {}
+            virtual void Commit() noexcept override
+            {
+                Owner->_Configuration = MoveTemp(Configuration);
+                Owner->_Widget->Configure(Owner->_Configuration.Cooldown, Owner->_Configuration.Image);
+            }
+            TSharedRef<FAbility> Owner;
+            FAbilityConfiguration Configuration;
+        };
+        TSharedPtr<SCkUiHudAbility> _Widget;
+        FAbilityConfiguration _Configuration;
+    };
 }
 
 void SCkUiHudMeter::Construct(const FArguments&)
@@ -377,6 +506,135 @@ auto SCkUiHudMeter::OnPaint(const FPaintArgs&, const FGeometry& InGeometry,
     return InLayer + 3;
 }
 
+void SCkUiHudOrb::Construct(const FArguments&)
+{
+    SetVisibility(EVisibility::SelfHitTestInvisible);
+    SetCanTick(true);
+}
+
+void SCkUiHudOrb::Configure(TAttribute<float> InValue, TAttribute<const FSlateBrush*> InLiquid,
+    TAttribute<const FSlateBrush*> InFrame, const float InResponse)
+{
+    _Value = MoveTemp(InValue);
+    _Liquid = MoveTemp(InLiquid);
+    _Frame = MoveTemp(InFrame);
+    _Response = InResponse;
+    Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Paint);
+}
+
+void SCkUiHudOrb::Freeze()
+{
+    _Frozen = true;
+    Invalidate(EInvalidateWidgetReason::Paint);
+}
+
+void SCkUiHudOrb::Tick(const FGeometry& InGeometry, const double InCurrentTime, const float InDeltaTime)
+{
+    SLeafWidget::Tick(InGeometry, InCurrentTime, InDeltaTime);
+    if (_Frozen) { return; }
+    const float Target = ck_ui_hud::UnitFraction(_Value.Get(0.0f));
+    if (!_Initialized) { _Displayed = Target; _Initialized = true; }
+    else
+    {
+        const float Delta = FMath::IsFinite(InDeltaTime) ? FMath::Clamp(InDeltaTime, 0.0f, 1.0f) : 0.0f;
+        const float Alpha = _Response <= 0.0f ? 1.0f : 1.0f - FMath::Exp(-Delta / _Response);
+        _Displayed = FMath::Lerp(_Displayed, Target, Alpha);
+    }
+    Invalidate(EInvalidateWidgetReason::Paint);
+}
+
+auto SCkUiHudOrb::ComputeDesiredSize(float) const -> FVector2D { return FVector2D(160.0f, 160.0f); }
+
+auto SCkUiHudOrb::OnPaint(const FPaintArgs&, const FGeometry& InGeometry, const FSlateRect&,
+    FSlateWindowElementList& OutDrawElements, const int32 InLayer,
+    const FWidgetStyle& InWidgetStyle, bool) const -> int32
+{
+    if (_Frozen) { return InLayer; }
+    const FSlateBrush* Liquid = _Liquid.Get(nullptr);
+    const FSlateBrush* Frame = _Frame.Get(nullptr);
+    if (Liquid == nullptr || Frame == nullptr) { return InLayer; }
+    const FLinearColor Tint = InWidgetStyle.GetColorAndOpacityTint();
+    const FVector2D Size = InGeometry.GetLocalSize();
+    FSlateDrawElement::MakeBox(OutDrawElements, InLayer, InGeometry.ToPaintGeometry(),
+        Liquid, ESlateDrawEffect::None, FLinearColor(0.07f, 0.07f, 0.07f, 0.65f) * Tint);
+    if (_Displayed > 0.0f)
+    {
+        const FVector2D TopLeft = InGeometry.LocalToAbsolute(FVector2D(0.0f, Size.Y * (1.0f - _Displayed)));
+        const FVector2D BottomRight = InGeometry.LocalToAbsolute(Size);
+        OutDrawElements.PushClip(FSlateClippingZone(FSlateRect(TopLeft.X, TopLeft.Y,
+            BottomRight.X, BottomRight.Y)));
+        FSlateDrawElement::MakeBox(OutDrawElements, InLayer + 1, InGeometry.ToPaintGeometry(),
+            Liquid, ESlateDrawEffect::None, Tint);
+        OutDrawElements.PopClip();
+    }
+    FSlateDrawElement::MakeBox(OutDrawElements, InLayer + 2, InGeometry.ToPaintGeometry(),
+        Frame, ESlateDrawEffect::None, Tint);
+    return InLayer + 2;
+}
+
+void SCkUiHudAbility::Construct(const FArguments&)
+{
+    SetVisibility(EVisibility::SelfHitTestInvisible);
+    SetCanTick(true);
+}
+
+void SCkUiHudAbility::Configure(TAttribute<float> InCooldown, TAttribute<const FSlateBrush*> InImage)
+{
+    _Cooldown = MoveTemp(InCooldown);
+    _Image = MoveTemp(InImage);
+    Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Paint);
+}
+
+void SCkUiHudAbility::Freeze()
+{
+    _Frozen = true;
+    Invalidate(EInvalidateWidgetReason::Paint);
+}
+
+void SCkUiHudAbility::Tick(const FGeometry& InGeometry, const double InCurrentTime, const float InDeltaTime)
+{
+    SLeafWidget::Tick(InGeometry, InCurrentTime, InDeltaTime);
+    if (!_Frozen) { Invalidate(EInvalidateWidgetReason::Paint); }
+}
+
+auto SCkUiHudAbility::ComputeDesiredSize(float) const -> FVector2D { return FVector2D(64.0f, 64.0f); }
+
+auto SCkUiHudAbility::OnPaint(const FPaintArgs&, const FGeometry& InGeometry, const FSlateRect&,
+    FSlateWindowElementList& OutDrawElements, const int32 InLayer,
+    const FWidgetStyle& InWidgetStyle, bool) const -> int32
+{
+    if (_Frozen) { return InLayer; }
+    const FSlateBrush* Image = _Image.Get(nullptr);
+    if (Image == nullptr) { return InLayer; }
+    const FLinearColor Tint = InWidgetStyle.GetColorAndOpacityTint();
+    const float Cooldown = ck_ui_hud::UnitFraction(_Cooldown.Get(0.0f));
+    const FVector2D Size = InGeometry.GetLocalSize();
+    FSlateDrawElement::MakeBox(OutDrawElements, InLayer, InGeometry.ToPaintGeometry(),
+        Image, ESlateDrawEffect::None, Tint);
+    if (Cooldown > 0.0f)
+    {
+        const float ShadeHeight = static_cast<float>(Size.Y) * Cooldown;
+        FSlateDrawElement::MakeBox(OutDrawElements, InLayer + 1,
+            InGeometry.ToPaintGeometry(FVector2f(Size.X, ShadeHeight),
+                FSlateLayoutTransform(FVector2f(0.0f, 0.0f))),
+            FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")), ESlateDrawEffect::None,
+            FLinearColor(0.015f, 0.018f, 0.02f, 0.74f) * Tint);
+        const float ArcFraction = 1.0f - Cooldown;
+        TArray<FVector2f> Arc;
+        const FVector2f Center(Size.X * 0.5f, Size.Y * 0.5f);
+        const float Radius = FMath::Max(0.0f, FMath::Min(Size.X, Size.Y) * 0.5f - 3.0f);
+        const int32 Steps = FMath::Max(2, FMath::CeilToInt(48.0f * ArcFraction));
+        for (int32 Index = 0; Index <= Steps; ++Index)
+        {
+            const float Angle = -HALF_PI + TWO_PI * ArcFraction * Index / Steps;
+            Arc.Add(Center + FVector2f(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius);
+        }
+        FSlateDrawElement::MakeLines(OutDrawElements, InLayer + 2, InGeometry.ToPaintGeometry(),
+            MoveTemp(Arc), ESlateDrawEffect::None, FLinearColor(0.92f, 0.75f, 0.43f, 0.92f) * Tint, true, 2.0f);
+    }
+    return InLayer + 2;
+}
+
 auto FCkUiHudControls::Register(FCkUiWidgetRegistry& InRegistry) -> FCkUiLoadResult
 {
     FCkUiWidgetRegistry Candidate = InRegistry;
@@ -429,6 +687,42 @@ auto FCkUiHudControls::Register(FCkUiWidgetRegistry& InRegistry) -> FCkUiLoadRes
         return Control;
     };
     Result = Candidate.Register(MoveTemp(Graphic));
+    if (!Result.Succeeded) { return Result; }
+    auto Orb = FCkUiCustomWidgetRegistration{};
+    Orb.Schema.Tag = TEXT("hud-orb");
+    Orb.Schema.Properties = {
+        {TEXT("value"), ECkUiCustomPropertyKind::NumberBinding, true},
+        {TEXT("liquid"), ECkUiCustomPropertyKind::ImageBinding, true},
+        {TEXT("frame"), ECkUiCustomPropertyKind::ImageBinding, true}
+    };
+    Orb.Schema.StyleProperties = {{TEXT("-ck-hud-orb-response"), ECkUiCustomStyleKind::Number}};
+    Orb.RetainedFactory = [](const FCkUiCustomWidgetArguments& InArguments, FString& OutFailure)
+        -> TSharedPtr<ICkUiRetainedWidget>
+    {
+        ck_ui_hud::FOrbConfiguration Configuration;
+        if (!ck_ui_hud::MakeOrbConfiguration(InArguments, Configuration, OutFailure)) { return {}; }
+        const TSharedRef<ck_ui_hud::FOrb> Control = MakeShared<ck_ui_hud::FOrb>(MoveTemp(Configuration));
+        Control->Initialize(InArguments.Id);
+        return Control;
+    };
+    Result = Candidate.Register(MoveTemp(Orb));
+    if (!Result.Succeeded) { return Result; }
+    auto Ability = FCkUiCustomWidgetRegistration{};
+    Ability.Schema.Tag = TEXT("hud-ability");
+    Ability.Schema.Properties = {
+        {TEXT("cooldown"), ECkUiCustomPropertyKind::NumberBinding, true},
+        {TEXT("image"), ECkUiCustomPropertyKind::ImageBinding, true}
+    };
+    Ability.RetainedFactory = [](const FCkUiCustomWidgetArguments& InArguments, FString& OutFailure)
+        -> TSharedPtr<ICkUiRetainedWidget>
+    {
+        ck_ui_hud::FAbilityConfiguration Configuration;
+        if (!ck_ui_hud::MakeAbilityConfiguration(InArguments, Configuration, OutFailure)) { return {}; }
+        const TSharedRef<ck_ui_hud::FAbility> Control = MakeShared<ck_ui_hud::FAbility>(MoveTemp(Configuration));
+        Control->Initialize(InArguments.Id);
+        return Control;
+    };
+    Result = Candidate.Register(MoveTemp(Ability));
     if (Result.Succeeded)
     { InRegistry = MoveTemp(Candidate); }
     return Result;

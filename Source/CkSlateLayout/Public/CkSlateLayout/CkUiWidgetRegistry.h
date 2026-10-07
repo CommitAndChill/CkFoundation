@@ -8,6 +8,7 @@
 struct FSlateBrush;
 class FCkUiCollection;
 class FCkUiFloatSeries;
+class FCkUiFontRegistrySnapshot;
 
 DECLARE_DELEGATE_OneParam(FCkUiOnBoolChanged, bool);
 DECLARE_DELEGATE_OneParam(FCkUiOnNumberChanged, float);
@@ -89,6 +90,8 @@ struct FCkUiCustomWidgetArguments
     TAttribute<bool> CanDispatchEvents;
     /** Consumer-selected base font for standard Slate controls. */
     FSlateFontInfo BaseFont;
+    /** Host-admitted font families for custom controls with a literal font-family property. */
+    TSharedPtr<const FCkUiFontRegistrySnapshot> FontRegistry;
     /** Persistent opaque slot mounts. The factory mounts each supplied box once beneath its detached widget. */
     TMap<FString, TSharedPtr<SWidget>> Slots;
     /** Runtime/teardown only: release this host user's captures beneath a named slot. Never call from factory, PrepareReload, or Commit. */
