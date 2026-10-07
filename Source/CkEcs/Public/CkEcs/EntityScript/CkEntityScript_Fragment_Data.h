@@ -76,6 +76,10 @@ private:
               meta = (AllowPrivateAccess = true))
     FInstancedStruct _SpawnParams;
 
+    // The spawn wrappers own a newly created target; direct Add keeps caller ownership.
+    // C++ request metadata only: no Blueprint-facing ownership option.
+    bool _DestroyTargetOnFailure = false;
+
 private:
     FCk_EntityScript_PostConstruction_Func _PostConstruction_Func;
 
@@ -87,8 +91,15 @@ public:
     CK_PROPERTY(_ContextOwner);
     CK_PROPERTY(_SpawnParams);
     CK_PROPERTY(_PostConstruction_Func);
+    CK_PROPERTY_GET(_DestroyTargetOnFailure);
 
     CK_DEFINE_CONSTRUCTORS(FCk_Request_EntityScript_SpawnEntity, _NewEntity, _Owner, _EntityScriptClassArchetype);
+    // C++-only provenance overload; Blueprint/AngelScript callers cannot select ownership.
+    FCk_Request_EntityScript_SpawnEntity(FCk_Handle InNewEntity, FCk_Handle InOwner,
+        TWeakObjectPtr<UCk_EntityScript_UE> InArchetype, bool InDestroyTargetOnFailure)
+        : FCk_Request_EntityScript_SpawnEntity{MoveTemp(InNewEntity), MoveTemp(InOwner),
+            MoveTemp(InArchetype)}
+    { _DestroyTargetOnFailure = InDestroyTargetOnFailure; }
     FCk_Request_EntityScript_SpawnEntity(
         const FCk_Handle& InNewEntity,
         const FCk_Handle& InOwner,
