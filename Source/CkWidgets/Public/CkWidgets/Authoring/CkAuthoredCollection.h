@@ -13,7 +13,8 @@ enum class ECk_UI_AuthoredFieldKind : uint8
     Number,
     Bool,
     Integer,
-    Color
+    Color,
+    Image
 };
 
 USTRUCT(BlueprintType)
@@ -57,6 +58,8 @@ private:
     int32 _Integer = 0;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
     FLinearColor _Color = FLinearColor::White;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
+    UTexture2D* _Texture = nullptr;
 public:
     CK_PROPERTY(_Name);
     CK_PROPERTY(_Kind);
@@ -65,6 +68,8 @@ public:
     CK_PROPERTY(_Bool);
     CK_PROPERTY(_Integer);
     CK_PROPERTY(_Color);
+    auto Get_Texture() const -> UTexture2D*;
+    auto Set_Texture(UTexture2D* InValue) -> ThisType&;
     CK_DEFINE_CONSTRUCTORS(FCk_UI_AuthoredFieldValue, _Name, _Kind);
 };
 
