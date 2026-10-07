@@ -1328,6 +1328,8 @@ the view uses them.
 <hud-meter id="health" value-bind="HealthFraction" tint-bind="HealthTint" class="health-meter" />
 <hud-meter id="cooldown" value-bind="CooldownFraction" class="cooldown-ring" />
 <hud-graphic id="damage" image-bind="DamageBrush" opacity-bind="DamageOpacity" />
+<hud-orb id="health-orb" value-bind="HealthFraction" liquid-bind="HealthLiquid" frame-bind="OrbBezel" />
+<hud-ability id="shadow" cooldown-bind="ShadowCooldown" image-bind="ShadowArt" />
 ```
 
 ```css
@@ -1346,9 +1348,19 @@ The meter eases its leading fill toward the bound value, holds a loss trail
 briefly before it eases down, and pulses the fill at or below the low threshold.
 The radial form draws a native Slate arc; no material asset is required.
 
-Both controls are passive and retain native identity across compatible source
-reloads. An invalid candidate leaves the accepted view in place. Releasing the
-owning view freezes a held meter and makes a held graphic stop reading its image.
+`hud-orb` requires a normalized `value-bind`, `liquid-bind`, and `frame-bind`.
+It draws a dimmed liquid texture under a vertically clipped, eased liquid fill,
+then the frame texture above both. Transparent edges in the liquid art form the
+round silhouette. `-ck-hud-orb-response` is a finite 0..5 second number (default
+0.18). `hud-ability` requires normalized `cooldown-bind` and `image-bind`; it
+draws the art, a dark cooldown shade, and a live progress arc. The host owns
+scalar images and their resources. Both controls are retained and freeze on
+owner release. A custom image property uses `<name>-bind`, so the orb's
+attributes are `liquid-bind` and `frame-bind`.
+
+All four HUD controls are passive and retain native identity across compatible
+source reloads. An invalid candidate leaves the accepted view in place.
+Releasing the owning view freezes held controls and their bound images.
 For an on-screen UMG host, make the host hit-test invisible and keep gameplay
 input mode and pause state with the player. The
 [CkTests combat HUD proof](../../../CkTests/Documentation/UI/CombatHudProof/README.md)
@@ -1367,6 +1379,19 @@ Register `RegisterRadialUiControls` from `CkUiRadialSelector.h` in the owner's r
 
 `items-bind` references a keyed collection with Text fields `actor` and `glyph`, Number fields `angle` and `cooldown`, and Bool fields `enabled` and `queued`. An optional Text `label` belongs to the host. Angles run clockwise from right (top is -90 degrees), must be finite and separated by at least 15 degrees. Cooldown is normalized to 0..1. Empty or malformed collections reject configuration; invalid retained reloads leave the accepted root untouched.
 
+The collection may also declare an `image` field of Image kind. When present,
+records provide a retained brush for each icon. The reflected CkWidgets
+collection adapter accepts `UTexture2D` image fields and keeps accepted
+textures alive through the brush; invalid textures reject the whole record
+replacement before publication.
+
 `select` reports hover or keyboard selection, including unavailable items so a host can explain their state. `activate` reports an enabled, ready item on mouse-up or Enter. Model updates and source reloads do not invoke these events. Set `FDataBindings::SlateUserIndex` and `CanDispatchEvents` for the owning input context. Releasing the view freezes the root and suppresses callbacks through external references.
 
 The optional `content` slot mounts authored center content once and remains hit-test invisible. CSS supports `-ck-radial-tile-size` (20..128px), and Color properties `-ck-radial-ring`, `-ck-radial-selected`, `-ck-radial-queued` and `-ck-radial-disabled`. `-ck-radial-sector-mode: 1` opts into a ring with one sector per item, midpoint spokes, a selected outer arc, and the record's glyph and actor label as text; the default `0` preserves the original power-wheel drawing. Sector text sizes are authored with `-ck-radial-glyph-font-size` and `-ck-radial-label-font-size` (finite 8..48px lengths, rounded to Slate point sizes; defaults 18 and 13). Invalid values reject source reload without replacing the accepted view. The Mass Effect squad-power gym exercises the default control with independent actor queues and atomic queue release.
+
+An optional literal `font-family` selects an admitted regular face for native
+radial labels. `-ck-radial-fantasy-mode: 1` requires sector mode and draws a
+feathered selected wedge, thin spokes, and an inner ring without an outer ring;
+it places record image icons inside the wheel and labels near its edge. The
+dark disc and center controls can remain ordinary authored overlay nodes. The
+CkTests Dark Fantasy HUD gym demonstrates this composition.

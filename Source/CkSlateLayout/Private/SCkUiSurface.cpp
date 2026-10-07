@@ -2440,7 +2440,7 @@ auto FCkUiView::StageNode(const FCkUiNode& InNode, FStagedDocument& InOutStaged,
         {
             const TSharedPtr<FCkUiView> Owner = WeakOwner.Pin();
             return Owner.IsValid() && Owner->CanDispatchEvents();
-        }), .BaseFont = _BaseFont, .SlateUserIndex = _Data.SlateUserIndex};
+        }), .BaseFont = _BaseFont, .FontRegistry = _FontRegistry, .SlateUserIndex = _Data.SlateUserIndex};
         for (const auto& [Name, Value] : InNode.CustomProperties)
         {
             switch (Value.Kind)

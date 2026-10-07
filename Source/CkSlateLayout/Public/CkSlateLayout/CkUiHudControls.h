@@ -60,7 +60,55 @@ private:
     bool _Frozen = false;
 };
 
-/** Registers passive, retained hud-meter and hud-graphic controls. */
+/** Image-backed liquid orb. The fill clips upward through a retained texture. */
+class CKSLATELAYOUT_API SCkUiHudOrb final : public SLeafWidget
+{
+public:
+    SLATE_BEGIN_ARGS(SCkUiHudOrb) {} SLATE_END_ARGS()
+
+    void Construct(const FArguments& InArguments);
+    void Configure(TAttribute<float> InValue, TAttribute<const FSlateBrush*> InLiquid,
+        TAttribute<const FSlateBrush*> InFrame, float InResponse);
+    void Freeze();
+    auto GetDisplayedFraction() const -> float { return _Displayed; }
+    virtual void Tick(const FGeometry& InGeometry, double InCurrentTime, float InDeltaTime) override;
+    virtual auto ComputeDesiredSize(float InScale) const -> FVector2D override;
+    virtual auto OnPaint(const FPaintArgs& InArgs, const FGeometry& InGeometry,
+        const FSlateRect& InCullingRect, FSlateWindowElementList& OutDrawElements,
+        int32 InLayer, const FWidgetStyle& InWidgetStyle, bool InParentEnabled) const -> int32 override;
+
+private:
+    TAttribute<float> _Value;
+    TAttribute<const FSlateBrush*> _Liquid;
+    TAttribute<const FSlateBrush*> _Frame;
+    float _Response = 0.18f;
+    float _Displayed = 0.0f;
+    bool _Initialized = false;
+    bool _Frozen = false;
+};
+
+/** Image ability tile with a live graphical cooldown shade and progress rim. */
+class CKSLATELAYOUT_API SCkUiHudAbility final : public SLeafWidget
+{
+public:
+    SLATE_BEGIN_ARGS(SCkUiHudAbility) {} SLATE_END_ARGS()
+
+    void Construct(const FArguments& InArguments);
+    void Configure(TAttribute<float> InCooldown, TAttribute<const FSlateBrush*> InImage);
+    void Freeze();
+    virtual void Tick(const FGeometry& InGeometry, double InCurrentTime, float InDeltaTime) override;
+    virtual auto ComputeDesiredSize(float InScale) const -> FVector2D override;
+    virtual auto OnPaint(const FPaintArgs& InArgs, const FGeometry& InGeometry,
+        const FSlateRect& InCullingRect, FSlateWindowElementList& OutDrawElements,
+        int32 InLayer, const FWidgetStyle& InWidgetStyle, bool InParentEnabled) const -> int32 override;
+
+private:
+    TAttribute<float> _Cooldown;
+    TAttribute<const FSlateBrush*> _Image;
+    bool _Frozen = false;
+};
+
+/** Registers passive, retained HUD image and meter controls. */
 class CKSLATELAYOUT_API FCkUiHudControls final
 {
 public:
