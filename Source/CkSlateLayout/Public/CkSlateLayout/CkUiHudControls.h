@@ -60,7 +60,7 @@ private:
     bool _Frozen = false;
 };
 
-/** Image-backed liquid orb. The fill clips upward through a retained texture. */
+/** Animated liquid inside a shaded sphere, beneath a fixed glass highlight and frame. */
 class CKSLATELAYOUT_API SCkUiHudOrb final : public SLeafWidget
 {
 public:
@@ -68,9 +68,12 @@ public:
 
     void Construct(const FArguments& InArguments);
     void Configure(TAttribute<float> InValue, TAttribute<const FSlateBrush*> InLiquid,
-        TAttribute<const FSlateBrush*> InFrame, float InResponse);
+        TAttribute<const FSlateBrush*> InFrame, float InResponse, float InMotionSpeed = 0.35f);
+    void AdvancePresentation(float InDeltaTime);
     void Freeze();
     auto GetDisplayedFraction() const -> float { return _Displayed; }
+    auto GetAnimationPhase() const -> float { return _Phase; }
+    auto IsFrozen() const -> bool { return _Frozen; }
     virtual void Tick(const FGeometry& InGeometry, double InCurrentTime, float InDeltaTime) override;
     virtual auto ComputeDesiredSize(float InScale) const -> FVector2D override;
     virtual auto OnPaint(const FPaintArgs& InArgs, const FGeometry& InGeometry,
@@ -82,20 +85,25 @@ private:
     TAttribute<const FSlateBrush*> _Liquid;
     TAttribute<const FSlateBrush*> _Frame;
     float _Response = 0.18f;
+    float _MotionSpeed = 0.35f;
+    float _Phase = 0.0f;
     float _Displayed = 0.0f;
     bool _Initialized = false;
     bool _Frozen = false;
 };
 
-/** Image ability tile with a live graphical cooldown shade and progress rim. */
+/** Image ability tile with a clockwise cooldown mask and optional remaining-seconds label. */
 class CKSLATELAYOUT_API SCkUiHudAbility final : public SLeafWidget
 {
 public:
     SLATE_BEGIN_ARGS(SCkUiHudAbility) {} SLATE_END_ARGS()
 
     void Construct(const FArguments& InArguments);
-    void Configure(TAttribute<float> InCooldown, TAttribute<const FSlateBrush*> InImage);
+    void Configure(TAttribute<float> InCooldown, TAttribute<const FSlateBrush*> InImage,
+        TAttribute<float> InRemaining, const FSlateFontInfo& InFont);
     void Freeze();
+    auto GetRemainingSeconds() const -> int32;
+    auto IsFrozen() const -> bool { return _Frozen; }
     virtual void Tick(const FGeometry& InGeometry, double InCurrentTime, float InDeltaTime) override;
     virtual auto ComputeDesiredSize(float InScale) const -> FVector2D override;
     virtual auto OnPaint(const FPaintArgs& InArgs, const FGeometry& InGeometry,
@@ -105,6 +113,8 @@ public:
 private:
     TAttribute<float> _Cooldown;
     TAttribute<const FSlateBrush*> _Image;
+    TAttribute<float> _Remaining;
+    FSlateFontInfo _Font;
     bool _Frozen = false;
 };
 
