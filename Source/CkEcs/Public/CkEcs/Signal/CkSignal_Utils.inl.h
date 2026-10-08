@@ -608,5 +608,73 @@ namespace ck
         return DelegateFragment.DoGet_IsBound();
     }
 
+    template <typename T_DerivedSignal, typename T_DerivedSignal_Delegate>
+    template <typename T_HandleType>
+    auto
+        TUtils_Signal_Delegate<T_DerivedSignal, T_DerivedSignal_Delegate>::
+        Get_NumBoundListeners(
+            const T_HandleType& InHandle)
+        -> int32
+    {
+        if (ck::Is_NOT_Valid(InHandle)) { return 0; }
+        if (NOT InHandle.template Has<SignalType>()) { return 0; }
+        const auto& Signal = InHandle.template Get<SignalType>();
+        const auto NativeCount = [&]()
+        {
+            if constexpr (DelegateSignalType::PostFireBehavior == ECk_Signal_PostFireBehavior::Unbind)
+            { return Signal._InvokeAndUnbind_Signal.size(); }
+            else
+            { return Signal._Invoke_Signal.size(); }
+        }();
+        if (NativeCount >= static_cast<size_t>(MAX_int32)) { return MAX_int32; }
+        auto Count = static_cast<int32>(NativeCount);
+        if (NOT InHandle.template Has<DelegateSignalType>()) { return Count; }
+        const auto& Fragment = InHandle.template Get<DelegateSignalType>();
+        // The bridge represents all entries below as one native subscription. Normal
+        // bind/unbind paths maintain the token; zero signal membership is never a bridge.
+        if (NOT Fragment._Connection || NativeCount == 0) { return Count; }
+        --Count;
+        for (const auto& Delegate : Fragment._UnconditionalDelegates)
+        {
+            if (Delegate.IsBound() && Count < MAX_int32) { ++Count; }
+        }
+        for (const auto& Delegate : Fragment._ConditionalInvocationList)
+        {
+            if (Delegate.UnicastDelegate.IsBound() && Count < MAX_int32) { ++Count; }
+        }
+        return Count;
+    }
+
+    template <typename T_DerivedSignal, typename T_DerivedSignal_Delegate>
+    template <typename T_HandleType>
+    auto
+        TUtils_Signal_Delegate<T_DerivedSignal, T_DerivedSignal_Delegate>::
+        Get_NumUnconditionalBindingsToDelegate(
+            const T_HandleType& InHandle,
+            const DynamicDelegateType& InDelegate)
+        -> int32
+    {
+        if (ck::Is_NOT_Valid(InHandle) || NOT InDelegate.IsBound()) { return 0; }
+        if (NOT InHandle.template Has<SignalType>()) { return 0; }
+        if (NOT InHandle.template Has<DelegateSignalType>()) { return 0; }
+        const auto& Signal = InHandle.template Get<SignalType>();
+        const auto& Fragment = InHandle.template Get<DelegateSignalType>();
+        if (NOT Fragment._Connection) { return 0; }
+        if constexpr (DelegateSignalType::PostFireBehavior == ECk_Signal_PostFireBehavior::Unbind)
+        {
+            if (Signal._InvokeAndUnbind_Signal.empty()) { return 0; }
+        }
+        else
+        {
+            if (Signal._Invoke_Signal.empty()) { return 0; }
+        }
+        auto Count = int32{0};
+        for (const auto& Delegate : Fragment._UnconditionalDelegates)
+        {
+            if (Delegate.IsBound() && Delegate == InDelegate && Count < MAX_int32) { ++Count; }
+        }
+        return Count;
+    }
+
     // --------------------------------------------------------------------------------------------------------------------
 }
