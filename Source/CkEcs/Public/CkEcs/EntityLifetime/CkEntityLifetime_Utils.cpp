@@ -183,6 +183,15 @@ auto
 
 auto
     UCk_Utils_EntityLifetime_UE::
+    Has_LifetimeOwner(
+        const FCk_Handle& InHandle)
+    -> bool
+{
+    return ck::IsValid(InHandle) && InHandle.Has<ck::FFragment_LifetimeOwner>();
+}
+
+auto
+    UCk_Utils_EntityLifetime_UE::
     Get_LifetimeOwner(
         const FCk_Handle& InHandle,
         ECk_PendingKill_Policy InPendingKillPolicy)

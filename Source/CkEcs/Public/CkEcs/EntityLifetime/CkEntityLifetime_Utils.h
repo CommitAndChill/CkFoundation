@@ -99,6 +99,14 @@ public:
         ECk_PendingKill_Policy InPendingKillPolicy = ECk_PendingKill_Policy::ExcludePendingKill);
     */
 
+    /** Total representation precondition for Get_LifetimeOwner; does not validate the owner entity. */
+    UFUNCTION(BlueprintPure,
+              DisplayName = "[Ck][Lifetime] Has Lifetime Owner",
+              Category = "Ck|Utils|Lifetime")
+    static bool
+    Has_LifetimeOwner(
+        const FCk_Handle& InHandle);
+
     UFUNCTION(BlueprintPure,
               DisplayName = "[Ck][Lifetime] Get Entity Lifetime Owner",
               Category = "Ck|Utils|Lifetime")
