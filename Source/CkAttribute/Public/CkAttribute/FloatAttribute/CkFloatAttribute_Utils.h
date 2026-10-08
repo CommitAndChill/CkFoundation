@@ -322,6 +322,13 @@ private:
 public:
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|AttributeRefill|Float",
+              DisplayName="[Ck][FloatAttribute] Has Refill")
+    static bool
+    Has_Refill(
+        const FCk_Handle& InAttributeRefillEntity);
+
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|AttributeRefill|Float",
               DisplayName="[Ck][FloatAttribute] Get Fill Rate")
     static float
     Get_FillRate(
@@ -437,6 +444,14 @@ public:
     static bool
     Has(
         const FCk_Handle& InModifierEntity);
+
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|AttributeModifier|Float",
+              DisplayName="[Ck][FloatAttribute] Has Modifier Component")
+    static bool
+    Has_Component(
+        const FCk_Handle& InModifierEntity,
+        ECk_MinMaxCurrent InComponent);
 
 public:
     UFUNCTION(BlueprintCallable,

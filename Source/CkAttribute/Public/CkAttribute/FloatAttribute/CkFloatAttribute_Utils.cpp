@@ -734,6 +734,17 @@ auto
 
 auto
     UCk_Utils_FloatAttributeRefill_UE::
+    Has_Refill(
+        const FCk_Handle& InAttributeRefillEntity)
+    -> bool
+{
+    return ck::IsValid(InAttributeRefillEntity) &&
+        InAttributeRefillEntity.Has<ck::FTag_IsRefillAttribute>() &&
+        InAttributeRefillEntity.Has<ck::FFragment_FloatAttribute>();
+}
+
+auto
+    UCk_Utils_FloatAttributeRefill_UE::
     Get_FillRate(
         const FCk_Handle_FloatAttributeRefill& InAttributeRefill)
     -> float
@@ -1086,6 +1097,29 @@ auto
     -> bool
 {
     return InModifierEntity.Has_Any<ck::FFragment_FloatAttributeModifier_Min, ck::FFragment_FloatAttributeModifier,ck::FFragment_FloatAttributeModifier_Max>();
+}
+
+auto
+    UCk_Utils_FloatAttributeModifier_UE::
+    Has_Component(
+        const FCk_Handle& InModifierEntity,
+        ECk_MinMaxCurrent InComponent)
+    -> bool
+{
+    if (ck::Is_NOT_Valid(InModifierEntity))
+    { return false; }
+
+    switch (InComponent)
+    {
+        case ECk_MinMaxCurrent::Min:
+            return InModifierEntity.Has<ck::FFragment_FloatAttributeModifier_Min>();
+        case ECk_MinMaxCurrent::Max:
+            return InModifierEntity.Has<ck::FFragment_FloatAttributeModifier_Max>();
+        case ECk_MinMaxCurrent::Current:
+            return InModifierEntity.Has<ck::FFragment_FloatAttributeModifier>();
+        default:
+            return false;
+    }
 }
 
 auto

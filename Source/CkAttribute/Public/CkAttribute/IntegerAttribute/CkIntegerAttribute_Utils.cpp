@@ -1076,6 +1076,29 @@ auto
 
 auto
     UCk_Utils_IntegerAttributeModifier_UE::
+    Has_Component(
+        const FCk_Handle& InModifierEntity,
+        ECk_MinMaxCurrent InComponent)
+    -> bool
+{
+    if (ck::Is_NOT_Valid(InModifierEntity))
+    { return false; }
+
+    switch (InComponent)
+    {
+        case ECk_MinMaxCurrent::Min:
+            return InModifierEntity.Has<ck::FFragment_IntegerAttributeModifier_Min>();
+        case ECk_MinMaxCurrent::Max:
+            return InModifierEntity.Has<ck::FFragment_IntegerAttributeModifier_Max>();
+        case ECk_MinMaxCurrent::Current:
+            return InModifierEntity.Has<ck::FFragment_IntegerAttributeModifier>();
+        default:
+            return false;
+    }
+}
+
+auto
+    UCk_Utils_IntegerAttributeModifier_UE::
     ForEach(
         FCk_Handle_IntegerAttribute& InAttributeOwner,
         const FInstancedStruct&    InOptionalPayload,
