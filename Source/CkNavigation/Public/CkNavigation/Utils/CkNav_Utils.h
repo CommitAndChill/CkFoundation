@@ -127,6 +127,7 @@ public:
 
     // Actor-level registration is required for nav-relevant actors such as NavModifierVolumes,
     // whose BrushComponent contribution is not controlled by a NavModifierComponent toggle.
+    // Unregistering also regenerates the surface under the actor from geometry (RuntimeGeneration = Dynamic only).
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Utils|Nav",
               DisplayName = "[Ck][Nav] Request Set Actor Navigation Registered")

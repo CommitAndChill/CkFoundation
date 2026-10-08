@@ -9,6 +9,8 @@
 #include "CkEcs/Request/CkRequest_Completion.h"
 #include "CkEcs/Signal/CkSignal_Utils.h"
 
+#include <AI/Navigation/NavigationElement.h>
+#include <AI/Navigation/NavRelevantInterface.h>
 #include <GameFramework/Actor.h>
 #include <NavigationSystem.h>
 
@@ -256,9 +258,33 @@ auto
     { return; }
 
     if (InRegistered)
-    { UNavigationSystemV1::OnActorRegistered(InActor); }
-    else
-    { UNavigationSystemV1::OnActorUnregistered(InActor); }
+    {
+        UNavigationSystemV1::OnActorRegistered(InActor);
+        return;
+    }
+
+    auto* NavSys = UNavigationSystemV1::GetCurrent(InActor->GetWorld());
+    const auto* NavRelevantActor = Cast<INavRelevantInterface>(InActor);
+    const auto ElementHandle = FNavigationElementHandle{InActor};
+    const auto CanQueryElement = ck::IsValid(NavSys, ck::IsValid_Policy_NullptrOnly{}) &&
+        ck::IsValid(NavRelevantActor, ck::IsValid_Policy_NullptrOnly{});
+    const auto HadRegisteredElement = CanQueryElement &&
+        (ck::IsValid(NavSys->GetNavOctreeIdForElement(ElementHandle), ck::IsValid_Policy_NullptrOnly{}) ||
+         NavSys->HasPendingUpdateForElement(ElementHandle));
+    const auto RemovedFootprint = HadRegisteredElement ? NavRelevantActor->GetNavigationBounds() : FBox{ForceInit};
+
+    UNavigationSystemV1::OnActorUnregistered(InActor);
+
+    if (NOT RemovedFootprint.IsValid)
+    { return; }
+
+    // Unregistering alone is a modifier repair from cached tile layers, and loaded navigation data has
+    // none for ground the actor fully covered when saved. Not NavigationBounds: it skips tile-inclusion tests.
+    const auto RegenerateFromGeometry = ENavigationDirtyFlag::Geometry | ENavigationDirtyFlag::DynamicModifier;
+    NavSys->AddDirtyArea(RemovedFootprint, RegenerateFromGeometry, TEXT("Ck actor navigation unregistered"));
+
+    ck::nav::Log(TEXT("Actor [{}] left navigation - regenerating the surface under its footprint [{}] -> [{}] from geometry"),
+        InActor, RemovedFootprint.Min, RemovedFootprint.Max);
 }
 
 // --------------------------------------------------------------------------------------------------------------------
