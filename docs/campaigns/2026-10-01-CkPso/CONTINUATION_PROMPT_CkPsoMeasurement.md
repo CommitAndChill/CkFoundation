@@ -5,8 +5,8 @@ Start with: Fable · high · plan mode yes
 ```text
 Start with: Fable · high · plan mode yes
 I'm continuing the CkPso campaign (PSO preparation for CkFoundation loading screens). Read this continuation prompt fully before doing anything: D:\Repos\CkPlugins2\Plugins\CkFoundation\docs\campaigns\2026-10-01-CkPso\CONTINUATION_PROMPT_CkPsoMeasurement.md
-On 2026-10-08 feature/ck-pso was ported onto the CommitAndChill history (CkFoundation and CkTests) and gated in the CkPlugins2 editor. Remaining work, in order: confirm the two feature/ck-pso branches are pushed with PRs open to dev, build a packaged Development BusterBlock from a temp branch pinning the pushed CkFoundation tip (Buildkite, Neil runs it), Neil's three measurement runs, read the logs, then re-plan P2/P3 in plan mode.
-Start by checking the Repo state table against git (both submodules, the superproject and the remote branches), then ask Neil which of the next steps have already happened.
+On 2026-10-08 feature/ck-pso was ported onto the CommitAndChill history, gated in the CkPlugins2 editor, and shipped overnight: PRs CommitAndChill/CkFoundation#5, CommitAndChill/CkTests#6 (depends on #5) and chainkemists/CkPlugins#42 (superproject moved to CommitAndChill) are open to dev, and BusterBlock temp/ck-pso-measure (e99e146e5 = origin/dev + CkFoundation pinned at the pushed feature tip 5203b14a0) is pushed for the measurement build. Everything is committed and pushed except the superproject's working-tree gitlinks (deliberately uncommitted until the PRs merge). Remaining, in order: NEIL builds temp/ck-pso-measure on Buildkite (Development, pristine cook, AngelScript vm, AutoTests off, Steam spare branch), NEIL runs the three measurement runs, then read the logs and re-plan P2/P3 in plan mode; PR review/merge and pointer bumps are Neil's.
+Start by checking the Repo state table against git and gh (PR states), then ask Neil whether the Buildkite build and the runs have happened.
 ```
 
 # CkPso — ported to CommitAndChill; ship, then measure
@@ -31,10 +31,11 @@ the `chainkemists` remote.
 
 | Repo | Branch | Base | Commits | Pushed |
 |---|---|---|---|---|
-| `Plugins/CkFoundation` | `feature/ck-pso` | CommitAndChill `dev` `cf25641a3` | `8fb9d6983` module + gate · `960363393` miss-log parser · `20f3eac61` campaign docs · `dac3c5388` parked docs · `docs(pso): record the CommitAndChill port and its gates` | see the Slice C report (2026-10-08 plan) |
-| `Plugins/CkTests` | `feature/ck-pso` | CommitAndChill `dev` `17b956d50` | `29edb582` two AutoTests · `feb2c9f0` generated wrapper + two placed actors | see the Slice C report |
+| `Plugins/CkFoundation` | `feature/ck-pso` | CommitAndChill `dev` `cf25641a3` | `8fb9d6983` module + gate · `960363393` miss-log parser · `20f3eac61` campaign docs · `dac3c5388` parked docs · `5203b14a0` port + gates docs · this file's ship update | **yes** - PR [CommitAndChill/CkFoundation#5](https://github.com/CommitAndChill/CkFoundation/pull/5) -> `dev` |
+| `Plugins/CkTests` | `feature/ck-pso` | CommitAndChill `dev` `17b956d50` | `29edb582` two AutoTests · `feb2c9f0` generated wrapper + two placed actors | **yes** - PR [CommitAndChill/CkTests#6](https://github.com/CommitAndChill/CkTests/pull/6) -> `dev`, depends on #5 |
 | `Plugins/CkFoundation`, `Plugins/CkTests` | `backup/ck-pso-chainkemists` | old chainkemists history | the pre-port branch (`87ecc54ec` / `052dc0eb5`) | yes, as `chainkemists/feature/ck-pso` |
-| superproject | `chore/commitandchill-adoption` (off `dev-ckplugins2`) | `origin/dev` + `815a001`, `6cabe81` | `33458aa` submodules → CommitAndChill · `c96abb3` drop 28 host reds · `9b28853` prune 15 / list 11 | see the Slice C report; PR to `dev` planned |
+| superproject | `chore/commitandchill-adoption` (off `dev-ckplugins2`) | `origin/dev` + `815a001`, `6cabe81` | `33458aa` submodules → CommitAndChill · `c96abb3` drop 28 host reds · `9b28853` prune 15 / list 11 · `f5fee6e` list 3 flakies from the port gate | **yes** - PR [chainkemists/CkPlugins#42](https://github.com/chainkemists/CkPlugins/pull/42) -> `dev` |
+| BusterBlock (remote only) | `temp/ck-pso-measure` @`e99e146e5` | `origin/dev` `e084fb858c` | one gitlink: `Plugins/CkFoundation` `cf25641a3` -> `5203b14a0` | **yes** - made in a throwaway shallow clone (`<scratchpad>/sliceD/bb-shallow`); delete after the runs: `git push origin --delete temp/ck-pso-measure` |
 
 The superproject's working tree has the CkFoundation and CkTests gitlinks at the `feature/ck-pso` tips, **uncommitted**
 on purpose: a committed gitlink must name a pushed SHA, and the pointer bump belongs after the PRs merge.
@@ -75,13 +76,13 @@ Inferred (what would confirm):
 
 ## Next steps, in order
 
-1. **Push + PRs, if the Slice C report says they are not done:** `git push -u origin feature/ck-pso` in
-   `Plugins/CkFoundation` and `Plugins/CkTests`, then PRs to CommitAndChill `dev` (`/ck-ship-pr`). The CkTests PR depends
-   on the CkFoundation one (the tests call `UCk_Pso_Subsystem_UE`); never bump the CkTests pin ahead of CkFoundation's.
-   The superproject `chore/commitandchill-adoption` goes to CkPlugins as a PR to `dev`. Pointer bumps come after the merges.
-2. **BusterBlock temp branch** (plan Slice D): in a throwaway shallow clone in the scratchpad, never in
-   `D:\Repos\BusterBlock` or `BusterBlock_alt` (others' work; not even a fetch): BusterBlock `origin/dev` tip with the
-   CkFoundation gitlink set to the **pushed** `feature/ck-pso` tip, pushed as `temp/ck-pso-measure`.
+1. **DONE 2026-10-08 (overnight):** pushes + PRs #5 / #6 / #42 (see Repo state). The CkTests PR depends on the
+   CkFoundation one (the tests call `UCk_Pso_Subsystem_UE`); never bump the CkTests pin ahead of CkFoundation's. **NEIL:**
+   review/merge; then superproject pointer bumps (`/ck-ship-pr` step 6-PR: a squash-merge rewrites the SHAs, re-verify
+   containment before bumping).
+2. **DONE 2026-10-08:** BusterBlock `temp/ck-pso-measure` @`e99e146e5` pushed from a throwaway shallow clone
+   (`D:\Repos\BusterBlock` and `BusterBlock_alt` were never touched). It pins CkFoundation at the feature tip as of that
+   night (`5203b14a0`); this file's ship-update commit is docs-only and not in it.
 3. **NEIL: Buildkite** on that branch: Development, pristine cook, AngelScript vm, AutoTests off, Steam deploy to a spare
    branch. CkTests is not part of the measurement build.
 4. **NEIL: the three runs**, on a machine with the other sessions' builds and tests paused for about 20 minutes:
@@ -100,6 +101,11 @@ Inferred (what would confirm):
 5. Read the three logs against the outcome table in the parked plan; write the numbers into `PROGRESS.md`; settle the
    CkUsf outline row in `P2_WARMUP_RESEARCH.md` §6 from run 1's miss list.
 6. Re-plan P2/P3 in plan mode. Then delete `temp/ck-pso-measure`.
+
+Follow-ups filed (task chips in the 2026-10-08 session): re-register CkPlugins2's `EngineAssociation` GUID (toolbox runs
+need `--engine-path=D:\Repos\UnrealEngine-Angelscript` until then); recount the module headline in `Source/CLAUDE.md`
+(84/85 is about 22 below the real Runtime count; six Runtime modules are missing from the tier table); fix
+`Test_EntityScript_EditorServices` asset leaks; `SpiderCourseTraversal` oscillates.
 
 ## Decisions made rather than asking (each has an opt-out)
 
