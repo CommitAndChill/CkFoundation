@@ -432,6 +432,14 @@ public:
     Has(
         const FCk_Handle& InModifierEntity);
 
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|AttributeModifier|Integer",
+              DisplayName="[Ck][IntegerAttribute] Has Modifier Component")
+    static bool
+    Has_Component(
+        const FCk_Handle& InModifierEntity,
+        ECk_MinMaxCurrent InComponent);
+
 public:
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Utils|AttributeModifier|Integer",
