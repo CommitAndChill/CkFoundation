@@ -5,134 +5,86 @@ Start with: Fable · high · plan mode yes
 ```text
 Start with: Fable · high · plan mode yes
 I'm continuing the CkPso campaign (PSO preparation for CkFoundation loading screens). Read this continuation prompt fully before doing anything: D:\Repos\CkPlugins2\Plugins\CkFoundation\docs\campaigns\2026-10-01-CkPso\CONTINUATION_PROMPT_CkPsoMeasurement.md
-The campaign was PARKED on 2026-10-02: P1 and the miss-log parser are committed locally and unpushed on feature/ck-pso (based on chainkemists history), while BusterBlock is moving CkFoundation to the CommitAndChill history, which shares no merge-base with it. Remaining work, in order: port feature/ck-pso onto the post-adoption history and gate it in the editor, build a packaged Development BusterBlock from that line, then Neil runs three measurement runs that decide the P2/P3 scope.
-Start by asking Neil whether the CommitAndChill adoption has been submitted and which BusterBlock and CkFoundation branches it landed on; then plan the port in plan mode.
+On 2026-10-08 feature/ck-pso was ported onto the CommitAndChill history (CkFoundation and CkTests) and gated in the CkPlugins2 editor. Remaining work, in order: confirm the two feature/ck-pso branches are pushed with PRs open to dev, build a packaged Development BusterBlock from a temp branch pinning the pushed CkFoundation tip (Buildkite, Neil runs it), Neil's three measurement runs, read the logs, then re-plan P2/P3 in plan mode.
+Start by checking the Repo state table against git (both submodules, the superproject and the remote branches), then ask Neil which of the next steps have already happened.
 ```
 
-# CkPso — parked; port onto the CommitAndChill history, then measure
+# CkPso — ported to CommitAndChill; ship, then measure
 
-Picking up: P1 is built and editor-gated on the old CkFoundation history. The next step is no longer "package BusterBlock
-against this branch" — it is porting the branch onto the history BusterBlock is moving to, then the packaged measurement,
-then re-scoping P2 (warm-up) and the rest of P3 (miss capture) from its numbers.
+Picking up: P1 (the drain gate) and the P3 miss-log parser are ported onto the CommitAndChill history and editor-gated
+there. What is left is publishing the branches, the packaged measurement, and re-scoping P2 (warm-up) and the rest of P3
+(miss capture) from its numbers.
 
-This file was rewritten in place on 2026-10-02 and replaces the 2026-10-01 version of itself. If anything quotes
-"package BusterBlock against this branch" as the next step, that is the old text.
+This file was rewritten in place on 2026-10-08 and replaces the 2026-10-02 ("parked") version of itself. If anything
+quotes "wait for the adoption" or "port feature/ck-pso" as the next step, that is the old text.
 
-As of: 2026-10-02 · CkFoundation@90db7a10e (feature/ck-pso) · CkTests@052dc0eb5 (feature/ck-pso) ·
-CkGameplayDebugger@243c0cd4e (dev) · CkPlugins2 superproject@6cabe81 (dev-ckplugins2) ·
-BusterBlock@1dfd6a8b98 (feature/ckf-rename-adoption-cnc, another conversation's work)
+As of: 2026-10-08 · CkFoundation `feature/ck-pso` (CommitAndChill; this file's commit sits on `dac3c5388`) · CkTests
+`feature/ck-pso` @`feb2c9f0` · CkGameplayDebugger @`11d89540a` · CkAuto @`e0e756ed8` (toolbox v1.56) · CkPlugins2
+superproject `chore/commitandchill-adoption` @`9b28853`
 
 If HEAD has moved past this, re-check Repo state before trusting the rest.
 
 ## Repo state
 
-Checkout: `D:\Repos\CkPlugins2`. Nothing was built, committed or pushed on 2026-10-02; the session was plan mode plus
-read-only recon. BusterBlock, BusterBlock_alt and the engine were read, never written.
+Checkout: `D:\Repos\CkPlugins2`. The submodules' `origin` is now `github.com/CommitAndChill/<Repo>`; the old history is
+the `chainkemists` remote.
 
-| Repo | Branch | Commits (local, unpushed) |
-|---|---|---|
-| `Plugins/CkFoundation` | `feature/ck-pso` (off chainkemists dev `faa395509`) | `96518fe8f` module + gate · `c6b27489c` miss-log parser · `90db7a10e` campaign docs |
-| `Plugins/CkTests` | `feature/ck-pso` (off dev `ac3e2e0a`) | `d73ce2fb` two AutoTests · `052dc0eb` generated wrapper + two placed actors |
-| superproject | `dev-ckplugins2` | `815a001` PlaceableTests script fix · `6cabe81` AutomationGate.json |
+| Repo | Branch | Base | Commits | Pushed |
+|---|---|---|---|---|
+| `Plugins/CkFoundation` | `feature/ck-pso` | CommitAndChill `dev` `cf25641a3` | `8fb9d6983` module + gate · `960363393` miss-log parser · `20f3eac61` campaign docs · `dac3c5388` parked docs · `docs(pso): record the CommitAndChill port and its gates` | see the Slice C report (2026-10-08 plan) |
+| `Plugins/CkTests` | `feature/ck-pso` | CommitAndChill `dev` `17b956d50` | `29edb582` two AutoTests · `feb2c9f0` generated wrapper + two placed actors | see the Slice C report |
+| `Plugins/CkFoundation`, `Plugins/CkTests` | `backup/ck-pso-chainkemists` | old chainkemists history | the pre-port branch (`87ecc54ec` / `052dc0eb5`) | yes, as `chainkemists/feature/ck-pso` |
+| superproject | `chore/commitandchill-adoption` (off `dev-ckplugins2`) | `origin/dev` + `815a001`, `6cabe81` | `33458aa` submodules → CommitAndChill · `c96abb3` drop 28 host reds · `9b28853` prune 15 / list 11 | see the Slice C report; PR to `dev` planned |
 
-**This work exists only on this machine.** Neil was offered a backup push of the branches and has not answered.
+The superproject's working tree has the CkFoundation and CkTests gitlinks at the `feature/ck-pso` tips, **uncommitted**
+on purpose: a committed gitlink must name a pushed SHA, and the pointer bump belongs after the PRs merge.
 
-Uncommitted, this campaign's, left for Neil's commit word:
-- This file (untracked; the skill does not commit it).
-- `PROGRESS.md` beside it (tracked, modified 2026-10-02: a "Parked" section, a research correction, open item 6).
+Plans:
+- Port + ship plan (2026-10-08, Slices A–D): `C:\Users\neilj\.claude\plans\pasted-content-id-2a7d-start-with-expressive-storm.md`.
+- Parked plan (runbook, outcome table, recon facts, the original Build route): `C:\Users\neilj\.claude\plans\pasted-content-id-26ee-start-with-glimmering-leaf.md`.
+- Original campaign plan: `C:\Users\neilj\.claude\plans\d-users-neilj-downloads-pso-smart-utils-compiled-orbit.md`.
+- Living state, gate numbers and attributions: `PROGRESS.md` beside this file ("Ported to CommitAndChill (2026-10-08)").
 
-Uncommitted, NOT this campaign's authored work — do not stage:
-- Superproject submodule pointers for CkFoundation / CkTests / CkGameplayDebugger (un-bumped since before the campaign).
-- `Config/DefaultGameplayTags.ini`, `Script/Generated/CkPlugins_EntitySpawnParams.as` (written by editor test boots).
-- Untracked: `.claude/skills/{debug-issue,explore-codebase,refactor-safely,review-changes}.md`,
-  `Content/CkPlugins/Cube_EntityScript.uasset`, `Content/EntitySpawnParams/EntitySpawnParams_{Cube_TEST,Mesh_EntityScript}.uasset`.
-
-Scratch (gitignored, safe to delete): `Saved/CkPsoStaging/`.
-
-### Sibling repos (state on 2026-10-02 — expect all of it to have moved)
-
-- `D:\Repos\BusterBlock`: branch `feature/ckf-rename-adoption-cnc`, 201 dirty entries, a toolbox test run was live.
-  Its `.gitmodules` points CkFoundation and CkTests at `github.com/CommitAndChill/…`. Its CkFoundation was `2fce06417`
-  on a `cnc` remote. **Owned by another conversation. Do not touch.**
-- `D:\Repos\BusterBlock_alt`: a git worktree of BusterBlock at `f065755748` (four unpushed gate/docs commits over
-  `origin/dev` `fb2976f10d`), CkFoundation `589375cff` (on chainkemists `origin/release/busterblock-1.0.4`). Idle that
-  day. Owner not confirmed with Neil.
-- Other sessions run toolbox tests on this machine most of the day and hold the engine lock shared.
-
-### Last gate baseline (unchanged since 2026-10-01)
-
-- Pre-change (serial, fresh boot, toolbox v1.51, CkFoundation `faa395509` / CkTests `ac3e2e0a` / CkGameplayDebugger
-  `243c0cd4` / superproject `c14c308` + the script fix): **3819 run, 3775 passed, 44 failed, 0 contaminated.** The 44
-  names are the `knownReds` in `D:\Repos\CkPlugins2\AutomationGate.json`.
-- Post-change full suite (two lanes): **3959 run, 3907 passed, 52 failed** = 44 known + 8 new, each attributed to
-  something other than CkPso. The table is in `PROGRESS.md`.
-- Final scoped run on the committed tree: `Pso` 37/37.
-- **None of this applies to the CommitAndChill history.** The port needs its own baseline there, captured before the
-  first change.
+Not this campaign's, never stage: superproject `Config/DefaultGameplayTags.ini`,
+`Script/Generated/CkPlugins_EntitySpawnParams.as`, untracked `.claude/skills/*.md`, and the `Content/**` uassets that
+`Test_EntityScript_EditorServices` leaks (see Gotchas).
 
 ## Confirmed vs inferred
 
-Confirmed on 2026-10-02 (evidence named):
-- Repo heads above (`git rev-parse` in each repo).
-- BusterBlock HEAD's `.gitmodules` uses CommitAndChill URLs; BusterBlock_alt's commit uses chainkemists URLs
-  (`git show <rev>:.gitmodules`).
-- BusterBlock_alt pins CkFoundation `589375cff`; between that and `faa395509` there is zero diff in
-  `Source/CkLoadingScreen`, `Source/CkSettings`, `Source/CkBuildConfig`; the seam CkPso uses exists at that pin
-  (`CkLoadingScreen_Subsystem.h:78,95,107`).
-- Outside `Source/CkPso/`, commits `96518fe8f` and `c6b27489c` touch only `CkFoundation.uplugin`, `Source/CLAUDE.md`,
-  `Source/CkLoadingScreen/Claude.md` (`git show --stat`).
-- `r.PSOPrecache.GlobalShaders=1` on Windows (`Engine/Config/Windows/BaseWindowsEngine.ini:26`).
-- BusterBlock's `EngineAssociation` `{E4464C1C-43B7-7194-E787-E7B5711509D4}` is not registered in
-  `HKCU\Software\Epic Games\Unreal Engine\Builds`; the engine is `D:/Repos/UnrealEngine-Angelscript`.
-- Buildkite package dialog fields: `mode`, `cook`, `as-mode`, `test-content`, `deployments`, `steam`
-  (`BusterBlock_alt/.runreal/steps/package.steps.ts:42`); `Build.xml` reads `BB_AS_MODE` (`:256-261`) and
-  `BB_PRISTINE_COOK` (`:125-127`).
-
-Reported by read-only recon agents with file:line, not re-checked by me (trust, but re-open the line before leaning on it):
-- BusterBlock's cnc CkFoundation shares no merge-base with `faa395509`; the cnc counterpart of `faa395509` is
-  `2f9b145f5`; `Register_LoadingProcessor`, `BindTo_OnVisibilityChanged`, `Get_IsLoadingScreenShowing` exist at cnc HEAD.
-- Every engine symbol in CkPso's never-compiled `#if PSO_PRECACHING_VALIDATE && UE_WITH_PSO_PRECACHING` regions
-  (`CkPso_Subsystem.cpp:22-24, 67-79`) exists with the expected signature (`PSOPrecacheValidation.h:81,162,225-228,244,327`).
-- `PSO_PRECACHING_VALIDATE` is 0 in the editor and 1 in Development and Shipping game builds (`PSOPrecacheFwd.h:18,22`).
-- The engine's miss-block format strings match what `CkPso_MissLogParser` expects (`PSOPrecacheValidation.cpp:524-555`).
-- BusterBlock has no PSO config and no bundled pipeline cache; RHI is D3D12.
+Confirmed on 2026-10-08:
+- The port: `git diff --stat origin/dev` lists only `Source/CkPso/**`, `CkFoundation.uplugin`, `Source/CLAUDE.md`,
+  `Source/CkLoadingScreen/Claude.md` and `docs/campaigns/2026-10-01-CkPso/**` in CkFoundation; only `Script/CkPso/*.as`,
+  `Script/Generated/CkTests_AutoTestActors.as` and the two placed-actor uassets in CkTests.
+- CkPso compiles and links in the editor on the new history with no source change (`Saved/Logs/BuildTest-SliceB-Pso.log`).
+- Gates (details and attribution in `PROGRESS.md`): scoped `Pso` 37/37 incl. both Pso AutoTests, `LoadingScreen` 6/6;
+  full gate 4023 run / 3984 passed / 39 failed (baseline without CkPso: 3993 / 3955 / 38), exit 1 on 14 NEW = 11
+  listed flakies over the re-run cap + 3 unlisted AutoTests; all 14 pass alone, none attributed to CkPso. The 3 went
+  into the host `AutomationGate.json` as `flaky` (superproject, uncommitted at the time of writing).
+- `r.PSOPrecache.GlobalShaders=1` on Windows (`Engine/Config/Windows/BaseWindowsEngine.ini:26`; 1 = global compute
+  shaders, `PSOPrecache.cpp:19`). `P2_WARMUP_RESEARCH.md` §6 is now corrected.
 
 Inferred (what would confirm):
-- CkPso compiles and links in a non-editor target — the first packaged build.
+- CkPso compiles and links in a non-editor target, including the never-compiled
+  `#if PSO_PRECACHING_VALIDATE && UE_WITH_PSO_PRECACHING` regions (`CkPso_Subsystem.cpp`) — the first packaged build.
 - The pending count drains to zero on a cold run instead of stalling — measurement run 1. **This is the claim most
   likely to be wrong.**
 - Plugin cvars set with `-ini:Engine:[SystemSettings]:ck.Pso.…` before the module loads are applied at registration —
   the gate line in the run's log.
-- The rename did not touch any identifier CkPso uses — nobody has looked at CkPso's includes on the cnc history yet.
-- Everything already listed as inferred on 2026-10-01 (Fab plugin's precompile is a no-op, four Ck render paths lack
-  precache coverage, the three "passes alone" gate failures are noise) is still inferred.
+- Everything listed as inferred on 2026-10-01/02 and not re-checked here (Fab plugin precompile is a no-op, three Ck
+  render paths lack precache coverage, the CkUsf outline row is open either way).
 
-## Remaining plan
+## Next steps, in order
 
-Plans:
-- Parked plan, with the runbook, the outcome table and a recon-facts section:
-  `C:\Users\neilj\.claude\plans\pasted-content-id-26ee-start-with-glimmering-leaf.md`. Its "Build route" section
-  (temp branches off BusterBlock `origin/dev` + CkFoundation `589375cff`) only applies if Neil decides to measure
-  *before* the adoption lands. He decided against that on 2026-10-02.
-- Original campaign plan: `C:\Users\neilj\.claude\plans\d-users-neilj-downloads-pso-smart-utils-compiled-orbit.md`.
-- Living state: `PROGRESS.md` beside this file.
-
-Done: P1 slices A and B; the P3 parser; campaign docs; host gate file; measurement runbook (written, not run).
-
-Next, in order:
-1. **NEIL:** say the adoption is submitted, and name the BusterBlock branch and the CkFoundation / CkTests remotes and
-   branches it landed on. Until then there is nothing to do.
-2. Plan the port (plan mode). Read CkPso's Ck includes against the new history first: `CkCore/{Algorithms,Ensure,Enums,
-   Format,Log,Macros,Time,Validation}`, `CkLoadingScreen/{CkLoadingScreen_Common.h, LoadingProcess/CkLoadingProcess_Interface.h,
-   Subsystem/CkLoadingScreen_Subsystem.h}`, `CkSettings/ProjectSettings/CkProjectSettings.h`. The two histories share no
-   merge-base, so this is a cherry-pick of `96518fe8f`, `c6b27489c`, `90db7a10e` (and CkTests `d73ce2fb`, `052dc0eb`)
-   onto a new branch there, not a rebase. Which checkout hosts it is an open question for Neil.
-3. Baseline on the new history, port, toolbox build, scoped `Pso` + `LoadingScreen` run, then the full gate once.
-   Report as a delta against that new baseline.
-4. Build a packaged **Development** BusterBlock from the post-adoption line. Route options are in the parked plan:
-   CI (Buildkite dialog: Development, pristine cook, AngelScript vm, AutoTests off, Steam deploy to a spare branch) or
-   local BuildGraph. Any push is Neil's yes.
-5. **NEIL:** the three runs, on a machine with the other sessions' builds and tests paused for about 20 minutes:
+1. **Push + PRs, if the Slice C report says they are not done:** `git push -u origin feature/ck-pso` in
+   `Plugins/CkFoundation` and `Plugins/CkTests`, then PRs to CommitAndChill `dev` (`/ck-ship-pr`). The CkTests PR depends
+   on the CkFoundation one (the tests call `UCk_Pso_Subsystem_UE`); never bump the CkTests pin ahead of CkFoundation's.
+   The superproject `chore/commitandchill-adoption` goes to CkPlugins as a PR to `dev`. Pointer bumps come after the merges.
+2. **BusterBlock temp branch** (plan Slice D): in a throwaway shallow clone in the scratchpad, never in
+   `D:\Repos\BusterBlock` or `BusterBlock_alt` (others' work; not even a fetch): BusterBlock `origin/dev` tip with the
+   CkFoundation gitlink set to the **pushed** `feature/ck-pso` tip, pushed as `temp/ck-pso-measure`.
+3. **NEIL: Buildkite** on that branch: Development, pristine cook, AngelScript vm, AutoTests off, Steam deploy to a spare
+   branch. CkTests is not part of the measurement build.
+4. **NEIL: the three runs**, on a machine with the other sessions' builds and tests paused for about 20 minutes:
 
    | Run | Flags on top of the common set | Answers |
    |---|---|---|
@@ -144,87 +96,92 @@ Next, in order:
    -LogCmds="CkPso Verbose, LogPSOHitching Verbose" -abslog=<folder>\pso_<n>_<name>.log`.
    Same route each time: boot, ~10 s at the main menu, start or load the same game, ~3 minutes through a crowd, a
    VFX-heavy moment and the menus, back to the main menu, quit from the menu. Back up `Saved\SaveGames` and
-   `Saved\Config` first; do not delete `Saved`. No console typing is needed — the log carries arm / complete /
-   timed-out lines and the gameplay-window hitch summary.
-6. Read the three logs against the outcome table in the parked plan, write the numbers into `PROGRESS.md`, fix
-   `P2_WARMUP_RESEARCH.md` §6 (see Gotchas), then re-plan P2/P3 in plan mode.
-7. **NEIL:** push + PRs (on hold since 2026-10-02; the target depends on step 1), superproject pointer bumps, and what
-   to do with `Ck_AutoTest_Crowd_AvoidanceVolume_InitialPathAvoidsExpandedObb` (not in `knownReds`; fails alone
-   without CkPso loaded).
+   `Saved\Config` first; do not delete `Saved`. No console typing is needed.
+5. Read the three logs against the outcome table in the parked plan; write the numbers into `PROGRESS.md`; settle the
+   CkUsf outline row in `P2_WARMUP_RESEARCH.md` §6 from run 1's miss list.
+6. Re-plan P2/P3 in plan mode. Then delete `temp/ck-pso-measure`.
 
 ## Decisions made rather than asking (each has an opt-out)
 
-From 2026-10-02:
-- Rewrote this file in place instead of adding a second prompt beside it. Say the word and I split it.
-- Refreshed `PROGRESS.md` by hand and left it uncommitted. Say the word and I commit it (that path only).
-- In the parked plan: CI is the primary build route and local BuildGraph the fallback; three runs rather than two;
-  validation level 2 on all three; CkTests' branch is not part of the measurement build. Each is one line to change.
+From 2026-10-08 (the port plan):
+- The port is a cherry-pick onto new `feature/ck-pso` branches off CommitAndChill `dev`; the old branches were renamed
+  `backup/ck-pso-chainkemists`. Opt-out: name the new ones `feature/ck-pso-cnc`.
+- Slice A's gate (the adoption pins, no CkPso) is the baseline for the CkPso gate; no separate pre-change run.
+- Both full gates used `--discover-fresh` (new toolbox, new history).
+- New flaky entries go to the host `AutomationGate.json` with `[owner: <repo>]`; they belong in the owning plugin's
+  list once they are red in a gate there.
 
-From 2026-10-01, still standing:
+From 2026-10-01/02, still standing:
 - Gate is default-on with fail-open budgets. Opt-out: `_WaitForPsoPrecache` default Disable.
 - Stall = count unchanged for the timeout, not "not decreased". One line in `CkPso_DrainTracker.cpp`, one test block.
 - A Complete window only re-opens while the loading screen is showing.
 - Subsystem ticks without a game viewport (the headless tests need it).
 - `ck.Pso.Debug.StallTimeoutOverride` (non-Shipping) exists so the fail-open test takes about 0.5 s.
-- AutoTests renamed `HoldReleasesAfterQuietPeriod` / `HoldFailsOpenOnStall` (the originals were a prefix of one another).
-- Committed locally although the full gate was red (8 new failures, each attributed elsewhere). Say the word and I
-  soft-reset them.
+- AutoTests are named `HoldReleasesAfterQuietPeriod` / `HoldFailsOpenOnStall` (the originals were a prefix of one another).
 - Commit messages carry no Co-Authored-By footer (the repo's commit hook says so).
-- Baseline failures recorded as known reds after a single run, each reason led by `[owner: <repo>]`.
-- The post-change full gate ran on two lanes, not serially like the baseline. A serial re-run is about 1h45m.
+- CI is the primary build route, three runs rather than two, validation level 2 on all three.
 
 ## Critical files
 
-- `C:\Users\neilj\.claude\plans\pasted-content-id-26ee-start-with-glimmering-leaf.md` — parked plan: runbook, outcome
-  table, recon facts (engine cvars, log format strings with line numbers, packaging traps).
+- `C:\Users\neilj\.claude\plans\pasted-content-id-2a7d-start-with-expressive-storm.md` — port + ship plan (Slices A–D).
+- `C:\Users\neilj\.claude\plans\pasted-content-id-26ee-start-with-glimmering-leaf.md` — runbook, outcome table, recon facts.
 - `Plugins/CkFoundation/Source/CkPso/Claude.md` — module doc: API, cvars, the inert rule, telemetry, ini recipe.
 - `.../CkPso/Public/CkPso/Subsystem/CkPso_Subsystem.{h,cpp}` — arming, inert rule, hitch report, every log line the
-  measurement reads; the never-compiled validation regions are at `.cpp:22-24, 67-79`.
+  measurement reads; the never-compiled validation regions.
 - `.../CkPso/Public/CkPso/Drain/CkPso_DrainTracker.{h,cpp}` — the state machine; all timing semantics.
 - `.../CkPso/Public/CkPso/Settings/CkPso_Settings.{h,cpp}` — project settings and the `ck.Pso.*` cvars.
 - `.../CkPso/Public/CkPso/Diagnostics/CkPso_MissLogParser.{h,cpp}` — P3 parser, not wired to anything.
-- `Plugins/CkFoundation/docs/campaigns/2026-10-01-CkPso/{PROGRESS.md,P2_WARMUP_RESEARCH.md}` — state and engine research.
 - `Plugins/CkTests/Script/CkPso/*.as` — the two AutoTests.
-- `D:\Repos\CkPlugins2\AutomationGate.json` — gate roots + 44 known reds (old history only).
-- `D:\Repos\BusterBlock_alt\.runreal\buildgraph\Build.xml` and `.runreal\steps\package.steps.ts` — how the game is packaged.
+- `D:\Repos\CkPlugins2\AutomationGate.json` — host roots + host-only known reds; plugin lists beside each `.uplugin`.
 
 ## Ruled out / already proven
 
-- Measuring before the adoption lands, on temp branches off the old history: workable (designed in the parked plan),
-  declined by Neil on 2026-10-02 because the machine is busy and the port would then happen twice.
-- Checking BusterBlock's CkFoundation out at `90db7a10e` directly: wrong on both checkouts (no shared history on main;
-  +89 framework commits of drift on BusterBlock_alt).
-- Building in main BusterBlock: it is another conversation's in-flight work.
+- Measuring on the old chainkemists history before the port: declined by Neil on 2026-10-02.
+- Checking BusterBlock's CkFoundation out at an old-history SHA: no shared history with CommitAndChill.
+- Building or fetching in `D:\Repos\BusterBlock` / `BusterBlock_alt`: other conversations' in-flight work.
 - A capture device for the measurement: not needed, miss blocks can be aggregated offline from the log.
 - Shader precompile, runtime thread-pool sizing, runtime validation toggles, live "repair" sessions, an engine-fork
   miss delegate, `PrecachePSOsBoostToHighestPriority`: dropped, reasons in the original plan.
-- CkPso causing any of the 8 new gate failures: ruled out per the table in `PROGRESS.md`.
+- CkPso causing a gate failure: ruled out on the old history (2026-10-01 table) and on the new one (PROGRESS.md,
+  2026-10-08 section).
+- `Ck_AutoTest_Crowd_AvoidanceVolume_InitialPathAvoidsExpandedObb`: pre-existing, now listed `red` in CommitAndChill
+  CkTests' own list.
 
 ## Gotchas
 
-New on 2026-10-02:
-- **`P2_WARMUP_RESEARCH.md` §6 has an unproven row.** It calls the CkUsf outline compute shaders a miss because
-  `r.PSOPrecache.GlobalShaders` is 0; it is 1 on Windows. The file itself is not corrected yet (`PROGRESS.md` notes it).
+New on 2026-10-08:
+- **CkPlugins2's `EngineAssociation` GUID is not registered on this machine.** Every toolbox run needs
+  `--engine-path=D:\Repos\UnrealEngine-Angelscript` (per run; do not edit the registry or the `.uproject`).
+- **CkAuto LFS smudge fails after the remote rename** (`origin` now CommitAndChill): fetch the objects explicitly with
+  `git lfs fetch origin <sha>` in `CkAuto`, then check out again.
+- **`Test_EntityScript_EditorServices` leaks assets into the host `Content/`** (`Content/__CkEntityScriptEditorServices_*`,
+  `Content/EntitySpawnParams/*`, `Content/CkPlugins/Cube_EntityScript.uasset`), and the editor's SCC provider may stage
+  them. Check the index before every superproject commit; never `git add` a directory.
+- **`Ck_AutoTest_ProceduralAnimation_SpiderCourseTraversal` oscillates** (red, red alone twice, then green in the next
+  gate). It is listed `red` with an `OSCILLATES` reason, so it detects nothing while listed; do not prune it on one pass.
+- **Concurrent gates on the machine produce load flakes**: renderer-pass physical-click / clipboard assertions, and
+  AutoTests failing on `LogAssetRegistry OpenFile failed` for a CkUsf `GeneratedLooksTest/P<pid>/` scratch package written
+  by another editor. Run each new failure alone before calling it anything.
+- `--test-pattern Pso` is a substring match: it also selects unrelated tests whose names contain "pso" across a word
+  boundary (`...Loops On...`, `...Drops Only...`). Read the per-test list, not just the count.
+
+From 2026-10-02:
 - **The toolbox has no package verb.** Packaging is BuildGraph (`Package Clients`) or CI, and it needs the engine lock
   exclusively, which the other sessions' test runs starve.
-- **`ClientTargetName` must be set to `BusterBlock`** for a local BuildGraph run; the default resolves to a target that
-  does not exist (agent-reported, `Build.xml:304`).
+- **`ClientTargetName` must be set to `BusterBlock`** for a local BuildGraph run (agent-reported, `Build.xml:304`).
 - **`Get-ProjectEnginePath.ps1` fails for BusterBlock** (unregistered GUID), and PowerShell script execution is blocked
   by policy on this machine. Hardcode `D:/Repos/UnrealEngine-Angelscript`.
-- **Miss blocks are multi-line and unprefixed.** The engine message starts with two newlines, so `PSO PRECACHING MISS:`
-  and its fields are on lines without the log prefix. Use `grep -A14`. There is no `-logPSOPrecacheMiss` switch.
-- **Packaged builds print raw enum names** (`TimedOut`, `MaxWait`); the editor prints spaced display names. Do not
-  write greps from editor output.
-- **`-clearPSODriverCache` wipes the GPU vendor's whole DX cache folder** (D3D12 only, top level only). Other running
-  UE processes hold files there, which is one reason the runs need a quiet machine. Counts survive a busy machine;
+- **Miss blocks are multi-line and unprefixed.** Use `grep -A14`. There is no `-logPSOPrecacheMiss` switch.
+- **Packaged builds print raw enum names** (`TimedOut`, `MaxWait`); the editor prints spaced display names.
+- **`-clearPSODriverCache` wipes the GPU vendor's whole DX cache folder** (D3D12 only). Counts survive a busy machine;
   durations and the 20 ms hitch counter do not.
 - **`-ini:` overrides are ignored in Shipping**; the measurement build must be Development.
 - **A zero peak everywhere means the build or flags are wrong**, not that there is nothing to precache.
 - BusterBlock_alt and BusterBlock share one `.git` object store; a fetch in one moves remote-tracking refs for both.
 
-From 2026-10-01, still true on the old history:
+From 2026-10-01, still true:
 - `--generate` starves on the shared engine lock; a plain `--build` picks up a new module.
-- `Ck.Snapshot.Meta.WallTimeReadsAreAllowListed` counts wall-time reads per file and is already red on dev.
+- `Ck.Snapshot.Meta.WallTimeReadsAreAllowListed` counts wall-time reads per file.
 - CkFoundation ignores `*.md` outside `.claude/` and `docs/`; a module's `Claude.md` needs `git add -f`.
 - Automation matches test names by substring: never name one AutoTest as a prefix of another.
 - Removing an AutoTest leaves its placed actor behind; the stale actor runs as a fake pass.
