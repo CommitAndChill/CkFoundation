@@ -101,6 +101,7 @@ struct FCkUiStyle
     bool AllowWrapping = true;
     ETextWrappingPolicy WrappingPolicy = ETextWrappingPolicy::DefaultWrapping;
     ETextOverflowPolicy OverflowPolicy = ETextOverflowPolicy::Clip;
+    ETextJustify::Type TextAlignment = ETextJustify::Left;
     TOptional<FLinearColor> Color;
     TOptional<FLinearColor> Background;
     TOptional<FLinearColor> BorderColor;

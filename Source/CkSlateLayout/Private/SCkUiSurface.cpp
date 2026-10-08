@@ -2146,7 +2146,7 @@ auto FCkUiView::StageNode(const FCkUiNode& InNode, FStagedDocument& InOutStaged,
     if (InNode.Kind == ECkUiNodeKind::Text)
     {
         return ApplyVisibility(ApplyStyle(InNode.Style, SNew(SCkFlexText).Tag(FName(*InNode.Id)).Text(MakeTextAttribute())
-            .Font(MakeFont()).AllowWrapping(InNode.Style.AllowWrapping).OverflowPolicy(InNode.Style.OverflowPolicy).WrappingPolicy(InNode.Style.WrappingPolicy)
+            .Font(MakeFont()).Justification(InNode.Style.TextAlignment).AllowWrapping(InNode.Style.AllowWrapping).OverflowPolicy(InNode.Style.OverflowPolicy).WrappingPolicy(InNode.Style.WrappingPolicy)
             .Clipping(InNode.Style.AllowWrapping ? EWidgetClipping::Inherit : EWidgetClipping::ClipToBounds)
             .ColorAndOpacity(TextColor(InNode)).ToolTipText(TooltipText(InNode))));
     }

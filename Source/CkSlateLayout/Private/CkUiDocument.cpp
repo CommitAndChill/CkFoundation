@@ -240,7 +240,7 @@ namespace ck_ui_document
             || InProperty == TEXT("max-width") || InProperty == TEXT("max-height")
             || InProperty == TEXT("width") || InProperty == TEXT("height")
             || InProperty == TEXT("font-size") || InProperty == TEXT("font-family") || InProperty == TEXT("font-weight") || InProperty == TEXT("letter-spacing")
-            || InProperty == TEXT("text-wrap") || InProperty == TEXT("overflow-wrap") || InProperty == TEXT("text-overflow")
+            || InProperty == TEXT("text-wrap") || InProperty == TEXT("overflow-wrap") || InProperty == TEXT("text-overflow") || InProperty == TEXT("text-align")
             || InProperty == TEXT("color") || InProperty == TEXT("background-color")
             || InProperty == TEXT("border-color") || InProperty == TEXT("border-width") || InProperty == TEXT("border-radius")
             || InProperty == TEXT("horizontal-align") || InProperty == TEXT("vertical-align")
@@ -311,7 +311,7 @@ namespace ck_ui_document
             || InProperty.EndsWith(TEXT("-color"), ESearchCase::CaseSensitive);
     }
 
-    auto TryParseButtonTextAlignment(const FString& InValue, ETextJustify::Type& OutAlignment) -> bool
+    auto TryParseTextAlignment(const FString& InValue, ETextJustify::Type& OutAlignment) -> bool
     {
         if (InValue == TEXT("left")) { OutAlignment = ETextJustify::Left; return true; }
         if (InValue == TEXT("center")) { OutAlignment = ETextJustify::Center; return true; }
@@ -400,7 +400,7 @@ namespace ck_ui_document
             if (InProperty == TEXT("-ck-button-text-align"))
             {
                 ETextJustify::Type Alignment = ETextJustify::Left;
-                if (!TryParseButtonTextAlignment(Value, Alignment))
+                if (!TryParseTextAlignment(Value, Alignment))
                 { InOutState.Error(TEXT("invalid CSS value for '") + InProperty + TEXT("'")); return false; }
                 return true;
             }
@@ -448,6 +448,13 @@ namespace ck_ui_document
         if (InProperty == TEXT("text-wrap"))
         {
             if (Value != TEXT("wrap") && Value != TEXT("nowrap")) { InOutState.Error(TEXT("invalid CSS text-wrap")); return false; }
+            return true;
+        }
+        if (InProperty == TEXT("text-align"))
+        {
+            ETextJustify::Type Alignment = ETextJustify::Left;
+            if (!TryParseTextAlignment(Value, Alignment))
+            { InOutState.Error(TEXT("invalid CSS text-align")); return false; }
             return true;
         }
         if (InProperty == TEXT("flex-wrap"))
@@ -582,7 +589,7 @@ namespace ck_ui_document
             InOutNode.ButtonVisualStyle.Enabled = true;
             if (InProperty == TEXT("-ck-button-text-align"))
             {
-                if (!TryParseButtonTextAlignment(Value, InOutNode.ButtonVisualStyle.TextAlignment))
+                if (!TryParseTextAlignment(Value, InOutNode.ButtonVisualStyle.TextAlignment))
                 { InOutState.Error(FString::Printf(TEXT("node '%s': invalid CSS value for '%s'"), *InOutNode.Id, *InProperty)); return false; }
                 return true;
             }
@@ -765,8 +772,15 @@ namespace ck_ui_document
         if ((InProperty == TEXT("font-size") || InProperty == TEXT("font-family") || InProperty == TEXT("font-weight") || InProperty == TEXT("letter-spacing") || InProperty == TEXT("color")) && (bCustom || (!Schema->bAllowsTextStyle && !bIsTabsFontFamily))) { return InvalidForNode(); }
         if (InProperty == TEXT("font-family") && InOutNode.Kind != ECkUiNodeKind::Text && InOutNode.Kind != ECkUiNodeKind::Button && InOutNode.Kind != ECkUiNodeKind::MenuButton && InOutNode.Kind != ECkUiNodeKind::Tabs) { return InvalidForNode(); }
         if ((InProperty == TEXT("text-wrap") || InProperty == TEXT("overflow-wrap") || InProperty == TEXT("text-overflow")) && InOutNode.Kind != ECkUiNodeKind::Text && InOutNode.Kind != ECkUiNodeKind::Button) { return InvalidForNode(); }
+        if (InProperty == TEXT("text-align") && InOutNode.Kind != ECkUiNodeKind::Text) { return InvalidForNode(); }
         if (InProperty == TEXT("padding")) { if (!ParsePadding(Value, InOutNode.Style.Padding)) { InOutState.Error(TEXT("invalid padding on '") + InOutNode.Id + TEXT("'")); return false; } return true; }
         if (InProperty == TEXT("text-wrap")) { InOutNode.Style.AllowWrapping = Value == TEXT("wrap"); return true; }
+        if (InProperty == TEXT("text-align"))
+        {
+            if (!TryParseTextAlignment(Value, InOutNode.Style.TextAlignment))
+            { InOutState.Error(TEXT("invalid text-align on '") + InOutNode.Id + TEXT("'")); return false; }
+            return true;
+        }
         if (InProperty == TEXT("flex-wrap"))
         {
             if (Value == TEXT("nowrap")) { InOutNode.Style.FlexWrap = ECkFlexWrap::NoWrap; }
