@@ -68,6 +68,7 @@ public:
     FText GetText() const { return _Text.Get(FText::GetEmpty()); }
     FSlateFontInfo GetFont() const { return _Font.Get(FSlateFontInfo{}); }
     FSlateColor GetColorAndOpacity() const { return _ColorAndOpacity.Get(FSlateColor::UseForeground()); }
+    ETextJustify::Type GetJustification() const { return _Justification.Get(ETextJustify::Left); }
     void SetFont(TAttribute<FSlateFontInfo> InFont);
     void SetColorAndOpacity(TAttribute<FSlateColor> InColorAndOpacity);
 
