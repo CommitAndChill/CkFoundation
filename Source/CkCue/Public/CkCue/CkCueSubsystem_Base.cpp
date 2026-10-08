@@ -104,21 +104,22 @@ namespace ck_cue_subsystem_base
             const FInstancedStruct& InSpawnParams)
         -> FCk_Handle_PendingEntityScript
     {
-        CK_ENSURE_IF_NOT(ck::IsValid(InCueClass),
+        const bool bHasCueClass = ck::IsValid(InCueClass);
+        CK_ENSURE_IF_NOT(bHasCueClass,
             TEXT("CueClass was INVALID when trying to execute Cue [{}]"), InCueName)
-        { return {}; }
+        {}
+        if (NOT bHasCueClass) { return {}; }
 
         auto CueDefaultObject = InCueClass->GetDefaultObject<UCk_CueBase_EntityScript>();
 
         if (ck::Is_NOT_Valid(InOwnerEntity))
         {
-            if (ck::IsValid(CueDefaultObject) &&
-                CueDefaultObject->Get_OwnerValidationPolicy() == ECk_Cue_OwnerValidationPolicy::RequireValid)
-            {
-                CK_ENSURE_IF_NOT(false,
-                    TEXT("OwnerEntity is invalid when trying to execute Cue [{}] (OwnerValidationPolicy = RequireValid)"), InCueName)
-                { return {}; }
-            }
+            const bool bOwnerAllowed = !ck::IsValid(CueDefaultObject) ||
+                CueDefaultObject->Get_OwnerValidationPolicy() != ECk_Cue_OwnerValidationPolicy::RequireValid;
+            CK_ENSURE_IF_NOT(bOwnerAllowed,
+                TEXT("OwnerEntity is invalid when trying to execute Cue [{}] (OwnerValidationPolicy = RequireValid)"), InCueName)
+            {}
+            if (NOT bOwnerAllowed) { return {}; }
 
             ck::cue::Verbose(TEXT("Skipping cue [{}] - OwnerEntity is invalid (OwnerValidationPolicy = SkipIfInvalid)"), InCueName);
             return {};
