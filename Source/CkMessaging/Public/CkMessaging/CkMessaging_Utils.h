@@ -27,6 +27,34 @@ private:
     struct RecordOfMessengers_Utils : public ck::TUtils_RecordOfEntities<ck::FFragment_RecordOfMessengers> {};
 
 public:
+    // Pure lookup of an already-bound message endpoint; never creates a messenger or record.
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|Messaging",
+              DisplayName = "[Ck][Messaging] Try Get Messenger Entity")
+    static FCk_Handle
+    TryGet_MessengerEntity(
+        const FCk_Handle& InOwner,
+        FGameplayTag InMessageName);
+
+public:
+    // Read existing endpoints only. Total includes conditional delegates and native
+    // listeners; the exact query proves an unconditional dynamic callback.
+    UFUNCTION(BlueprintPure, Category = "Ck|Utils|Messaging")
+    static int32
+    Get_NumBoundTo_OnBroadcast(
+        const FCk_Handle& InOwner,
+        FGameplayTag InMessageName,
+        ECk_Signal_PostFireBehavior InPostFireBehavior);
+
+    UFUNCTION(BlueprintPure, Category = "Ck|Utils|Messaging")
+    static int32
+    Get_NumUnconditionalBindingsTo_OnBroadcast(
+        const FCk_Handle& InOwner,
+        FGameplayTag InMessageName,
+        const FCk_Delegate_Messaging_OnBroadcast& InDelegate,
+        ECk_Signal_PostFireBehavior InPostFireBehavior);
+
+public:
     // Hidden in the editor through the DefaultCkFoundation.ini Config file (see: BlueprintEditor.Menu section)
     UFUNCTION(BlueprintCallable)
     static void

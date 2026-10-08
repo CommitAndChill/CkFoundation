@@ -116,6 +116,18 @@ namespace ck
         static auto
         IsBoundToDelegate(
             T_HandleType InHandle) -> bool;
+
+        // Pure census of live dynamic delegates and directly connected native listeners.
+        template <typename T_HandleType>
+        static auto
+        Get_NumBoundListeners(
+            const T_HandleType& InHandle) -> int32;
+
+        template <typename T_HandleType>
+        static auto
+        Get_NumUnconditionalBindingsToDelegate(
+            const T_HandleType& InHandle,
+            const DynamicDelegateType& InDelegate) -> int32;
     };
 }
 

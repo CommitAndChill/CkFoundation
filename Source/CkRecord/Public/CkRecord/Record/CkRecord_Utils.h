@@ -133,6 +133,12 @@ namespace ck
             const FCk_Handle& InRecordHandle,
             const FGameplayTag& InTag) -> MaybeTypeSafeHandle;
 
+        [[nodiscard]]
+        static auto
+        TryGet_DirectEntry_ByTag(
+            const FCk_Handle& InRecordHandle,
+            const FGameplayTag& InTag) -> MaybeTypeSafeHandle;
+
     public:
         template <typename T_Predicate>
         [[nodiscard]]
@@ -654,6 +660,37 @@ namespace ck
         });
 
         return MaybeValidEntry;
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    template <typename T_DerivedRecord>
+    auto
+        TUtils_RecordOfEntities<T_DerivedRecord>::
+        TryGet_DirectEntry_ByTag(
+            const FCk_Handle& InRecordHandle,
+            const FGameplayTag& InTag)
+        -> MaybeTypeSafeHandle
+    {
+        if (ck::Is_NOT_Valid(InRecordHandle) ||
+            !InTag.IsValid() ||
+            !InRecordHandle.Has<RecordType>())
+        { return {}; }
+
+        bool Found = false;
+        RecordEntryEntityType MatchingEntry;
+        for (const auto& Pair : InRecordHandle.Get<RecordType>().Get_RecordEntriesTagNamePairs())
+        {
+            if (Pair.Key != InTag.GetTagName()) { continue; }
+            if (Found) { return {}; }
+            Found = true;
+            MatchingEntry = Pair.Value;
+        }
+        if (!Found) { return {}; }
+
+        const auto Entry = ck::MakeHandle(MatchingEntry, InRecordHandle);
+        if (ck::Is_NOT_Valid(Entry)) { return {}; }
+        return ck::StaticCast<MaybeTypeSafeHandle>(Entry);
     }
 
     // --------------------------------------------------------------------------------------------------------------------
