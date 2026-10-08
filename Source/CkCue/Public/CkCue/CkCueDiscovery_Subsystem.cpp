@@ -298,11 +298,13 @@ auto
 
     const auto FoundCue = _DiscoveredCues.Find(InCueName);
 
-    CK_ENSURE_IF_NOT(ck::IsValid(FoundCue, ck::IsValid_Policy_NullptrOnly{}),
+    const bool bHasFoundCue = ck::IsValid(FoundCue, ck::IsValid_Policy_NullptrOnly{});
+    CK_ENSURE_IF_NOT(bHasFoundCue,
         TEXT("Failed to find Cue with Name [{}]! Cue Subsystem [{}] has not discovered any Cue with that name, does it even exist?"),
         InCueName,
         this)
-    { return {}; }
+    {}
+    if (NOT bHasFoundCue) { return {}; }
 
     return *FoundCue;
 }
