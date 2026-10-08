@@ -1,13 +1,73 @@
 #include "CkSlateLayout/CkUiHudControls.h"
+#include "CkSlateLayout/CkUiFontRegistry.h"
+#include "CkSlateLayout/CkUiKeyHint.h"
+#include "CkUiHudGeometry.h"
 
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Layout/Clipping.h"
+#include "Fonts/FontMeasure.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Rendering/DrawElements.h"
+#include "Rendering/SlateRenderer.h"
+#include "Textures/SlateShaderResource.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/Images/SImage.h"
 
 namespace ck_ui_hud
 {
+    auto DrawMesh(const FGeometry& InGeometry, FSlateWindowElementList& OutElements,
+        int32 InLayer, const FSlateBrush& InBrush, const ck_ui_hud_geometry::FMesh& InMesh,
+        const FLinearColor& InTint) -> void
+    {
+        if (InMesh.Indices.IsEmpty() || !FSlateApplication::IsInitialized())
+        { return; }
+        const auto Renderer = FSlateApplication::Get().GetRenderer();
+        if (Renderer == nullptr)
+        { return; }
+        const auto Handle = Renderer->GetResourceHandle(InBrush);
+        const auto* Proxy = Handle.GetResourceProxy();
+        // Color brushes have no texture proxy. Slate supplies white for those batches,
+        // so their vertex colors still render masks and highlights.
+        TArray<FSlateVertex> Vertices;
+        Vertices.Reserve(InMesh.Vertices.Num());
+        for (const auto& Vertex : InMesh.Vertices)
+        {
+            Vertices.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(
+                InGeometry.GetAccumulatedRenderTransform(), Vertex.Position,
+                Proxy != nullptr ? Proxy->StartUV + Vertex.UV * Proxy->SizeUV : Vertex.UV,
+                (Vertex.Color * InTint).ToFColor(true)));
+        }
+        TArray<SlateIndex> Indices;
+        Indices.Append(InMesh.Indices);
+        FSlateDrawElement::MakeCustomVerts(OutElements, InLayer, Handle, Vertices, Indices,
+            nullptr, 0, 0, ESlateDrawEffect::None);
+    }
+
+    auto DrawGlassHighlight(const FGeometry& InGeometry, FSlateWindowElementList& OutElements,
+        int32 InLayer, const FLinearColor& InTint) -> void
+    {
+        const FVector2f Size(InGeometry.GetLocalSize());
+        const float Radius = FMath::Min(Size.X, Size.Y) * 0.435f;
+        const FVector2f Center = Size * 0.5f + FVector2f(0.38f, -0.48f) * Radius;
+        const auto* White = FCoreStyle::Get().GetBrush(TEXT("WhiteBrush"));
+        for (int32 Lobe = 0; Lobe < 2; ++Lobe)
+        {
+            ck_ui_hud_geometry::FMesh Mesh;
+            const FVector2f Extent = (Lobe == 0 ? FVector2f(0.29f, 0.20f) : FVector2f(0.075f, 0.052f)) * Radius;
+            const float Alpha = Lobe == 0 ? 0.17f : 0.82f;
+            Mesh.Vertices.Add({Center, FVector2f(0.5f), FLinearColor(0.84f, 0.91f, 1.0f, Alpha)});
+            for (int32 Index = 0; Index <= 48; ++Index)
+            {
+                const float Angle = TWO_PI * Index / 48.0f;
+                Mesh.Vertices.Add({Center + FVector2f(FMath::Cos(Angle), FMath::Sin(Angle)) * Extent,
+                    FVector2f(0.5f), FLinearColor(0.84f, 0.91f, 1.0f, 0.0f)});
+                if (Index > 0)
+                { Mesh.Indices.Append({0, static_cast<uint16>(Index), static_cast<uint16>(Index + 1)}); }
+            }
+            DrawMesh(InGeometry, OutElements, InLayer + Lobe, *White, Mesh, InTint);
+        }
+    }
+
     auto FiniteColor(const FLinearColor& InColor) -> bool
     {
         return FMath::IsFinite(InColor.R) && FMath::IsFinite(InColor.G)
@@ -238,6 +298,7 @@ namespace ck_ui_hud
         TAttribute<const FSlateBrush*> Liquid;
         TAttribute<const FSlateBrush*> Frame;
         float Response = 0.18f;
+        float MotionSpeed = 0.35f;
     };
 
     auto MakeOrbConfiguration(const FCkUiCustomWidgetArguments& InArguments,
@@ -253,7 +314,9 @@ namespace ck_ui_hud
             return false;
         }
         if (!ReadNumber(InArguments.Style, TEXT("-ck-hud-orb-response"), ECkUiCustomStyleKind::Number,
-            0.0f, 5.0f, Out.Response, OutFailure))
+            0.0f, 5.0f, Out.Response, OutFailure)
+            || !ReadNumber(InArguments.Style, TEXT("-ck-hud-orb-motion-speed"), ECkUiCustomStyleKind::Number,
+                0.0f, 4.0f, Out.MotionSpeed, OutFailure))
         { return false; }
         Out.Value = *Value;
         Out.Liquid = *Liquid;
@@ -270,7 +333,7 @@ namespace ck_ui_hud
         {
             SAssignNew(_Widget, SCkUiHudOrb).Tag(FName(*InId));
             _Widget->Configure(_Configuration.Value, _Configuration.Liquid, _Configuration.Frame,
-                _Configuration.Response);
+                _Configuration.Response, _Configuration.MotionSpeed);
         }
         virtual auto GetWidget() const -> TSharedRef<SWidget> override { return _Widget.ToSharedRef(); }
         virtual void ReleaseOwnerInteraction() override { _Widget->Freeze(); }
@@ -291,7 +354,7 @@ namespace ck_ui_hud
             {
                 Owner->_Configuration = MoveTemp(Configuration);
                 Owner->_Widget->Configure(Owner->_Configuration.Value, Owner->_Configuration.Liquid,
-                    Owner->_Configuration.Frame, Owner->_Configuration.Response);
+                    Owner->_Configuration.Frame, Owner->_Configuration.Response, Owner->_Configuration.MotionSpeed);
             }
             TSharedRef<FOrb> Owner;
             FOrbConfiguration Configuration;
@@ -304,6 +367,8 @@ namespace ck_ui_hud
     {
         TAttribute<float> Cooldown;
         TAttribute<const FSlateBrush*> Image;
+        TAttribute<float> Remaining;
+        FSlateFontInfo Font;
     };
 
     auto MakeAbilityConfiguration(const FCkUiCustomWidgetArguments& InArguments,
@@ -319,6 +384,22 @@ namespace ck_ui_hud
         }
         Out.Cooldown = *Cooldown;
         Out.Image = *Image;
+        Out.Font = InArguments.BaseFont;
+        Out.Font.Size = 20;
+        if (const auto* Remaining = InArguments.NumberBindings.Find(TEXT("remaining")))
+        { Out.Remaining = *Remaining; }
+        if (const auto* Family = InArguments.TextProperties.Find(TEXT("font-family")))
+        {
+            if (!InArguments.FontRegistry.IsValid())
+            { OutFailure = TEXT("HUD ability font-family requires an admitted font registry."); return false; }
+            if (!InArguments.FontRegistry->TryResolve(Family->ToString(), TEXT("Regular"), Out.Font))
+            { OutFailure = TEXT("HUD ability font-family must name an admitted regular face."); return false; }
+        }
+        float FontSize = 20.0f;
+        if (!ReadNumber(InArguments.Style, TEXT("-ck-hud-ability-font-size"), ECkUiCustomStyleKind::Length,
+            8.0f, 48.0f, FontSize, OutFailure))
+        { return false; }
+        Out.Font.Size = FMath::RoundToInt(FontSize);
         return true;
     }
 
@@ -330,7 +411,7 @@ namespace ck_ui_hud
         void Initialize(const FString& InId)
         {
             SAssignNew(_Widget, SCkUiHudAbility).Tag(FName(*InId));
-            _Widget->Configure(_Configuration.Cooldown, _Configuration.Image);
+            _Widget->Configure(_Configuration.Cooldown, _Configuration.Image, _Configuration.Remaining, _Configuration.Font);
         }
         virtual auto GetWidget() const -> TSharedRef<SWidget> override { return _Widget.ToSharedRef(); }
         virtual void ReleaseOwnerInteraction() override { _Widget->Freeze(); }
@@ -350,7 +431,8 @@ namespace ck_ui_hud
             virtual void Commit() noexcept override
             {
                 Owner->_Configuration = MoveTemp(Configuration);
-                Owner->_Widget->Configure(Owner->_Configuration.Cooldown, Owner->_Configuration.Image);
+                Owner->_Widget->Configure(Owner->_Configuration.Cooldown, Owner->_Configuration.Image,
+                    Owner->_Configuration.Remaining, Owner->_Configuration.Font);
             }
             TSharedRef<FAbility> Owner;
             FAbilityConfiguration Configuration;
@@ -513,12 +595,13 @@ void SCkUiHudOrb::Construct(const FArguments&)
 }
 
 void SCkUiHudOrb::Configure(TAttribute<float> InValue, TAttribute<const FSlateBrush*> InLiquid,
-    TAttribute<const FSlateBrush*> InFrame, const float InResponse)
+    TAttribute<const FSlateBrush*> InFrame, const float InResponse, const float InMotionSpeed)
 {
     _Value = MoveTemp(InValue);
     _Liquid = MoveTemp(InLiquid);
     _Frame = MoveTemp(InFrame);
-    _Response = InResponse;
+    _Response = FMath::IsFinite(InResponse) ? FMath::Clamp(InResponse, 0.0f, 5.0f) : 0.0f;
+    _MotionSpeed = FMath::IsFinite(InMotionSpeed) ? FMath::Clamp(InMotionSpeed, 0.0f, 4.0f) : 0.0f;
     Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Paint);
 }
 
@@ -531,12 +614,19 @@ void SCkUiHudOrb::Freeze()
 void SCkUiHudOrb::Tick(const FGeometry& InGeometry, const double InCurrentTime, const float InDeltaTime)
 {
     SLeafWidget::Tick(InGeometry, InCurrentTime, InDeltaTime);
-    if (_Frozen) { return; }
+    AdvancePresentation(InDeltaTime);
+}
+
+void SCkUiHudOrb::AdvancePresentation(const float InDeltaTime)
+{
+    if (_Frozen)
+    { return; }
+    const float Delta = FMath::IsFinite(InDeltaTime) ? FMath::Clamp(InDeltaTime, 0.0f, 1.0f) : 0.0f;
+    _Phase = FMath::Fmod(_Phase + Delta * _MotionSpeed, TWO_PI);
     const float Target = ck_ui_hud::UnitFraction(_Value.Get(0.0f));
     if (!_Initialized) { _Displayed = Target; _Initialized = true; }
     else
     {
-        const float Delta = FMath::IsFinite(InDeltaTime) ? FMath::Clamp(InDeltaTime, 0.0f, 1.0f) : 0.0f;
         const float Alpha = _Response <= 0.0f ? 1.0f : 1.0f - FMath::Exp(-Delta / _Response);
         _Displayed = FMath::Lerp(_Displayed, Target, Alpha);
     }
@@ -555,21 +645,25 @@ auto SCkUiHudOrb::OnPaint(const FPaintArgs&, const FGeometry& InGeometry, const 
     if (Liquid == nullptr || Frame == nullptr) { return InLayer; }
     const FLinearColor Tint = InWidgetStyle.GetColorAndOpacityTint();
     const FVector2D Size = InGeometry.GetLocalSize();
-    FSlateDrawElement::MakeBox(OutDrawElements, InLayer, InGeometry.ToPaintGeometry(),
-        Liquid, ESlateDrawEffect::None, FLinearColor(0.07f, 0.07f, 0.07f, 0.65f) * Tint);
+    ck_ui_hud_geometry::FMesh Mesh;
+    if (!ck_ui_hud_geometry::TryBuildOrb(FVector2f(Size), _Phase, 0.055f, Mesh))
+    { return InLayer; }
+    ck_ui_hud::DrawMesh(InGeometry, OutDrawElements, InLayer, *Liquid, Mesh, Tint);
     if (_Displayed > 0.0f)
     {
-        const FVector2D TopLeft = InGeometry.LocalToAbsolute(FVector2D(0.0f, Size.Y * (1.0f - _Displayed)));
-        const FVector2D BottomRight = InGeometry.LocalToAbsolute(Size);
-        OutDrawElements.PushClip(FSlateClippingZone(FSlateRect(TopLeft.X, TopLeft.Y,
-            BottomRight.X, BottomRight.Y)));
-        FSlateDrawElement::MakeBox(OutDrawElements, InLayer + 1, InGeometry.ToPaintGeometry(),
-            Liquid, ESlateDrawEffect::None, Tint);
+        const float Radius = FMath::Min(Size.X, Size.Y) * 0.435f;
+        const float FillTop = Size.Y * 0.5f + Radius * (1.0f - 2.0f * _Displayed);
+        const auto FillGeometry = InGeometry.MakeChild(FVector2f(Size.X, Size.Y - FillTop),
+            FSlateLayoutTransform(FVector2f(0.0f, FillTop)));
+        OutDrawElements.PushClip(FSlateClippingZone(FillGeometry));
+        if (ck_ui_hud_geometry::TryBuildOrb(FVector2f(Size), _Phase, 1.0f, Mesh))
+        { ck_ui_hud::DrawMesh(InGeometry, OutDrawElements, InLayer + 1, *Liquid, Mesh, Tint); }
         OutDrawElements.PopClip();
     }
-    FSlateDrawElement::MakeBox(OutDrawElements, InLayer + 2, InGeometry.ToPaintGeometry(),
+    ck_ui_hud::DrawGlassHighlight(InGeometry, OutDrawElements, InLayer + 2, Tint);
+    FSlateDrawElement::MakeBox(OutDrawElements, InLayer + 4, InGeometry.ToPaintGeometry(),
         Frame, ESlateDrawEffect::None, Tint);
-    return InLayer + 2;
+    return InLayer + 4;
 }
 
 void SCkUiHudAbility::Construct(const FArguments&)
@@ -578,10 +672,13 @@ void SCkUiHudAbility::Construct(const FArguments&)
     SetCanTick(true);
 }
 
-void SCkUiHudAbility::Configure(TAttribute<float> InCooldown, TAttribute<const FSlateBrush*> InImage)
+void SCkUiHudAbility::Configure(TAttribute<float> InCooldown, TAttribute<const FSlateBrush*> InImage,
+    TAttribute<float> InRemaining, const FSlateFontInfo& InFont)
 {
     _Cooldown = MoveTemp(InCooldown);
     _Image = MoveTemp(InImage);
+    _Remaining = MoveTemp(InRemaining);
+    _Font = InFont;
     Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Paint);
 }
 
@@ -599,6 +696,14 @@ void SCkUiHudAbility::Tick(const FGeometry& InGeometry, const double InCurrentTi
 
 auto SCkUiHudAbility::ComputeDesiredSize(float) const -> FVector2D { return FVector2D(64.0f, 64.0f); }
 
+auto SCkUiHudAbility::GetRemainingSeconds() const -> int32
+{
+    if (_Frozen || ck_ui_hud::UnitFraction(_Cooldown.Get(0.0f)) <= 0.0f)
+    { return 0; }
+    const float Seconds = _Remaining.Get(0.0f);
+    return FMath::IsFinite(Seconds) ? FMath::CeilToInt(FMath::Clamp(Seconds, 0.0f, 86400.0f)) : 0;
+}
+
 auto SCkUiHudAbility::OnPaint(const FPaintArgs&, const FGeometry& InGeometry, const FSlateRect&,
     FSlateWindowElementList& OutDrawElements, const int32 InLayer,
     const FWidgetStyle& InWidgetStyle, bool) const -> int32
@@ -613,26 +718,32 @@ auto SCkUiHudAbility::OnPaint(const FPaintArgs&, const FGeometry& InGeometry, co
         Image, ESlateDrawEffect::None, Tint);
     if (Cooldown > 0.0f)
     {
-        const float ShadeHeight = static_cast<float>(Size.Y) * Cooldown;
-        FSlateDrawElement::MakeBox(OutDrawElements, InLayer + 1,
-            InGeometry.ToPaintGeometry(FVector2f(Size.X, ShadeHeight),
-                FSlateLayoutTransform(FVector2f(0.0f, 0.0f))),
-            FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")), ESlateDrawEffect::None,
-            FLinearColor(0.015f, 0.018f, 0.02f, 0.74f) * Tint);
-        const float ArcFraction = 1.0f - Cooldown;
-        TArray<FVector2f> Arc;
-        const FVector2f Center(Size.X * 0.5f, Size.Y * 0.5f);
-        const float Radius = FMath::Max(0.0f, FMath::Min(Size.X, Size.Y) * 0.5f - 3.0f);
-        const int32 Steps = FMath::Max(2, FMath::CeilToInt(48.0f * ArcFraction));
-        for (int32 Index = 0; Index <= Steps; ++Index)
+        ck_ui_hud_geometry::FMesh Mask;
+        if (ck_ui_hud_geometry::TryBuildCooldown(FVector2f(Size), Cooldown,
+            FLinearColor(0.012f, 0.015f, 0.018f, 0.82f), Mask))
         {
-            const float Angle = -HALF_PI + TWO_PI * ArcFraction * Index / Steps;
-            Arc.Add(Center + FVector2f(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius);
+            ck_ui_hud::DrawMesh(InGeometry, OutDrawElements, InLayer + 1,
+                *FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")), Mask, Tint);
         }
-        FSlateDrawElement::MakeLines(OutDrawElements, InLayer + 2, InGeometry.ToPaintGeometry(),
-            MoveTemp(Arc), ESlateDrawEffect::None, FLinearColor(0.92f, 0.75f, 0.43f, 0.92f) * Tint, true, 2.0f);
+        const int32 Seconds = GetRemainingSeconds();
+        if (Seconds > 0 && FSlateApplication::IsInitialized())
+        {
+            const auto Renderer = FSlateApplication::Get().GetRenderer();
+            if (Renderer != nullptr)
+            {
+                const FString Label = FString::FromInt(Seconds);
+                const auto Measured = Renderer->GetFontMeasureService()->Measure(Label, _Font);
+                const FVector2f Origin = (FVector2f(Size) - FVector2f(Measured)) * 0.5f;
+                FSlateDrawElement::MakeText(OutDrawElements, InLayer + 2,
+                    InGeometry.ToPaintGeometry(FSlateLayoutTransform(Origin + FVector2f(1.0f, 1.0f))),
+                    Label, _Font, ESlateDrawEffect::None, FLinearColor::Black * Tint);
+                FSlateDrawElement::MakeText(OutDrawElements, InLayer + 3,
+                    InGeometry.ToPaintGeometry(FSlateLayoutTransform(Origin)), Label, _Font,
+                    ESlateDrawEffect::None, FLinearColor(0.83f, 0.79f, 0.68f) * Tint);
+            }
+        }
     }
-    return InLayer + 2;
+    return InLayer + 3;
 }
 
 auto FCkUiHudControls::Register(FCkUiWidgetRegistry& InRegistry) -> FCkUiLoadResult
@@ -695,7 +806,10 @@ auto FCkUiHudControls::Register(FCkUiWidgetRegistry& InRegistry) -> FCkUiLoadRes
         {TEXT("liquid"), ECkUiCustomPropertyKind::ImageBinding, true},
         {TEXT("frame"), ECkUiCustomPropertyKind::ImageBinding, true}
     };
-    Orb.Schema.StyleProperties = {{TEXT("-ck-hud-orb-response"), ECkUiCustomStyleKind::Number}};
+    Orb.Schema.StyleProperties = {
+        {TEXT("-ck-hud-orb-response"), ECkUiCustomStyleKind::Number},
+        {TEXT("-ck-hud-orb-motion-speed"), ECkUiCustomStyleKind::Number}
+    };
     Orb.RetainedFactory = [](const FCkUiCustomWidgetArguments& InArguments, FString& OutFailure)
         -> TSharedPtr<ICkUiRetainedWidget>
     {
@@ -711,8 +825,11 @@ auto FCkUiHudControls::Register(FCkUiWidgetRegistry& InRegistry) -> FCkUiLoadRes
     Ability.Schema.Tag = TEXT("hud-ability");
     Ability.Schema.Properties = {
         {TEXT("cooldown"), ECkUiCustomPropertyKind::NumberBinding, true},
-        {TEXT("image"), ECkUiCustomPropertyKind::ImageBinding, true}
+        {TEXT("image"), ECkUiCustomPropertyKind::ImageBinding, true},
+        {TEXT("remaining"), ECkUiCustomPropertyKind::NumberBinding, false},
+        {TEXT("font-family"), ECkUiCustomPropertyKind::Text, false}
     };
+    Ability.Schema.StyleProperties = {{TEXT("-ck-hud-ability-font-size"), ECkUiCustomStyleKind::Length}};
     Ability.RetainedFactory = [](const FCkUiCustomWidgetArguments& InArguments, FString& OutFailure)
         -> TSharedPtr<ICkUiRetainedWidget>
     {
@@ -723,6 +840,9 @@ auto FCkUiHudControls::Register(FCkUiWidgetRegistry& InRegistry) -> FCkUiLoadRes
         return Control;
     };
     Result = Candidate.Register(MoveTemp(Ability));
+    if (!Result.Succeeded)
+    { return Result; }
+    Result = RegisterKeyHintUiControl(Candidate);
     if (Result.Succeeded)
     { InRegistry = MoveTemp(Candidate); }
     return Result;
