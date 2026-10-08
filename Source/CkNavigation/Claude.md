@@ -25,7 +25,8 @@ static ECk_Nav_PathStatus       Get_PathStatus(const FCk_Handle& InHandle);
 static bool                     Has_Path(const FCk_Handle& InHandle);
 
 // Register or unregister an actor's actor-level navigation contribution. Separate component
-// registration remains owned by the component APIs.
+// registration remains owned by the component APIs. Unregistering regenerates the surface under
+// the actor's footprint from geometry (see "Removing a baked blocker" below).
 static void Request_SetActorNavigationRegistered(AActor* InActor, bool InRegistered);
 
 // Re-bindable signal API (for code that wants to react to every path request, not just the one it issued).
@@ -216,6 +217,44 @@ slot against the agent's real movement state and fails an episode no provider an
 `_PathPendingTimeoutSeconds`. Note the bound lives in CkCrowd, not here: CkNavigation's own 5s
 deferral timeout only covers queries that actually reached its queue, and the PathNetwork and
 VoxelNav branches never enqueue one.
+
+## Removing a baked blocker regenerates from geometry, never from the tile cache
+
+`Request_SetActorNavigationRegistered(Actor, false)` reads the actor's registered footprint, unregisters
+it, and then raises a `Geometry | DynamicModifier` dirty area over that footprint. The second step is the
+contract, and it is there because of how Recast navigation data is saved.
+
+A tile is a full-height column and holds one cached, compressed layer per walkable level or room. When a
+level's navigation data is saved, `FPImplRecastNavMesh::Serialize` writes a cached layer once per saved
+`dtMeshTile` - that is, only for layers that produced navmesh. A room that sits completely inside a
+Null-area volume at save time produces none, so its layer is not in the saved data at all.
+
+At runtime, removing a nav-relevant actor raises the element's own dirty flag, and for a volume with no
+geometry that is a modifier-only repair. `FRecastTileGenerator` answers a modifier-only repair from the
+tile's cached layers and regenerates them only when the tile has NONE. Other levels of the same column
+(a roof, a basement, the next room) keep the list non-empty, so the missing layer is never rebuilt and
+the ground the volume used to cover stays unwalkable for the rest of the session. A full `Build()` or any
+geometry change in the tile repairs it for good, because a runtime regeneration stores every layer.
+
+Found in BusterBlock (2026-10-08): unlocking a store section removed its NavModifierVolume; tiles that a
+wall component also touched got a geometry repair and came back, a tile only the volume covered did not,
+and every NPC sent to the shelves standing in it walked to the edge of the hole and never arrived.
+
+- The request is `Geometry | DynamicModifier` spelled out, not `All` and never `NavigationBounds`: that
+  flag skips the generator's total-bounds and tile-inclusion tests.
+- An actor with no registered element raises nothing, so a blanket re-apply over already-removed actors
+  costs no rebuild.
+- Registering stays a modifier repair. Ground being sealed needs no layer it does not already have.
+- The guarantee holds for `RuntimeGeneration = Dynamic`. A navmesh that cannot rebuild geometry at
+  runtime refuses a geometry dirty and keeps repairing from its cache.
+- If dirty-area accumulation is off (the navigation system is locked or still initialising) the engine
+  drops both requests, exactly as it dropped the single one before.
+
+**Not covered, by decision:** a baked blocker that leaves navigation some other way - the actor is
+destroyed, its level is unloaded, its area class changes - still takes the engine's modifier-only path
+and can leave the same hole. BusterBlock has no such path today. The fix for that whole class is in the
+engine (regenerate layers on the first repair of a tile whose cache came from disk, or persist layers
+that produced no navmesh); route a new removal path through this utility until then.
 
 ## Future work
 
