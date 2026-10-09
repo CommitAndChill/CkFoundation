@@ -58,7 +58,8 @@ public:
     Get_IsEnabled(
         const FCk_Handle_Gait& InGait);
 
-    // Stride phase, radians [0, 2pi). A footfall every pi; sin(phase) is the left/right swing.
+    // Stride phase, radians [0, 2pi). Footfalls at the bob's dip bottoms, pi/2 (left) and 3pi/2 (right); sin(phase) is
+    // the left/right swing.
     UFUNCTION(BlueprintPure, Category = "Ck|Utils|Gait", DisplayName = "[Ck][Gait] Get Phase")
     static float
     Get_Phase(
@@ -94,6 +95,19 @@ public:
     UFUNCTION(BlueprintPure, Category = "Ck|Utils|Gait", DisplayName = "[Ck][Gait] Get Last Land Impact Speed")
     static float
     Get_LastLandImpactSpeed(
+        const FCk_Handle_Gait& InGait);
+
+    // Monotonic count of footfalls since Add: each crossing of phase pi/2 or 3pi/2 while grounded and SpeedRatio is at
+    // least the stride's FootfallMinSpeedRatio. Consumers diff it against their own copy; Request_Reset leaves it alone.
+    UFUNCTION(BlueprintPure, Category = "Ck|Utils|Gait", DisplayName = "[Ck][Gait] Get Footfall Count")
+    static int32
+    Get_FootfallCount(
+        const FCk_Handle_Gait& InGait);
+
+    // The foot of the most recent footfall (Left before the first one).
+    UFUNCTION(BlueprintPure, Category = "Ck|Utils|Gait", DisplayName = "[Ck][Gait] Get Last Footfall Side")
+    static ECk_Gait_Side
+    Get_LastFootfallSide(
         const FCk_Handle_Gait& InGait);
 
 public:

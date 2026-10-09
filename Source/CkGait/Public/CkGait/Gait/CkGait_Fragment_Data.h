@@ -35,6 +35,16 @@ enum class ECk_Gait_Stance : uint8
 
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_Gait_Stance);
 
+// The foot of a footfall: Left at phase pi/2, Right at 3pi/2 (the bob's dip bottoms).
+UENUM(BlueprintType)
+enum class ECk_Gait_Side : uint8
+{
+    Left,
+    Right
+};
+
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_Gait_Side);
+
 // --------------------------------------------------------------------------------------------------------------------
 
 class UNavMovementComponent;
@@ -73,6 +83,11 @@ private:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true, ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
     float _MinCadenceScale = 0.35f;
 
+    // A footfall counts only while grounded and SpeedRatio is at least this: the clock idles at _MinCadenceScale at
+    // rest, and those dips are not steps.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true, ClampMin = "0.0", UIMin = "0.0", UIMax = "1.0"))
+    float _FootfallMinSpeedRatio = 0.1f;
+
 public:
     CK_PROPERTY(_ReferenceSpeed);
     CK_PROPERTY(_StridesPerSecond);
@@ -80,6 +95,7 @@ public:
     CK_PROPERTY(_AmountInterpSpeed);
     CK_PROPERTY(_CrouchScale);
     CK_PROPERTY(_MinCadenceScale);
+    CK_PROPERTY(_FootfallMinSpeedRatio);
 
 public:
     CK_DEFINE_CONSTRUCTORS(FCk_Gait_StrideParams, _ReferenceSpeed, _StridesPerSecond);
@@ -198,7 +214,7 @@ public:
 
 // --------------------------------------------------------------------------------------------------------------------
 
-// Zeroes the clock (phase, amount, breath) and the previous motion sample. The landing counter is NOT reset.
+// Zeroes the clock (phase, amount, breath) and the previous motion sample. The landing and footfall counters are NOT reset.
 USTRUCT(BlueprintType)
 struct CKGAIT_API FCk_Request_Gait_Reset : public FCk_Request_Base
 {

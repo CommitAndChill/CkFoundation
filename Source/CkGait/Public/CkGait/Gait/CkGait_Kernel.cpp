@@ -43,6 +43,7 @@ auto
         && ck_gait_kernel::DoGet_IsFiniteAtLeast(InStride.Get_StridesPerSecond(), 0.0f)
         && ck_gait_kernel::DoGet_IsFiniteAtLeast(InStride.Get_MaxAmountScale(), 0.0f)
         && ck_gait_kernel::DoGet_IsFiniteAtLeast(InStride.Get_AmountInterpSpeed(), 0.0f)
+        && ck_gait_kernel::DoGet_IsFiniteAtLeast(InStride.Get_FootfallMinSpeedRatio(), 0.0f)
         && ck_gait_kernel::DoGet_IsFiniteInUnitRange(InStride.Get_CrouchScale())
         && ck_gait_kernel::DoGet_IsFiniteInUnitRange(InStride.Get_MinCadenceScale());
 }
@@ -120,10 +121,10 @@ auto
         const FCk_Gait_Spec& InSpec,
         const FCk_Gait_Motion& InMotion,
         float InDeltaSeconds)
-    -> void
+    -> float
 {
     if (NOT FMath::IsFinite(InDeltaSeconds) || InDeltaSeconds <= 0.0f)
-    { return; }
+    { return 0.0f; }
 
     const auto& Stride = InSpec.Get_Stride();
 
@@ -137,8 +138,53 @@ auto
     InOutState._Amount += (TargetAmount - InOutState._Amount) * ck_gait_kernel::DoGet_FollowAlpha(Stride.Get_AmountInterpSpeed(), InDeltaSeconds);
 
     const auto Cadence = FMath::Max(SpeedRatio, Stride.Get_MinCadenceScale());
-    InOutState._Phase = Wrap_Phase(InOutState._Phase + kTwoPi * Stride.Get_StridesPerSecond() * Cadence * InDeltaSeconds);
+    const auto PhaseAdvance = kTwoPi * Stride.Get_StridesPerSecond() * Cadence * InDeltaSeconds;
+    InOutState._Phase = Wrap_Phase(InOutState._Phase + PhaseAdvance);
     InOutState._BreathPhase = Wrap_Phase(InOutState._BreathPhase + kTwoPi * InDeltaSeconds / InSpec.Get_BreathPeriodSeconds());
+
+    return PhaseAdvance;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    ck::gait::Count_Footfalls(
+        float InPhaseBefore,
+        float InPhaseAdvance)
+    -> FFootfalls
+{
+    if (NOT FMath::IsFinite(InPhaseBefore) || NOT FMath::IsFinite(InPhaseAdvance) || InPhaseAdvance <= 0.0f)
+    { return {}; }
+
+    // Dip k sits at pi/2 + k pi; floor((phase - pi/2) / pi) is the index of the last dip at or before phase.
+    const auto Get_LastDipIndex = [](double InPhase) -> int64
+    {
+        return static_cast<int64>(FMath::FloorToDouble((InPhase - UE_DOUBLE_HALF_PI) / UE_DOUBLE_PI));
+    };
+
+    const auto Before = static_cast<double>(InPhaseBefore);
+    const auto LastDipIndex = Get_LastDipIndex(Before + static_cast<double>(InPhaseAdvance));
+    const auto Count = LastDipIndex - Get_LastDipIndex(Before);
+
+    if (Count <= 0)
+    { return {}; }
+
+    auto Footfalls = FFootfalls{};
+    Footfalls._Count = static_cast<int32>(FMath::Min<int64>(Count, MAX_int32));
+    Footfalls._LastSide = (LastDipIndex % 2 == 0) ? ECk_Gait_Side::Left : ECk_Gait_Side::Right;
+    return Footfalls;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    ck::gait::Get_CanFootfall(
+        const FCk_Gait_StrideParams& InStride,
+        const FCk_Gait_Motion& InMotion,
+        float InSpeedRatio)
+    -> bool
+{
+    return InMotion.Get_Footing() == ECk_Gait_Footing::Grounded && InSpeedRatio >= InStride.Get_FootfallMinSpeedRatio();
 }
 
 // --------------------------------------------------------------------------------------------------------------------

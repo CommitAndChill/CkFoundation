@@ -25,7 +25,7 @@ drain.
 
 Reads: `Get_Spec`, `Get_IsEnabled`, `Get_Phase` (radians `[0, 2pi)`), `Get_Amount`, `Get_SpeedRatio`,
 `Get_BreathPhase`, `Get_LastMotion` (`FCk_Gait_Motion { _Velocity (world cm/s), _Footing, _Stance }`),
-`Get_LandingCount`, `Get_LastLandImpactSpeed`.
+`Get_LandingCount`, `Get_LastLandImpactSpeed`, `Get_FootfallCount`, `Get_LastFootfallSide` (`ECk_Gait_Side`).
 
 ### Bob
 
@@ -64,7 +64,8 @@ request-mutable, not `_Params`. Every request completes its delegate once: bound
   Bob re-seeds its consumed landing count from the gait, so a landing the gait counted while the bob was
   disabled does not kick the spring on re-enable.
 - `Request_Reset` on a Gait zeroes the clock (phase, amount, speed ratio, breath phase) and the previous motion
-  sample; the landing counter and the last impact speed are NOT reset. On a Bob it zeroes the spring and the
+  sample; the landing and footfall counters, the last impact speed and the last footfall side are NOT reset (the
+  phase restarts at 0, so the next footfall is Left). On a Bob it zeroes the spring and the
   smoothed target and re-seeds the consumed landing count from the gait (0 when the gait is gone); the node
   returns to rest through Update's normal publish path.
 - `Request_SetRestOffset` (Bob) replaces the rest offset (a non-finite rest is rejected with an ensure at
@@ -94,6 +95,14 @@ Each frame `FProcessor_Gait_Update` samples one motion from the spec's movement 
 Landing edge (`ck::gait::Detect_Landing`): previous sample Airborne and current Grounded →
 `_LandingCount += 1`, `_LastLandImpactSpeed = max(-PrevVelocity.Z, 0)`. A monotonic counter, not a one-frame
 flag, so consumers and tests are immune to processor ordering: each consumer diffs it against its own copy.
+
+Footfall edge: `Step_Clock` returns the UNWRAPPED phase advance, and `ck::gait::Count_Footfalls(PhaseBefore, Advance)`
+counts every crossing of a dip bottom `pi/2 + k pi` in `(PhaseBefore, PhaseBefore + Advance]` (floor arithmetic, so
+a large dt counts each one): even `k` = `Left` (pi/2), odd `k` = `Right` (3pi/2). These are the Bob's dip bottoms
+(`-_VerticalCm x |sin phase|`), so a footstep consumer and the head bob agree. They count only when
+`Get_CanFootfall`: the sample is Grounded and `SpeedRatio >= _Stride._FootfallMinSpeedRatio` (0.1), because the clock
+idles at `_MinCadenceScale` at rest. Crossings outside the gate (airborne, idle, disabled) are DROPPED, not deferred.
+`_FootfallCount` is monotonic like `_LandingCount`; `_LastFootfallSide` is the side of the last counted one.
 
 ### Bob (`ck::bob`, `CkBob_Kernel.h`)
 
@@ -126,7 +135,7 @@ in parentheses.
 | `FCk_Gait_Spec` | Holds |
 |---|---|
 | `_MovementComponent` (Source) | `TWeakObjectPtr<UNavMovementComponent>`, constructor-essential |
-| `_Stride` (`FCk_Gait_StrideParams`) | `_ReferenceSpeed` (420), `_StridesPerSecond` (1.6), `_MaxAmountScale` (1.5), `_AmountInterpSpeed` (7), `_CrouchScale` (0.6), `_MinCadenceScale` (0.35) |
+| `_Stride` (`FCk_Gait_StrideParams`) | `_ReferenceSpeed` (420), `_StridesPerSecond` (1.6), `_MaxAmountScale` (1.5), `_AmountInterpSpeed` (7), `_CrouchScale` (0.6), `_MinCadenceScale` (0.35), `_FootfallMinSpeedRatio` (0.1) |
 | `_BreathPeriodSeconds` | 3.6 |
 | `_StartingState` | Enable |
 
@@ -190,9 +199,10 @@ No signals in v1.
   node, and the readout `Gait phase .. A .. | Bob loc (..) rot (..) spring .. land#..` (`gait -` when the gait
   is gone; `land#` is the landing count the bob has consumed). Red = disabled, yellow = foreign offset write
   reported, green otherwise.
-- **C++ unit rows:** `Ck.Gait.Kernel.*` (10 rows) and `Ck.Gait.BobKernel.*` (11 rows), world-free
+- **C++ unit rows:** `Ck.Gait.Kernel.*` (13 rows, three of them the footfall counting and gate) and `Ck.Gait.BobKernel.*` (11 rows), world-free
   (`CkTests/Private/UnitTests/CkGait/Test_Gait_Kernel.cpp`, `Test_Bob_Kernel.cpp`).
-- **AS autotests:** `Ck_AutoTest_Gait_*` (7 rows) and `Ck_AutoTest_Gait_Bob_*` (9 rows) in `CkTests/Script/CkGait/`,
+- **AS autotests:** `Ck_AutoTest_Gait_*` (10 rows; footfalls: `FootfallsCountTwicePerStrideAndAlternate`,
+  `IdleAndAirborneCountNoFootfalls`, `ResetKeepsFootfallCountAndSide`) and `Ck_AutoTest_Gait_Bob_*` (9 rows) in `CkTests/Script/CkGait/`,
   on `ACk_GaitAutoTest_Character` (`CkGaitAutoTest_Fixture.as`, whose `AddGait` puts the character's movement
   component on the spec): an unpossessed character, so its movement component runs no physics and a scripted velocity / movement mode is sampled exactly (Flying = grounded and
   moving, Falling = airborne, Falling -> Flying = a landing).

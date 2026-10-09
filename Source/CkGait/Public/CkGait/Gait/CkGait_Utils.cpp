@@ -122,6 +122,24 @@ auto
 
 auto
     UCk_Utils_Gait_UE::
+    Get_FootfallCount(
+        const FCk_Handle_Gait& InGait)
+    -> int32
+{
+    return InGait.Get<ck::FFragment_Gait>().Get_FootfallCount();
+}
+
+auto
+    UCk_Utils_Gait_UE::
+    Get_LastFootfallSide(
+        const FCk_Handle_Gait& InGait)
+    -> ECk_Gait_Side
+{
+    return InGait.Get<ck::FFragment_Gait>().Get_LastFootfallSide();
+}
+
+auto
+    UCk_Utils_Gait_UE::
     Request_UpdateSpec(
         FCk_Handle_Gait& InGait,
         const FCk_Request_Gait_UpdateSpec& InRequest,

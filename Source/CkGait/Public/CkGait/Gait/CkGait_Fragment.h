@@ -37,12 +37,16 @@ namespace ck
         FCk_Gait_Motion _LastMotion;
         int32 _LandingCount = 0;
         float _LastLandImpactSpeed = 0.0f;
+        int32 _FootfallCount = 0;
+        ECk_Gait_Side _LastFootfallSide = ECk_Gait_Side::Left;
 
     public:
         CK_PROPERTY_GET(_Clock);
         CK_PROPERTY_GET(_LastMotion);
         CK_PROPERTY_GET(_LandingCount);
         CK_PROPERTY_GET(_LastLandImpactSpeed);
+        CK_PROPERTY_GET(_FootfallCount);
+        CK_PROPERTY_GET(_LastFootfallSide);
 
     public:
         CK_DEFINE_CONSTRUCTORS(FFragment_Gait, _LandingCount);

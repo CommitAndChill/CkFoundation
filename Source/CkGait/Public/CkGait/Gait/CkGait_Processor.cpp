@@ -100,8 +100,8 @@ auto
         const FCk_Request_Gait_Reset& InRequest)
     -> ECk_Request_OperationResult
 {
-    // The landing counter and the last impact speed are untouched: consumers diff the counter against their own copy,
-    // and a reset must not replay or swallow a landing.
+    // The landing and footfall counters (and the last impact speed and footfall side) are untouched: consumers diff a
+    // counter against their own copy, and a reset must not replay or swallow an edge.
     InGait._Clock = {};
     InGait._LastMotion = gait::Get_RestMotion();
     return ECk_Request_OperationResult::Succeeded;
@@ -153,6 +153,17 @@ auto
         InGait._LastLandImpactSpeed = Landing.GetValue();
     }
 
-    gait::Step_Clock(InGait._Clock, InTunables, Motion, static_cast<float>(InDeltaT.Get_Seconds()));
+    const auto PhaseBefore = InGait._Clock._Phase;
+    const auto PhaseAdvance = gait::Step_Clock(InGait._Clock, InTunables, Motion, static_cast<float>(InDeltaT.Get_Seconds()));
+
+    if (gait::Get_CanFootfall(InTunables.Get_Stride(), Motion, InGait._Clock._SpeedRatio))
+    {
+        if (const auto Footfalls = gait::Count_Footfalls(PhaseBefore, PhaseAdvance); Footfalls._Count > 0)
+        {
+            InGait._FootfallCount += Footfalls._Count;
+            InGait._LastFootfallSide = Footfalls._LastSide;
+        }
+    }
+
     InGait._LastMotion = Motion;
 }
