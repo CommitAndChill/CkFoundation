@@ -67,6 +67,10 @@ Result contract, on both `FCk_Probe_RayCast_Result` and `FCk_ShapeCast_Result`:
   (or JoltBody) entity for World hits. It MAY be invalid — a body with no owning entity is still a
   real physical hit.
 - `_SurfaceNormal` is the true surface normal. `_NormalDirLen` is NOT (see below).
+- `_PhysicalMaterial` (setter-filled, not a ctor arg) is the hit surface's phys mat: a Probe hit's
+  `FCk_Probe_SurfaceInfo` (`Direct` only — a `Trace` source ensures and yields null), a World hit's
+  `ck::jolt::TryGet_BodyPhysicalMaterial` (JoltBody spec or baked static body). The persistent trace's
+  `FCk_ProbeTrace_Payload_OnWorldHit` carries it too.
 - `Request_Single*` is `Multi[0]`, so under `Blocking` it answers "did the shot land or hit the
   wall" and nothing more. "Was there a probe behind the wall?" needs `Multi` or `Reported`.
 

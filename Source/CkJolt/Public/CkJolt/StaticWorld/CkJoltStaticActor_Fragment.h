@@ -7,6 +7,7 @@
 // --------------------------------------------------------------------------------------------------------------------
 
 class AActor;
+class UPhysicalMaterial;
 class UPrimitiveComponent;
 class UCk_Utils_JoltStaticActor_UE;
 class UCk_JoltStaticWorld_Subsystem_UE;
@@ -35,6 +36,9 @@ namespace ck
 
     private:
         TArray<uint32>               _BodyIds;
+        // Parallel to _BodyIds: each body's phys mat, null when it had none (or came from a cell cooked before phys mats
+        // were recorded). Weak: the source component, its mesh, or the engine owns the material.
+        TArray<TWeakObjectPtr<UPhysicalMaterial>> _BodyPhysicalMaterials;
         TWeakObjectPtr<const AActor> _SourceActor;
         FName                        _SourceActorName;
         // Actor data-layer membership captured with the static-world source. Cooked bodies may have no
@@ -51,6 +55,7 @@ namespace ck
 
     public:
         CK_PROPERTY_GET(_BodyIds);
+        CK_PROPERTY_GET(_BodyPhysicalMaterials);
         CK_PROPERTY_GET(_SourceActor);
         CK_PROPERTY_GET(_SourceActorName);
         CK_PROPERTY_GET(_DataLayerNames);

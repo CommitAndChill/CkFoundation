@@ -73,6 +73,14 @@ public:
     Get_MotionType(
         const FCk_Handle_JoltBody& InJoltBody);
 
+    // The spec's phys mat when its SurfaceSource is PhysicalMaterial; null for Explicit surfaces or an unset material.
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|JoltBody",
+              DisplayName="[Ck][JoltBody] Get Physical Material")
+    static UPhysicalMaterial*
+    Get_PhysicalMaterial(
+        const FCk_Handle_JoltBody& InJoltBody);
+
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|JoltBody",
               DisplayName="[Ck][JoltBody] Get Sleep State")

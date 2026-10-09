@@ -9,6 +9,9 @@
 
 #include "CkJolt/Body/CkJoltBody_Fragment.h"
 #include "CkJolt/Body/CkJoltBody_Utils.h"
+#include "CkJolt/CkJolt_BodySurface.h"
+
+#include <PhysicalMaterials/PhysicalMaterial.h>
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -23,6 +26,7 @@ namespace ck::jolt_body
             const FCk_Handle& InOtherEntity,
             const FCk_Jolt_ContactEvent& InEvent,
             uint32 InSelfBodyIndexAndSeq,
+            uint32 InOtherBodyIndexAndSeq,
             const TArray<FVector>& InContactPoints,
             const FVector& InContactNormal,
             bool InOtherIsSensor)
@@ -38,6 +42,10 @@ namespace ck::jolt_body
         auto JoltBody = UCk_Utils_JoltBody_UE::Cast(SelfHandle);
 
         const auto OtherIsSensor = InOtherIsSensor ? ECk_EnableDisable::Enable : ECk_EnableDisable::Disable;
+        const auto Get_OtherPhysicalMaterial = [&]() -> TWeakObjectPtr<UPhysicalMaterial>
+        {
+            return ck::jolt::TryGet_BodyPhysicalMaterial(InOtherEntity, InOtherBodyIndexAndSeq);
+        };
 
         switch (InEvent.Type)
         {
@@ -46,7 +54,8 @@ namespace ck::jolt_body
             case FCk_Jolt_ContactEvent::EType::Added:
             {
                 const auto Payload = FCk_JoltBody_Payload_OnContact{
-                    InOtherEntity, InContactPoints, InContactNormal, -InEvent.RelativeNormalVelocity, OtherIsSensor};
+                    InOtherEntity, InContactPoints, InContactNormal, -InEvent.RelativeNormalVelocity, OtherIsSensor,
+                    Get_OtherPhysicalMaterial()};
 
                 ck::UUtils_Signal_OnJoltBodyContactAdded::Broadcast(JoltBody, ck::MakePayload(JoltBody, Payload));
                 break;
@@ -57,7 +66,8 @@ namespace ck::jolt_body
                 { break; }
 
                 const auto Payload = FCk_JoltBody_Payload_OnContact{
-                    InOtherEntity, InContactPoints, InContactNormal, -InEvent.RelativeNormalVelocity, OtherIsSensor};
+                    InOtherEntity, InContactPoints, InContactNormal, -InEvent.RelativeNormalVelocity, OtherIsSensor,
+                    Get_OtherPhysicalMaterial()};
 
                 ck::UUtils_Signal_OnJoltBodyContactPersisted::Broadcast(JoltBody, ck::MakePayload(JoltBody, Payload));
                 break;
@@ -113,10 +123,10 @@ namespace ck::jolt_body
             const auto Body2Entity = ResolveBodyEntity(Event.Body2UserData);
 
             // Per-side: body1 gets the negated world-space normal + its own contact points, body2 the positive.
-            DoRouteForSide(Body1Entity, Body2Entity, Event, Event.Body1IndexAndSeq,
+            DoRouteForSide(Body1Entity, Body2Entity, Event, Event.Body1IndexAndSeq, Event.Body2IndexAndSeq,
                 Event.ContactPointsOn1, -Event.WorldSpaceNormal, Event.IsSensor2);
 
-            DoRouteForSide(Body2Entity, Body1Entity, Event, Event.Body2IndexAndSeq,
+            DoRouteForSide(Body2Entity, Body1Entity, Event, Event.Body2IndexAndSeq, Event.Body1IndexAndSeq,
                 Event.ContactPointsOn2, Event.WorldSpaceNormal, Event.IsSensor1);
         }
     }

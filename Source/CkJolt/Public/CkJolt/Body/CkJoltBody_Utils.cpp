@@ -16,6 +16,7 @@
 #include "CkJolt/Subsystem/CkJolt_Subsystem.h"
 
 #include <Engine/World.h>
+#include <PhysicalMaterials/PhysicalMaterial.h>
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/PhysicsSystem.h>
@@ -240,6 +241,20 @@ auto
     -> ECk_MotionType
 {
     return InJoltBody.Get<ck::FFragment_JoltBody_Params>().Get_MotionType();
+}
+
+auto
+    UCk_Utils_JoltBody_UE::
+    Get_PhysicalMaterial(
+        const FCk_Handle_JoltBody& InJoltBody)
+    -> UPhysicalMaterial*
+{
+    const auto& Params = InJoltBody.Get<ck::FFragment_JoltBody_Params>();
+
+    if (Params.Get_SurfaceSource() != ECk_JoltBody_SurfaceSource::PhysicalMaterial)
+    { return nullptr; }
+
+    return Params.Get_PhysicalMaterial().Get();
 }
 
 auto

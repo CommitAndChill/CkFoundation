@@ -83,6 +83,7 @@ namespace ck_jolt_bake_extraction
         InOutBody._Friction = PhysMaterial->Friction;
         InOutBody._Restitution = PhysMaterial->Restitution;
         InOutBody._SurfaceType = PhysMaterial->SurfaceType;
+        InOutBody._PhysicalMaterial = PhysMaterial;
     }
 
     // ----------------------------------------------------------------------------------------------------------------
@@ -1721,6 +1722,7 @@ namespace ck::jolt::bake
                     Body._Friction = DefaultPhysMaterial->Friction;
                     Body._Restitution = DefaultPhysMaterial->Restitution;
                     Body._SurfaceType = DefaultPhysMaterial->SurfaceType;
+                    Body._PhysicalMaterial = const_cast<UPhysicalMaterial*>(DefaultPhysMaterial);
                 }
 
                 OutBodies.Emplace(MoveTemp(Body));
@@ -1862,6 +1864,10 @@ namespace ck::jolt::bake
             DoHash_String(Builder, Component->GetClass()->GetName());
             DoHash_Transform(Builder, Component->GetComponentTransform());
 
+            // The cooked record carries the phys mat, so changing it must re-cook the actor.
+            const auto* PhysMaterialOverride = Component->BodyInstance.GetPhysMaterialOverride();
+            DoHash_String(Builder, ck::IsValid(PhysMaterialOverride) ? PhysMaterialOverride->GetPathName() : FString{});
+
             const auto HashBodySetup = [&](const UBodySetup* InBodySetup) -> void
             {
                 if (ck::Is_NOT_Valid(InBodySetup))
@@ -1870,6 +1876,9 @@ namespace ck::jolt::bake
                 Builder.Update(&InBodySetup->BodySetupGuid, sizeof(FGuid));
                 const uint8 TraceFlag = static_cast<uint8>(InBodySetup->GetCollisionTraceFlag());
                 Builder.Update(&TraceFlag, sizeof(TraceFlag));
+
+                const auto* BodySetupPhysMaterial = InBodySetup->GetPhysMaterial();
+                DoHash_String(Builder, ck::IsValid(BodySetupPhysMaterial) ? BodySetupPhysMaterial->GetPathName() : FString{});
             };
 
             if (const auto* StaticMesh = Cast<UStaticMeshComponent>(Component))

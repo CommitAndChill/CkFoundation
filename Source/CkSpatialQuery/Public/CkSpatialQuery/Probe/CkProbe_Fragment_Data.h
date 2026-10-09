@@ -478,6 +478,12 @@ private:
               meta = (AllowPrivateAccess = true))
     float _Fraction = 0.0f;
 
+    // The hit surface's phys mat: a Probe hit's SurfaceInfo (Direct source), a World hit's JoltBody spec phys mat
+    // (SurfaceSource PhysicalMaterial) or baked static body phys mat. Null when the surface has none.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    TWeakObjectPtr<UPhysicalMaterial> _PhysicalMaterial;
+
 public:
     CK_PROPERTY_GET(_Probe);
     CK_PROPERTY_GET(_HitLocation);
@@ -488,6 +494,7 @@ public:
     CK_PROPERTY(_HitEntity);
     CK_PROPERTY(_SurfaceNormal);
     CK_PROPERTY(_Fraction);
+    CK_PROPERTY(_PhysicalMaterial);
 
 public:
     CK_DEFINE_CONSTRUCTORS(FCk_Probe_RayCast_Result, _Probe, _HitLocation, _NormalDirLen, _StartPos, _EndPos);
@@ -611,6 +618,12 @@ private:
               meta = (AllowPrivateAccess = true))
     FVector _SurfaceNormal = FVector::UpVector;
 
+    // The hit surface's phys mat: a Probe hit's SurfaceInfo (Direct source), a World hit's JoltBody spec phys mat
+    // (SurfaceSource PhysicalMaterial) or baked static body phys mat. Null when the surface has none.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    TWeakObjectPtr<UPhysicalMaterial> _PhysicalMaterial;
+
 public:
     CK_PROPERTY_GET(_Probe);
     CK_PROPERTY_GET(_HitLocation);
@@ -621,6 +634,7 @@ public:
     CK_PROPERTY(_HitKind);
     CK_PROPERTY(_HitEntity);
     CK_PROPERTY(_SurfaceNormal);
+    CK_PROPERTY(_PhysicalMaterial);
 
 public:
     CK_DEFINE_CONSTRUCTORS(FCk_ShapeCast_Result, _Probe, _HitLocation, _NormalDirLen, _StartPos, _EndPos, _Fraction);
@@ -1025,10 +1039,16 @@ private:
               meta = (AllowPrivateAccess = true))
     FVector _SurfaceNormal = FVector::UpVector;
 
+    // The world body's phys mat (see FCk_ShapeCast_Result::_PhysicalMaterial); null when it has none.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    TWeakObjectPtr<UPhysicalMaterial> _PhysicalMaterial;
+
 public:
     CK_PROPERTY_GET(_WorldEntity);
     CK_PROPERTY_GET(_HitLocation);
     CK_PROPERTY_GET(_SurfaceNormal);
+    CK_PROPERTY(_PhysicalMaterial);
 
 public:
     CK_DEFINE_CONSTRUCTORS(FCk_ProbeTrace_Payload_OnWorldHit, _WorldEntity, _HitLocation, _SurfaceNormal);

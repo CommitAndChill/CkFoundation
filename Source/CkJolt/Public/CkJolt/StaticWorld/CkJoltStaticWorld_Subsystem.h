@@ -35,6 +35,8 @@ namespace ck::jolt
         FVector _Position = FVector::ZeroVector;
         // The hit body's source-actor attribution entity; INVALID when the body has no live entity.
         FCk_Handle _Entity;
+        // Null when the body has no phys mat or no attribution entity.
+        TWeakObjectPtr<UPhysicalMaterial> _PhysicalMaterial;
     };
 
     /// Resolves the cooked-index asset path for a map by convention:

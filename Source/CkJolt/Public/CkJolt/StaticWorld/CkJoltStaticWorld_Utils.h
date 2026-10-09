@@ -11,6 +11,7 @@
 // --------------------------------------------------------------------------------------------------------------------
 
 class AActor;
+class UPhysicalMaterial;
 class UPrimitiveComponent;
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -36,10 +37,15 @@ private:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
     FCk_Handle _Entity;
 
+    // The hit body's phys mat; null when it has none or the body has no attribution entity.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+    TWeakObjectPtr<UPhysicalMaterial> _PhysicalMaterial;
+
 public:
     CK_PROPERTY(_HasHit);
     CK_PROPERTY(_Position);
     CK_PROPERTY(_Entity);
+    CK_PROPERTY(_PhysicalMaterial);
 };
 
 // --------------------------------------------------------------------------------------------------------------------

@@ -80,8 +80,10 @@ namespace ck_probe_trace_processor
             if (NOT IsNewContact)
             { continue; }
 
-            ck::UUtils_Signal_OnProbeTraceWorldHit::Broadcast(InHandle, ck::MakePayload(InHandle,
-                FCk_ProbeTrace_Payload_OnWorldHit{WorldEntity, Result.Get_HitLocation(), Result.Get_SurfaceNormal()}));
+            auto Payload = FCk_ProbeTrace_Payload_OnWorldHit{WorldEntity, Result.Get_HitLocation(), Result.Get_SurfaceNormal()};
+            Payload.Set_PhysicalMaterial(Result.Get_PhysicalMaterial());
+
+            ck::UUtils_Signal_OnProbeTraceWorldHit::Broadcast(InHandle, ck::MakePayload(InHandle, Payload));
         }
 
         Contacts._Entities = MoveTemp(CurrentEntities);

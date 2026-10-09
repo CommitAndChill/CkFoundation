@@ -12,6 +12,7 @@
 // --------------------------------------------------------------------------------------------------------------------
 
 class AActor;
+class UPhysicalMaterial;
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -82,6 +83,15 @@ public:
     static int32
     Get_NumBodies(
         const FCk_Handle_JoltStaticActor& InJoltStaticActor);
+
+public:
+    // The phys mat of one of this entity's baked bodies (InBodyIndexAndSequence = JPH::BodyID::GetIndexAndSequenceNumber),
+    // or null when the body had none. C++ only: the body id is not a Blueprint type, and BP/AS read the phys mat off the
+    // hit and contact results that carry it.
+    static auto
+    Get_BodyPhysicalMaterial(
+        const FCk_Handle_JoltStaticActor& InJoltStaticActor,
+        uint32 InBodyIndexAndSequence) -> UPhysicalMaterial*;
 };
 
 // --------------------------------------------------------------------------------------------------------------------

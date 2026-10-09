@@ -104,6 +104,12 @@ private:
     UPROPERTY()
     TEnumAsByte<EPhysicalSurface> _SurfaceType = SurfaceType_Default;
 
+    // The phys mat the friction/restitution came from, resolved (never loaded) at cell load. A cell cooked before this
+    // field existed loads it empty, which reads as "no phys mat" until the map is re-cooked; no version bump, because
+    // a bump would SKIP every old cell's bodies rather than only lose their surface.
+    UPROPERTY()
+    FSoftObjectPath _PhysicalMaterial;
+
 public:
     CK_PROPERTY(_ShapeIndex);
     CK_PROPERTY(_Position);
@@ -112,6 +118,7 @@ public:
     CK_PROPERTY(_Friction);
     CK_PROPERTY(_Restitution);
     CK_PROPERTY(_SurfaceType);
+    CK_PROPERTY(_PhysicalMaterial);
 };
 
 // --------------------------------------------------------------------------------------------------------------------

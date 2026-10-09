@@ -266,6 +266,7 @@ namespace ck_jolt_cook_world_cooker
                 Record.Set_Friction(Body._Friction);
                 Record.Set_Restitution(Body._Restitution);
                 Record.Set_SurfaceType(Body._SurfaceType);
+                Record.Set_PhysicalMaterial(FSoftObjectPath{Body._PhysicalMaterial.Get()});
                 Records.Emplace(MoveTemp(Record));
             }
 
@@ -403,6 +404,9 @@ namespace ck_jolt_cook_world_cooker
             Body._Friction = Record.Get_Friction();
             Body._Restitution = Record.Get_Restitution();
             Body._SurfaceType = Record.Get_SurfaceType();
+            // TryLoad, not ResolveObject: a carried-over record whose phys mat is not resident would otherwise be
+            // re-written with an empty path. Editor-only cook code, where a load is acceptable.
+            Body._PhysicalMaterial = Cast<UPhysicalMaterial>(Record.Get_PhysicalMaterial().TryLoad());
 
             ActorData._Bodies.Emplace(MoveTemp(Body));
         }

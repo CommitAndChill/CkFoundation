@@ -184,7 +184,20 @@ resolve their soft mesh through a rooted batch, consumer id `JoltBody.Setup`), `
   editor keeps serving the pre-cook answer until it restarts. The cook already does.
 - `UCk_Utils_JoltStaticActor_UE` — typesafe-handle BPFL over the attribution entity: `Has`,
   `Cast`/`DoCast`/`DoCastChecked`, `Get_SourceActor` (may be null after the actor dies),
-  `Get_SourceActorName` (cached, survives actor death), `Get_NumBodies`.
+  `Get_SourceActorName` (cached, survives actor death), `Get_NumBodies`, and the C++-only
+  `Get_BodyPhysicalMaterial(Entity, BodyIndexAndSequence)`.
+- **Per-body phys mats.** The bake records the phys mat each body's friction came from (component
+  `PhysMaterialOverride`, else the BodySetup's, else the engine default; landscape: the proxy's default).
+  `FFragment_JoltStaticActor::_BodyPhysicalMaterials` is a weak array PARALLEL to `_BodyIds`: every site
+  that emplaces or empties one does the other. Live extraction stores the pointer; a cooked record stores
+  an `FSoftObjectPath` resolved (never loaded) once per path per level load — a non-resident path ensures.
+  A cell cooked before the field existed loads it empty (null phys mat) until the map is re-cooked; the
+  cook version was deliberately NOT bumped, since a bump SKIPS old cells' bodies. The editor-only source
+  hash includes the override and BodySetup phys mat paths, so changing one re-cooks the actor.
+- `ck::jolt::TryGet_BodyPhysicalMaterial(Entity, BodyIndexAndSequence)` (`CkJolt_BodySurface.h`) is the
+  one resolver every consumer uses: a JoltBody's spec phys mat when its `SurfaceSource` is
+  `PhysicalMaterial` (`UCk_Utils_JoltBody_UE::Get_PhysicalMaterial`) and the body id is its own, or a
+  JoltStaticActor's per-body one. The static-world ray hit carries it as `_PhysicalMaterial`.
 - Cooker lives in `CkJoltEditor` (editor subsystem + `-run=CkJoltCook` commandlet).
 
 ### Scene queries + occupancy
@@ -238,7 +251,8 @@ resolve their soft mesh through a rooted batch, consumer id `JoltBody.Setup`), `
   every added kinematic body to its current ECS Transform each stepping frame.
   Signals: `OnJoltBodyContactAdded` / `OnJoltBodyContactPersisted` (opt-in via
   `FTag_JoltBody_PersistContacts`) / `OnJoltBodyContactRemoved` (payload OtherEntity +
-  points/normal + RelativeNormalSpeed POSITIVE-WHEN-CLOSING + OtherIsSensor) and
+  points/normal + RelativeNormalSpeed POSITIVE-WHEN-CLOSING + OtherIsSensor + OtherPhysicalMaterial,
+  resolved through `ck::jolt::TryGet_BodyPhysicalMaterial` with the OTHER side's body id) and
   `OnJoltBodySleepStateChanged`. Contact routing: `"JoltBody.Signals"` router registered on
   the subsystem; UserData==0 = NO entity — never resolve raw id 0 (it is the registry's transient
   root). Baked statics now carry their source actor's JoltStaticActor entity id (not 0), so a

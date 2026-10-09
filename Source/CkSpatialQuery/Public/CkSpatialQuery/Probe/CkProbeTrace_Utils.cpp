@@ -3,6 +3,7 @@
 #include "CkProbe_Utils.h"
 
 #include "CkCore/Debug/CkDebugDraw_Utils.h"
+#include "CkCore/Ensure/CkEnsure.h"
 
 #include "CkEcs/Handle/CkHandle_Utils.h"
 
@@ -10,6 +11,7 @@
 #include "CkSpatialQuery/CkSpatialQuery_Utils.h"
 #include "CkSpatialQuery/Probe/CkProbe_Fragment.h"
 #include "CkSpatialQuery/Settings/CkSpatialQuery_Settings.h"
+#include "CkJolt/CkJolt_BodySurface.h"
 #include "CkJolt/CollisionLayers/CkJoltCollisionLayerTable.h"
 
 #include <Jolt/Jolt.h>
@@ -132,6 +134,33 @@ namespace ck_probe_trace_utils
         FCk_Handle _Entity;
         FCk_Handle_Probe _Probe;
     };
+
+    // ----------------------------------------------------------------------------------------------------------------
+
+    /// A Probe hit's surface is the probe's SurfaceInfo (Direct only); a World hit's is its body's phys mat.
+    inline auto
+        Get_HitPhysicalMaterial(
+            ECk_ProbeTrace_HitKind InKind,
+            const FCk_Handle& InEntity,
+            const FCk_Handle_Probe& InProbe,
+            JPH::BodyID InBodyId)
+        -> UPhysicalMaterial*
+    {
+        if (InKind == ECk_ProbeTrace_HitKind::World)
+        { return ck::jolt::TryGet_BodyPhysicalMaterial(InEntity, InBodyId.GetIndexAndSequenceNumber()); }
+
+        if (ck::Is_NOT_Valid(InProbe))
+        { return nullptr; }
+
+        const auto SurfaceInfo = UCk_Utils_Probe_UE::Get_SurfaceInfo(InProbe);
+        const auto IsDirect = SurfaceInfo.Get_PhysicalMaterialSource() == ECk_PhysicalMaterialSource::Direct;
+        CK_ENSURE_IF_NOT(IsDirect,
+            TEXT("Probe [{}] uses PhysicalMaterialSource [{}], which is not supported; its hits carry no phys mat"),
+            InProbe, SurfaceInfo.Get_PhysicalMaterialSource())
+        { return nullptr; }
+
+        return SurfaceInfo.Get_PhysicalMaterial().Get();
+    }
 
     // ----------------------------------------------------------------------------------------------------------------
 
@@ -632,6 +661,7 @@ auto
         HitResult.Set_SurfaceNormal(ck_probe_trace_utils::Get_RaySurfaceNormal(PhysicsSystem, Hit._BodyId,
             Hit._SubShapeId2, RayCast.GetPointOnRay(Hit._Fraction)));
         HitResult.Set_Fraction(Hit._Fraction);
+        HitResult.Set_PhysicalMaterial(ck_probe_trace_utils::Get_HitPhysicalMaterial(Hit._Kind, Hit._Entity, Hit._Probe, Hit._BodyId));
 
         Result.Emplace(MoveTemp(HitResult));
     }
@@ -941,6 +971,7 @@ auto
         // from a point to itself) can report a degenerate penetration axis, and a raw divide would
         // put a NaN in the result. Up matches the ray path's lock-failure fallback.
         HitResult.Set_SurfaceNormal(jolt::Conv((-Hit._PenetrationAxis).NormalizedOr(JPH::Vec3::sAxisZ())));
+        HitResult.Set_PhysicalMaterial(ck_probe_trace_utils::Get_HitPhysicalMaterial(Hit._Kind, Hit._Entity, Hit._Probe, Hit._BodyId));
 
         Result.Emplace(MoveTemp(HitResult));
     }

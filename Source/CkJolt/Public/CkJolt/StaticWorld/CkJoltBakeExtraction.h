@@ -100,6 +100,8 @@ namespace ck::jolt::bake
         float _Friction = 0.7f;
         float _Restitution = 0.3f;
         TEnumAsByte<EPhysicalSurface> _SurfaceType = SurfaceType_Default;
+        // Weak: the source component's BodyInstance/BodySetup (or the engine) keeps it alive.
+        TWeakObjectPtr<UPhysicalMaterial> _PhysicalMaterial;
         TWeakObjectPtr<const UPrimitiveComponent> _SourceComponent;
     };
 

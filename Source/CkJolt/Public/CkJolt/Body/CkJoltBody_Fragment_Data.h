@@ -663,6 +663,8 @@ public:
 // Payload for a JoltBody contact begin/persist signal. _OtherEntity may be INVALID (the other body has no
 // live entity). _ContactPoints/_ContactNormal are on THIS body's surface; _RelativeNormalSpeed is the closing
 // speed along that normal in UE units/s, POSITIVE when approaching (Jolt's raw sign is the opposite).
+// _OtherPhysicalMaterial is the other body's phys mat (a JoltBody with SurfaceSource PhysicalMaterial, or a baked
+// static body), null when it has none or has no live entity.
 USTRUCT(BlueprintType)
 struct CKJOLT_API FCk_JoltBody_Payload_OnContact
 {
@@ -692,15 +694,21 @@ private:
               meta = (AllowPrivateAccess = true))
     ECk_EnableDisable _OtherIsSensor = ECk_EnableDisable::Disable;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    TWeakObjectPtr<UPhysicalMaterial> _OtherPhysicalMaterial;
+
 public:
     CK_PROPERTY_GET(_OtherEntity);
     CK_PROPERTY_GET(_ContactPoints);
     CK_PROPERTY_GET(_ContactNormal);
     CK_PROPERTY_GET(_RelativeNormalSpeed);
     CK_PROPERTY_GET(_OtherIsSensor);
+    CK_PROPERTY_GET(_OtherPhysicalMaterial);
 
 public:
-    CK_DEFINE_CONSTRUCTORS(FCk_JoltBody_Payload_OnContact, _OtherEntity, _ContactPoints, _ContactNormal, _RelativeNormalSpeed, _OtherIsSensor);
+    CK_DEFINE_CONSTRUCTORS(FCk_JoltBody_Payload_OnContact, _OtherEntity, _ContactPoints, _ContactNormal, _RelativeNormalSpeed,
+        _OtherIsSensor, _OtherPhysicalMaterial);
 };
 
 // --------------------------------------------------------------------------------------------------------------------

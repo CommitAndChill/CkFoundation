@@ -141,6 +141,7 @@ auto
     Result.Set_HasHit(Hit._HasHit);
     Result.Set_Position(Hit._Position);
     Result.Set_Entity(Hit._Entity);
+    Result.Set_PhysicalMaterial(Hit._PhysicalMaterial);
 
     return Result;
 }

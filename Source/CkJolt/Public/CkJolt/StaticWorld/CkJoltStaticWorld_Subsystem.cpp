@@ -45,6 +45,35 @@ DECLARE_CYCLE_STAT(TEXT("JoltStaticWorld_DestroyBodies"), STAT_CkJolt_StaticWorl
 
 // --------------------------------------------------------------------------------------------------------------------
 
+namespace ck_jolt_static_world_subsystem
+{
+    // Resolve, never load: the level that owns these bodies is loaded, and with it every component, mesh BodySetup and
+    // landscape that references the phys mat. An unresolved non-empty path is therefore a defect, not a pending load.
+    auto
+        DoResolve_CookedPhysicalMaterial(
+            const FSoftObjectPath& InPath,
+            TMap<FSoftObjectPath, TWeakObjectPtr<UPhysicalMaterial>>& InOutResolved)
+        -> TWeakObjectPtr<UPhysicalMaterial>
+    {
+        if (InPath.IsNull())
+        { return {}; }
+
+        if (const auto* Found = InOutResolved.Find(InPath))
+        { return *Found; }
+
+        auto* PhysicalMaterial = Cast<UPhysicalMaterial>(InPath.ResolveObject());
+        const auto IsResident = ck::IsValid(PhysicalMaterial);
+        CK_ENSURE_IF_NOT(IsResident,
+            TEXT("Cooked Jolt body names phys mat [{}], which is not resident although its level is loaded; the body "
+                 "reports no phys mat"), InPath.ToString())
+        { return InOutResolved.Add(InPath, nullptr); }
+
+        return InOutResolved.Add(InPath, PhysicalMaterial);
+    }
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
 namespace ck::jolt
 {
     auto
@@ -410,6 +439,12 @@ auto
     const auto& BodyInterface = PhysicsSystem->GetBodyInterface();
     Result._Entity = DoResolve_EntityFromUserData(BodyInterface.GetUserData(RayResult.mBodyID));
 
+    if (const auto StaticActor = UCk_Utils_JoltStaticActor_UE::Cast(Result._Entity); ck::IsValid(StaticActor))
+    {
+        Result._PhysicalMaterial = UCk_Utils_JoltStaticActor_UE::Get_BodyPhysicalMaterial(StaticActor,
+            RayResult.mBodyID.GetIndexAndSequenceNumber());
+    }
+
     return Result;
 }
 
@@ -600,6 +635,7 @@ auto
     {
         // Jolt world already gone (teardown) — nothing to free; still empty the array so a later pass no-ops.
         Fragment._BodyIds.Empty();
+        Fragment._BodyPhysicalMaterials.Empty();
         return;
     }
 
@@ -632,6 +668,7 @@ auto
     }
 
     Fragment._BodyIds.Empty();
+    Fragment._BodyPhysicalMaterials.Empty();
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -1263,6 +1300,7 @@ auto
     const auto& ActorLookup = ActorsInLevel->Get_ActorsByName();
     const auto& Cells = _CookedIndex->Get_Cells();
     auto UsedCellIndices = TSet<int32>{};
+    auto ResolvedPhysicalMaterials = TMap<FSoftObjectPath, TWeakObjectPtr<UPhysicalMaterial>>{};
 
     // The index-level filter-hash check in DoEnsure_IndexLoaded guarantees this matches the cook-time
     // filter, so per-actor hash comparisons below are apples-to-apples.
@@ -1358,6 +1396,8 @@ auto
             const auto RawBodyId = Body->GetID().GetIndexAndSequenceNumber();
             OutBodyIdsForBatch.Emplace(RawBodyId);
             Fragment._BodyIds.Emplace(RawBodyId);
+            Fragment._BodyPhysicalMaterials.Emplace(ck_jolt_static_world_subsystem::DoResolve_CookedPhysicalMaterial(
+                Record.Get_PhysicalMaterial(), ResolvedPhysicalMaterials));
         }
 
         OutActorEntities.Emplace(ActorEntity);
@@ -1468,6 +1508,7 @@ auto
         const auto RawBodyId = Body->GetID().GetIndexAndSequenceNumber();
         OutBodyIdsForBatch.Emplace(RawBodyId);
         Fragment._BodyIds.Emplace(RawBodyId);
+        Fragment._BodyPhysicalMaterials.Emplace(Extracted._PhysicalMaterial);
     }
 }
 
