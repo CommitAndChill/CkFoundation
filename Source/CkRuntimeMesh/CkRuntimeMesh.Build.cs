@@ -12,6 +12,7 @@ public class CkRuntimeMesh : CkModuleRules
             "CkCore",
             "CkEcs",
             "CkEcsExt",
+            "CkGraphics",
             "CkResourceLoader",
             "GeometryCore",
         });

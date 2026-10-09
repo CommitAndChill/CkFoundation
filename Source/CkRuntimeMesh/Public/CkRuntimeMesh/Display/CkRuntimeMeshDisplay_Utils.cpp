@@ -10,6 +10,8 @@
 #include "CkCore/Validation/CkIsValid.h"
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
 
+#include "Components/DynamicMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
 #include "Engine/World.h"
 #include "Materials/MaterialInterface.h"
@@ -128,6 +130,83 @@ auto
     { return ECk_RuntimeMeshDisplay_SetupFailure::None; }
 
     return InHandle.Get<ck::FFragment_RuntimeMeshDisplay>().Get_SetupFailure();
+}
+
+auto
+    UCk_Utils_RuntimeMeshDisplay_UE::
+    Request_SetCustomPrimitiveData(
+        FCk_Handle_RuntimeMeshDisplay& InDisplay,
+        const FCk_Request_RuntimeMeshDisplay_SetCustomPrimitiveData& InRequest,
+        const FCk_Delegate_Request_OnCompleted& InDelegate)
+    -> FCk_Handle_RuntimeMeshDisplay
+{
+    const auto IsRequestValid = InRequest.Get_IsValid();
+    CK_ENSURE_IF_NOT(IsRequestValid,
+        TEXT("Cannot set custom primitive data on RuntimeMeshDisplay [{}] - index [{}] with [{}] float(s) does not fit "
+             "the engine's [{}] custom primitive data floats"),
+        InDisplay, InRequest.Get_Data().Get_CustomDataIndex(), InRequest.Get_Data().Get_Value().Get_FloatCount(),
+        FCustomPrimitiveData::NumCustomPrimitiveDataFloats)
+    {
+        InDelegate.ExecuteIfBound(InDisplay, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return InDisplay;
+    }
+
+    const auto IsDisplayValid = ck::IsValid(InDisplay);
+    CK_ENSURE_IF_NOT(IsDisplayValid, TEXT("Cannot set custom primitive data on invalid RuntimeMeshDisplay [{}]"), InDisplay)
+    {
+        InDelegate.ExecuteIfBound(InDisplay, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return InDisplay;
+    }
+
+    // Legitimate during teardown, hence no ensure: once destruction has begun a queued request could only be
+    // cancelled, and one queued after the EndPlay cancellation has run would never complete.
+    if (InDisplay.Has<ck::FTag_DestroyEntity_Initiate>())
+    {
+        InDelegate.ExecuteIfBound(InDisplay, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return InDisplay;
+    }
+
+    auto Request = InRequest;
+    if (InDelegate.IsBound())
+    { Request.Set_CompletionDelegate(InDelegate); }
+
+    InDisplay.AddOrGet<ck::FFragment_RuntimeMeshDisplay_Requests>()._Requests.Emplace(Request);
+
+    return InDisplay;
+}
+
+auto
+    UCk_Utils_RuntimeMeshDisplay_UE::
+    Get_CustomPrimitiveDataFloat(
+        const FCk_Handle_RuntimeMeshDisplay& InDisplay,
+        int32 InIndex)
+    -> float
+{
+    const auto IsDisplayValid = ck::IsValid(InDisplay);
+    CK_ENSURE_IF_NOT(IsDisplayValid, TEXT("Cannot Get_CustomPrimitiveDataFloat on invalid RuntimeMeshDisplay [{}]"), InDisplay)
+    { return 0.0f; }
+
+    const auto IndexIsInRange = InIndex >= 0 && InIndex < FCustomPrimitiveData::NumCustomPrimitiveDataFloats;
+    CK_ENSURE_IF_NOT(IndexIsInRange,
+        TEXT("Cannot Get_CustomPrimitiveDataFloat on RuntimeMeshDisplay [{}] - index [{}] is outside the engine's [{}] "
+             "custom primitive data floats"),
+        InDisplay, InIndex, FCustomPrimitiveData::NumCustomPrimitiveDataFloats)
+    { return 0.0f; }
+
+    const auto& Display = InDisplay.Get<ck::FFragment_RuntimeMeshDisplay>();
+    if (Display.Get_SetupState() != ECk_RuntimeMesh_SetupState::Ready)
+    { return 0.0f; }
+
+    const auto* Component = Display.Get_Component().Get();
+    if (ck::Is_NOT_Valid(Component))
+    { return 0.0f; }
+
+    const auto& CustomPrimitiveData = Component->GetCustomPrimitiveData().Data;
+
+    if (NOT CustomPrimitiveData.IsValidIndex(InIndex))
+    { return 0.0f; }
+
+    return CustomPrimitiveData[InIndex];
 }
 
 // --------------------------------------------------------------------------------------------------------------------

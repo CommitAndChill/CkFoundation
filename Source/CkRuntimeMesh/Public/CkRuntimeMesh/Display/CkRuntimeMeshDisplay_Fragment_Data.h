@@ -3,6 +3,7 @@
 #include "CkRuntimeMesh/CkRuntimeMesh_Fragment_Data.h"
 
 #include "CkCore/Enums/CkEnums.h"
+#include "CkGraphics/CkGraphics_Common.h"
 
 #include "CkRuntimeMeshDisplay_Fragment_Data.generated.h"
 
@@ -103,5 +104,33 @@ public:
 public:
     /** The geometry handle is set and every one of the 1..MaxMaterialSlots material slots names a material. Whether the
      *  geometry is Ready in the owner's registry and covers every triangle material ID is checked by Add. */
+    auto Get_IsValid() const -> bool;
+};
+
+// --------------------------------------------------------------------------------------------------------------------
+
+USTRUCT(BlueprintType)
+struct CKRUNTIMEMESH_API FCk_Request_RuntimeMeshDisplay_SetCustomPrimitiveData : public FCk_Request_Base
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(FCk_Request_RuntimeMeshDisplay_SetCustomPrimitiveData);
+    CK_REQUEST_DEFINE_DEBUG_NAME(FCk_Request_RuntimeMeshDisplay_SetCustomPrimitiveData);
+
+private:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    FCk_CustomPrimitiveData _Data;
+
+public:
+    CK_PROPERTY_GET(_Data);
+
+public:
+    CK_DEFINE_CONSTRUCTORS(FCk_Request_RuntimeMeshDisplay_SetCustomPrimitiveData, _Data);
+
+public:
+    /** The value carries at least one float and every float it carries lands inside the engine's
+     *  FCustomPrimitiveData::NumCustomPrimitiveDataFloats slots, starting at a non-negative index. */
     auto Get_IsValid() const -> bool;
 };

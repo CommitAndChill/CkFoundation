@@ -63,4 +63,26 @@ namespace ck
 
         CK_DEFINE_CONSTRUCTORS(FFragment_RuntimeMeshDisplay_Setup, _Geometry, _Visuals);
     };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    struct CKRUNTIMEMESH_API FFragment_RuntimeMeshDisplay_Requests : public FCk_Snapshot_Session
+    {
+    public:
+        CK_GENERATED_BODY(FFragment_RuntimeMeshDisplay_Requests);
+
+    public:
+        friend class FProcessor_RuntimeMeshDisplay_HandleRequests;
+        friend class ::UCk_Utils_RuntimeMeshDisplay_UE;
+
+    public:
+        using RequestType = std::variant<FCk_Request_RuntimeMeshDisplay_SetCustomPrimitiveData>;
+        using RequestList = TArray<RequestType>;
+
+    private:
+        RequestList _Requests;
+
+    public:
+        CK_PROPERTY_GET(_Requests);
+    };
 }

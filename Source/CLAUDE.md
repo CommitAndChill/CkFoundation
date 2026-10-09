@@ -48,7 +48,7 @@ Before writing any code, navigate the documentation in this order:
 | FName-flavored multi-tags + tag queries | `CkEntityTag` |
 | higher-level ECS (SceneNode, Meta, Transform) | `CkEcsExt` |
 | attach/manage UActorComponents on entities | `CkUnrealComponent` |
-| write custom primitive data on an entity-owned component | `CkUnrealComponent` — `Request_SetCustomPrimitiveData` |
+| write custom primitive data on an entity-owned component | `CkUnrealComponent` — `Request_SetCustomPrimitiveData`; on a runtime-mesh display, `CkRuntimeMesh` — `UCk_Utils_RuntimeMeshDisplay_UE::Request_SetCustomPrimitiveData` |
 | place/spawn EntityScripts in a level | `CkEntitySpawner` (`AInfo`-derived spawner actor; no doc yet) |
 | entity presets / archetypes | EntityScript spawn params (`FInstancedStruct`, `CkEntityScript.h:65`) + `CkProvider`. CkTemplate/CkEcsTemplate were REMOVED (`ad045415b`); these are the successors (INFERRED) |
 | ECS timers with signals/delegates | `CkTimer` |
@@ -220,7 +220,7 @@ but **deps must never point to a higher band**. Editor/UncookedOnly modules are 
 | CkInteraction | Attribute,Core,Ecs,EcsExt,Label,Log,Provider,Record,Settings |
 | CkInventory | Attribute,Core,Ecs,EcsExt,Grid,Label,Log,Record,Settings,TagSet |
 | CkJolt | Core,Ecs,EcsExt,Log,ResourceLoader,Settings,ThirdParty (owns the Jolt world; extracted from CkSpatialQuery 2026-07-16; +EcsExt Phase 3, also engine PhysicsCore/Landscape) |
-| CkRuntimeMesh | Core,Ecs,EcsExt,ResourceLoader (immutable solid import, deferred plane slicing, optional DynamicMesh display; engine GeometryCore/DynamicMesh/GeometryFramework/MeshConversionEngineTypes; no CkJolt dependency) |
+| CkRuntimeMesh | Core,Ecs,EcsExt,Graphics,ResourceLoader (immutable solid import, deferred plane slicing, optional DynamicMesh display; engine GeometryCore/DynamicMesh/GeometryFramework/MeshConversionEngineTypes; no CkJolt dependency; Graphics added 2026-10-09 for the display's custom-primitive-data request's `FCk_CustomPrimitiveData` — same-tier dep) |
 | CkIsmRenderer | Core,Ecs,EcsExt,Graphics,Label,Log,Provider,Record,Settings |
 | CkIskmRenderer | Animation,Core,Ecs,EcsExt,Graphics,IskmRendererVF,Label,Log,Physics,Provider,Record,ResourceLoader,Settings |
 | CkMessaging | Core,Ecs,EcsExt,Label,Log,Provider,Record,Settings |

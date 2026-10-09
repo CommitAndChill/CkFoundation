@@ -93,6 +93,68 @@ namespace ck
             FCk_Handle InHandle,
             FFragment_RuntimeMeshDisplay& InDisplay) -> void;
     };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    class CKRUNTIMEMESH_API FProcessor_RuntimeMeshDisplay_HandleRequests : public ck_exp::TProcessor<
+            FProcessor_RuntimeMeshDisplay_HandleRequests,
+            FCk_Handle_RuntimeMeshDisplay,
+            TReadOnly<FFragment_RuntimeMeshDisplay>,
+            TReadWrite<FFragment_RuntimeMeshDisplay_Requests>,
+            TExclude<FTag_RuntimeMeshDisplay_NeedsSetup>,
+            TExclude<FTag_DestroyEntity_Initiate>,
+            CK_IGNORE_PENDING_KILL>
+    {
+    public:
+        using Group = FGroup_PostTransform;
+        using RunAfter = TDepList<FProcessor_RuntimeMeshDisplay_Setup>;
+        using MarkedDirtyBy = FFragment_RuntimeMeshDisplay_Requests;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        static auto
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_RuntimeMeshDisplay& InDisplay,
+            FFragment_RuntimeMeshDisplay_Requests& InRequestsComp) -> void;
+
+    private:
+        static auto
+        DoHandleRequest(
+            HandleType InHandle,
+            const FFragment_RuntimeMeshDisplay& InDisplay,
+            const FCk_Request_RuntimeMeshDisplay_SetCustomPrimitiveData& InRequest) -> ECk_Request_OperationResult;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // HandleRequests excludes owners already tagged for destruction, so a destroyed display's still-queued requests
+    // are never drained. This completes each of them with Failed_Cancelled so a caller awaiting completion terminates
+    // instead of hanging. Request_SetCustomPrimitiveData refuses to enqueue once that tag is present, so nothing can be
+    // queued behind this pass.
+    class CKRUNTIMEMESH_API FProcessor_RuntimeMeshDisplay_CancelPendingRequests : public ck_exp::TProcessor<
+            FProcessor_RuntimeMeshDisplay_CancelPendingRequests,
+            FCk_Handle_RuntimeMeshDisplay,
+            TReadOnly<FFragment_RuntimeMeshDisplay_Requests>,
+            CK_IF_END_PLAY>
+    {
+    public:
+        using Group = FGroup_EndPlay;
+        using RunAfter = TDepList<FProcessor_RuntimeMeshDisplay_EndPlay>;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        static auto
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_RuntimeMeshDisplay_Requests& InRequestsComp) -> void;
+    };
 }
 
 // --------------------------------------------------------------------------------------------------------------------

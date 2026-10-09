@@ -3,6 +3,7 @@
 #include "CkCore/Algorithms/CkAlgorithms.h"
 #include "CkCore/Validation/CkIsValid.h"
 
+#include "Components/PrimitiveComponent.h"
 #include "Materials/MaterialInterface.h"
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -19,6 +20,20 @@ auto
         [](const TSoftObjectPtr<UMaterialInterface>& InMaterial) { return InMaterial.IsNull(); });
 
     return HasGeometry && HasSlotCountInRange && HasNoEmptySlot;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    FCk_Request_RuntimeMeshDisplay_SetCustomPrimitiveData::
+    Get_IsValid() const
+    -> bool
+{
+    const auto DataIndex = _Data.Get_CustomDataIndex();
+    const auto FloatCount = _Data.Get_Value().Get_FloatCount();
+
+    return FloatCount > 0 && DataIndex >= 0 &&
+        DataIndex <= FCustomPrimitiveData::NumCustomPrimitiveDataFloats - FloatCount;
 }
 
 // --------------------------------------------------------------------------------------------------------------------

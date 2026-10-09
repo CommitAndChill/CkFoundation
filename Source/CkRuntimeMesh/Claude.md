@@ -28,6 +28,14 @@ evidence lives in `docs/campaigns/runtime-mesh/PROGRESS.md`.
   `UDynamicMeshComponent` with Chaos collision, simulation and navigation off. Runs in
   `FGroup_PostTransform` so it follows the Jolt writeback. The module's `OnWorldCleanup` hook releases
   displays before cancelling queued slices.
+  `Request_SetCustomPrimitiveData(Display, FCk_Request_RuntimeMeshDisplay_SetCustomPrimitiveData)` is the display's only
+  runtime channel: one `FCk_CustomPrimitiveData` (CkGraphics) per request, validated by the request's `Get_IsValid()`
+  against `FCustomPrimitiveData::NumCustomPrimitiveDataFloats`, queued on `FFragment_RuntimeMeshDisplay_Requests` and
+  applied by `FProcessor_RuntimeMeshDisplay_HandleRequests` once setup is Ready (a request made while Pending waits; a
+  display whose setup failed completes it `Failed`). Requests still queued at destruction complete `Failed_Cancelled`
+  (`FProcessor_RuntimeMeshDisplay_CancelPendingRequests`, after EndPlay); one made once destruction began is refused
+  `Failed_NotEnqueued` without an ensure. `Get_CustomPrimitiveDataFloat` reads a slot back as a test seam; it exposes a
+  float, never the component.
 
 ## Rules
 
@@ -40,6 +48,8 @@ evidence lives in `docs/campaigns/runtime-mesh/PROGRESS.md`.
   fall back to another LOD or a primitive, repair holes, recenter results, or bake transforms.
 - Convex physics is CkJolt's `RuntimeConvex` shape source fed with `Copy_LocalVerticesCm`; this module has
   no CkJolt dependency and CkJolt has none on it.
+- CkGraphics is a public dependency (same tier) for the display's `FCk_CustomPrimitiveData` request payload, the shape
+  CkUnrealComponent and CkIsmRenderer already take.
 - All state is `FCk_Snapshot_Session`; derived cuts are not persisted.
 - The 2048 vertex / 4096 triangle ceilings and the queue limits are provisional safety bounds until the
   campaign benchmark selects shipping values.

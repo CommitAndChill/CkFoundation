@@ -6,8 +6,10 @@
 #include "CkCore/ObjectPooling/CkObjectPooling_Params.h"
 #include "CkCore/Validation/CkIsValid.h"
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
+#include "CkEcs/Request/CkRequest_Completion.h"
 #include "CkEcs/Scheduler/CkProcessorRegistration.h"
 #include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
+#include "CkGraphics/CkGraphics_Utils.h"
 #include "CkResourceLoader/CkResourceLoader_Utils.h"
 
 #include "Components/DynamicMeshComponent.h"
@@ -22,6 +24,8 @@
 CK_REGISTER_PROCESSOR(ck::FProcessor_RuntimeMeshDisplay_Setup);
 CK_REGISTER_PROCESSOR(ck::FProcessor_RuntimeMeshDisplay_UpdateTransform);
 CK_REGISTER_PROCESSOR(ck::FProcessor_RuntimeMeshDisplay_EndPlay);
+CK_REGISTER_PROCESSOR(ck::FProcessor_RuntimeMeshDisplay_HandleRequests);
+CK_REGISTER_PROCESSOR(ck::FProcessor_RuntimeMeshDisplay_CancelPendingRequests);
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -329,6 +333,72 @@ namespace ck
             UCk_Utils_Object_UE::TryReleaseToPool(Component);
             Component->DestroyComponent();
         }
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProcessor_RuntimeMeshDisplay_HandleRequests::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_RuntimeMeshDisplay& InDisplay,
+            FFragment_RuntimeMeshDisplay_Requests& InRequestsComp)
+        -> void
+    {
+        const auto RequestsCopy = InRequestsComp._Requests;
+        InRequestsComp._Requests.Reset();
+
+        algo::ForEachRequest(RequestsCopy, ck::Visitor(
+        [&](const auto& InRequest) -> void
+        {
+            auto Result = ECk_Request_OperationResult::Failed;
+            const auto Guard = MakeCompletionGuard(InRequest, InHandle, Result);
+
+            Result = DoHandleRequest(InHandle, InDisplay, InRequest);
+        }), policy::DontResetContainer{});
+
+        if (InRequestsComp._Requests.IsEmpty())
+        {
+            InHandle.Remove<MarkedDirtyBy>();
+        }
+    }
+
+    auto
+        FProcessor_RuntimeMeshDisplay_HandleRequests::
+        DoHandleRequest(
+            HandleType InHandle,
+            const FFragment_RuntimeMeshDisplay& InDisplay,
+            const FCk_Request_RuntimeMeshDisplay_SetCustomPrimitiveData& InRequest)
+        -> ECk_Request_OperationResult
+    {
+        const auto IsReady = InDisplay.Get_SetupState() == ECk_RuntimeMesh_SetupState::Ready;
+        CK_ENSURE_IF_NOT(IsReady,
+            TEXT("Cannot set custom primitive data on RuntimeMeshDisplay [{}] - its setup did not reach Ready (failure [{}])"),
+            InHandle, InDisplay.Get_SetupFailure())
+        { return ECk_Request_OperationResult::Failed; }
+
+        auto* Component = InDisplay.Get_Component().Get();
+        const auto HasComponent = ck::IsValid(Component);
+        CK_ENSURE_IF_NOT(HasComponent, TEXT("Ready RuntimeMeshDisplay [{}] no longer has its component"), InHandle)
+        { return ECk_Request_OperationResult::Failed; }
+
+        UCk_Utils_Graphics_UE::Apply_CustomPrimitiveData(Component, InRequest.Get_Data());
+
+        return ECk_Request_OperationResult::Succeeded;
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProcessor_RuntimeMeshDisplay_CancelPendingRequests::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_RuntimeMeshDisplay_Requests& InRequestsComp)
+        -> void
+    {
+        request::FireCancelledForPending(InHandle, InRequestsComp.Get_Requests());
     }
 }
 
