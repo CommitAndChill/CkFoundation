@@ -7,6 +7,8 @@
 #include "Framework/Application/SlateApplication.h"
 #include "InputCoreTypes.h"
 #include "Rendering/DrawElements.h"
+#include "Rendering/SlateRenderer.h"
+#include "Textures/SlateShaderResource.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SNullWidget.h"
@@ -27,6 +29,7 @@ namespace ck_ui_radial
 
     struct FVisual
     {
+        FLinearColor TileBackground = FLinearColor::Transparent;
         FLinearColor Ring = FLinearColor(0.10f, 0.63f, 0.78f, 0.80f);
         FLinearColor Selected = FLinearColor(0.40f, 0.90f, 1.0f);
         FLinearColor Queued = FLinearColor(1.0f, 0.63f, 0.20f);
@@ -175,7 +178,8 @@ namespace ck_ui_radial
             Target = Value->Color;
             return true;
         };
-        if (!Color(TEXT("-ck-radial-ring"), Out.Visual.Ring)
+        if (!Color(TEXT("-ck-radial-tile-background"), Out.Visual.TileBackground)
+            || !Color(TEXT("-ck-radial-ring"), Out.Visual.Ring)
             || !Color(TEXT("-ck-radial-selected"), Out.Visual.Selected)
             || !Color(TEXT("-ck-radial-queued"), Out.Visual.Queued)
             || !Color(TEXT("-ck-radial-disabled"), Out.Visual.Disabled))
@@ -250,6 +254,29 @@ namespace ck_ui_radial
             ESlateDrawEffect::None, Color, true, Thickness);
     }
 
+    void FillTile(FSlateWindowElementList& Out, int32 Layer, const FGeometry& Geometry,
+        const FVector2f& Center, const TArray<FVector2f>& Perimeter, const FLinearColor& Color)
+    {
+        if (Color.A <= 0.0f || Perimeter.Num() < 4 || !FSlateApplication::IsInitialized()) { return; }
+        const auto Renderer = FSlateApplication::Get().GetRenderer();
+        if (Renderer == nullptr) { return; }
+        const auto Handle = Renderer->GetResourceHandle(*FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")));
+        const auto* Proxy = Handle.GetResourceProxy();
+        const FVector2f UV = Proxy != nullptr ? Proxy->StartUV + Proxy->SizeUV * 0.5f : FVector2f(0.5f, 0.5f);
+        TArray<FSlateVertex> Vertices;
+        TArray<SlateIndex> Indices;
+        Vertices.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(Geometry.GetAccumulatedRenderTransform(),
+            Center, UV, Color.ToFColor(true)));
+        for (const auto& Point : Perimeter)
+        {
+            Vertices.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(Geometry.GetAccumulatedRenderTransform(),
+                Point, UV, Color.ToFColor(true)));
+        }
+        for (int32 Index = 1; Index < Perimeter.Num(); ++Index)
+        { Indices.Append({0, static_cast<SlateIndex>(Index), static_cast<SlateIndex>(Index + 1)}); }
+        FSlateDrawElement::MakeCustomVerts(Out, Layer, Handle, Vertices, Indices, nullptr, 0, 0, ESlateDrawEffect::None);
+    }
+
     void Glyph(FSlateWindowElementList& Out, int32 Layer, const FGeometry& Geometry,
         const FVector2f& Center, float Radius, const FString& Name, FLinearColor Color)
     {
@@ -307,7 +334,8 @@ namespace ck_ui_radial
         { Shape = {Center + FVector2f(-Radius, 0.0f), Center + FVector2f(0.0f, -Radius),
             Center + FVector2f(Radius, 0.0f), Center + FVector2f(0.0f, Radius),
             Center + FVector2f(-Radius, 0.0f)}; }
-        Line(Out, Layer, Geometry, MoveTemp(Shape), Color, 2.0f);
+        Line(Out, Layer, Geometry, Shape, Color * FLinearColor(1.0f, 1.0f, 1.0f, 0.22f), 5.0f);
+        Line(Out, Layer, Geometry, MoveTemp(Shape), Color, 2.4f);
         if (Lower == TEXT("throw") || Lower == TEXT("concussive"))
         { Line(Out, Layer, Geometry, {Center + FVector2f(-Radius, 0.0f), Center + FVector2f(Radius, 0.0f)}, Color, 1.5f); }
         if (Lower == TEXT("incinerate"))
@@ -719,6 +747,8 @@ auto SCkUiRadialSelector::OnPaint(const FPaintArgs& InArgs, const FGeometry& InG
                 Position + FVector2f(Half, Half * 0.65f), Position + FVector2f(Half * 0.65f, Half),
                 Position + FVector2f(-Half * 0.65f, Half), Position + FVector2f(-Half, Half * 0.65f),
                 Position + FVector2f(-Half, -Half * 0.65f)};
+            ck_ui_radial::FillTile(OutDrawElements, InLayer, InGeometry, Position, Frame,
+                Visual.TileBackground * Tint);
             ck_ui_radial::Line(OutDrawElements, InLayer + 1, InGeometry, Frame, Rim * Tint,
                 Item.Key == Selected ? 3.0f : 1.5f);
             if (Visual.SectorMode)
@@ -854,6 +884,7 @@ auto RegisterRadialUiControls(FCkUiWidgetRegistry& InRegistry) -> FCkUiLoadResul
     };
     Registration.Schema.Slots = {{TEXT("content"), false}};
     Registration.Schema.StyleProperties = {
+        {TEXT("-ck-radial-tile-background"), ECkUiCustomStyleKind::Color},
         {TEXT("-ck-radial-ring"), ECkUiCustomStyleKind::Color},
         {TEXT("-ck-radial-selected"), ECkUiCustomStyleKind::Color},
         {TEXT("-ck-radial-queued"), ECkUiCustomStyleKind::Color},
