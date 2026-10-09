@@ -9,8 +9,10 @@
 #include "CkCompass/CkCompass_Log.h"
 #include "CkCompass/CkCompass_Utils.h"
 
+#include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
 #include "CkEcs/Request/CkRequest_Completion.h"
 #include "CkEcs/Scheduler/CkProcessorRegistration.h"
+#include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
 
 #include "CkEcsExt/Transform/CkTransform_Utils.h"
 
@@ -23,6 +25,7 @@
 #include "CkVisibleRange/CkVisibleRange_Utils.h"
 
 #include "Async/ParallelFor.h"
+#include "Engine/World.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -189,6 +192,38 @@ namespace ck
             FFragment_Compass_Scratch& InScratch) const
         -> void
     {
+        // The scheduler supplies the world transient entity. Verify that it
+        // still belongs to this world before reading the terminal closure tag.
+        const auto& WorldRoot = this->_TransientEntity;
+        if (ck::Is_NOT_Valid(WorldRoot) ||
+            !WorldRoot.Has<TWeakObjectPtr<UWorld>>())
+        {
+            DoClearAllEntries(InCompassEntity, InCompass, InScratch);
+            return;
+        }
+        if (UCk_Utils_EntityLifetime_UE::Get_IsPendingDestroy(
+            WorldRoot, ECk_EntityLifetime_DestructionPhase::BeginDestroy))
+        {
+            DoClearAllEntries(InCompassEntity, InCompass, InScratch);
+            return;
+        }
+        auto* World = WorldRoot.Get<TWeakObjectPtr<UWorld>>().Get();
+        if (!IsValid(World) ||
+            World->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+            World->IsBeingCleanedUp())
+        {
+            DoClearAllEntries(InCompassEntity, InCompass, InScratch);
+            return;
+        }
+        const auto ExactRoot = UCk_Utils_EcsWorld_Subsystem_UE::
+            TryGet_TransientEntityForWorld(*World);
+        if (ck::Is_NOT_Valid(ExactRoot) || ExactRoot != WorldRoot ||
+            WorldRoot.Has<ck::FTag_Compass_WorldProjectionClosed>())
+        {
+            DoClearAllEntries(InCompassEntity, InCompass, InScratch);
+            return;
+        }
+
         if (ck::Is_NOT_Valid(InCompass._Observer))
         {
             DoClearAllEntries(InCompassEntity, InCompass, InScratch);

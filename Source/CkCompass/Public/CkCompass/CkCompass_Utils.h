@@ -32,6 +32,21 @@ public:
     friend class UCk_Utils_Ecs_Base_UE;
 
 public:
+    // Closes every Compass projection in the exact local game world. This is
+    // monotone for that world's lifetime; a new world has a new transient entity.
+    UFUNCTION(BlueprintCallable,
+              Category = "Ck|Utils|Compass|World")
+    static bool
+    TryCloseWorldProjection(
+        const FCk_Handle& InTransientEntity);
+
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|Compass|World")
+    static bool
+    Get_IsWorldProjectionClosed(
+        const FCk_Handle& InTransientEntity);
+
+public:
     // Composes the Compass feature directly onto the given entity — one compass per entity. The observer
     // defaults to this same entity; redirect it via Request_SetObserver.
     UFUNCTION(BlueprintCallable,

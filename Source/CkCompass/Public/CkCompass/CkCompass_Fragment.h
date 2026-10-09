@@ -20,6 +20,10 @@ namespace ck
 {
     CK_DEFINE_ECS_TAG(FTag_Compass_NeedsSetup);
 
+    // A terminal, local-world latch on the exact ECS transient entity. Compass
+    // projections in this world drain and cannot repopulate until world restart.
+    CK_DEFINE_ECS_TAG(FTag_Compass_WorldProjectionClosed);
+
     // --------------------------------------------------------------------------------------------------------------------
 
     // The retained immutable residue of FCk_Compass_Spec. _CategoryFilter is DISSOLVED into

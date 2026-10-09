@@ -6,12 +6,83 @@
 
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
 #include "CkEcs/Handle/CkDebugCallstack_Macros.h"
+#include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
+
+#include "Engine/World.h"
 
 #include <NativeGameplayTags.h>
 
 // --------------------------------------------------------------------------------------------------------------------
 
 UE_DEFINE_GAMEPLAY_TAG(Tag_PoiConsumer_Compass, TEXT("Poi.Consumer.Compass"))
+
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace ck_compass_world_projection
+{
+    auto
+    TryGetExactGameWorldRoot(
+        const FCk_Handle& InTransientEntity,
+        FCk_Handle& OutRoot) -> bool
+    {
+        OutRoot = {};
+
+        if (!IsInGameThread()) { return false; }
+        if (ck::Is_NOT_Valid(InTransientEntity)) { return false; }
+        if (UCk_Utils_EntityLifetime_UE::Get_IsPendingDestroy(
+            InTransientEntity, ECk_EntityLifetime_DestructionPhase::BeginDestroy))
+        { return false; }
+        if (!InTransientEntity.Has<TWeakObjectPtr<UWorld>>())
+        { return false; }
+        auto* World = InTransientEntity.Get<TWeakObjectPtr<UWorld>>().Get();
+        if (!IsValid(World)) { return false; }
+        if (!World->IsGameWorld()) { return false; }
+        if (World->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+            World->IsBeingCleanedUp())
+        { return false; }
+
+        const auto ExactRoot = UCk_Utils_EcsWorld_Subsystem_UE::
+            TryGet_TransientEntityForWorld(*World);
+        if (ck::Is_NOT_Valid(ExactRoot)) { return false; }
+        if (ExactRoot != InTransientEntity) { return false; }
+
+        OutRoot = ExactRoot;
+        return true;
+    }
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    UCk_Utils_Compass_UE::
+    TryCloseWorldProjection(
+        const FCk_Handle& InTransientEntity)
+    -> bool
+{
+    FCk_Handle Root;
+    if (!ck_compass_world_projection::TryGetExactGameWorldRoot(
+        InTransientEntity, Root))
+    { return false; }
+
+    if (!Root.Has<ck::FTag_Compass_WorldProjectionClosed>())
+    { Root.Add<ck::FTag_Compass_WorldProjectionClosed>(); }
+
+    return Root.Has<ck::FTag_Compass_WorldProjectionClosed>();
+}
+
+auto
+    UCk_Utils_Compass_UE::
+    Get_IsWorldProjectionClosed(
+        const FCk_Handle& InTransientEntity)
+    -> bool
+{
+    FCk_Handle Root;
+    if (!ck_compass_world_projection::TryGetExactGameWorldRoot(
+        InTransientEntity, Root))
+    { return false; }
+
+    return Root.Has<ck::FTag_Compass_WorldProjectionClosed>();
+}
 
 // --------------------------------------------------------------------------------------------------------------------
 
