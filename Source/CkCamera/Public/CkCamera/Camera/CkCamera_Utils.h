@@ -96,7 +96,7 @@ private:
     static auto
     DoMaterializeAttributes(
         FCk_Handle_Camera& InCamera,
-        const FCk_CameraProfile& InDefaults) -> void;
+        const FCk_CameraProfile& InDefaults) -> bool;
 
 private:
     UFUNCTION(BlueprintCallable,
