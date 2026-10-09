@@ -165,6 +165,15 @@ bool FCkTest_GameSettings_Registry_AtomicBatchRejectsAll::RunTest(const FString&
     TestFalse(TEXT("null collection rejected"), Subsystem->Request_RegisterCollection(nullptr));
     TestEqual(TEXT("nothing registered from null collection"), Subsystem->Get_AllSettingKeys().Num(), 0);
 
+    const auto RecoveryBatch = TArray<FCk_GameSettings_SettingDefinition>
+    {
+        FCk_GameSettings_SettingDefinition{TEXT("recovery.a"), ECk_GameSettings_ValueType::Bool, TEXT("true")},
+        FCk_GameSettings_SettingDefinition{TEXT("recovery.b"), ECk_GameSettings_ValueType::Int32, TEXT("3")},
+    };
+    TestTrue(TEXT("valid batch after rejected requests registers wholly"),
+        Subsystem->Request_RegisterSettings(RecoveryBatch));
+    TestEqual(TEXT("only the recovery batch is registered"), Subsystem->Get_AllSettingKeys().Num(), 2);
+
     return true;
 }
 
