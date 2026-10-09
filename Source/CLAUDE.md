@@ -108,6 +108,7 @@ Before writing any code, navigate the documentation in this order:
 | data-driven dialogue / bark lines (event-tag-queried, condition-gated, per-emitter cooldowns; returns ALL matches with states) | `CkDialog` |
 | save/restore world state (snapshots) | `CkSnapshot` (v3 rebuild+hydrate — see `CkSnapshot/Claude.md`) — features persist via a Produce/HydrationApply handler on `FCk_PersistenceHandlerRegistry` (`CkEcs/Persistence/`, save subset `Get_SaveHandlerTypes`), NOT a per-fragment macro (`CK_REGISTER_SNAPSHOTABLE` removed 2026-07-13) |
 | session state machine | `CkGameSession` |
+| author in-game UI from HTML/CSS and code-created UMG | [UI authoring rules](CkSlateLayout/UI_AUTHORING_RULES.md), [CkSlateLayout grammar](CkSlateLayout/AUTHORING.md), [CkWidgets script host](CkWidgets/AUTHORING.md) |
 | CommonUI-based UI layer (layer stack, layout, HUD, extension points) | `CkUI` |
 | derive a widget, UI types/utils, input suspension, screen fade | `CkUICore` |
 | a custom widget primitive, a Common* style, rasterize a widget, project to screen | `CkWidgets` |

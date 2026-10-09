@@ -2,11 +2,21 @@
 
 CkFoundation is the Chainkemists ECS framework for Unreal Engine. This file is the always-loaded
 doctrine for the whole Ck plugin suite: **CkGameplayDebugger and CkTests defer to this file** for
-everything not plugin-specific. Style rules live HERE and only here; topology lives in
+everything not plugin-specific. Coding style rules live HERE and only here; topology lives in
 [Source/CLAUDE.md](Source/CLAUDE.md); AngelScript language rules live in
 [Script/ARCHITECTURE.md](Script/ARCHITECTURE.md); depth (runbooks, rationale, incident history) lives in the
 skill library (index at the bottom). Facts below marked with a date were verified against
 code/disk on that date.
+
+## In-game UI authoring
+
+Before creating or changing an in-game UI, read the canonical
+[UI authoring rules](Source/CkSlateLayout/UI_AUTHORING_RULES.md) and
+[supported markup/CSS grammar](Source/CkSlateLayout/AUTHORING.md).
+Typography, measured padding/alignment, reusable composition, material/animation
+layers and rendered-reference verification are baseline requirements.
+For script-created UMG, also read [CkWidgets authoring](Source/CkWidgets/AUTHORING.md).
+These rules ship with CkFoundation; CkTests supplies optional examples and evidence.
 
 ## Identity (verified 2026-07-02)
 

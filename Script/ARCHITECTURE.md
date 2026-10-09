@@ -11,6 +11,9 @@
 // Do NOT assume framework behavior — verify against existing .as files, or
 // ask. Research → Plan → Implement (root doctrine, Collaboration protocol).
 
+// For code-authored UMG, read the [UI authoring rules](../Source/CkSlateLayout/UI_AUTHORING_RULES.md)
+// and [scripted UMG API](../Source/CkWidgets/AUTHORING.md) before implementation.
+
 //============================================================================
 // 1. LANGUAGE DIFFERENCES FROM C++
 //============================================================================
