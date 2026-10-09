@@ -64,16 +64,26 @@ namespace ck_ui_tree
 
         void OpenLegacyContextMenu(const FPointerEvent& InMouseEvent) { OnRightMouseButtonUp(InMouseEvent); }
 
+        virtual const FSlateBrush* GetFocusBrush() const override
+        {
+            return bCustomFocusBrush ? &FocusBrush : STreeView<SCkUiTree::FNode>::GetFocusBrush();
+        }
+
         void ApplyVisualStyle(const FCkUiTreeVisualStyle& InVisualStyle)
         {
             TreeStyle = FCoreStyle::Get().GetWidgetStyle<FTableViewStyle>(TEXT("TreeView"));
             if (InVisualStyle.Background.IsSet())
             { TreeStyle.SetBackgroundBrush(FSlateRoundedBoxBrush{InVisualStyle.Background.GetValue(), 0.0f}); }
             SetStyle(&TreeStyle);
+            bCustomFocusBrush = InVisualStyle.FocusOutlineColor.IsSet();
+            if (bCustomFocusBrush)
+            { FocusBrush = FSlateRoundedBoxBrush{FLinearColor::Transparent, 0.0f, InVisualStyle.FocusOutlineColor.GetValue(), 1.0f}; }
         }
 
     private:
         FTableViewStyle TreeStyle;
+        FSlateBrush FocusBrush;
+        bool bCustomFocusBrush = false;
     };
 }
 
@@ -98,9 +108,13 @@ struct SCkUiTree::FImpl final : public TSharedFromThis<FImpl>
     {
         TOptional<FString> Key;
         bool Notify = false;
+        bool ScrollIntoView = false;
         int32 Attempts = 0;
     };
     TOptional<FSelectionRequest> SelectionRequest;
+    TOptional<FString> PendingRevealKey;
+    int32 RevealTicks = 0;
+    int32 RevealAdjustments = 0;
     ECkUiTreeSelectionRequestState SelectionRequestState = ECkUiTreeSelectionRequestState::None;
     FString SelectionRequestError;
     ck_ui_tree::FConfiguration Configuration;
@@ -117,6 +131,9 @@ struct SCkUiTree::FImpl final : public TSharedFromThis<FImpl>
     void CancelSelectionRequest()
     {
         SelectionRequest.Reset();
+        PendingRevealKey.Reset();
+        RevealTicks = 0;
+        RevealAdjustments = 0;
         SelectionRequestState = ECkUiTreeSelectionRequestState::None;
         SelectionRequestError.Reset();
     }
@@ -124,6 +141,9 @@ struct SCkUiTree::FImpl final : public TSharedFromThis<FImpl>
     void RejectSelectionRequest(const TCHAR* InError)
     {
         SelectionRequest.Reset();
+        PendingRevealKey.Reset();
+        RevealTicks = 0;
+        RevealAdjustments = 0;
         SelectionRequestState = ECkUiTreeSelectionRequestState::Rejected;
         SelectionRequestError = InError;
     }
@@ -162,7 +182,50 @@ struct SCkUiTree::FImpl final : public TSharedFromThis<FImpl>
         SelectionRequest.Reset();
         SelectionRequestState = ECkUiTreeSelectionRequestState::Applied;
         SelectionRequestError.Reset();
+        if (bChanged && Request.ScrollIntoView && Node.IsValid())
+        {
+            PendingRevealKey = Node->GetKey();
+            RevealTicks = 0;
+            RevealAdjustments = 0;
+        }
         if (bChanged && Request.Notify) { Notify(Request.Key, ESelectInfo::Direct); }
+    }
+
+    void PublishPendingReveal()
+    {
+        if (!PendingRevealKey.IsSet() || bOwnerReleased) { return; }
+        if (++RevealTicks > 32) { PendingRevealKey.Reset(); return; }
+        if (bProjectionDirty || bPreparing || bRefreshing || bNotifying || SelectionRequest.IsSet()
+            || !Tree.IsValid() || Tree->IsPendingRefresh()) { return; }
+        const FString Key = PendingRevealKey.GetValue();
+        if (SelectedKey != TOptional<FString>{Key} || !FilteredKeys.Contains(Key))
+        { PendingRevealKey.Reset(); return; }
+        const FNode Node = Collection.IsValid() ? Collection->FindNode(Key) : FNode{};
+        if (!Node.IsValid()) { PendingRevealKey.Reset(); return; }
+        const TArray<FNode> NativeSelection = Tree->GetSelectedItems();
+        if (NativeSelection.Num() != 1 || NativeSelection[0] != Node)
+        { PendingRevealKey.Reset(); return; }
+        const TSharedPtr<ITableRow> Row = Tree->WidgetFromItem(Node);
+        if (!Row.IsValid()) { Tree->RequestScrollIntoView(Node); return; }
+
+        const FGeometry& Viewport = Tree->GetCachedGeometry();
+        const FGeometry& Cell = Row->AsWidget()->GetCachedGeometry();
+        const double ViewHeight = Viewport.GetLocalSize().Y;
+        const double Start = Viewport.AbsoluteToLocal(Cell.GetAbsolutePosition()).Y;
+        const double End = Viewport.AbsoluteToLocal(Cell.LocalToAbsolute(Cell.GetLocalSize())).Y;
+        const double RowHeight = End - Start;
+        if (!FMath::IsFinite(ViewHeight) || !FMath::IsFinite(Start) || !FMath::IsFinite(End)
+            || !FMath::IsFinite(RowHeight) || ViewHeight <= 0.0 || RowHeight <= 0.0) { return; }
+        if (RowHeight > ViewHeight) { PendingRevealKey.Reset(); return; }
+        if (Start >= -1.0 && End <= ViewHeight + 1.0)
+        { PendingRevealKey.Reset(); return; }
+        if (++RevealAdjustments > 2) { PendingRevealKey.Reset(); return; }
+
+        // Slate counts generated (including clipped) rows as visible. Nudge by the measured
+        // overflow in item units when its native RequestScrollIntoView leaves a row clipped.
+        const double Overflow = End > ViewHeight + 1.0 ? End - ViewHeight + 1.0 : Start - 1.0;
+        const float DeltaItems = static_cast<float>(FMath::Clamp(Overflow / RowHeight, -8.0, 8.0));
+        Tree->SetScrollOffset(Tree->GetScrollOffset() + DeltaItems);
     }
 
     ~FImpl()
@@ -533,6 +596,8 @@ void SCkUiTree::FImpl::Commit(ck_ui_tree::FConfiguration&& InConfiguration,
     Configuration = MoveTemp(InConfiguration);
     RowStyle = FCoreStyle::Get().GetWidgetStyle<FTableRowStyle>(TEXT("TableView.Row"));
     const FCkUiTreeVisualStyle& VisualStyle = Configuration.VisualStyle;
+    if (VisualStyle.FocusOutlineColor.IsSet())
+    { RowStyle.SetSelectorFocusedBrush(FSlateRoundedBoxBrush{FLinearColor::Transparent, 0.0f, VisualStyle.FocusOutlineColor.GetValue(), 1.0f}); }
     if (VisualStyle.RowBackground.IsSet())
     {
         const FSlateRoundedBoxBrush Brush{VisualStyle.RowBackground.GetValue(), 0.0f};
@@ -622,7 +687,13 @@ void SCkUiTree::Construct(const FArguments& InArgs)
     };
     _Impl->CollectionChangedHandle = _Impl->Collection->OnChanged().AddSP(_Impl.ToSharedRef(), &FImpl::OnCollectionChanged);
     _Impl->Tree->OnNativeTick = [WeakImpl = TWeakPtr<FImpl>(_Impl)]()
-    { if (const TSharedPtr<FImpl> Impl = WeakImpl.Pin()) { Impl->PublishSelectionRequest(); } };
+    {
+        if (const TSharedPtr<FImpl> Impl = WeakImpl.Pin())
+        {
+            Impl->PublishSelectionRequest();
+            Impl->PublishPendingReveal();
+        }
+    };
     ChildSlot[_Impl->Tree.ToSharedRef()];
 }
 
@@ -675,6 +746,14 @@ auto SCkUiTree::Prepare(const FCkUiNode& InDefinition, FCellFactory InFactory, T
     if (!InFactory) { OutFailure = TEXT("tree cell factory is required"); return {}; }
     if (InDefinition.Kind != ECkUiNodeKind::Tree || InDefinition.Children.Num() != 1 || !FMath::IsFinite(InDefinition.RowHeight) || InDefinition.RowHeight < 1.0f || InDefinition.RowHeight > 1024.0f)
     { OutFailure = TEXT("tree definition or row height is invalid"); return {}; }
+
+    if (InDefinition.TreeVisualStyle.FocusOutlineColor.IsSet())
+    {
+        const FLinearColor Color = InDefinition.TreeVisualStyle.FocusOutlineColor.GetValue();
+        const bool bValidColor = FMath::IsFinite(Color.R) && FMath::IsFinite(Color.G)
+            && FMath::IsFinite(Color.B) && FMath::IsFinite(Color.A);
+        if (!bValidColor) { OutFailure = TEXT("tree focus outline color must be finite"); return {}; }
+    }
 
     const TSharedPtr<FImpl> KeepAlive = _Impl;
     TGuardValue<bool> Guard(_Impl->bPreparing, true);
@@ -747,12 +826,19 @@ auto SCkUiTree::TrySelectKey(TOptional<FString> InKey, const bool InNotify) -> b
     return true;
 }
 
-auto SCkUiTree::TryRequestSelectKey(TOptional<FString> InKey, const bool InNotify) -> bool
+auto SCkUiTree::TryRequestSelectKey(TOptional<FString> InKey, const bool InNotify,
+    const bool InScrollIntoView) -> bool
 {
     if (!_Impl.IsValid() || _Impl->bOwnerReleased || !_Impl->Collection.IsValid() || !_Impl->Tree.IsValid()
         || _Impl->bPreparing || (_Impl->bRefreshing && !_Impl->bNotifying) || !_Impl->Configuration.Selectable) { return false; }
     if (InKey.IsSet() && (InKey.GetValue().IsEmpty() || !_Impl->Collection->FindNode(InKey.GetValue()).IsValid())) { return false; }
-    _Impl->SelectionRequest = FImpl::FSelectionRequest{MoveTemp(InKey), InNotify, 0};
+    if (!InScrollIntoView || !InKey.IsSet() || _Impl->PendingRevealKey != InKey)
+    {
+        _Impl->PendingRevealKey.Reset();
+        _Impl->RevealTicks = 0;
+        _Impl->RevealAdjustments = 0;
+    }
+    _Impl->SelectionRequest = FImpl::FSelectionRequest{MoveTemp(InKey), InNotify, InScrollIntoView, 0};
     _Impl->SelectionRequestState = ECkUiTreeSelectionRequestState::Pending;
     _Impl->SelectionRequestError.Reset();
     return true;

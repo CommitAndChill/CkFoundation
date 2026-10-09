@@ -165,6 +165,7 @@ struct FCkUiTabsVisualStyle
     TOptional<FLinearColor> InactiveColor;
     TOptional<FLinearColor> ActiveColor;
     TOptional<FLinearColor> UnderlineColor;
+    TOptional<FLinearColor> FocusOutlineColor;
     TOptional<float> UnderlineHeight;
     TOptional<float> FontSize;
     TOptional<bool> Bold;
@@ -198,6 +199,7 @@ struct FCkUiTreeVisualStyle
     TOptional<FLinearColor> RowSelectedBackground;
     TOptional<FLinearColor> SelectedAccentColor;
     TOptional<float> SelectedAccentWidth;
+    TOptional<FLinearColor> FocusOutlineColor;
 };
 
 struct FCkUiNode

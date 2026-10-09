@@ -45,8 +45,10 @@ public:
     /** Permanently retire owner input and deferred work, including on externally retained widgets. */
     void ReleaseOwnerInteraction();
     auto TrySelectKey(TOptional<FString> InKey, bool InNotify = false) -> bool;
-    /** Queue selection after native projection refresh. True means admitted, not applied. Latest admitted request wins. */
-    auto TryRequestSelectKey(TOptional<FString> InKey, bool InNotify = false) -> bool;
+    /** Queue selection after native projection refresh. True means admitted, not applied. Latest admitted request wins.
+     *  Optional scrolling runs only after a changed key is accepted; unchanged selection preserves user scroll. */
+    auto TryRequestSelectKey(TOptional<FString> InKey, bool InNotify = false,
+        bool InScrollIntoView = false) -> bool;
     void CancelSelectionRequest();
     auto GetSelectionRequestState() const -> ECkUiTreeSelectionRequestState;
     const FString& GetSelectionRequestError() const;
