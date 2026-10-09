@@ -23,7 +23,6 @@ namespace ck_procedural_animation_utils
     {
         return ck::IsValid(InBody)
             && NOT InBody.Has<ck::FTag_DestroyEntity_Initiate>()
-            && UCk_Utils_Transform_UE::Has(InBody)
             && UCk_Utils_EntityLifetime_UE::Get_CanCreateEntity(InBody)
             && NOT UCk_Utils_ProceduralGait_UE::Has(InBody)
             && UCk_Utils_ProceduralLeg_UE::Get_Legs(InBody).IsEmpty();
@@ -73,7 +72,6 @@ namespace ck_procedural_animation_utils
         {
             const auto Admissible = ck::IsValid(InPart)
                 && NOT InPart.Has<ck::FTag_DestroyEntity_Initiate>()
-                && UCk_Utils_Transform_UE::Has(InPart)
                 && InPart != InBody
                 && UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InPart) == InBody.ConvertToHandle()
                 && NOT BoundParts.Contains(InPart);

@@ -177,7 +177,7 @@ auto
         const FCk_Handle_ProceduralLeg& InLeg)
     -> ECk_ProceduralLeg_Status
 {
-    if (ck::Is_NOT_Valid(InLeg) || NOT Has(InLeg) || InLeg.Has<ck::FTag_ProceduralLeg_Detached>())
+    if (ck::Is_NOT_Valid(InLeg) || InLeg.Has<ck::FTag_ProceduralLeg_Detached>())
     { return ECk_ProceduralLeg_Status::Detached; }
 
     return InLeg.Has<ck::FTag_ProceduralLeg_Disabled>() ? ECk_ProceduralLeg_Status::Disabled : ECk_ProceduralLeg_Status::Enabled;
@@ -190,7 +190,6 @@ auto
     -> bool
 {
     return ck::IsValid(InLeg)
-        && Has(InLeg)
         && NOT InLeg.Has<ck::FTag_DestroyEntity_Initiate>()
         && NOT InLeg.Has<ck::FTag_ProceduralLeg_Detached>();
 }
@@ -209,7 +208,7 @@ auto
     if (InDelegate.IsBound())
     { Request.Set_CompletionDelegate(InDelegate); }
 
-    const auto RequestValid = ck::IsValid(InLeg) && Has(InLeg) && NOT InLeg.Has<ck::FTag_DestroyEntity_Initiate>();
+    const auto RequestValid = ck::IsValid(InLeg) && NOT InLeg.Has<ck::FTag_DestroyEntity_Initiate>();
     CK_ENSURE_IF_NOT(RequestValid,
         TEXT("Procedural leg Request_EnableDisable rejected leg [{}]: it must be a live leg entity."), InLeg)
     {
@@ -241,7 +240,7 @@ auto
     if (InDelegate.IsBound())
     { Request.Set_CompletionDelegate(InDelegate); }
 
-    const auto RequestValid = ck::IsValid(InLeg) && Has(InLeg) && NOT InLeg.Has<ck::FTag_DestroyEntity_Initiate>();
+    const auto RequestValid = ck::IsValid(InLeg) && NOT InLeg.Has<ck::FTag_DestroyEntity_Initiate>();
     CK_ENSURE_IF_NOT(RequestValid,
         TEXT("Procedural leg Request_Detach rejected leg [{}]: it must be a live leg entity."), InLeg)
     {

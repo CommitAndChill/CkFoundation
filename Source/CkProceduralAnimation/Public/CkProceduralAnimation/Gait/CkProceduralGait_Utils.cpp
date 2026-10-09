@@ -167,7 +167,7 @@ auto
         const FCk_Handle_ProceduralGait& InGait)
     -> ECk_ProceduralAnimation_Status
 {
-    if (ck::Is_NOT_Valid(InGait) || NOT Has(InGait) || InGait.Has<ck::FFragment_ProceduralGait_Failure>())
+    if (ck::Is_NOT_Valid(InGait) || InGait.Has<ck::FFragment_ProceduralGait_Failure>())
     { return ECk_ProceduralAnimation_Status::Failed; }
 
     if (InGait.Has<ck::FTag_ProceduralGait_NeedsSetup>())
@@ -182,7 +182,7 @@ auto
         const FCk_Handle_ProceduralGait& InGait)
     -> ECk_ProceduralGait_Failure
 {
-    return ck::IsValid(InGait) && Has(InGait) && InGait.Has<ck::FFragment_ProceduralGait_Failure>()
+    return ck::IsValid(InGait) && InGait.Has<ck::FFragment_ProceduralGait_Failure>()
         ? InGait.Get<ck::FFragment_ProceduralGait_Failure>().Get_Reason()
         : ECk_ProceduralGait_Failure::None;
 }
@@ -246,7 +246,7 @@ auto
         const FCk_Handle_ProceduralGait& InGait)
     -> int32
 {
-    if (ck::Is_NOT_Valid(InGait) || NOT Has(InGait))
+    if (ck::Is_NOT_Valid(InGait))
     { return 0; }
 
     const auto& GaitComp = InGait.Get<ck::FFragment_ProceduralGait>();
@@ -296,7 +296,6 @@ auto
     { Request.Set_CompletionDelegate(InDelegate); }
 
     const auto RequestValid = ck::IsValid(InGait)
-        && Has(InGait)
         && NOT InGait.Has<ck::FTag_DestroyEntity_Initiate>()
         && ck::IsValid(InRequest.Get_Timing())
         && ck::IsValid(InRequest.Get_Step())

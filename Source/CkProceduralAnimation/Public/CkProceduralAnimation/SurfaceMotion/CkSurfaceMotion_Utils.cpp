@@ -93,7 +93,7 @@ auto
         const FCk_Handle_SurfaceMotion& InHandle)
     -> ECk_ProceduralAnimation_Status
 {
-    if (ck::Is_NOT_Valid(InHandle) || NOT Has(InHandle) || InHandle.Has<ck::FFragment_SurfaceMotion_Failure>())
+    if (ck::Is_NOT_Valid(InHandle) || InHandle.Has<ck::FFragment_SurfaceMotion_Failure>())
     { return ECk_ProceduralAnimation_Status::Failed; }
 
     if (InHandle.Has<ck::FTag_SurfaceMotion_NeedsSetup>())
@@ -108,7 +108,7 @@ auto
         const FCk_Handle_SurfaceMotion& InHandle)
     -> ECk_SurfaceMotion_Failure
 {
-    return ck::IsValid(InHandle) && Has(InHandle) && InHandle.Has<ck::FFragment_SurfaceMotion_Failure>()
+    return ck::IsValid(InHandle) && InHandle.Has<ck::FFragment_SurfaceMotion_Failure>()
         ? InHandle.Get<ck::FFragment_SurfaceMotion_Failure>().Get_Reason()
         : ECk_SurfaceMotion_Failure::None;
 }
@@ -165,7 +165,7 @@ auto
         const FCk_Handle_SurfaceMotion& InHandle)
     -> ECk_SurfaceMotion_HeightSource
 {
-    return ck::IsValid(InHandle) && Has(InHandle)
+    return ck::IsValid(InHandle)
         ? InHandle.Get<ck::FFragment_SurfaceMotion_Params>().Get_Contact().Get_HeightSource()
         : ECk_SurfaceMotion_HeightSource::Rays;
 }
@@ -176,7 +176,7 @@ auto
         const FCk_Handle_SurfaceMotion& InHandle)
     -> ECk_SurfaceMotion_WallPolicy
 {
-    return ck::IsValid(InHandle) && Has(InHandle)
+    return ck::IsValid(InHandle)
         ? InHandle.Get<ck::FFragment_SurfaceMotion_Params>().Get_Contact().Get_WallPolicy()
         : ECk_SurfaceMotion_WallPolicy::Climb;
 }
@@ -187,7 +187,7 @@ auto
         const FCk_Handle_SurfaceMotion& InHandle)
     -> float
 {
-    return ck::IsValid(InHandle) && Has(InHandle)
+    return ck::IsValid(InHandle)
         ? InHandle.Get<ck::FFragment_SurfaceMotion_Params>().Get_Contact().Get_MaxStepHeight()
         : 0.0f;
 }
@@ -261,7 +261,6 @@ auto
     { InRequest.Set_CompletionDelegate(InDelegate); }
 
     const auto RequestValid = ck::IsValid(InHandle)
-        && Has(InHandle)
         && NOT InHandle.Has<ck::FTag_DestroyEntity_Initiate>()
         && ck::IsValid(InRequest);
     CK_ENSURE_IF_NOT(RequestValid,

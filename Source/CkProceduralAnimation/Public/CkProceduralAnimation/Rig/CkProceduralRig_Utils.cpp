@@ -50,7 +50,6 @@ namespace ck_procedural_rig_utils
         {
             return ck::IsValid(InPart)
                 && NOT InPart.Has<ck::FTag_DestroyEntity_Initiate>()
-                && UCk_Utils_Transform_UE::Has(InPart)
                 && InPart != InLeg.ConvertToHandle()
                 && InPart != Body
                 && UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InPart) == Body
@@ -103,7 +102,7 @@ auto
         const FCk_Handle_ProceduralRig& InRig)
     -> ECk_ProceduralAnimation_Status
 {
-    if (ck::Is_NOT_Valid(InRig) || NOT Has(InRig) || InRig.Has<ck::FFragment_ProceduralRig_Failure>())
+    if (ck::Is_NOT_Valid(InRig) || InRig.Has<ck::FFragment_ProceduralRig_Failure>())
     { return ECk_ProceduralAnimation_Status::Failed; }
 
     if (InRig.Has<ck::FTag_ProceduralRig_NeedsSetup>())
@@ -118,7 +117,7 @@ auto
         const FCk_Handle_ProceduralRig& InRig)
     -> ECk_ProceduralRig_Failure
 {
-    return ck::IsValid(InRig) && Has(InRig) && InRig.Has<ck::FFragment_ProceduralRig_Failure>()
+    return ck::IsValid(InRig) && InRig.Has<ck::FFragment_ProceduralRig_Failure>()
         ? InRig.Get<ck::FFragment_ProceduralRig_Failure>().Get_Reason()
         : ECk_ProceduralRig_Failure::None;
 }
@@ -129,7 +128,7 @@ auto
         const FCk_Handle_ProceduralRig& InRig)
     -> FCk_ProceduralRig_Spec
 {
-    return ck::IsValid(InRig) && Has(InRig)
+    return ck::IsValid(InRig)
         ? InRig.Get<ck::FFragment_ProceduralRig_Params>()
         : FCk_ProceduralRig_Spec{};
 }
@@ -140,7 +139,7 @@ auto
         const FCk_Handle_ProceduralRig& InRig)
     -> ECk_ProceduralRig_Clearance
 {
-    return ck::IsValid(InRig) && Has(InRig)
+    return ck::IsValid(InRig)
         ? InRig.Get<ck::FFragment_ProceduralRig_Params>().Get_Clearance()
         : ECk_ProceduralRig_Clearance::None;
 }
@@ -151,7 +150,7 @@ auto
         const FCk_Handle_ProceduralRig& InRig)
     -> ECk_ProceduralRig_ChainState
 {
-    return ck::IsValid(InRig) && Has(InRig)
+    return ck::IsValid(InRig)
         ? InRig.Get<ck::FFragment_ProceduralRig>()._ChainState
         : ECk_ProceduralRig_ChainState::Clear;
 }
@@ -162,7 +161,7 @@ auto
         const FCk_Handle_ProceduralRig& InRig)
     -> float
 {
-    return ck::IsValid(InRig) && Has(InRig)
+    return ck::IsValid(InRig)
         ? InRig.Get<ck::FFragment_ProceduralRig>()._SwivelDegrees
         : 0.0f;
 }

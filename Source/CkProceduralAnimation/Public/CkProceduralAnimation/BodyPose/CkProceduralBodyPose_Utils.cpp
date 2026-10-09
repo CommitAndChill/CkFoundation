@@ -47,7 +47,6 @@ namespace ck_procedural_body_pose_utils
     {
         return ck::IsValid(InPresentation)
             && NOT InPresentation.Has<ck::FTag_DestroyEntity_Initiate>()
-            && UCk_Utils_Transform_UE::Has(InPresentation)
             && InPresentation != InBody
             && UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InPresentation) == InBody
             && NOT Get_IsBoundByAnyRig(InPresentation, InBody);
@@ -111,7 +110,7 @@ auto
         const FCk_Handle_ProceduralBodyPose& InBodyPose)
     -> ECk_ProceduralAnimation_Status
 {
-    if (ck::Is_NOT_Valid(InBodyPose) || NOT Has(InBodyPose) || InBodyPose.Has<ck::FFragment_ProceduralBodyPose_Failure>())
+    if (ck::Is_NOT_Valid(InBodyPose) || InBodyPose.Has<ck::FFragment_ProceduralBodyPose_Failure>())
     { return ECk_ProceduralAnimation_Status::Failed; }
 
     return ECk_ProceduralAnimation_Status::Ready;
@@ -123,7 +122,7 @@ auto
         const FCk_Handle_ProceduralBodyPose& InBodyPose)
     -> ECk_ProceduralBodyPose_Failure
 {
-    return ck::IsValid(InBodyPose) && Has(InBodyPose) && InBodyPose.Has<ck::FFragment_ProceduralBodyPose_Failure>()
+    return ck::IsValid(InBodyPose) && InBodyPose.Has<ck::FFragment_ProceduralBodyPose_Failure>()
         ? InBodyPose.Get<ck::FFragment_ProceduralBodyPose_Failure>().Get_Reason()
         : ECk_ProceduralBodyPose_Failure::None;
 }
@@ -156,7 +155,7 @@ auto
         const FCk_Handle_ProceduralBodyPose& InBodyPose)
     -> FCk_Handle_Transform
 {
-    return ck::IsValid(InBodyPose) && Has(InBodyPose)
+    return ck::IsValid(InBodyPose)
         ? InBodyPose.Get<ck::FFragment_ProceduralBodyPose_Params>().Get_Presentation()
         : FCk_Handle_Transform{};
 }
