@@ -24,6 +24,7 @@ namespace ck_ui_slider
         float Step = 0.01f;
         EOrientation Orientation = Orient_Horizontal;
         FSliderStyle NativeStyle;
+        TOptional<FLinearColor> FillColor;
     };
 
     struct FInteraction
@@ -44,6 +45,7 @@ namespace ck_ui_slider
         SLATE_BEGIN_ARGS(SCkUiSlider) {}
             SLATE_ARGUMENT(EOrientation, Orientation)
             SLATE_ARGUMENT(FSliderStyle, NativeStyle)
+            SLATE_ARGUMENT(TOptional<FLinearColor>, FillColor)
             SLATE_ATTRIBUTE(float, Value)
             SLATE_ATTRIBUTE(float, StepSize)
         SLATE_END_ARGS()
@@ -52,6 +54,7 @@ namespace ck_ui_slider
         {
             _Owner = MoveTemp(InOwner);
             _NativeStyle = InArguments._NativeStyle;
+            _FillColor = InArguments._FillColor;
             SSlider::Construct(SSlider::FArguments()
                 .Style(&_NativeStyle)
                 .Orientation(InArguments._Orientation)
@@ -67,6 +70,11 @@ namespace ck_ui_slider
             _NativeStyle = InStyle;
             SetStyle(&_NativeStyle);
         }
+        auto SetFillColor(const TOptional<FLinearColor>& InColor) -> void
+        {
+            _FillColor = InColor;
+            Invalidate(EInvalidateWidgetReason::Paint);
+        }
 
         virtual auto OnMouseButtonDown(const FGeometry&, const FPointerEvent&) -> FReply override;
         virtual auto OnMouseMove(const FGeometry&, const FPointerEvent&) -> FReply override;
@@ -79,6 +87,8 @@ namespace ck_ui_slider
         virtual void OnMouseCaptureLost(const FCaptureLostEvent&) override;
         virtual void OnFocusLost(const FFocusEvent&) override;
         virtual void Tick(const FGeometry&, double, float) override;
+        virtual int32 OnPaint(const FPaintArgs&, const FGeometry&, const FSlateRect&,
+            FSlateWindowElementList&, int32, const FWidgetStyle&, bool) const override;
 
     private:
         auto CanEdit() const -> bool;
@@ -93,6 +103,7 @@ namespace ck_ui_slider
         // SSlider borrows its style pointer. Keep storage alive with the native widget,
         // including when a caller holds it after the retained component is released.
         FSliderStyle _NativeStyle;
+        TOptional<FLinearColor> _FillColor;
         int32 _PendingUser = INDEX_NONE;
         uint32 _PendingPointer = 0;
         bool _TouchPending = false;
@@ -110,6 +121,7 @@ namespace ck_ui_slider
             SAssignNew(_Widget, SCkUiSlider, WeakSlider)
                 .Orientation(_Configuration.Orientation)
                 .NativeStyle(_Configuration.NativeStyle)
+                .FillColor(_Configuration.FillColor)
                 .Value_Lambda([WeakSlider]
                 {
                     const TSharedPtr<FSlider> Slider = WeakSlider.Pin();
@@ -140,7 +152,11 @@ namespace ck_ui_slider
         virtual void EndPointerCaptureTransfer(const FCkUiPointerCapture&, bool InRestored) noexcept override
         {
             _Transfer.Reset();
-            if (!InRestored) { _Interaction.Reset(); }
+            if (!InRestored)
+            {
+                _Interaction.Reset();
+                _Widget->Invalidate(EInvalidateWidgetReason::Paint);
+            }
         }
         auto IsTransfer(const FCaptureLostEvent& InEvent) const -> bool
         {
@@ -182,6 +198,7 @@ namespace ck_ui_slider
             if (_Interaction.IsSet() || !CanEdit()) { return; }
             const float Initial = _Configuration.Value.Get(_Configuration.Min);
             _Interaction = FInteraction{InSource, InUser, InPointer, Initial, FMath::Clamp(Initial, _Configuration.Min, _Configuration.Max)};
+            _Widget->Invalidate(EInvalidateWidgetReason::Paint);
             const FCkUiOnNumberInteraction Callback = _Configuration.Interaction;
             {
                 TGuardValue<bool> DispatchGuard(_Dispatching, true);
@@ -196,6 +213,7 @@ namespace ck_ui_slider
             const float Value = static_cast<float>(_Configuration.Min + FMath::Clamp(static_cast<double>(InNormalized), 0.0, 1.0) * Span);
             if (_Interaction->Draft == Value) { return; }
             _Interaction->Draft = Value;
+            _Widget->Invalidate(EInvalidateWidgetReason::Paint);
             const FCkUiOnNumberChanged Callback = _Configuration.Changed;
             {
                 TGuardValue<bool> DispatchGuard(_Dispatching, true);
@@ -209,6 +227,7 @@ namespace ck_ui_slider
             if (_Dispatching) { _CancelAfterDispatch = true; _SuppressDeferredCancellation |= !CanDispatch(); return; }
             const FInteraction Finished = _Interaction.GetValue();
             _Interaction.Reset();
+            _Widget->Invalidate(EInvalidateWidgetReason::Paint);
             const bool Commit = InCommit && CanEdit();
             if (!CanDispatch()) { return; }
             const FCkUiOnNumberInteraction Callback = _Configuration.Interaction;
@@ -227,6 +246,7 @@ namespace ck_ui_slider
             {
                 _Slider->_Widget->SetOrientation(_Configuration.Orientation);
                 _Slider->_Widget->ApplyNativeStyle(_Configuration.NativeStyle);
+                _Slider->_Widget->SetFillColor(_Configuration.FillColor);
                 _Slider->_Configuration = MoveTemp(_Configuration);
             }
         private:
@@ -238,7 +258,11 @@ namespace ck_ui_slider
             if (_CancelAfterDispatch)
             {
                 _CancelAfterDispatch = false;
-                if (_SuppressDeferredCancellation) { _Interaction.Reset(); }
+                if (_SuppressDeferredCancellation)
+                {
+                    _Interaction.Reset();
+                    _Widget->Invalidate(EInvalidateWidgetReason::Paint);
+                }
                 else { End(false); }
                 _SuppressDeferredCancellation = false;
             }
@@ -256,6 +280,62 @@ namespace ck_ui_slider
     {
         const TSharedPtr<FSlider> Slider = _Owner.Pin();
         return !_FinishingPointerInteraction && Slider.IsValid() && Slider->CanEdit();
+    }
+    int32 SCkUiSlider::OnPaint(const FPaintArgs& InArgs, const FGeometry& InGeometry,
+        const FSlateRect& InCullingRect, FSlateWindowElementList& OutDrawElements,
+        int32 InLayer, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+    {
+        if (!_FillColor.IsSet())
+        { return SSlider::OnPaint(InArgs, InGeometry, InCullingRect, OutDrawElements, InLayer, InWidgetStyle, bParentEnabled); }
+
+        // Match SSlider::OnPaint: vertical bars are laid out horizontally, then rotated.
+        const bool Horizontal = Orientation == Orient_Horizontal;
+        const float Width = Horizontal ? InGeometry.GetLocalSize().X : InGeometry.GetLocalSize().Y;
+        const float Height = Horizontal ? InGeometry.GetLocalSize().Y : InGeometry.GetLocalSize().X;
+        const FSlateBrush* BarImage = GetBarImage();
+        const FSlateBrush* ThumbImage = GetThumbImage();
+        const FVector2f ThumbSize = ThumbImage->ImageSize;
+        const float Indent = GetIndentHandleAttribute().Get() ? ThumbSize.X : 0.0f;
+        const float Percent = FMath::Clamp(GetNormalizedValue(), 0.0f, 1.0f);
+        const float ThumbCenter = Percent * (Width - Indent - ThumbSize.X)
+            + 0.5f * (Indent + ThumbSize.X);
+        const float BarStart = 0.5f * ThumbSize.X;
+        const float BarEnd = Width - BarStart;
+        const float BarY = 0.5f * Height - 0.5f * Style->BarThickness;
+
+        FGeometry PaintGeometry = InGeometry;
+        if (!Horizontal)
+        {
+            const FSlateRenderTransform Rotation = TransformCast<FSlateRenderTransform>(
+                Concatenate(Inverse(FVector2f(Width, 0.0f)), FQuat2D(FMath::DegreesToRadians(-90.0f))));
+            PaintGeometry = InGeometry.MakeChild(FVector2f(Width, Height),
+                FSlateLayoutTransform(), Rotation, FVector2f::ZeroVector);
+        }
+        const ESlateDrawEffect DrawEffects = ShouldBeEnabled(bParentEnabled)
+            ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect;
+        FSlateDrawElement::MakeBox(OutDrawElements, InLayer,
+            PaintGeometry.ToPaintGeometry(FVector2f(BarEnd - BarStart, Style->BarThickness),
+                FSlateLayoutTransform(FVector2f(BarStart, BarY))),
+            BarImage, DrawEffects,
+            BarImage->GetTint(InWidgetStyle) * GetSliderBarColorAttribute().Get().GetColor(InWidgetStyle)
+                * InWidgetStyle.GetColorAndOpacityTint());
+        const float FillWidth = Percent * FMath::Max(0.0f, BarEnd - BarStart);
+        if (FillWidth > 0.0f && Style->BarThickness > 0.0f)
+        {
+            FSlateDrawElement::MakeBox(OutDrawElements, InLayer + 1,
+                PaintGeometry.ToPaintGeometry(FVector2f(FillWidth, Style->BarThickness),
+                    FSlateLayoutTransform(FVector2f(BarStart, BarY))),
+                FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")), DrawEffects,
+                _FillColor.GetValue() * InWidgetStyle.GetColorAndOpacityTint());
+        }
+        FSlateDrawElement::MakeBox(OutDrawElements, InLayer + 2,
+            PaintGeometry.ToPaintGeometry(ThumbSize,
+                FSlateLayoutTransform(FVector2f(ThumbCenter - 0.5f * ThumbSize.X,
+                    0.5f * Height - 0.5f * ThumbSize.Y))),
+            ThumbImage, DrawEffects,
+            ThumbImage->GetTint(InWidgetStyle) * GetSliderHandleColorAttribute().Get().GetColor(InWidgetStyle)
+                * InWidgetStyle.GetColorAndOpacityTint());
+        return InLayer + 2;
     }
     auto SCkUiSlider::IsInputBlocked() const -> bool
     {
@@ -481,6 +561,16 @@ namespace ck_ui_slider
         SetColor(TEXT("-ck-slider-thumb-color"), OutConfiguration.NativeStyle.NormalThumbImage);
         SetColor(TEXT("-ck-slider-thumb-hover-color"), OutConfiguration.NativeStyle.HoveredThumbImage);
         SetColor(TEXT("-ck-slider-thumb-disabled-color"), OutConfiguration.NativeStyle.DisabledThumbImage);
+        if (const FCkUiCustomStyleValue* Fill = InArguments.Style.CustomProperties.Find(TEXT("-ck-slider-fill-color")))
+        {
+            const FLinearColor& Color = Fill->Color;
+            const bool Valid = Fill->Kind == ECkUiCustomStyleKind::Color
+                && FMath::IsFinite(Color.R) && FMath::IsFinite(Color.G)
+                && FMath::IsFinite(Color.B) && FMath::IsFinite(Color.A);
+            if (!Valid)
+            { OutFailure = TEXT("Slider fill color must be a finite color."); return false; }
+            OutConfiguration.FillColor = Color;
+        }
         if (const FCkUiCustomStyleValue* Thickness = InArguments.Style.CustomProperties.Find(TEXT("-ck-slider-bar-thickness")))
         { OutConfiguration.NativeStyle.BarThickness = Thickness->Number; }
         for (FSlateBrush* Thumb : {&OutConfiguration.NativeStyle.NormalThumbImage,
@@ -554,6 +644,7 @@ auto FCkUiSlider::Register(FCkUiWidgetRegistry& InRegistry) -> FCkUiLoadResult
         {TEXT("-ck-slider-bar-color"), ECkUiCustomStyleKind::Color},
         {TEXT("-ck-slider-bar-hover-color"), ECkUiCustomStyleKind::Color},
         {TEXT("-ck-slider-bar-disabled-color"), ECkUiCustomStyleKind::Color},
+        {TEXT("-ck-slider-fill-color"), ECkUiCustomStyleKind::Color},
         {TEXT("-ck-slider-thumb-color"), ECkUiCustomStyleKind::Color},
         {TEXT("-ck-slider-thumb-hover-color"), ECkUiCustomStyleKind::Color},
         {TEXT("-ck-slider-thumb-disabled-color"), ECkUiCustomStyleKind::Color},
