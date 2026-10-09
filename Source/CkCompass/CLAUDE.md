@@ -17,7 +17,7 @@ ribbon widget only), `CkVisibleRange`.
   (typically the local player's pawn/controller entity; one compass per entity). Observer defaults to
   that same entity; redirect via `Request_SetObserver`.
 - `Create(InLifetimeOwner, InParams)` — creates a NEW Compass child entity under `InLifetimeOwner`
-  (Compass has no record — no record wiring). Observer defaults to the created child entity itself;
+  (Compass has no record — no record wiring). Observer defaults to `InLifetimeOwner`;
   redirect via `Request_SetObserver`.
 - `FCk_Compass_Spec` — `_ArcDegrees` (essential), `_MaxEntries`, `_CategoryFilter`
   (`FGameplayTagQuery`; **empty accepts everything**), `_HeadingSource`
@@ -30,6 +30,19 @@ ribbon widget only), `CkVisibleRange`.
 - Requests: `Request_SetCategoryFilter`, `Request_SetManualHeading`, `Request_SetObserver`.
 - Pure math: `ck::bearing::` in `CkCore/Math/Bearing/CkBearing_Utils.h` (bearing/arc/cardinal), unit-tested in
   `Tests/CkBearing_Utils.spec.cpp` (`Ck.CkCompass.Bearing.*`).
+
+## World projection closure
+
+- `TryCloseWorldProjection(InTransientEntity)` accepts only the exact live transient root of a game
+  world. It closes Compass projection for every Compass in that world; a default, stale, child,
+  foreign, or tearing-down handle returns `false` without closing another world.
+- `Get_IsWorldProjectionClosed(InTransientEntity)` reads that same world-local state and returns
+  `false` for invalid input. Closing is idempotent and monotone for the lifetime of that world; there
+  is no resume API. A new world starts with its own open projection state. The closure state is not
+  replicated.
+- Closing sets the world state immediately, but existing Compass entries drain on the next ordered
+  Compass Update, with membership disappearance signals. Do not assume `Get_Entries` is empty when
+  `TryCloseWorldProjection` returns. Dedicated servers already skip cosmetic projection.
 
 ## The delivery contract (read this before writing a consumer)
 
