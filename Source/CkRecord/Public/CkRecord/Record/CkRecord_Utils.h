@@ -1060,6 +1060,9 @@ namespace ck
         Entry._DisconnectionFuncs.Add(InRecordHandle,
         [](FCk_Handle InRecordEntity, FCk_Handle InRecordEntryEntity)
         {
+            // Admission rollback may remove the parent record before this child retires.
+            if (NOT ck::IsValid(InRecordEntity) ||
+                NOT InRecordEntity.Has<RecordType>()) { return; }
             InRecordEntity.Get<RecordType>()._RecordEntries.Remove(
                 ck::StaticCast<MaybeTypeSafeHandle>(InRecordEntryEntity));
         });
@@ -1150,6 +1153,9 @@ namespace ck
         RecordEntryFragment._DisconnectionFuncs.Add(InRecordHandle,
         [](FCk_Handle InRecordEntity, FCk_Handle InRecordEntryEntity)
         {
+            // Admission rollback may remove the parent record before this child retires.
+            if (NOT ck::IsValid(InRecordEntity) ||
+                NOT InRecordEntity.Has<T_DerivedRecord>()) { return; }
             InRecordEntity.Get<T_DerivedRecord>()._RecordEntries.Remove(ck::StaticCast<MaybeTypeSafeHandle>(InRecordEntryEntity));
         });
 
