@@ -368,7 +368,8 @@ auto
 
     const auto AllValid = FailureReason.IsEmpty();
     CK_ENSURE_IF_NOT(AllValid, TEXT("GameSettings registration rejected, nothing was registered: {}"), FailureReason)
-    { return false; }
+    {}
+    if (NOT AllValid) { return false; }
 
     for (const auto& Definition : InDefinitions)
     {
@@ -392,7 +393,8 @@ auto
 {
     const auto CollectionIsValid = ck::IsValid(InCollection);
     CK_ENSURE_IF_NOT(CollectionIsValid, TEXT("Invalid GameSettings Collection, nothing was registered"))
-    { return false; }
+    {}
+    if (NOT CollectionIsValid) { return false; }
 
     return Request_RegisterSettings(InCollection->Get_Settings());
 }
