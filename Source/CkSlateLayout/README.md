@@ -1,5 +1,7 @@
 # CkSlateLayout
 
+For in-game UI, first read the [UI authoring rules](UI_AUTHORING_RULES.md) for typography, spacing, reusable composition and rendered verification.
+
 For file-based HTML/CSS-like authoring and live reload, start with [AUTHORING.md](AUTHORING.md).
 FCkUiView supplies named regions, retained native bindings, actions, styles, and atomic reload.
 The C++ primitives below remain the underlying integration API.

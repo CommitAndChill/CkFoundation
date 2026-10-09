@@ -6,6 +6,12 @@ ECS patterns, requests, signals, and collaboration rules. Read
 [Source/ARCHITECTURE.md](Source/ARCHITECTURE.md) for C++ topology and the target module's
 `Claude.md`; read [Script/ARCHITECTURE.md](Script/ARCHITECTURE.md) for AngelScript.
 
+## In-game UI authoring
+
+Before creating or changing an in-game UI, read the [UI authoring rules](Source/CkSlateLayout/UI_AUTHORING_RULES.md),
+[supported grammar](Source/CkSlateLayout/AUTHORING.md), and [scripted UMG API](Source/CkWidgets/AUTHORING.md).
+The shared requirements are described in DEVELOPMENT.md.
+
 ## CK_ENSURE_IF_NOT
 
 - The macro is an inverted `if`: put the failure return, rollback, completion notification,

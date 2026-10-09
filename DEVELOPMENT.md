@@ -8,6 +8,16 @@ everything not plugin-specific. Style rules live HERE and only here; topology li
 skill library (index at the bottom). Facts below marked with a date were verified against
 code/disk on that date.
 
+## In-game UI authoring
+
+Before creating or changing an in-game UI, read the canonical
+[UI authoring rules](Source/CkSlateLayout/UI_AUTHORING_RULES.md) and
+[supported markup/CSS grammar](Source/CkSlateLayout/AUTHORING.md).
+Typography, measured padding/alignment, reusable composition, material/animation
+layers and rendered-reference verification are baseline requirements.
+For script-created UMG, also read [CkWidgets authoring](Source/CkWidgets/AUTHORING.md).
+These rules ship with CkFoundation; CkTests supplies optional examples and evidence.
+
 ## Identity (verified 2026-07-02)
 
 - **Engine:** UnrealEngine-Angelscript **5.7.x** (Hazelight AngelScript fork; 5.7.4 on disk). NOT

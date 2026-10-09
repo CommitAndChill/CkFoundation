@@ -4,6 +4,8 @@ Gate 2 introduces external structure and styles on top of Yoga and native Slate.
 This is a deliberately small XML-compatible HTML-like language and CSS subset.
 It does not load browser content or execute scripts.
 
+For in-game screens, read the [standing UI authoring rules](UI_AUTHORING_RULES.md) before implementation. They establish reference comparison, explicit font admission, measured text, shared composition, and real-renderer verification as the baseline for every UI task.
+
 ## Edit Texture Health
 
 Open Texture Debugger with `ck.TextureDebugger 1`, then its Texture Health surface.
@@ -22,6 +24,60 @@ For a visible first edit, change `.search-row { gap: var(--space-s); }` to
 texture and type in the search controls before saving to observe state retention.
 
 ## Markup
+
+### Spatial inventory grids
+
+Register `RegisterInventoryGridUiControl(registry)` before creating the view.
+Reflected UMG sessions include it in `Config.Set_RegisterItemControls(true)`.
+
+```html
+<inventory-grid id="pack" items-bind="Pack" image-bind="InventoryAtlas"
+                columns="6" rows="6" cell-size="52"
+                atlas-columns="5" atlas-rows="4"
+                select="SelectItem" move="MoveToPack"
+                selected-key-bind="SelectedItemKey" font-family="tactical-ui" />
+```
+
+`items-bind` names a keyed collection. Required fields are Text `name`, `kind`;
+Number `x`, `y`, `w`, `h`, `icon`, `quantity`; Bool `rotated`, `selected`,
+`enabled`. Coordinates/dimensions are finite integers in cell units. Width and
+height describe the unrotated footprint; `rotated` swaps them and rotates its
+art. Icon is a zero-based atlas cell or -1 for no image. Grid and atlas dimensions
+are integers 1–64, cell size is 20–160. Quantity is 0–999999.
+
+Optional Number fields `icon-left`, `icon-top`, `icon-right`, `icon-bottom`
+describe the sprite's normalized rectangle within its atlas cell. Supply all
+four together; they must be finite within 0–1 with left < right and top < bottom.
+Absent crops use the whole cell. Both painted art and drag thumbnails use the
+cropped UV and aspect; a multi-cell footprint does not stretch a square sprite.
+
+The complete collection must be valid, in bounds and free of overlaps. Initial
+invalid layout rejects admission; malformed retained updates preserve the last
+valid drawing and suppress proposals until the current revision is valid.
+Selection reports the stable record key through `StringChanged`. Move reports
+`key|x|y|rotated` through the destination grid's `StringChanged`, where rotation
+is 0 or 1. The host validates container ownership and publishes accepted state;
+the grid never mutates the model. In AngelScript these callbacks use the
+authored session's item-action bridge.
+
+Pointer drags across grids require the same current owning document domain.
+They capture collection revisions; reload, record changes, owner release,
+invalid input admission or another Slate user's drop invalidates a held drag.
+R rotates an active hovered drag; repeated key events do not toggle it. The
+optional selected-key text binding enables selected-item R proposals. Hosts
+must let R bubble to the control before applying their own fallback handler.
+
+Supported CSS controls: `-ck-inventory-grid-background`,
+`-ck-inventory-grid-cell-background`, `-ck-inventory-grid-item-background`,
+`-ck-inventory-grid-border`, `-ck-inventory-grid-selected` are colors;
+`-ck-inventory-grid-label-font-size` is a length in 8–20 Slate points. Declare
+the named font through the shared font registry. The grid owns item insets,
+label/quantity overlays, atlas aspect fit, preview and drag thumbnail; artwork
+does not define cell geometry. `GetItemBounds`, `CanPlace` and `TryMove` expose
+the same production placement contract to native integrations.
+
+The [tactical inventory gym](../../../CkTests/Documentation/UI/TacticalInventoryProof/README.md)
+is an optional consumer example; CkTests is not a runtime dependency.
 
 ```html
 <ui version="1">
@@ -108,6 +164,7 @@ shorthand lengths. Padding expansion is limited to four source components and
 | `font-size`, `font-weight` | Text/button/search; Slate font point-size value 1–512, `normal` or `bold` |
 | `font-family` | Text, button, menu-button and tabs only; `monospace` selects the base Mono face, `sans-serif` selects base Regular. A registered lowercase family name selects its explicit Regular/Bold face. Omitted keeps the base face; bold takes precedence. Lists, quoted names, files and URLs are unsupported. |
 | `text-wrap` | Text and ordinary buttons; `wrap` (default) or `nowrap`. Controls soft wrapping; preserves explicit line breaks |
+| `text-align` | Text only; `left` (default), `center`, or `right`. Justifies text inside its allocated bounds; does not position the node in its parent |
 | `overflow-wrap` | Text and ordinary buttons; `normal` (default) or `anywhere`. Anywhere permits character wrapping for long unbroken identifiers; `text-wrap: nowrap` still disables wrapping |
 | `text-overflow` | Text and ordinary buttons; `clip` (default) or `ellipsis`. Ellipsis requires `text-wrap: nowrap`; nowrap text clips to its allocated bounds |
 | `color` | Text/button/search; `#RRGGBB` or `#RRGGBBAA` in sRGB |
@@ -121,6 +178,12 @@ to points. Slate rasterizes points at its font render DPI, and the full line box
 includes the selected face's ascent/descent. A row height equal to the font-size
 number can therefore be too small. Measure natural text at the actual layout
 scale and inspect native captures; do not infer fit from source numbers alone.
+
+For centered text, allocate an appropriate text width and use `text-align: center`;
+use `horizontal-align`/`vertical-align` for the surrounding layout separately.
+For key legends, use the shared `key-hint` below instead of independently offsetting
+text within each background. Inspect glyph centering at the final scale, including
+short labels, wide labels such as SPACE, and the selected font's baseline.
 
 ### Registered font families
 
@@ -505,6 +568,58 @@ the new authored header and cells replace only after preparation succeeds. Inval
 schema or cell markup rejects the complete document even when the collection has no
 records.
 
+## Item slots and atlas images
+
+The character/equipment proof also registers `item-slot` and `atlas-image` through
+`FCk_UI_AuthoredSession_Config.RegisterItemControls`. `item-slot` owns a native
+focusable button, category-checked drag proposals and a rich authored tooltip.
+It requires `key-bind`, `kind-bind`, `select` (string-changed action), and one
+`content` slot. Optional `tooltip` contains ordinary authored layout. Repeat
+records use `key-field`, `kind-field`, `selected-field`, `enabled-field` and
+`rarity-field`; `accepts` is a literal category or `*`, and `drop` receives the
+source stable key. Optional `drag-enabled-bind` controls whether a populated slot
+can start a drag. `rarity` is a number binding: 0 common, 1 magic, 2 rare, 3 legendary.
+Selection, keyboard focus, and valid/invalid drag borders override rarity.
+Optional `drag-label-bind` (or repeat `drag-label-field`) snapshots a readable
+drag label; without it, the source key remains the label. A drag thumbnail uses
+the complete optional group `drag-image-bind`, `drag-index-bind` (or repeat
+`drag-index-field`), and literal `drag-columns`/`drag-rows`. Both dimensions must
+be integers in 1..64. Incomplete or invalid dimensions reject the document;
+an invalid dynamic index or null brush leaves a label-only drag. The drag copies
+the current brush and atlas UVs when it begins. The host must keep its image
+resource alive while the view owns input; source retirement suppresses thumbnail
+painting, and the existing drag-domain and record-revision checks still govern
+drop acceptance.
+
+Styles use `-ck-item-slot-background`, `-border`, `-focus`, `-selected`, `-valid`,
+`-invalid` colors and `-border-width`, `-padding` lengths, all with the full
+`-ck-item-slot-` prefix. Tooltips are measured as authored content and fitted into
+the owning Slate window. Put text inside explicit line boxes and bounds; a popup
+size limit does not make oversized copy readable. Release input before hiding a
+menu so shared transient cleanup closes tooltips and invalidates drag proposals.
+
+`atlas-image` requires `image-bind`, `index-bind` (or `index-field`), and literal
+integer `columns`/`rows` in 1..64. It selects a row-major cell without copying the
+texture. Negative, noninteger, nonfinite or overflow dynamic indices draw blank.
+The control retains its native image during compatible reloads and blanks it
+after owner release. Supply transparent gutters in the atlas to avoid neighboring
+art bleeding into the selected cell.
+
+Optional NumberBindings `crop-left-bind`, `crop-top-bind`, `crop-right-bind`
+and `crop-bottom-bind` select a normalized subrectangle within that cell.
+Supply all four together with finite 0–1 bounds and left < right, top < bottom.
+Invalid initial/reload crops reject publication; later malformed bound values
+draw blank. `aspect-fit="true"` preserves the cropped sprite's proportions
+within a fixed authored frame. The default false preserves the existing image
+behavior; changing this mode on a retained ID rejects reload. Use a new ID when
+changing the frame's native composition.
+
+`TryFocusControl` accepts a native control's full authored tag, including repeat
+and template scopes, while enforcing the session's owned-input admission. For
+example, `items/sword/card` targets the card in a stable keyed repeat record.
+Filtering and moving items still need an explicit model policy to choose the next
+visible item; the focus API does not choose one for the game.
+
 ## Document-local authored templates
 
 Templates and their uses live in the same HTML-like resource and reload atomically.
@@ -626,13 +741,13 @@ Bind a `FCkUiTreeCollection` through `FDataBindings.Trees`, and a selection dele
 
 The native STreeView owns indentation, expanders, keyboard navigation and virtualization. Row field bindings use the same types as table cells. Editable/retained custom row controls and multicolumn trees are not yet supported.
 
-Tree presentation is opt-in and only valid on `<tree>`: `-ck-tree-background`, `-ck-tree-row-background`, `-ck-tree-row-hover-background`, `-ck-tree-row-selected-background`, `-ck-tree-row-selected-accent-color`, and `-ck-tree-row-selected-accent-width`. Colors use the normal CSS color grammar; accent width is a finite nonnegative CSS length. The viewport background is independent of row backgrounds: use `-ck-tree-background: #00000000` for a transparent list, including empty space below its rows. Omitting it restores the engine's default tree background. The accent is drawn only when both accent declarations are present and the width is nonzero; it is a hit-test-invisible selected-row decoration, while native `STreeView` continues to own selection and input. These brushes are owned by the retained tree and update on compatible reload without replacing native rows or selection.
+Tree presentation is opt-in and only valid on `<tree>`: `-ck-tree-background`, `-ck-tree-row-background`, `-ck-tree-row-hover-background`, `-ck-tree-row-selected-background`, `-ck-tree-row-selected-accent-color`, `-ck-tree-row-selected-accent-width`, and `-ck-tree-focus-outline-color`. Colors use the normal CSS color grammar; accent width is a finite nonnegative CSS length. The viewport background is independent of row backgrounds: use `-ck-tree-background: #00000000` for a transparent list, including empty space below its rows. Omitting it restores the engine's default tree background. The accent is drawn only when both accent declarations are present and the width is nonzero; it is a hit-test-invisible selected-row decoration, while native `STreeView` continues to own selection and input. The optional focus color styles both the native viewport focus outline and the focused row selector; transparent suppresses this chrome while preserving keyboard focus and navigation. Omitting it restores the engine defaults. Direct configuration rejects nonfinite focus colors before preparing cells. These brushes are owned by the retained tree and update on compatible reload without replacing native rows or selection.
 
 `FCkUiTreeNodeData` contains Key, optional ParentKey and Fields. Unset parent means root; an empty supplied parent is invalid. Publish using TrySetNodes: fields, roots, child adjacency and revision change together, then one OnChanged fires. Duplicate keys, absent parents, cycles, depth over256, malformed fields or excess limits reject without publication. Nodes retain shared identity by key. Limits match flat collections except the additional depth limit; roots and siblings preserve input order.
 
 `GetTree(id)` exposes SCkUiTree. TrySelectKey and TrySetExpanded operate on stable keys. User expansion survives filtering and valid reload. Filtering includes text matches plus ancestors and temporarily expands matching paths; clearing the filter restores user expansion. A selected node removed by filtering or model publication clears selection once. GetVisibleNodeCount reports all nodes in the filtered projection, including collapsed descendants; GetLiveRowCount reports realized native rows.
 
-After `TrySetNodes`, or inside a selection callback, use `TryRequestSelectKey(key, notify=false)` rather than immediately selecting against an old projection. Its boolean means **admitted**, not applied: inspect `GetSelectionRequestState()` for `Pending`, `Applied`, or `Rejected`, and `GetSelectionRequestError()` on rejection. An unset key requests a clear; an empty/missing supplied key rejects admission without disturbing an existing request. The latest admitted request replaces prior pending work. The tree resolves the stable key against the latest collection after its native `STreeView` refresh, verifies the exact native selected node, and optionally emits one semantic `Direct` notification only when the key changed. A key removed or filtered before application rejects without notifying. Four unsettled native ticks reject with a diagnostic; a hidden tree stays pending until it ticks. This API does not expand collapsed ancestors or scroll into view. Programmatic selection supports collapsed descendants, matching the immediate API; the native tree permits invisible selection so the adapter/native key survives compatible refreshes. Filtering and model removal still clear genuinely excluded keys.
+After `TrySetNodes`, or inside a selection callback, use `TryRequestSelectKey(key, notify=false, scrollIntoView=false)` rather than immediately selecting against an old projection. Its boolean means **admitted**, not applied: inspect `GetSelectionRequestState()` for `Pending`, `Applied`, or `Rejected`, and `GetSelectionRequestError()` on rejection. An unset key requests a clear; an empty/missing supplied key rejects admission without disturbing an existing request. The latest admitted request replaces prior pending work. The tree resolves the stable key against the latest collection after its native `STreeView` refresh, verifies the exact native selected node, and optionally emits one semantic `Direct` notification only when the key changed. A key removed or filtered before application rejects without notifying. Four unsettled native ticks reject with a diagnostic; a hidden tree stays pending until it ticks. The optional third argument requests native scroll reveal after an accepted changed selection. The default leaves scrolling alone; same-key synchronization preserves manual scrolling. This API does not expand collapsed ancestors. Programmatic selection supports collapsed descendants, matching the immediate API; the native tree permits invisible selection so the adapter/native key survives compatible refreshes. Filtering and model removal still clear genuinely excluded keys.
 
 `CancelSelectionRequest()` clears the request, status and error. Native user selection and successful immediate `TrySelectKey` take precedence and cancel pending work. Compatible/rejected document reloads preserve requests; an accepted non-selectable configuration rejects a pending request on its next native tick. `FCkUiView::ReleaseOwnerInteractions`, owner destruction and accepted removal permanently retire the tree's owner interaction and cancel pending work, including on externally retained widgets. A released tree cannot admit selection requests, rebind its host key hook or prepare a configuration to revive the old owner. Create a new view/control for a new owner.
 
@@ -936,12 +1051,17 @@ This contract transports visual configuration; components still own their native
 brush/style lifetimes and must apply prepared changes without rebuilding identity
 or dispatching consumer events. These declarations do not add browser pseudo-selectors.
 Slider visual CSS properties are `-ck-slider-bar-color`, `-ck-slider-bar-hover-color`,
-`-ck-slider-bar-disabled-color`, `-ck-slider-thumb-color`,
+`-ck-slider-bar-disabled-color`, `-ck-slider-fill-color`, `-ck-slider-thumb-color`,
 `-ck-slider-thumb-hover-color`, and `-ck-slider-thumb-disabled-color` (Color);
 `-ck-slider-thumb-width`, `-ck-slider-thumb-height`, and
 `-ck-slider-bar-thickness` (Length). Omitted values reset to the native Core Slider
-style defaults. Thumb dimensions apply to all three states. Native Slate chooses
-the hover/disabled brush; the stylesheet does not simulate input state.
+style defaults. Thumb dimensions apply to all three states. The optional fill
+covers the normalized bar extent from minimum to maximum (left to right for
+horizontal sliders, bottom to top for vertical sliders), follows the local draft
+value, and receives Slate's disabled drawing effect and inherited opacity. Its
+fractional endpoint sits beneath the native thumb.
+Without a fill color, the slider uses the native Core Slider paint path. Native
+Slate chooses the hover/disabled brush; the stylesheet does not simulate input state.
 
 Color-only reloads preserve an active draft/capture. A change to thumb dimensions
 or bar thickness rejects while an interaction or pending touch exists, just like
@@ -1029,6 +1149,14 @@ omission uses `left`. A fixed header centers its label. Compatible reload update
 these presentations without replacing keyed headers or changing the model.
 Malformed values reject before publication. Native geometry and retained reload
 coverage live in `Ck.UiAuthoring.Tabs.VisualStyle`.
+
+`-ck-tabs-focus-outline-color` accepts a `#RRGGBB` or `#RRGGBBAA` color for the
+focused native header's 1-pixel outline. Omission preserves the Core button
+focus brush; transparent `#00000000` suppresses its visible rectangle while
+preserving keyboard focus and Arrow/Home/End navigation. Compatible reload
+updates the retained header brush without replacing headers or selection.
+Malformed CSS colors reject the whole source, and native configuration rejects
+nonfinite color components before changing the mounted tabs.
 
 Current implementation has shared native selected-header tint. Full authored
 state styling, explicit tab accessibility roles, generic descendant popup/capture
@@ -1329,7 +1457,7 @@ the view uses them.
 <hud-meter id="cooldown" value-bind="CooldownFraction" class="cooldown-ring" />
 <hud-graphic id="damage" image-bind="DamageBrush" opacity-bind="DamageOpacity" />
 <hud-orb id="health-orb" value-bind="HealthFraction" liquid-bind="HealthLiquid" frame-bind="OrbBezel" />
-<hud-ability id="shadow" cooldown-bind="ShadowCooldown" image-bind="ShadowArt" />
+<hud-ability id="shadow" cooldown-bind="ShadowCooldown" remaining-bind="ShadowSeconds" image-bind="ShadowArt" font-family="fantasy-ui" />
 ```
 
 ```css
@@ -1349,13 +1477,22 @@ briefly before it eases down, and pulses the fill at or below the low threshold.
 The radial form draws a native Slate arc; no material asset is required.
 
 `hud-orb` requires a normalized `value-bind`, `liquid-bind`, and `frame-bind`.
-It draws a dimmed liquid texture under a vertically clipped, eased liquid fill,
-then the frame texture above both. Transparent edges in the liquid art form the
-round silhouette. `-ck-hud-orb-response` is a finite 0..5 second number (default
-0.18). `hud-ability` requires normalized `cooldown-bind` and `image-bind`; it
-draws the art, a dark cooldown shade, and a live progress arc. The host owns
-scalar images and their resources. Both controls are retained and freeze on
-owner release. A custom image property uses `<name>-bind`, so the orb's
+It draws a circular liquid mesh with moving UVs beneath fixed spherical shading
+and glass highlights. A dimmed empty sphere sits beneath the vertically clipped,
+eased fill; the frame texture is drawn above the liquid and highlights.
+`-ck-hud-orb-response` is a finite 0..5 second number (default 0.18).
+`-ck-hud-orb-motion-speed` is a finite 0..4 number (default 0.35); zero stops UV
+motion without changing fill response. Keep the liquid texture and frame separate:
+a baked highlight in the moving texture will move with the liquid.
+
+`hud-ability` requires normalized `cooldown-bind` and `image-bind`. It draws a
+filled clockwise cooldown mask over the icon, not a progress arc: one is fully
+covered and zero is ready. Optional `remaining-bind` supplies seconds; positive
+remaining time is rounded up and drawn centered only while cooldown is positive.
+Optional literal `font-family` selects an admitted Regular face for that timer;
+`-ck-hud-ability-font-size` accepts 8..48px lengths (Slate point sizes).
+The host owns scalar images and their resources. Both controls are retained and
+freeze on owner release. A custom image property uses `<name>-bind`, so the orb's
 attributes are `liquid-bind` and `frame-bind`.
 
 All four HUD controls are passive and retain native identity across compatible
@@ -1365,6 +1502,43 @@ For an on-screen UMG host, make the host hit-test invisible and keep gameplay
 input mode and pause state with the player. The
 [CkTests combat HUD proof](../../../CkTests/Documentation/UI/CombatHudProof/README.md)
 shows three code-driven visual themes using these controls.
+
+### Shared key hints and framed slots
+
+`FCkUiHudControls::Register` also registers `key-hint`. Consumers without HUD
+controls can include `CkUiKeyHint.h` and call `RegisterKeyHintUiControl(Registry)`
+once instead; check its result before publishing the registry snapshot.
+
+```html
+<key-hint id="close" label="E" action="Close" font-family="fantasy-ui" class="key" />
+<key-hint id="evade" label="SPACE" font-family="fantasy-ui" class="key" />
+```
+
+The required literal `label` is measured and centered horizontally and vertically
+by the native control. Optional `action` makes it interactive; passive hints do
+not take keyboard focus. Optional `font-family` selects an admitted Regular face.
+Compatible reload retains the control; owner release makes it inert.
+
+CSS exposes `-ck-key-hint-font-size` (1..256px), `-ck-key-hint-foreground`,
+`-ck-key-hint-background`, `-ck-key-hint-border-color`,
+`-ck-key-hint-border-width` (0..32px), `-ck-key-hint-radius` (0..128px),
+and `-ck-key-hint-padding-x`/`-ck-key-hint-padding-y` (0..256px).
+Colors accept the normal hex syntax including alpha. Ensure explicit width/height
+can contain the measured label and padding; a centered control does not make
+undersized bounds safe.
+
+Compose repeated slots with a document-local typed template: an outer frame owns
+its padding, an inner inlay owns the art bounds, and overlays/timers and the shared
+hint belong to that same instance. Custom bindings forward through the complete
+attribute plus `-param`, for example `image-bind-param="art"` for an
+`image-binding` parameter. See the [Dark Fantasy spell-slot source](../../../CkTests/Resources/UiAuthoring/DarkFantasyHudProof/DarkFantasyHudProof.ui.html)
+for a working example. Keep decorative bar art separate from slot geometry;
+do not align independent icons with apertures painted into a single background.
+
+Verify new rendering effects in native captures as well as mesh/layout tests.
+A correct mesh can still draw no pixels because of brush/resource handling.
+The Dark Fantasy proof checks full-mask darkening and visible orb texture motion;
+its geometry tests separately establish fixed lighting and positions.
 
 ## Radial selection
 
@@ -1387,7 +1561,7 @@ replacement before publication.
 
 `select` reports hover or keyboard selection, including unavailable items so a host can explain their state. `activate` reports an enabled, ready item on mouse-up or Enter. Model updates and source reloads do not invoke these events. Set `FDataBindings::SlateUserIndex` and `CanDispatchEvents` for the owning input context. Releasing the view freezes the root and suppresses callbacks through external references.
 
-The optional `content` slot mounts authored center content once and remains hit-test invisible. CSS supports `-ck-radial-tile-size` (20..128px), and Color properties `-ck-radial-ring`, `-ck-radial-selected`, `-ck-radial-queued` and `-ck-radial-disabled`. `-ck-radial-sector-mode: 1` opts into a ring with one sector per item, midpoint spokes, a selected outer arc, and the record's glyph and actor label as text; the default `0` preserves the original power-wheel drawing. Sector text sizes are authored with `-ck-radial-glyph-font-size` and `-ck-radial-label-font-size` (finite 8..48px lengths, rounded to Slate point sizes; defaults 18 and 13). Invalid values reject source reload without replacing the accepted view. The Mass Effect squad-power gym exercises the default control with independent actor queues and atomic queue release.
+The optional `content` slot mounts authored center content once and remains hit-test invisible. CSS supports `-ck-radial-tile-size` (20..128px), and Color properties `-ck-radial-tile-background` (transparent by default; fills the power-wheel tile frame), `-ck-radial-ring`, `-ck-radial-selected`, `-ck-radial-queued` and `-ck-radial-disabled`. `-ck-radial-sector-mode: 1` opts into a ring with one sector per item, midpoint spokes, a selected outer arc, and the record's glyph and actor label as text; the default `0` preserves the original power-wheel drawing. Sector text sizes are authored with `-ck-radial-glyph-font-size` and `-ck-radial-label-font-size` (finite 8..48px lengths, rounded to Slate point sizes; defaults 18 and 13). Invalid values reject source reload without replacing the accepted view. The Mass Effect squad-power gym exercises the default control with independent actor queues and atomic queue release.
 
 An optional literal `font-family` selects an admitted regular face for native
 radial labels. `-ck-radial-fantasy-mode: 1` requires sector mode and draws a
@@ -1395,3 +1569,7 @@ feathered selected wedge, thin spokes, and an inner ring without an outer ring;
 it places record image icons inside the wheel and labels near its edge. The
 dark disc and center controls can remain ordinary authored overlay nodes. The
 CkTests Dark Fantasy HUD gym demonstrates this composition.
+
+### Focus inside a repeated custom control
+
+`UCk_UI_AuthoredSession_UE::TryFocusControl` accepts a native tagged control ID, or `repeat-id/record-key/local-control-id` for a repeated control. It refreshes the matching repeat transactionally before resolving its current record, rejects presenter failures and ambiguous paths, and checks that the session still owns input after focus callbacks. Template instance IDs keep their expanded `instance/local-id` form. Do not globally retag every repeated child or keep a removed record widget as the current focus target.

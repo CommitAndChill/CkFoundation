@@ -1,5 +1,7 @@
 # Authored UMG from scripts
 
+Before authoring a screen, apply the [shared UI authoring rules](../CkSlateLayout/UI_AUTHORING_RULES.md). They cover fonts, measured padding/alignment, reusable widgets, visual effects and rendered acceptance. CkTests links below are optional examples and historical evidence; the rules and API guidance live in CkFoundation.
+
 `UCk_UI_AuthoredSession_UE` adapts scalar and flat collection models for `FCkUiView`. A script can construct a normal UMG widget tree, own the session, declare values/actions and mount an accepted document in `UCk_UI_AuthoredSurface_UE`. The underlying HTML/CSS grammar and native controls remain [CkSlateLayout](../CkSlateLayout/AUTHORING.md). The adapter does not introduce a second parser or layout engine.
 
 The first implementation is exercised by CkTests' [scripted card](../../../CkTests/Documentation/UI/ScriptingCardProof/README.md). Its [focused Editor gate](../../../CkTests/Documentation/UI/ScriptingCardProof/verification.md) passed 11 selected tests with five inspected captures. This establishes the scalar scripting path in that Development Editor fixture.
@@ -13,7 +15,30 @@ The first implementation is exercised by CkTests' [scripted card](../../../CkTes
 
 The production [AngelScript card](../../../CkTests/Script/CkUiAuthoring/CkScriptingCard_Gym.as) shows the complete construction/event/teardown path without a Widget Blueprint or C++ screen host.
 
-Declarations freeze after initialization succeeds. A malformed declaration set publishes no partial model/view and can be retried. Names follow the parser's identifier grammar, are case-sensitive and are unique across scalar, action, collection and item-action declarations. Regions have a separate nonempty, unique name set; initialization prepares all retained mounts before publishing the view. Numbers must be finite. Wrong-type/unknown names and nonfinite setters reject without mutation; failed getters preserve their output values.
+Declarations freeze after initialization succeeds. A malformed declaration set publishes no partial model/view and can be retried. Scalar, action, collection and item-action names follow the parser's identifier grammar, are case-sensitive and are unique across those declaration kinds. Regions have a separate nonempty, unique name set; initialization prepares all retained mounts before publishing the view. Numbers must be finite. Wrong-type/unknown names and nonfinite setters reject without mutation; failed getters preserve their output values.
+
+## Shared style tokens
+
+Before initialization, use `Config.Set_StyleTokens` to provide named CSS values:
+
+```angelscript
+TMap<FString, FString> StyleTokens;
+StyleTokens.Add("--space-s", "12px");
+StyleTokens.Add("--panel-inset", "16px 20px");
+StyleTokens.Add("--ink-body", "#CBC2AE");
+Config.Set_StyleTokens(StyleTokens);
+```
+
+Use them in supported declarations, for example `padding: var(--panel-inset);`
+or `color: var(--ink-body);`. Token names start with `--`; each name and value
+is limited to 1,048,576 characters. The accepted map is copied into the
+native view and frozen for the session. Mutating the caller's config does not
+change subsequent reloads. Referenced unresolved tokens or values invalid for
+their target property reject reload and preserve the accepted document.
+This exposes the native token resolver; it does not add CSS inheritance or
+browser custom-property declarations.
+
+## Required source contracts
 
 Optional `Config.Set_RequiredButtons` declares source contracts with
 `FCk_UI_AuthoredButtonRequirement(Id, Action, EnabledBool)`. `Region` defaults to
@@ -37,9 +62,12 @@ One session may mount on one surface during its lifetime. Invalid mount candidat
 
 Text maps to text/search bindings, booleans to visibility/enabled/checkbox values, and numbers to numeric bindings. The session internally registers the existing slider and checkbox. A slider's required `interaction` refers to its number declaration and emits a proposal on commit; optional `changed` also emits live proposals. Use both only when the consumer intentionally handles both. Actions refer to the declared action list.
 
-Optional `Config.Set_RegisterHudControls(true)` registers the existing
-`hud-meter` and `hud-graphic` controls; `Set_RegisterRadialControls(true)`
-registers `radial-selector`. Both default to false. Registration is completed
+Optional `Config.Set_RegisterHudControls(true)` registers `hud-meter`, `hud-graphic`, `hud-orb`, `hud-ability` and `key-hint`;
+`Set_RegisterRadialControls(true)` registers `radial-selector`.
+`Set_RegisterItemControls(true)` registers `item-slot`, `atlas-image` and
+`inventory-grid`. The [spatial inventory contract](../CkSlateLayout/AUTHORING.md#spatial-inventory-grids)
+documents multi-cell records, rotation, cross-grid proposals and their ownership.
+All three flags default to false. Registration is completed
 before view publication, and a failed registration rejects the full session.
 The native [HUD and radial grammar](../CkSlateLayout/AUTHORING.md) remains the
 source of control properties and collection schema requirements.
