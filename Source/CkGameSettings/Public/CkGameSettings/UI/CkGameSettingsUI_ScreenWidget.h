@@ -160,7 +160,7 @@ private:
     auto DoGet_LoadedRowClass(const FCk_GameSettings_SettingDefinition& InDefinition) const -> UClass*;
     auto DoReportMisconfig(const TCHAR* InMessage) -> void;
 
-private:
+protected:
     /** The panel rows are injected into — required (rows have no injection point without it).
      *  WBP-compile-enforced; headless native instantiation still runs with it null.
      *  ROWS ONLY: every populate re-appends rows in display order, which pushes any designed
@@ -169,6 +169,7 @@ private:
               meta = (BindWidget, AllowPrivateAccess = true))
     TObjectPtr<UPanelWidget> _RowContainer;
 
+private:
     /** Category tabs. Absent, every category's rows render as one flat list. */
     UPROPERTY(BlueprintReadOnly,
               meta = (BindWidgetOptional, AllowPrivateAccess = true))

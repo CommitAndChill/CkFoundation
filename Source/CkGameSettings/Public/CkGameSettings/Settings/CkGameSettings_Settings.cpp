@@ -1,6 +1,7 @@
 #include "CkGameSettings_Settings.h"
 
 #include "CkGameSettings/Storage/CkGameSettings_IniStorageProvider.h"
+#include "CkGameSettings/Storage/CkGameSettings_StorageProvider.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -11,6 +12,19 @@ UCk_GameSettings_ProjectSettings_UE::
 {
     _StorageProviderClass = UCk_GameSettings_IniStorageProvider_UE::StaticClass();
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+bool UCk_GameSettings_ProjectSettings_UE::Test_TrySetStorageProviderClass(
+    const TSoftClassPtr<UCk_GameSettings_StorageProvider_UE>& InClass)
+{
+    UClass* Loaded = InClass.Get();
+    if (!IsValid(Loaded) ||
+        !Loaded->IsChildOf(UCk_GameSettings_StorageProvider_UE::StaticClass()) ||
+        Loaded->HasAnyClassFlags(CLASS_Abstract)) return false;
+    _StorageProviderClass = InClass;
+    return true;
+}
+#endif
 
 // --------------------------------------------------------------------------------------------------------------------
 

@@ -99,6 +99,12 @@ public:
     CK_PROPERTY_GET(_VideoPackCategoryTag);
     CK_PROPERTY_GET(_RowClassOverrides);
     CK_PROPERTY_GET(_SelectRowClassOverride);
+
+#if WITH_DEV_AUTOMATION_TESTS
+    /** C++ automation only: select a loaded, concrete provider before PIE subsystem creation. */
+    bool Test_TrySetStorageProviderClass(
+        const TSoftClassPtr<UCk_GameSettings_StorageProvider_UE>& InClass);
+#endif
 };
 
 // --------------------------------------------------------------------------------------------------------------------
