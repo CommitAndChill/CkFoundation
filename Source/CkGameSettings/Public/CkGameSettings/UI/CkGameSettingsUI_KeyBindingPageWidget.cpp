@@ -12,14 +12,71 @@
 #include <CommonButtonBase.h>
 #include <CommonInputSubsystem.h>
 #include <CommonInputBaseTypes.h>
+#include <Blueprint/UserWidget.h>
+#include <Engine/GameInstance.h>
+#include <Engine/LocalPlayer.h>
+#include <Engine/World.h>
 #include <Framework/Application/IInputProcessor.h>
 #include <Framework/Application/SlateApplication.h>
+#include <Framework/Application/SlateUser.h>
+#include <GameFramework/PlayerController.h>
+#include <GenericPlatform/GenericPlatformInputDeviceMapper.h>
+#include <Layout/WidgetPath.h>
 
 // --------------------------------------------------------------------------------------------------------------------
 
 namespace ck_game_settings_ui_key_binding_page_widget
 {
     constexpr auto AnalogCaptureThreshold = 0.5f;
+
+    auto HasVisibleOwnedViewportRoot(
+        const UCk_GameSettingsUI_KeyBindingPageWidget* InPage,
+        const APlayerController* InController,
+        const ULocalPlayer* InLocalPlayer,
+        const UWorld* InWorld) -> bool
+    {
+        // A nested page reaches its direct viewport root through panel
+        // parents, then through the UUserWidget that owns a widget-tree root.
+        TSet<const UWidget*> Visited;
+        const UWidget* Current = InPage;
+        const UUserWidget* ViewportRoot = nullptr;
+        for (int32 Depth = 0; Depth < 64; ++Depth)
+        {
+            if (ck::Is_NOT_Valid(Current) || Visited.Contains(Current) ||
+                Current->GetWorld() != InWorld)
+            { return false; }
+            Visited.Add(Current);
+            if (const auto* UserWidget = Cast<UUserWidget>(Current);
+                ck::IsValid(UserWidget) &&
+                (UserWidget->GetOwningPlayer() != InController ||
+                 UserWidget->GetOwningLocalPlayer() != InLocalPlayer))
+            { return false; }
+            if (Current->IsInViewport())
+            {
+                ViewportRoot = Cast<UUserWidget>(Current);
+                break;
+            }
+            if (const auto* Parent = Current->GetParent(); ck::IsValid(Parent))
+            { Current = Parent; continue; }
+            const auto* OuterWidget = Current->GetTypedOuter<UUserWidget>();
+            if (ck::Is_NOT_Valid(OuterWidget) || OuterWidget == Current)
+            { return false; }
+            Current = OuterWidget;
+        }
+        if (ck::Is_NOT_Valid(ViewportRoot) ||
+            ViewportRoot->GetOwningPlayer() != InController ||
+            ViewportRoot->GetOwningLocalPlayer() != InLocalPlayer ||
+            ViewportRoot->GetWorld() != InWorld)
+        { return false; }
+        const auto PageSlate = InPage->GetCachedWidget();
+        const auto RootSlate = ViewportRoot->GetCachedWidget();
+        if (NOT PageSlate.IsValid() || NOT RootSlate.IsValid())
+        { return false; }
+        auto Path = FWidgetPath{};
+        return FSlateApplication::Get().FindPathToWidget(
+                   PageSlate.ToSharedRef(), Path, EVisibility::Visible) &&
+            Path.IsValid() && Path.ContainsWidget(RootSlate.Get());
+    }
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -40,22 +97,37 @@ public:
     {}
 
     auto Tick(const float InDeltaTime, FSlateApplication& InSlateApp, TSharedRef<ICursor> InCursor) -> void override
-    {}
+    {
+        if (auto* Page = _Page.Get();
+            ck::IsValid(Page) && Page->_CaptureActive && NOT Page->Get_HasExactCaptureOwner())
+        { Page->DoCancelCapture(); }
+    }
 
     auto HandleKeyDownEvent(FSlateApplication& InSlateApp, const FKeyEvent& InKeyEvent) -> bool override
     {
+        auto* Page = _Page.Get();
+        if (ck::Is_NOT_Valid(Page) || NOT Page->DoCanConsumeCaptureEvent(InKeyEvent))
+        { return false; }
         DoDeliver(InKeyEvent.GetKey());
         return true;
     }
 
     auto HandleMouseButtonDownEvent(FSlateApplication& InSlateApp, const FPointerEvent& InPointerEvent) -> bool override
     {
+        auto* Page = _Page.Get();
+        if (ck::Is_NOT_Valid(Page) || NOT Page->DoCanConsumeCaptureEvent(InPointerEvent))
+        { return false; }
         DoDeliver(InPointerEvent.GetEffectingButton());
         return true;
     }
 
     auto HandleMouseWheelOrGestureEvent(FSlateApplication& InSlateApp, const FPointerEvent& InWheelEvent, const FPointerEvent* InGestureEvent) -> bool override
     {
+        auto* Page = _Page.Get();
+        if (ck::Is_NOT_Valid(Page) || NOT Page->DoCanConsumeCaptureEvent(InWheelEvent) ||
+            (InGestureEvent != nullptr &&
+             NOT Page->DoCanConsumeCaptureEvent(*InGestureEvent)))
+        { return false; }
         if (InWheelEvent.GetWheelDelta() == 0.0f)
         { return true; }
 
@@ -66,6 +138,10 @@ public:
     auto HandleAnalogInputEvent(FSlateApplication& InSlateApp, const FAnalogInputEvent& InAnalogEvent) -> bool override
     {
         using namespace ck_game_settings_ui_key_binding_page_widget;
+
+        auto* Page = _Page.Get();
+        if (ck::Is_NOT_Valid(Page) || NOT Page->DoCanConsumeCaptureEvent(InAnalogEvent))
+        { return false; }
 
         if (FMath::Abs(InAnalogEvent.GetAnalogValue()) < AnalogCaptureThreshold)
         { return true; }
@@ -467,8 +543,12 @@ auto
     NativeDestruct()
     -> void
 {
-    if (_CaptureProcessor.IsValid() && FSlateApplication::IsInitialized())
-    { FSlateApplication::Get().UnregisterInputPreProcessor(_CaptureProcessor); }
+    DoCancelCapture();
+    _CaptureOwnerController.Reset();
+    _CaptureOwnerLocalPlayer.Reset();
+    _CaptureOwnerWorld.Reset();
+    _CaptureSlateUserIndex = INDEX_NONE;
+    _CapturePlatformUserId = PLATFORMUSERID_NONE;
 
     if (const auto PlayerController = GetOwningPlayer();
         ck::IsValid(PlayerController))
@@ -488,6 +568,9 @@ auto
 {
     if (NOT _CaptureActive)
     { return Super::NativeOnKeyDown(InGeometry, InKeyEvent); }
+
+    if (NOT DoCanConsumeCaptureEvent(InKeyEvent))
+    { return FReply::Unhandled(); }
 
     if (InKeyEvent.GetKey() == EKeys::Escape)
     {
@@ -510,6 +593,9 @@ auto
 
     if (NOT _CaptureActive)
     { return Super::NativeOnAnalogValueChanged(InGeometry, InAnalogEvent); }
+
+    if (NOT DoCanConsumeCaptureEvent(InAnalogEvent))
+    { return FReply::Unhandled(); }
 
     if (FMath::Abs(InAnalogEvent.GetAnalogValue()) < AnalogCaptureThreshold)
     { return FReply::Handled(); }
@@ -606,9 +692,11 @@ auto
     HandleSwapClicked()
     -> void
 {
+    if (NOT Get_HasExactCaptureOwner())
+    { _ConflictPending = false; DoSetConflictOverlayVisible(false); return; }
     _ConflictPending = false;
 
-    const auto PlayerController = GetOwningPlayer();
+    const auto PlayerController = _CaptureOwnerController.Get();
 
     if (ck::Is_NOT_Valid(PlayerController))
     { return; }
@@ -625,9 +713,11 @@ auto
     HandleOverwriteClicked()
     -> void
 {
+    if (NOT Get_HasExactCaptureOwner())
+    { _ConflictPending = false; DoSetConflictOverlayVisible(false); return; }
     _ConflictPending = false;
 
-    const auto PlayerController = GetOwningPlayer();
+    const auto PlayerController = _CaptureOwnerController.Get();
 
     if (ck::Is_NOT_Valid(PlayerController))
     { return; }
@@ -653,11 +743,98 @@ auto
 
 auto
     UCk_GameSettingsUI_KeyBindingPageWidget::
+    Get_HasExactCaptureOwner() const
+    -> bool
+{
+    if (NOT FSlateApplication::IsInitialized())
+    { return false; }
+    auto* Controller = _CaptureOwnerController.Get();
+    auto* LocalPlayer = _CaptureOwnerLocalPlayer.Get();
+    auto* World = _CaptureOwnerWorld.Get();
+    if (ck::Is_NOT_Valid(Controller) || Controller->IsActorBeingDestroyed() ||
+        ck::Is_NOT_Valid(LocalPlayer) || ck::Is_NOT_Valid(World) ||
+        World->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+        World->bIsTearingDown || World->IsBeingCleanedUp() ||
+        ck::Is_NOT_Valid(World->GetGameInstance()) ||
+        LocalPlayer->GetGameInstance() != World->GetGameInstance() ||
+        NOT Controller->IsLocalController() ||
+        GetOwningPlayer() != Controller || GetOwningLocalPlayer() != LocalPlayer ||
+        Controller->GetLocalPlayer() != LocalPlayer ||
+        LocalPlayer->GetPlayerController(World) != Controller ||
+        Controller->GetWorld() != World || LocalPlayer->GetWorld() != World ||
+        GetWorld() != World || _CaptureSlateUserIndex < 0 ||
+        NOT _CapturePlatformUserId.IsValid() ||
+        LocalPlayer->GetPlatformUserId() != _CapturePlatformUserId ||
+        NOT ck_game_settings_ui_key_binding_page_widget::HasVisibleOwnedViewportRoot(
+            this, Controller, LocalPlayer, World))
+    { return false; }
+    const auto User = LocalPlayer->GetSlateUser();
+    auto& Slate = FSlateApplication::Get();
+    return User.IsValid() && User->GetUserIndex() == _CaptureSlateUserIndex &&
+        Slate.GetUser(_CaptureSlateUserIndex) == User &&
+        Slate.GetUserFromPlatformUser(_CapturePlatformUserId) == User;
+}
+
+auto
+    UCk_GameSettingsUI_KeyBindingPageWidget::
+    DoCanConsumeCaptureEvent(
+        const FInputEvent& InEvent)
+    -> bool
+{
+    if (NOT _CaptureActive) { return false; }
+    if (NOT Get_HasExactCaptureOwner())
+    { DoCancelCapture(); return false; }
+    const auto Device = InEvent.GetInputDeviceId();
+    if (NOT Device.IsValid() ||
+        InEvent.GetUserIndex() != static_cast<uint32>(_CaptureSlateUserIndex))
+    { return false; }
+    const auto DeviceOwner = IPlatformInputDeviceMapper::Get().GetUserForInputDevice(Device);
+    return DeviceOwner.IsValid() && DeviceOwner == _CapturePlatformUserId &&
+        InEvent.GetPlatformUserId() == _CapturePlatformUserId;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    UCk_GameSettingsUI_KeyBindingPageWidget::
     DoBeginCapture(
         FName InMappingName,
         EPlayerMappableKeySlot InSlot)
     -> void
 {
+    if (_CaptureActive) { DoCancelCapture(); }
+    if (NOT FSlateApplication::IsInitialized())
+    { return; }
+    auto* Controller = GetOwningPlayer();
+    auto* LocalPlayer = GetOwningLocalPlayer();
+    auto* World = GetWorld();
+    if (ck::Is_NOT_Valid(Controller) || Controller->IsActorBeingDestroyed() ||
+        ck::Is_NOT_Valid(LocalPlayer) || ck::Is_NOT_Valid(World) ||
+        World->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+        World->bIsTearingDown || World->IsBeingCleanedUp() ||
+        ck::Is_NOT_Valid(World->GetGameInstance()) ||
+        LocalPlayer->GetGameInstance() != World->GetGameInstance() ||
+        NOT Controller->IsLocalController() ||
+        Controller->GetLocalPlayer() != LocalPlayer ||
+        LocalPlayer->GetPlayerController(World) != Controller ||
+        Controller->GetWorld() != World || LocalPlayer->GetWorld() != World)
+    { return; }
+    const auto User = LocalPlayer->GetSlateUser();
+    const auto PlatformUser = LocalPlayer->GetPlatformUserId();
+    if (NOT User.IsValid() || NOT PlatformUser.IsValid())
+    { return; }
+    _CaptureOwnerController = Controller;
+    _CaptureOwnerLocalPlayer = LocalPlayer;
+    _CaptureOwnerWorld = World;
+    _CaptureSlateUserIndex = User->GetUserIndex();
+    _CapturePlatformUserId = PlatformUser;
+    if (NOT Get_HasExactCaptureOwner())
+    { return; }
+    if (NOT _CaptureProcessor.IsValid())
+    { _CaptureProcessor = MakeShared<FCk_GameSettingsUI_KeyCaptureProcessor>(this); }
+    if (NOT FSlateApplication::Get().RegisterInputPreProcessor(_CaptureProcessor))
+    { return; }
+
     _PendingMappingName = InMappingName;
     _PendingSlot = InSlot;
     _CaptureActive = true;
@@ -674,15 +851,8 @@ auto
 
     DoSetPendingRowCaptureDisplay(true);
 
-    if (FSlateApplication::IsInitialized())
-    {
-        if (NOT _CaptureProcessor.IsValid())
-        { _CaptureProcessor = MakeShared<FCk_GameSettingsUI_KeyCaptureProcessor>(this); }
-
-        FSlateApplication::Get().RegisterInputPreProcessor(_CaptureProcessor);
-    }
-
-    SetKeyboardFocus();
+    // The preprocessor receives this owner's input without changing the
+    // primary keyboard user's global focus (which may belong to another LP).
 }
 
 auto
@@ -693,6 +863,8 @@ auto
 {
     if (NOT _CaptureActive)
     { return; }
+    if (NOT Get_HasExactCaptureOwner())
+    { DoCancelCapture(); return; }
 
     if (InKey == EKeys::Escape)
     {
@@ -757,12 +929,12 @@ auto
         const FKey& InNewKey)
     -> void
 {
+    if (NOT Get_HasExactCaptureOwner())
+    { DoCancelCapture(); return; }
     DoCancelCapture();
-
-    const auto PlayerController = GetOwningPlayer();
-
-    if (ck::Is_NOT_Valid(PlayerController))
+    if (NOT Get_HasExactCaptureOwner())
     { return; }
+    const auto PlayerController = _CaptureOwnerController.Get();
 
     _PendingKey = InNewKey;
 
@@ -808,8 +980,8 @@ auto
     if (InSucceeded)
     {
         // Linked followers ride along — covers the plain, swap and overwrite paths alike.
-        if (const auto PlayerController = GetOwningPlayer();
-            ck::IsValid(PlayerController))
+        if (const auto PlayerController = _CaptureOwnerController.Get();
+            Get_HasExactCaptureOwner() && ck::IsValid(PlayerController))
         {
             for (const auto& LinkedName : Get_LinkedMappingNames(_PendingMappingName))
             {

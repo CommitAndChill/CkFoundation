@@ -12,6 +12,9 @@
 // --------------------------------------------------------------------------------------------------------------------
 
 class FCk_GameSettingsUI_KeyCaptureProcessor;
+struct FInputEvent;
+class ULocalPlayer;
+class UWorld;
 class UCommonButtonBase;
 class UCommonInputSubsystem;
 class UImage;
@@ -171,6 +174,8 @@ class CKGAMESETTINGS_API UCk_GameSettingsUI_KeyBindingPageWidget : public UCk_Us
 {
     GENERATED_BODY()
 
+    friend class FCk_GameSettingsUI_KeyCaptureProcessor;
+
 public:
     CK_GENERATED_BODY(UCk_GameSettingsUI_KeyBindingPageWidget);
 
@@ -307,6 +312,8 @@ public:
 private:
     auto DoBeginCapture(FName InMappingName, EPlayerMappableKeySlot InSlot) -> void;
     auto DoCancelCapture() -> void;
+    auto Get_HasExactCaptureOwner() const -> bool;
+    auto DoCanConsumeCaptureEvent(const FInputEvent& InEvent) -> bool;
     auto DoAttemptRebind(const FKey& InNewKey) -> void;
     auto DoFinishRebind(bool InSucceeded, const FGameplayTagContainer& InFailureReason) -> void;
     auto DoSetStatus(const FText& InStatus) -> void;
@@ -391,6 +398,11 @@ private:
     TArray<TObjectPtr<UCk_GameSettingsUI_KeyBindingRowWidget>> _Rows;
 
     bool _CaptureActive = false;
+    TWeakObjectPtr<APlayerController> _CaptureOwnerController;
+    TWeakObjectPtr<ULocalPlayer> _CaptureOwnerLocalPlayer;
+    TWeakObjectPtr<UWorld> _CaptureOwnerWorld;
+    int32 _CaptureSlateUserIndex = INDEX_NONE;
+    FPlatformUserId _CapturePlatformUserId = PLATFORMUSERID_NONE;
     bool _ConflictPending = false;
     bool _ResetAllPending = false;
     FName _PendingMappingName;
