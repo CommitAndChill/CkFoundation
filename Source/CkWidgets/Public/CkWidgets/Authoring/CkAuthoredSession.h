@@ -156,12 +156,17 @@ private:
     TArray<FCk_UI_AuthoredBool> _Bool;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
     TArray<FCk_UI_AuthoredFontFamily> _FontFamilies;
+    /** Native var(--name) values; frozen when the session is initialized. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
+    TMap<FString, FString> _StyleTokens;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
     TArray<FCk_UI_AuthoredImage> _Images;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
     bool _RegisterHudControls = false;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
     bool _RegisterRadialControls = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
+    bool _RegisterItemControls = false;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
     TArray<FString> _Actions;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
@@ -180,9 +185,11 @@ public:
     CK_PROPERTY(_Number);
     CK_PROPERTY(_Bool);
     CK_PROPERTY(_FontFamilies);
+    CK_PROPERTY(_StyleTokens);
     CK_PROPERTY(_Images);
     CK_PROPERTY(_RegisterHudControls);
     CK_PROPERTY(_RegisterRadialControls);
+    CK_PROPERTY(_RegisterItemControls);
     CK_PROPERTY(_Actions);
     CK_PROPERTY(_Collections);
     CK_PROPERTY(_ItemActions);
@@ -253,6 +260,9 @@ public:
     void Request_EndInput(bool InRestoreFocus = true);
     UFUNCTION(BlueprintCallable, Category = "Ck|UI|Authoring")
     bool TryFocusButton(const FString& InId);
+    /** Focus a visible, enabled native control by its full authored tag, including repeat scopes. */
+    UFUNCTION(BlueprintCallable, Category = "Ck|UI|Authoring")
+    bool TryFocusControl(const FString& InId);
     /** Queries exact current button focus for the active admitted user without refreshing attributes. */
     UFUNCTION(BlueprintPure, Category = "Ck|UI|Authoring")
     bool Get_IsButtonFocused(const FString& InId) const;

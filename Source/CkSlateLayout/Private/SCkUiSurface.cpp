@@ -184,7 +184,7 @@ namespace ck_ui_surface
 
     auto MakeMeasuredPort(const TSharedRef<SWidget>& InWidget, const FString& InId) -> TSharedRef<SBox>
     {
-        const auto Port = SNew(SBox).Tag(FName(*InId));
+        const auto Port = SNew(SBox).Visibility(EVisibility::SelfHitTestInvisible).Tag(FName(*InId));
         if (const TSharedPtr<FCkFlexMeasureMetaData> Measure = InWidget->GetMetaData<FCkFlexMeasureMetaData>(); Measure.IsValid())
         {
             Port->AddMetadata(MakeShared<FCkFlexMeasureMetaData>(
@@ -330,6 +330,7 @@ struct FCkUiView::FNestedUpdate
 
 auto FCkUiView::Create(FNativeBindings InBindings, FActions InActions, FTokens InTokens, FSlateFontInfo InBaseFont, FDataBindings InData, TSharedPtr<const FCkUiWidgetRegistrySnapshot> InCustomRegistry, TSharedPtr<const FCkUiFontRegistrySnapshot> InFontRegistry) -> TSharedRef<FCkUiView>
 {
+    if (!InData.ItemSlotDomain.IsValid()) { InData.ItemSlotDomain = MakeShared<int32>(0); }
     return MakeShareable(new FCkUiView(MoveTemp(InBindings), MoveTemp(InActions), MoveTemp(InTokens), MoveTemp(InBaseFont), MoveTemp(InData), MoveTemp(InCustomRegistry), MoveTemp(InFontRegistry)));
 }
 
@@ -1191,7 +1192,7 @@ auto FCkUiView::ApplyStyle(const FCkUiStyle& InStyle, const TSharedRef<SWidget>&
         const auto MinHeight = InStyle.MinHeight > 0.0f ? FOptionalSize(InStyle.MinHeight) : FOptionalSize();
         const auto MaxWidth = InStyle.MaxWidth.IsSet() ? FOptionalSize(InStyle.MaxWidth.GetValue()) : FOptionalSize();
         const auto MaxHeight = InStyle.MaxHeight.IsSet() ? FOptionalSize(InStyle.MaxHeight.GetValue()) : FOptionalSize();
-        Result = SNew(SBox).MinDesiredWidth(MinWidth).MinDesiredHeight(MinHeight).MaxDesiredWidth(MaxWidth).MaxDesiredHeight(MaxHeight)[Result];
+        Result = SNew(SBox).Visibility(EVisibility::SelfHitTestInvisible).MinDesiredWidth(MinWidth).MinDesiredHeight(MinHeight).MaxDesiredWidth(MaxWidth).MaxDesiredHeight(MaxHeight)[Result];
     }
     if (InStyle.Background.IsSet() || InStyle.BorderColor.IsSet())
     {
@@ -2436,11 +2437,14 @@ auto FCkUiView::StageNode(const FCkUiNode& InNode, FStagedDocument& InOutStaged,
         { OutErrors.Add(FString::Printf(TEXT("Custom node '%s' is not registered."), *InNode.Id)); return nullptr; }
 
         const TWeakPtr<FCkUiView> WeakOwner = const_cast<FCkUiView*>(this)->AsShared();
-        auto Arguments = FCkUiCustomWidgetArguments{.Id = InNode.Id, .Style = InNode.Style, .CanDispatchEvents = TAttribute<bool>::CreateLambda([WeakOwner]()
+        auto Arguments = FCkUiCustomWidgetArguments{.Id = InNode.Id, .OwnerView = WeakOwner,
+            .ItemSlotDomain = _Data.ItemSlotDomain, .Style = InNode.Style, .CanDispatchEvents = TAttribute<bool>::CreateLambda([WeakOwner]()
         {
             const TSharedPtr<FCkUiView> Owner = WeakOwner.Pin();
             return Owner.IsValid() && Owner->CanDispatchEvents();
         }), .BaseFont = _BaseFont, .FontRegistry = _FontRegistry, .SlateUserIndex = _Data.SlateUserIndex};
+        for (const auto& [Name, Collection] : _Data.Collections)
+        { if (Collection.IsValid()) { Arguments.InteractionCollections.Add(Collection); } }
         for (const auto& [Name, Value] : InNode.CustomProperties)
         {
             switch (Value.Kind)
@@ -2942,6 +2946,32 @@ auto FCkUiView::ReleaseTransientInteractions(const TSharedRef<SWidget>& InRoot, 
     for (const TSharedPtr<SCkUiMenuButton>& Menu : Menus) { Menu->ReleasePopup(); }
     for (const TSharedPtr<SCkUiTable>& Table : Tables) { Table->ReleaseContextMenu(); }
     for (const TSharedPtr<SCkUiTree>& Tree : Trees) { Tree->ReleaseContextMenu(); }
+}
+
+auto FCkUiView::Request_ReleaseTransientInteractions() -> void
+{
+    if (!IsInGameThread() || !FSlateApplication::IsInitialized() || _TransientReleaseActive) { return; }
+    TGuardValue<bool> Guard(_TransientReleaseActive, true);
+    const TSharedRef<FCkUiView> KeepAlive = AsShared();
+    TArray<TSharedPtr<FCkUiView>> Children;
+    for (const auto& [Id, Repeat] : _RepeatStates)
+    {
+        if (!Repeat.IsValid()) { continue; }
+        for (const auto& Item : Repeat->Items)
+        { if (Item.View.IsValid()) { Children.AddUnique(Item.View); } }
+    }
+    for (const auto& [Id, Container] : _CustomSlots)
+    {
+        if (!Container.IsValid()) { continue; }
+        for (const auto& [Name, Slot] : Container->Slots)
+        { if (Slot.IsValid() && Slot->View.IsValid()) { Children.AddUnique(Slot->View); } }
+    }
+    TArray<TSharedPtr<SBox>> Mounts;
+    _RegionMounts.GenerateValueArray(Mounts);
+    for (const auto& Child : Children)
+    { if (Child.IsValid()) { Child->Request_ReleaseTransientInteractions(); } }
+    for (const auto& Mount : Mounts)
+    { if (Mount.IsValid()) { ReleaseTransientInteractions(Mount.ToSharedRef()); } }
 }
 
 auto FCkUiView::ReleaseOwnerInteractions() -> void

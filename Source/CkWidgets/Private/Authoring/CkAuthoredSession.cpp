@@ -8,6 +8,11 @@
 #include "CkSlateLayout/CkUiSlider.h"
 #include "CkSlateLayout/CkUiHudControls.h"
 #include "CkSlateLayout/CkUiRadialSelector.h"
+#include "CkSlateLayout/CkUiItemSlot.h"
+#include "CkSlateLayout/CkUiInventoryGrid.h"
+#include "CkSlateLayout/CkUiActionCard.h"
+#include "CkSlateLayout/SCkUiRepeat.h"
+#include "CkSlateLayout/CkUiAtlasImage.h"
 #include "CkCore/Ensure/CkEnsure.h"
 #include "Engine/Texture2D.h"
 #include "UObject/StrongObjectPtr.h"
@@ -288,6 +293,15 @@ auto
     { return Fail(OutErrors, TEXT("Authored session initialization requires an initialized Slate application.")); }
     TGuardValue<bool> OperationGuard(_OperationActive, true);
 
+    FCkUiView::FTokens StyleTokens = InConfig.Get_StyleTokens();
+    constexpr int32 MaxStyleTokenChars = 1024 * 1024; // Matches the native document source bound.
+    for (const auto& [Name, Value] : StyleTokens)
+    {
+        if (!Name.StartsWith(TEXT("--")) || Name.Len() > MaxStyleTokenChars
+            || Value.Len() > MaxStyleTokenChars)
+        { return Fail(OutErrors, TEXT("Authored style tokens require -- names and values no larger than 1 MiB.")); }
+    }
+
     UCommonActivatableWidget* InteractionOwner = InConfig.Get_InteractionOwner();
     ULocalPlayer* InputPlayer = nullptr;
     UWorld* InputWorld = nullptr;
@@ -421,6 +435,8 @@ auto
     }
 
     FCkUiWidgetRegistry Registry;
+    const FCkUiLoadResult ActionCardResult = FCkUiActionCard::Register(Registry);
+    if (!ActionCardResult.Succeeded) { OutErrors = ActionCardResult.Errors; return false; }
     const FCkUiLoadResult SliderResult = FCkUiSlider::Register(Registry);
     if (!SliderResult.Succeeded) { OutErrors = SliderResult.Errors; return false; }
     const FCkUiLoadResult CheckboxResult = FCkUiCheckbox::Register(Registry);
@@ -439,6 +455,15 @@ auto
         const bool Registered = Result.Succeeded;
         CK_ENSURE_IF_NOT(Registered, TEXT("Authored radial controls could not be registered.")) {}
         if (!Registered) { OutErrors = Result.Errors; return false; }
+    }
+    if (InConfig.Get_RegisterItemControls())
+    {
+        const FCkUiLoadResult Slots = RegisterItemSlotUiControl(Registry);
+        if (!Slots.Succeeded) { OutErrors = Slots.Errors; return false; }
+        const FCkUiLoadResult Atlas = RegisterAtlasImageUiControl(Registry);
+        if (!Atlas.Succeeded) { OutErrors = Atlas.Errors; return false; }
+        const FCkUiLoadResult Grid = RegisterInventoryGridUiControl(Registry);
+        if (!Grid.Succeeded) { OutErrors = Grid.Errors; return false; }
     }
 
     const TWeakObjectPtr<UCk_UI_AuthoredSession_UE> Weak{this};
@@ -553,7 +578,7 @@ auto
             if (Owner != nullptr && Owner->CanDispatchEvents()) { Owner->OnAction.Broadcast(Name); }
         }));
     }
-    const TSharedRef<FCkUiView> Candidate = FCkUiView::Create({}, MoveTemp(Actions), {},
+    const TSharedRef<FCkUiView> Candidate = FCkUiView::Create({}, MoveTemp(Actions), MoveTemp(StyleTokens),
         FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 10), MoveTemp(Data), Registry.CreateSnapshot(), Fonts.CreateSnapshot());
     // Native document admission requires the complete retained mount set before the first reload.
     for (const FString& Name : InConfig.Get_Regions())
@@ -912,12 +937,15 @@ auto
     if (!IsInGameThread()) { return; }
     if (!_InputActive && !_InputReleaseGuard.IsValid() && !_PreviousInputFocus.IsValid()) { return; }
     TGuardValue<bool> InputGuard(_InputOperationActive, true);
-    ++_InputGeneration;
+    const uint64 Generation = ++_InputGeneration;
     _InputActive = false;
     const TSharedPtr<FCkUiAuthoredInputReleaseGuard> ReleaseGuard = MoveTemp(_InputReleaseGuard);
     if (ReleaseGuard.IsValid()) { ReleaseGuard->BeginDrain(); }
     const TSharedPtr<SWidget> PreviousFocus = _PreviousInputFocus.Pin();
     _PreviousInputFocus.Reset();
+    const auto View = _View;
+    if (View.IsValid()) { View->Request_ReleaseTransientInteractions(); }
+    if (_InputGeneration != Generation || _View != View) { return; }
     if (!InRestoreFocus) { return; }
     if (!FSlateApplication::IsInitialized() || !PreviousFocus.IsValid() || !HasOwnedInputContext()) { return; }
     const auto* Owner = _InteractionOwner.Get();
@@ -978,6 +1006,69 @@ auto
     const FString Id = InId;
     TGuardValue<bool> InputGuard(_InputOperationActive, true);
     return DoFocusButton(Id, FindFocusableButton(Id));
+}
+
+auto
+    UCk_UI_AuthoredSession_UE::
+    TryFocusControl(const FString& InId)
+    -> bool
+{
+    if (_InputOperationActive || !Get_IsInputActive() || _OperationActive || InId.IsEmpty()) { return false; }
+    TGuardValue<bool> Guard(_InputOperationActive, true);
+    const auto View = _View;
+    const auto Revision = View->GetRevision();
+    const auto Generation = _InputGeneration;
+    const auto* Surface = _MountedSurface.Get();
+    const auto Root = IsValid(Surface) ? Surface->GetCachedWidget() : TSharedPtr<SWidget>{};
+    if (!Root.IsValid()) { return false; }
+    TFunction<TSharedPtr<SWidget>(const TSharedRef<SWidget>&, const FString&)> Find;
+    Find = [&Find](const TSharedRef<SWidget>& Node, const FString& Id) -> TSharedPtr<SWidget>
+    {
+        if (Node->HasRegisteredSlateAttribute() && Node->IsAttributesUpdatesEnabled())
+        {
+            FSlateAttributeMetaData::UpdateAllAttributes(*Node,
+                FSlateAttributeMetaData::EInvalidationPermission::AllowInvalidationIfConstructed);
+        }
+        if (!Node->GetVisibility().IsVisible() || !Node->IsEnabled()) { return {}; }
+        if (Node->GetTag() == FName(*Id) && Node->SupportsKeyboardFocus()) { return Node; }
+        if (Node->GetTypeAsString() == TEXT("SCkUiRepeat"))
+        {
+            const FString Prefix = Node->GetTag().ToString() + TEXT("/");
+            if (Id.StartsWith(Prefix, ESearchCase::CaseSensitive))
+            {
+                const FString Tail = Id.Mid(Prefix.Len());
+                const auto Repeat = StaticCastSharedRef<SCkUiRepeat>(Node);
+                Repeat->TryRefresh();
+                if (!Repeat->GetLastFailure().IsEmpty()) { return {}; }
+                TSharedPtr<SWidget> Match;
+                for (int32 Index = 1; Index < Tail.Len() - 1; ++Index)
+                {
+                    if (Tail[Index] != TCHAR('/')) { continue; }
+                    const auto Item = Repeat->GetItemWidget(Tail.Left(Index));
+                    if (!Item.IsValid()) { continue; }
+                    const auto Candidate = Find(Item.ToSharedRef(), Tail.Mid(Index + 1));
+                    if (!Candidate.IsValid()) { continue; }
+                    if (Match.IsValid() && Match != Candidate) { return {}; }
+                    Match = Candidate;
+                }
+                return Match;
+            }
+        }
+        const auto* Children = Node->GetChildren();
+        for (int32 Index = 0; Children != nullptr && Index < Children->Num(); ++Index)
+        {
+            const auto Found = Find(ConstCastSharedRef<SWidget>(Children->GetChildAt(Index)), Id);
+            if (Found.IsValid()) { return Found; }
+        }
+        return {};
+    };
+    const auto Candidate = Find(Root.ToSharedRef(), InId);
+    if (!Candidate.IsValid() || !Get_IsInputActive() || _View != View
+        || View->GetRevision() != Revision || _InputGeneration != Generation) { return false; }
+    FSlateApplication::Get().SetUserFocus(_SlateUserIndex, Candidate, EFocusCause::Navigation);
+    return Get_IsInputActive() && _View == View && View->GetRevision() == Revision
+        && _InputGeneration == Generation
+        && FSlateApplication::Get().GetUserFocusedWidget(_SlateUserIndex) == Candidate;
 }
 
 auto
