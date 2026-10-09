@@ -113,7 +113,7 @@ private:
     auto DoResolveDisplayedSlot() -> void;
     auto DoRefreshKeyDisplay() -> void;
 
-private:
+protected:
     UPROPERTY(BlueprintReadOnly,
               meta = (BindWidgetOptional, AllowPrivateAccess = true))
     TObjectPtr<UTextBlock> _NameText;
@@ -138,6 +138,7 @@ private:
               meta = (BindWidgetOptional, AllowPrivateAccess = true))
     TObjectPtr<UCommonButtonBase> _ResetButton;
 
+private:
     UPROPERTY(Transient)
     TWeakObjectPtr<APlayerController> _PlayerController;
 
@@ -321,7 +322,7 @@ private:
     auto DoSetPendingRowCaptureDisplay(bool InCapturing) -> void;
     auto DoGet_MappingDisplayName(FName InMappingName) const -> FText;
 
-private:
+protected:
     /** The panel key rows are injected into — required (rows have no injection point without it).
      *  WBP-compile-enforced; headless native instantiation still runs with it null. */
     UPROPERTY(BlueprintReadOnly,
@@ -373,6 +374,7 @@ private:
               meta = (AllowPrivateAccess = true))
     TSubclassOf<UCk_GameSettingsUI_KeyBindingRowWidget> _RowWidgetClass = UCk_GameSettingsUI_KeyBindingRowWidget::StaticClass();
 
+private:
     /** Set: Reset All fires OnResetAllRequested (the game presents its confirmation) instead of
      *  resetting immediately. Reset-all confirmation presentation is the game's choice, like
      *  conflict presentation. */
