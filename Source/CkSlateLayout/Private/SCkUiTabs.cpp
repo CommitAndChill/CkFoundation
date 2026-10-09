@@ -2,6 +2,7 @@
 #include "CkSlateLayout/CkFlexLayoutTypes.h"
 
 #include "Brushes/SlateNoResource.h"
+#include "Brushes/SlateRoundedBoxBrush.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Application/SlateUser.h"
 #include "Input/Events.h"
@@ -14,6 +15,31 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 
+namespace
+{
+    class SCkUiTabsHeaderButton final : public SButton
+    {
+    public:
+        using FArguments = SButton::FArguments;
+        using SButton::Construct;
+
+        void SetFocusOutlineColor(const TOptional<FLinearColor>& InColor)
+        {
+            _HasAuthoredFocusBrush = InColor.IsSet();
+            if (_HasAuthoredFocusBrush)
+            { _FocusBrush = FSlateRoundedBoxBrush{FLinearColor::Transparent, 0.0f, InColor.GetValue(), 1.0f}; }
+            Invalidate(EInvalidateWidgetReason::Paint);
+        }
+
+        auto GetFocusBrush() const -> const FSlateBrush* override
+        { return _HasAuthoredFocusBrush ? &_FocusBrush : SButton::GetFocusBrush(); }
+
+    private:
+        FSlateBrush _FocusBrush;
+        bool _HasAuthoredFocusBrush = false;
+    };
+}
+
 struct SCkUiTabs::FEntry
 {
     FString Key;
@@ -22,7 +48,7 @@ struct SCkUiTabs::FEntry
     TAttribute<bool> Visible;
     TSharedPtr<SWidget> Content;
     TFunction<void()> OnDeactivate;
-    TSharedPtr<SButton> Header;
+    TSharedPtr<SCkUiTabsHeaderButton> Header;
     TSharedPtr<STextBlock> HeaderLabel;
     TSharedPtr<SBox> HeaderPresentation;
     TSharedPtr<SBox> Underline;
@@ -114,6 +140,14 @@ void SCkUiTabs::SetConfiguration(TArray<FPanel> InPanels, TAttribute<FString> In
     FCkUiOnStringChanged InChanged, TAttribute<bool> InCanDispatchEvents, FSlateFontInfo InFont,
     FCkUiTabsVisualStyle InVisualStyle)
 {
+    bool bValidFocusOutline = true;
+    if (InVisualStyle.FocusOutlineColor.IsSet())
+    {
+        const FLinearColor Color = InVisualStyle.FocusOutlineColor.GetValue();
+        bValidFocusOutline = FMath::IsFinite(Color.R) && FMath::IsFinite(Color.G)
+            && FMath::IsFinite(Color.B) && FMath::IsFinite(Color.A);
+    }
+    if (!bValidFocusOutline) { return; }
     TSet<FString> Keys;
     for (const FPanel& Panel : InPanels)
     {
@@ -215,6 +249,7 @@ void SCkUiTabs::UpdateHeaderAppearance()
     {
         if (Entry.Header.IsValid())
         {
+            Entry.Header->SetFocusOutlineColor(_VisualStyle.FocusOutlineColor);
             Entry.Header->SetButtonStyle(_VisualStyle.Enabled ? &_FlatHeaderStyle : &_CoreHeaderStyle);
             Entry.Header->SetContentPadding(_VisualStyle.Enabled ? _VisualStyle.HeaderPadding : FMargin(4.0f, 2.0f));
             Entry.Header->SetHAlign(_VisualStyle.HeaderWidth.IsSet() ? HAlign_Center : HAlign_Fill);
@@ -300,7 +335,7 @@ void SCkUiTabs::Reconcile()
                         ? Owner->_VisualStyle.ActiveColor.Get(FLinearColor(0.18f, 0.42f, 0.90f, 1.0f))
                         : Owner->_VisualStyle.InactiveColor.Get(FLinearColor::White));
                 });
-            SAssignNew(Entry.Header, SButton)
+            SAssignNew(Entry.Header, SCkUiTabsHeaderButton)
                 .ButtonStyle(_VisualStyle.Enabled ? &_FlatHeaderStyle : &_CoreHeaderStyle)
                 .ContentPadding(_VisualStyle.Enabled ? _VisualStyle.HeaderPadding : FMargin(4.0f, 2.0f))
                 .HAlign(_VisualStyle.HeaderWidth.IsSet() ? HAlign_Center : HAlign_Fill)

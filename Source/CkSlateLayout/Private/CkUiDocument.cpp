@@ -268,6 +268,7 @@ namespace ck_ui_document
             || InProperty == TEXT("-ck-tabs-font-size") || InProperty == TEXT("-ck-tabs-font-weight")
             || InProperty == TEXT("-ck-tabs-header-padding-x") || InProperty == TEXT("-ck-tabs-header-padding-y")
             || InProperty == TEXT("-ck-tabs-header-width") || InProperty == TEXT("-ck-tabs-header-align")
+            || InProperty == TEXT("-ck-tabs-focus-outline-color")
             || InProperty == TEXT("-ck-table-header-background")
             || InProperty == TEXT("-ck-table-sort-indicator-color")
             || InProperty == TEXT("-ck-table-header-padding-x") || InProperty == TEXT("-ck-table-header-padding-y")
@@ -276,7 +277,7 @@ namespace ck_ui_document
             || InProperty == TEXT("-ck-table-row-separator-width")
             || InProperty == TEXT("-ck-tree-background") || InProperty == TEXT("-ck-tree-row-background") || InProperty == TEXT("-ck-tree-row-hover-background")
             || InProperty == TEXT("-ck-tree-row-selected-background") || InProperty == TEXT("-ck-tree-row-selected-accent-color")
-            || InProperty == TEXT("-ck-tree-row-selected-accent-width");
+            || InProperty == TEXT("-ck-tree-row-selected-accent-width") || InProperty == TEXT("-ck-tree-focus-outline-color");
     }
 
     auto IsButtonVisualProperty(const FString& InProperty) -> bool
@@ -697,6 +698,7 @@ namespace ck_ui_document
                 if (!ParseColor(Value, Color)) { InOutState.Error(FString::Printf(TEXT("node '%s': invalid CSS color value for '%s'"), *InOutNode.Id, *InProperty)); return false; }
                 if (InProperty == TEXT("-ck-tabs-inactive-color")) { InOutNode.TabsVisualStyle.InactiveColor = Color; }
                 else if (InProperty == TEXT("-ck-tabs-active-color")) { InOutNode.TabsVisualStyle.ActiveColor = Color; }
+                else if (InProperty == TEXT("-ck-tabs-focus-outline-color")) { InOutNode.TabsVisualStyle.FocusOutlineColor = Color; }
                 else { InOutNode.TabsVisualStyle.UnderlineColor = Color; }
                 return true;
             }
@@ -753,6 +755,7 @@ namespace ck_ui_document
                 else if (InProperty == TEXT("-ck-tree-row-background")) { InOutNode.TreeVisualStyle.RowBackground = Color; }
                 else if (InProperty == TEXT("-ck-tree-row-hover-background")) { InOutNode.TreeVisualStyle.RowHoverBackground = Color; }
                 else if (InProperty == TEXT("-ck-tree-row-selected-background")) { InOutNode.TreeVisualStyle.RowSelectedBackground = Color; }
+                else if (InProperty == TEXT("-ck-tree-focus-outline-color")) { InOutNode.TreeVisualStyle.FocusOutlineColor = Color; }
                 else { InOutNode.TreeVisualStyle.SelectedAccentColor = Color; }
                 return true;
             }
