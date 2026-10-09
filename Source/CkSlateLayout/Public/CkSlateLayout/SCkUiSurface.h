@@ -79,6 +79,8 @@ public:
         TMap<FString, TAttribute<bool>> Visibility;
         /** Optional inherited dispatch gate. Unset retains the normal enabled behavior. */
         TAttribute<bool> CanDispatchEvents;
+        /** Root-issued identity, inherited by nested repeat and slot views. */
+        TSharedPtr<int32> ItemSlotDomain;
         TMap<FString, TSharedPtr<FCkUiCollection>> Collections;
         /** Host-owned mutable series. The view retains only weak handles and never extends their lifetime. */
         TMap<FString, TWeakPtr<FCkUiFloatSeries>> FloatSeries;
@@ -168,6 +170,8 @@ public:
      * popups, pointer capture, or owner callbacks after the production owner is gone.
      */
     auto ReleaseOwnerInteractions() -> void;
+    /** Dismisses transient interactions throughout this view and its current nested views. */
+    auto Request_ReleaseTransientInteractions() -> void;
 
     const FCkUiLoadResult& GetLastResult() const { return _LastResult; }
     int64 GetRevision() const { return _Revision; }
@@ -294,5 +298,6 @@ private:
     bool _HasPolledContent = false;
     bool _IsReloading = false;
     bool _OwnerInteractionsReleased = false;
+    bool _TransientReleaseActive = false;
     int64 _Revision = 0;
 };

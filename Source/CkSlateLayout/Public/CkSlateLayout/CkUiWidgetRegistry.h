@@ -9,6 +9,7 @@ struct FSlateBrush;
 class FCkUiCollection;
 class FCkUiFloatSeries;
 class FCkUiFontRegistrySnapshot;
+class FCkUiView;
 
 DECLARE_DELEGATE_OneParam(FCkUiOnBoolChanged, bool);
 DECLARE_DELEGATE_OneParam(FCkUiOnNumberChanged, float);
@@ -59,6 +60,11 @@ struct FCkUiCustomWidgetSchema
 struct FCkUiCustomWidgetArguments
 {
     FString Id;
+    /** Read-only owning view and root-issued domain for same-document item transfers. */
+    TWeakPtr<FCkUiView> OwnerView;
+    TWeakPtr<int32> ItemSlotDomain;
+    /** Weak inherited collection handles for invalidating drags on synchronous record publication. */
+    TArray<TWeakPtr<FCkUiCollection>> InteractionCollections;
     FCkUiStyle Style;
     TMap<FString, FText> TextProperties;
     TMap<FString, float> NumberProperties;
