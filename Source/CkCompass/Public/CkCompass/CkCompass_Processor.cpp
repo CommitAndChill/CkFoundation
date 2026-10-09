@@ -210,7 +210,7 @@ namespace ck
         auto* World = WorldRoot.Get<TWeakObjectPtr<UWorld>>().Get();
         if (!IsValid(World) ||
             World->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
-            World->IsBeingCleanedUp())
+            World->bIsTearingDown || World->IsBeingCleanedUp())
         {
             DoClearAllEntries(InCompassEntity, InCompass, InScratch);
             return;

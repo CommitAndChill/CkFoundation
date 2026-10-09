@@ -38,7 +38,7 @@ namespace ck_compass_world_projection
         if (!IsValid(World)) { return false; }
         if (!World->IsGameWorld()) { return false; }
         if (World->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
-            World->IsBeingCleanedUp())
+            World->bIsTearingDown || World->IsBeingCleanedUp())
         { return false; }
 
         const auto ExactRoot = UCk_Utils_EcsWorld_Subsystem_UE::
