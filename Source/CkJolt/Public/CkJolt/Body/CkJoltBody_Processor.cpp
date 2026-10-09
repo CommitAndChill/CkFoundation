@@ -43,6 +43,8 @@
 #include <Jolt/Physics/Collision/Shape/DecoratedShape.h>
 #include <Jolt/Physics/Collision/Shape/OffsetCenterOfMassShape.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
+#include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
+#include <Jolt/Geometry/ConvexHullBuilder.h>
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -53,6 +55,7 @@ CK_REGISTER_PROCESSOR(ck::FProcessor_JoltBody_SleepStateMirror);
 CK_REGISTER_PROCESSOR(ck::FProcessor_JoltBody_KinematicPush);
 CK_REGISTER_PROCESSOR(ck::FProcessor_JoltBody_WritebackInterpolated);
 CK_REGISTER_PROCESSOR(ck::FProcessor_JoltBody_EndPlay);
+CK_REGISTER_PROCESSOR(ck::FProcessor_JoltBody_CancelSetupWaiters);
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -130,22 +133,36 @@ namespace ck
         _JoltWorld = ck_jolt_body_processor::TryResolve_JoltWorld(_TransientEntity);
 
         const auto PinnedPhysicsSystem = _PhysicsSystem.Pin();
-        if (ck::Is_NOT_Valid(PinnedPhysicsSystem) || _LayerTable == nullptr)
-        { return; }
 
         _PendingActivate.Reset();
         _PendingDontActivate.Reset();
+        _SetupDeliveries.Reset();
 
         TProcessor::DoTick(InDeltaT);
 
-        if (_PendingActivate.IsEmpty() && _PendingDontActivate.IsEmpty())
-        { return; }
+        if (ck::IsValid(PinnedPhysicsSystem) && _LayerTable != nullptr)
+        {
+            auto& BodyInterface = PinnedPhysicsSystem->GetBodyInterface();
+            DoBatchAdd(BodyInterface, _PendingActivate, JPH::EActivation::Activate);
+            DoBatchAdd(BodyInterface, _PendingDontActivate, JPH::EActivation::DontActivate);
+        }
 
-        auto& BodyInterface = PinnedPhysicsSystem->GetBodyInterface();
-
-        DoBatchAdd(BodyInterface, _PendingActivate, JPH::EActivation::Activate);
-        DoBatchAdd(BodyInterface, _PendingDontActivate, JPH::EActivation::DontActivate);
+        // Delivered only after BOTH batches are finalized, so a callback that destroys an entity cannot strand a
+        // body still waiting in the other batch.
+        auto Deliveries = MoveTemp(_SetupDeliveries);
+        for (auto& Delivery : Deliveries)
+        {
+            for (auto& Waiter : Delivery._Waiters)
+            { Waiter.ExecuteIfBound(Delivery._Handle, Delivery._State, Delivery._Failure); }
+        }
     }
+
+    auto
+        FProcessor_JoltBody_Setup::
+        DoQueue_SetupDelivery(
+            FSetupDelivery&& InDelivery)
+        -> void
+    { _SetupDeliveries.Emplace(MoveTemp(InDelivery)); }
 
     auto
         FProcessor_JoltBody_Setup::
@@ -157,6 +174,40 @@ namespace ck
         -> void
     {
         using namespace JPH;
+
+        const auto IsRuntimeConvex = InParams.Get_ShapeSource() == ECk_JoltBody_ShapeSource::RuntimeConvex;
+
+        // Terminal: records the result and queues the waiters for delivery after the batched add. Never ensures —
+        // every caller sits inside its own ensure body or reports an outcome that is not a defect.
+        const auto Fail = [&](ECk_JoltBody_SetupFailure InFailure, const FString& InDiagnostic = {}) -> void
+        {
+            InHandle.Try_Remove<MarkedDirtyBy>();
+            InHandle.Try_Remove<FFragment_JoltBody_RuntimeConvexInput>();
+            InJoltBody._SetupState = ECk_JoltBody_SetupState::Failed;
+            InJoltBody._SetupFailure = InFailure;
+            InJoltBody._SetupDiagnostic = InDiagnostic;
+            DoQueue_SetupDelivery(FSetupDelivery{
+                InHandle, ECk_JoltBody_SetupState::Failed, InFailure, MoveTemp(InJoltBody._SetupWaiters)});
+        };
+
+        if (IsRuntimeConvex && InHandle.Has<FTag_DestroyEntity_Initiate>())
+        {
+            Fail(ECk_JoltBody_SetupFailure::Cancelled, TEXT("entity destruction began before admission"));
+            return;
+        }
+
+        const auto JoltWorldIsReady = ck::IsValid(_PhysicsSystem.Pin()) && _LayerTable != nullptr;
+
+        // Legacy sources keep NeedsSetup and retry once a Jolt world exists; RuntimeConvex admission is terminal.
+        if (NOT JoltWorldIsReady && NOT IsRuntimeConvex)
+        { return; }
+
+        CK_ENSURE_IF_NOT(JoltWorldIsReady,
+            TEXT("JoltBody setup failed for Entity [{}]: the world has no Jolt physics system or layer table."), InHandle)
+        {
+            Fail(ECk_JoltBody_SetupFailure::UnsupportedWorld, TEXT("no Jolt physics system or layer table"));
+            return;
+        }
 
         if (InParams.Get_ShapeSource() == ECk_JoltBody_ShapeSource::StaticMeshAsset)
         {
@@ -189,6 +240,47 @@ namespace ck
         // entity transform (see its declaration). Setup-time only, like every other shape input.
         const auto EntityScale = EntityTransform.GetScale3D() * InParams.Get_ShapeScale();
 
+        // RuntimeConvex points are already in body-local cm, so any scale would be applied twice; Jolt stores the
+        // pose and COM offset as floats, so a double that overflows a float is rejected rather than turned into inf.
+        if (IsRuntimeConvex)
+        {
+            const auto IsRepresentableAsFloat = [](const FVector& InVector) -> bool
+            { return NOT InVector.ContainsNaN() && InVector.GetAbsMax() <= MAX_flt; };
+
+            const auto HasUnitScale = EntityTransform.GetScale3D().Equals(FVector::OneVector, 0.0) &&
+                InParams.Get_ShapeScale().Equals(FVector::OneVector, 0.0);
+            CK_ENSURE_IF_NOT(HasUnitScale,
+                TEXT("JoltBody setup failed for Entity [{}]: RuntimeConvex requires entity and shape scale of exactly one."),
+                InHandle)
+            {
+                Fail(ECk_JoltBody_SetupFailure::InvalidScale, TEXT("entity and shape scale must both be exactly one"));
+                return;
+            }
+
+            const auto ComOffsetIsRepresentable = InParams.Get_ComSource() != ECk_JoltBody_ComSource::ExplicitOffset ||
+                IsRepresentableAsFloat(InParams.Get_ComOffset());
+            const auto PoseIsRepresentable = IsRepresentableAsFloat(EntityLocation) && EntityRotation.IsNormalized() &&
+                ComOffsetIsRepresentable;
+            CK_ENSURE_IF_NOT(PoseIsRepresentable,
+                TEXT("JoltBody setup failed for Entity [{}]: location, rotation or COM offset is non-finite, "
+                     "unnormalized or out of float range."), InHandle)
+            {
+                Fail(ECk_JoltBody_SetupFailure::InvalidInput,
+                    TEXT("entity location, rotation or COM offset is non-finite, unnormalized or out of float range"));
+                return;
+            }
+
+            const auto MassIsExplicitAndPositive = InParams.Get_MassSource() == ECk_JoltBody_MassSource::Explicit &&
+                FMath::IsFinite(InParams.Get_MassKg()) && InParams.Get_MassKg() > 0.0f;
+            CK_ENSURE_IF_NOT(MassIsExplicitAndPositive,
+                TEXT("JoltBody setup failed for Entity [{}]: RuntimeConvex requires MassSource Explicit with a finite "
+                     "positive MassKg [{}]."), InHandle, InParams.Get_MassKg())
+            {
+                Fail(ECk_JoltBody_SetupFailure::InvalidMass, TEXT("MassSource must be Explicit with a finite positive MassKg"));
+                return;
+            }
+        }
+
         const auto DebugName = ck::Format_UE(TEXT("JoltBody [{}]"), InHandle);
 
         // ---- Shape ----
@@ -210,7 +302,10 @@ namespace ck
                 CK_ENSURE_IF_NOT(NOT PreloadFailed,
                     TEXT("JoltBody on Entity [{}]: preload of StaticMesh [{}] failed — the body is never created."),
                     InHandle, InParams.Get_StaticMesh().ToSoftObjectPath().ToString())
-                { return; }
+                {
+                    Fail(ECk_JoltBody_SetupFailure::ShapeFailed);
+                    return;
+                }
 
                 // Batch-first so the cooked mesh is the one the batch roots; the resident-or-null
                 // fallback covers params built raw with an already-loaded mesh.
@@ -220,14 +315,20 @@ namespace ck
 
                 CK_ENSURE_IF_NOT(ck::IsValid(Mesh),
                     TEXT("JoltBody on Entity [{}] uses ShapeSource StaticMeshAsset but has NO StaticMesh set (or it failed to resolve)."), InHandle)
-                { return; }
+                {
+                    Fail(ECk_JoltBody_SetupFailure::ShapeFailed);
+                    return;
+                }
 
                 auto* BodySetup = Mesh->GetBodySetup();
 
                 CK_ENSURE_IF_NOT(ck::IsValid(BodySetup),
                     TEXT("JoltBody on Entity [{}]: StaticMesh [{}] has NO BodySetup (no collision geometry)."),
                     InHandle, Mesh->GetName())
-                { return; }
+                {
+                    Fail(ECk_JoltBody_SetupFailure::ShapeFailed);
+                    return;
+                }
 
                 MeshBodySetup = BodySetup;
 
@@ -241,10 +342,114 @@ namespace ck
                 { Shape = ck::jolt::bake::BuildShape_FromBodySetup(*BodySetup, EntityScale, DebugName); }
                 break;
             }
+            case ECk_JoltBody_ShapeSource::RuntimeConvex:
+            {
+                // Four points is the fewest that can span a volume; the magnitude bound keeps every point exact
+                // enough in float for the hull tolerance to mean something.
+
+                const auto* Input = InHandle.Has<FFragment_JoltBody_RuntimeConvexInput>()
+                    ? &InHandle.Get<FFragment_JoltBody_RuntimeConvexInput>()
+                    : nullptr;
+
+                const auto& Spec = InParams.Get_RuntimeConvex();
+                const auto PointCountIsAdmissible = Input != nullptr &&
+                    Input->Get_PointsCm().Num() >= ck::jolt_body::MinRuntimeConvexPoints &&
+                    Input->Get_PointsCm().Num() <= ck::jolt_body::MaxRuntimeConvexPoints;
+                const auto HullSettingsAreValid =
+                    FMath::IsFinite(Spec.Get_HullToleranceCm()) && Spec.Get_HullToleranceCm() > 0.0f &&
+                    FMath::IsFinite(Spec.Get_MaxConvexRadiusCm()) && Spec.Get_MaxConvexRadiusCm() >= 0.0f;
+                const auto ConvexInputIsAdmissible = PointCountIsAdmissible && HullSettingsAreValid;
+                CK_ENSURE_IF_NOT(ConvexInputIsAdmissible,
+                    TEXT("JoltBody setup failed for Entity [{}]: RuntimeConvex needs {} to {} points, a positive hull "
+                         "tolerance and a non-negative convex radius."),
+                    InHandle, ck::jolt_body::MinRuntimeConvexPoints, ck::jolt_body::MaxRuntimeConvexPoints)
+                {
+                    Fail(ECk_JoltBody_SetupFailure::InvalidInput, ck::Format_UE(
+                        TEXT("needs {} to {} points, a positive hull tolerance and a non-negative convex radius"),
+                        ck::jolt_body::MinRuntimeConvexPoints, ck::jolt_body::MaxRuntimeConvexPoints));
+                    return;
+                }
+
+                auto Points = JPH::Array<JPH::Vec3>{};
+                Points.reserve(Input->Get_PointsCm().Num());
+                for (const auto& Point : Input->Get_PointsCm())
+                {
+                    const auto PointIsAdmissible = NOT Point.ContainsNaN() && Point.GetAbsMax() <= ck::jolt_body::MaxRuntimeConvexPointMagnitudeCm;
+                    CK_ENSURE_IF_NOT(PointIsAdmissible,
+                        TEXT("JoltBody setup failed for Entity [{}]: RuntimeConvex point [{}] is non-finite or beyond "
+                             "[{}] cm."), InHandle, Point, ck::jolt_body::MaxRuntimeConvexPointMagnitudeCm)
+                    {
+                        Fail(ECk_JoltBody_SetupFailure::InvalidInput, TEXT("a point is non-finite or out of range"));
+                        return;
+                    }
+
+                    Points.push_back(ck::jolt::Conv(Point));
+                }
+
+                const auto* HullError = static_cast<const char*>(nullptr);
+                auto HullBuilder = ConvexHullBuilder{Points};
+                const auto HullStatus = HullBuilder.Initialize(
+                    ConvexHullShape::cMaxPointsInHull, Spec.Get_HullToleranceCm(), HullError);
+
+                const auto HullErrorOr = [&HullError](const TCHAR* InFallback) -> FString
+                { return HullError != nullptr ? FString{UTF8_TO_TCHAR(HullError)} : FString{InFallback}; };
+
+                // Jolt's own hull shape accepts MaxVerticesReached as an approximation; this source reports it
+                // instead, so the caller's geometry is never simplified silently.
+                if (HullStatus == ConvexHullBuilder::EResult::MaxVerticesReached)
+                {
+                    Fail(ECk_JoltBody_SetupFailure::HullLimitExceeded,
+                        HullErrorOr(TEXT("native convex builder reached its final vertex cap")));
+                    return;
+                }
+
+                const auto HullBuildSucceeded = HullStatus == ConvexHullBuilder::EResult::Success;
+                CK_ENSURE_IF_NOT(HullBuildSucceeded,
+                    TEXT("JoltBody setup failed for Entity [{}]: the native convex builder failed [{}]."),
+                    InHandle, HullErrorOr(TEXT("no reason given")))
+                {
+                    Fail(ECk_JoltBody_SetupFailure::HullFailed, HullErrorOr(TEXT("native convex builder failed")));
+                    return;
+                }
+
+                auto HullCenter = Vec3::sZero();
+                auto HullVolume = 0.0f;
+                HullBuilder.GetCenterOfMassAndVolume(HullCenter, HullVolume);
+
+                const auto HullHasVolume = FMath::IsFinite(HullVolume) && HullVolume > 0.0f &&
+                    FMath::IsFinite(HullCenter.GetX()) && FMath::IsFinite(HullCenter.GetY()) &&
+                    FMath::IsFinite(HullCenter.GetZ());
+                CK_ENSURE_IF_NOT(HullHasVolume,
+                    TEXT("JoltBody setup failed for Entity [{}]: the convex hull has zero or non-finite volume [{}]."),
+                    InHandle, HullVolume)
+                {
+                    Fail(ECk_JoltBody_SetupFailure::HullFailed, TEXT("native convex builder returned zero or non-finite volume"));
+                    return;
+                }
+
+                auto HullSettings = ConvexHullShapeSettings{Points, Spec.Get_MaxConvexRadiusCm()};
+                HullSettings.mHullTolerance = Spec.Get_HullToleranceCm();
+                const auto HullResult = HullSettings.Create();
+
+                const auto HullShapeIsValid = HullResult.IsValid();
+                CK_ENSURE_IF_NOT(HullShapeIsValid,
+                    TEXT("JoltBody setup failed for Entity [{}]: Jolt rejected the convex hull shape [{}]."),
+                    InHandle, FString{UTF8_TO_TCHAR(HullResult.GetError().c_str())})
+                {
+                    Fail(ECk_JoltBody_SetupFailure::HullFailed, FString{UTF8_TO_TCHAR(HullResult.GetError().c_str())});
+                    return;
+                }
+
+                Shape = HullResult.Get();
+                break;
+            }
         }
 
         if (ck::Is_NOT_Valid(Shape))
-        { return; }
+        {
+            Fail(ECk_JoltBody_SetupFailure::ShapeFailed);
+            return;
+        }
 
         // ---- Trimesh-on-Dynamic guard: Jolt forbids a MeshShape leaf on a dynamic body ----
         if (InParams.Get_MotionType() == ECk_MotionType::Dynamic)
@@ -255,7 +460,10 @@ namespace ck
                 TEXT("JoltBody on Entity [{}] has MotionType Dynamic but its shape resolves to a triangle Mesh "
                      "(complex/tri-mesh collision). Jolt forbids dynamic mesh bodies — use a primitive/convex "
                      "shape, or make the body Static/Kinematic."), InHandle)
-            { return; }
+            {
+                Fail(ECk_JoltBody_SetupFailure::ShapeFailed);
+                return;
+            }
         }
 
         // ---- Center of mass offset (wraps the shape) ----
@@ -267,7 +475,10 @@ namespace ck
             CK_ENSURE_IF_NOT(ComResult.IsValid(),
                 TEXT("JoltBody on Entity [{}]: failed to build the COM-offset shape wrapper.\nJolt Error: [{}]"),
                 InHandle, FString{ComResult.GetError().c_str()})
-            { return; }
+            {
+                Fail(ECk_JoltBody_SetupFailure::ShapeFailed, FString{UTF8_TO_TCHAR(ComResult.GetError().c_str())});
+                return;
+            }
 
             Shape = ComResult.Get();
         }
@@ -282,14 +493,20 @@ namespace ck
         CK_ENSURE_IF_NOT(MaybeSignature.IsSet(),
             TEXT("JoltBody on Entity [{}]: collision profile [{}] does not exist in UCollisionProfile (or has "
                  "collision disabled). Cannot assign a Jolt object layer."), InHandle, InParams.Get_CollisionProfileName())
-        { return; }
+        {
+            Fail(ECk_JoltBody_SetupFailure::InvalidProfile);
+            return;
+        }
 
         const auto Layer = _LayerTable->Get_OrRegisterLayer(*MaybeSignature);
 
         // Table exhaustion already fired Get_OrRegisterLayer's own ensure; an invalid layer reaching
         // BodyCreationSettings would silently create a body that collides with nothing.
         if (Layer == JPH::cObjectLayerInvalid)
-        { return; }
+        {
+            Fail(ECk_JoltBody_SetupFailure::LayerCapacityExceeded);
+            return;
+        }
 
         // ---- Body creation settings ----
         auto Settings = BodyCreationSettings{
@@ -350,6 +567,43 @@ namespace ck
             }
         }
 
+        // A finite positive MassKg can still yield an infinite inverse mass or a singular inertia (a denormal
+        // mass, a sliver hull); Jolt would accept either and integrate NaN.
+        if (IsRuntimeConvex)
+        {
+            const auto MassProperties = Settings.GetMassProperties();
+            const auto& Inertia = MassProperties.mInertia;
+
+            auto MassPropertiesAreUsable = FMath::IsFinite(MassProperties.mMass) && MassProperties.mMass > 0.0f &&
+                FMath::IsFinite(1.0f / MassProperties.mMass);
+            for (auto Row = JPH::uint{0}; Row < 3; ++Row)
+            {
+                for (auto Column = JPH::uint{0}; Column < 3; ++Column)
+                { MassPropertiesAreUsable &= FMath::IsFinite(Inertia(Row, Column)); }
+
+                MassPropertiesAreUsable &= Inertia(Row, Row) > 0.0f;
+            }
+            MassPropertiesAreUsable &= FMath::IsFinite(Inertia.GetDeterminant3x3()) && Inertia.GetDeterminant3x3() > 0.0f;
+
+            if (MassPropertiesAreUsable)
+            {
+                const auto InverseInertia = Inertia.Inversed3x3();
+                for (auto Row = JPH::uint{0}; Row < 3; ++Row)
+                {
+                    for (auto Column = JPH::uint{0}; Column < 3; ++Column)
+                    { MassPropertiesAreUsable &= FMath::IsFinite(InverseInertia(Row, Column)); }
+                }
+            }
+
+            CK_ENSURE_IF_NOT(MassPropertiesAreUsable,
+                TEXT("JoltBody setup failed for Entity [{}]: Jolt derived a non-finite mass or a singular inertia from "
+                     "MassKg [{}]."), InHandle, InParams.Get_MassKg())
+            {
+                Fail(ECk_JoltBody_SetupFailure::InvalidMass, TEXT("Jolt derived a non-finite mass or a singular inertia"));
+                return;
+            }
+        }
+
         switch (InParams.Get_SurfaceSource())
         {
             case ECk_JoltBody_SurfaceSource::PhysicalMaterial:
@@ -374,7 +628,10 @@ namespace ck
         // ---- Create the body (NOT added — the batched AddBodies pass runs after the view loop) ----
         const auto PhysicsSystem = _PhysicsSystem.Pin();
         if (ck::Is_NOT_Valid(PhysicsSystem))
-        { return; }
+        {
+            Fail(ECk_JoltBody_SetupFailure::UnsupportedWorld);
+            return;
+        }
 
         auto& BodyInterface = PhysicsSystem->GetBodyInterface();
         const auto Body = BodyInterface.CreateBody(Settings);
@@ -382,6 +639,13 @@ namespace ck
         CK_ENSURE_IF_NOT(ck::IsValid(Body, ck::IsValid_Policy_NullptrOnly{}),
             TEXT("JoltBody on Entity [{}]: CreateBody FAILED (max body count reached?)."), InHandle)
         {
+            // RuntimeConvex capacity failure is terminal: a retry is a new caller attempt, never an invisible loop.
+            if (IsRuntimeConvex)
+            {
+                Fail(ECk_JoltBody_SetupFailure::BodyCapacityExceeded);
+                return;
+            }
+
             // Transient failure (slots free up as other bodies die) — re-arm setup so the entity retries
             // instead of being left half-composed forever.
             InHandle.Add<MarkedDirtyBy>();
@@ -392,6 +656,7 @@ namespace ck
 
         InJoltBody._BodyId = Body->GetID();
         InJoltBody._Shape = Shape;
+        InHandle.Try_Remove<FFragment_JoltBody_RuntimeConvexInput>();
 
         // Seed the step-pose buffer so the very first interpolation reads a valid prev==curr==spawn pose.
         auto& StepPose = InHandle.Get<ck::FFragment_JoltBody_StepPose>();
@@ -447,7 +712,16 @@ namespace ck
             if (ck::Is_NOT_Valid(Handle) || NOT Handle.Has<ck::FFragment_JoltBody>())
             { continue; }
 
-            Handle.Get<ck::FFragment_JoltBody>()._BodyAdded = true;
+            auto& JoltBody = Handle.Get<ck::FFragment_JoltBody>();
+            JoltBody._BodyAdded = true;
+            JoltBody._SetupState = ECk_JoltBody_SetupState::Ready;
+            JoltBody._SetupFailure = ECk_JoltBody_SetupFailure::None;
+            JoltBody._SetupDiagnostic.Reset();
+            DoQueue_SetupDelivery(FSetupDelivery{
+                UCk_Utils_JoltBody_UE::CastChecked(Handle),
+                ECk_JoltBody_SetupState::Ready,
+                ECk_JoltBody_SetupFailure::None,
+                MoveTemp(JoltBody._SetupWaiters)});
         }
     }
 
@@ -1176,6 +1450,43 @@ namespace ck
         -> void
     {
         request::FireCancelledForPending(InHandle, InRequestsComp.Get_Requests());
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProcessor_JoltBody_CancelSetupWaiters::
+        DoTick(
+            TimeType InDeltaT)
+        -> void
+    {
+        _Deliveries.Reset();
+
+        TProcessor::DoTick(InDeltaT);
+
+        auto Deliveries = MoveTemp(_Deliveries);
+        for (auto& Delivery : Deliveries)
+        {
+            for (auto& Waiter : Delivery._Waiters)
+            { Waiter.ExecuteIfBound(Delivery._Handle, ECk_JoltBody_SetupState::Failed, ECk_JoltBody_SetupFailure::Cancelled); }
+        }
+    }
+
+    auto
+        FProcessor_JoltBody_CancelSetupWaiters::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            FFragment_JoltBody& InJoltBody)
+        -> void
+    {
+        if (InJoltBody._SetupState != ECk_JoltBody_SetupState::Pending)
+        { return; }
+
+        InJoltBody._SetupState = ECk_JoltBody_SetupState::Failed;
+        InJoltBody._SetupFailure = ECk_JoltBody_SetupFailure::Cancelled;
+        InJoltBody._SetupDiagnostic = TEXT("entity ended before setup completed");
+        _Deliveries.Emplace(FDelivery{InHandle, MoveTemp(InJoltBody._SetupWaiters)});
     }
 }
 

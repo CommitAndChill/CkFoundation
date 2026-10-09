@@ -3,6 +3,7 @@
 #include "CkCore/Algorithms/CkAlgorithms.h"
 #include "CkCore/Diagnostics/CkDiagnosticVisibility.h"
 
+#include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
 #include "CkEcs/Registry/CkRegistry.h"
 #include "CkEcs/Subsystem/CkEcsEditor_Subsystem.h"
 #include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
@@ -10,6 +11,7 @@
 #include "CkJolt/Body/CkJoltBody_ContactRouter.h"
 #include "CkJolt/Body/CkJoltBody_Fragment.h"
 #include "CkJolt/Body/CkJoltBody_Fragment_Data.h"
+#include "CkJolt/Body/CkJoltBody_Utils.h"
 #include "CkJolt/CkJolt_ActivationEvent.h"
 #include "CkJolt/CkJolt_Log.h"
 #include "CkJolt/CkJolt_Stats.h"
@@ -524,6 +526,10 @@ auto
     { _EcsWorldSubsystem = InCollection.InitializeDependency<UCk_EcsWorld_Subsystem_UE>(); }
 
     auto EcsRegistry = UCk_Utils_EcsWorld_Subsystem_UE::TryGet_RegistryForWorld(*GetWorld());
+    _Closing = false;
+    _TransientEntity = UCk_Utils_EntityLifetime_UE::Get_TransientEntity(EcsRegistry);
+    _WorldCleanupHandle = FWorldDelegates::OnWorldCleanup.AddUObject(
+        this, &UCk_Jolt_Subsystem::OnWorldCleanup);
 
     using namespace JPH;
 
@@ -834,6 +840,12 @@ auto
     Deinitialize()
         -> void
 {
+    _Closing = true;
+    if (_WorldCleanupHandle.IsValid())
+    {
+        FWorldDelegates::OnWorldCleanup.Remove(_WorldCleanupHandle);
+        _WorldCleanupHandle.Reset();
+    }
     // Wait any in-flight async step and null the Jolt world's non-owning pointers BEFORE destroying the
     // objects they reference. The registry context keeps its TSharedPtr (SetContext has no overwrite
     // variant) — safe: the shut-down world is inert, and the registry dies with the world anyway.
@@ -864,6 +876,57 @@ auto
     ck::jolt::Request_GlobalJoltShutdown();
 
     Super::Deinitialize();
+}
+
+auto
+    UCk_Jolt_Subsystem::
+    Get_IsClosing() const
+    -> bool
+{ return _Closing; }
+
+auto
+    UCk_Jolt_Subsystem::
+    OnWorldCleanup(
+        UWorld* InWorld,
+        bool InSessionEnded,
+        bool InCleanupResources)
+    -> void
+{
+    if (InWorld != GetWorld() || _Closing)
+    { return; }
+
+    // Closing first, so a callback below cannot enqueue a setup or a waiter that nothing would ever resolve.
+    _Closing = true;
+
+    if (ck::Is_NOT_Valid(_TransientEntity))
+    { return; }
+
+    struct FDelivery
+    {
+        FCk_Handle_JoltBody _Handle;
+        TArray<FCk_Delegate_JoltBody_OnSetupResolved> _Waiters;
+    };
+
+    auto Deliveries = TArray<FDelivery>{};
+    _TransientEntity.View<ck::FFragment_JoltBody>().ForEach(
+        [&](FCk_Entity InEntity, ck::FFragment_JoltBody& InJoltBody) -> void
+        {
+            if (InJoltBody._SetupState != ECk_JoltBody_SetupState::Pending)
+            { return; }
+
+            InJoltBody._SetupState = ECk_JoltBody_SetupState::Failed;
+            InJoltBody._SetupFailure = ECk_JoltBody_SetupFailure::Cancelled;
+            InJoltBody._SetupDiagnostic = TEXT("world cleanup cancelled pending setup");
+
+            auto Handle = _TransientEntity.Get_ValidHandle(InEntity.Get_ID());
+            Deliveries.Emplace(FDelivery{UCk_Utils_JoltBody_UE::CastChecked(Handle), MoveTemp(InJoltBody._SetupWaiters)});
+        });
+
+    for (auto& Delivery : Deliveries)
+    {
+        for (auto& Waiter : Delivery._Waiters)
+        { Waiter.ExecuteIfBound(Delivery._Handle, ECk_JoltBody_SetupState::Failed, ECk_JoltBody_SetupFailure::Cancelled); }
+    }
 }
 
 auto

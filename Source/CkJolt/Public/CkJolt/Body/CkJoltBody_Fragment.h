@@ -5,6 +5,7 @@
 #include "CkEcs/Tag/CkTag.h"
 #include "CkEcs/Handle/CkDebugCallstack_Macros.h"
 #include "CkEcs/Signal/CkSignal_Macros.h"
+#include "CkEcs/Snapshot/CkSnapshot_Posture.h"
 
 #include "CkJolt/Body/CkJoltBody_Fragment_Data.h"
 
@@ -22,6 +23,7 @@
 // --------------------------------------------------------------------------------------------------------------------
 
 class UCk_Utils_JoltBody_UE;
+class UCk_Jolt_Subsystem;
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -33,6 +35,7 @@ namespace ck
     class FProcessor_JoltBody_KinematicPush;
     class FProcessor_JoltBody_WritebackInterpolated;
     class FProcessor_JoltBody_EndPlay;
+    class FProcessor_JoltBody_CancelSetupWaiters;
 
     // --------------------------------------------------------------------------------------------------------------------
 
@@ -93,7 +96,9 @@ namespace ck
         friend class FProcessor_JoltBody_KinematicPush;
         friend class FProcessor_JoltBody_WritebackInterpolated;
         friend class FProcessor_JoltBody_EndPlay;
+        friend class FProcessor_JoltBody_CancelSetupWaiters;
         friend class ::UCk_Utils_JoltBody_UE;
+        friend class ::UCk_Jolt_Subsystem;
 
     private:
         JPH::BodyID          _BodyId;
@@ -105,9 +110,41 @@ namespace ck
         // mesh resident across the load window.
         FCk_ResourceLoader_RootedAssetBatch _MeshPreloadBatch;
 
+        ECk_JoltBody_SetupState _SetupState = ECk_JoltBody_SetupState::Pending;
+        ECk_JoltBody_SetupFailure _SetupFailure = ECk_JoltBody_SetupFailure::None;
+        FString _SetupDiagnostic;
+
+        // Drained exactly once, by whichever path makes _SetupState terminal.
+        TArray<FCk_Delegate_JoltBody_OnSetupResolved> _SetupWaiters;
+
     public:
         CK_PROPERTY_GET(_BodyId);
         CK_PROPERTY_GET(_BodyAdded);
+        CK_PROPERTY_GET(_SetupState);
+        CK_PROPERTY_GET(_SetupFailure);
+        CK_PROPERTY_GET(_SetupDiagnostic);
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // The RuntimeConvex point cloud, owned until Setup consumes it; the retained Params never hold it.
+    struct CKJOLT_API FFragment_JoltBody_RuntimeConvexInput : FCk_Snapshot_Session
+    {
+    public:
+        CK_GENERATED_BODY(FFragment_JoltBody_RuntimeConvexInput);
+
+    public:
+        friend class FProcessor_JoltBody_Setup;
+        friend class ::UCk_Utils_JoltBody_UE;
+
+    private:
+        TArray<FVector> _PointsCm;
+
+    public:
+        CK_PROPERTY_GET(_PointsCm);
+
+    public:
+        CK_DEFINE_CONSTRUCTORS(FFragment_JoltBody_RuntimeConvexInput, _PointsCm);
     };
 
     // --------------------------------------------------------------------------------------------------------------------

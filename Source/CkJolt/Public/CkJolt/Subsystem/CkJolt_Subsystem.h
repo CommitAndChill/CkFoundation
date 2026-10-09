@@ -51,6 +51,16 @@ public:
     auto
     Deinitialize() -> void override;
 
+    auto
+    Get_IsClosing() const -> bool;
+
+private:
+    auto
+    OnWorldCleanup(
+        UWorld* InWorld,
+        bool InSessionEnded,
+        bool InCleanupResources) -> void;
+
 protected:
     // Editor worlds host the Jolt world too when ECk_Jolt_EditorStaticWorldMode is on, so authoring and
     // cook-time consumers read the same geometry PIE reads.
@@ -68,6 +78,9 @@ private:
     TUniquePtr<ck::jolt::FCk_Jolt_ObjectVsBroadPhaseLayerFilter_Table> _ObjectVsBroadPhaseLayerFilter;
     TUniquePtr<ck::jolt::FCk_Jolt_ObjectLayerPairFilter_Table> _ObjectVsObjectFilter;
     TSharedPtr<JPH::PhysicsSystem> _PhysicsSystem;
+    FDelegateHandle _WorldCleanupHandle;
+    FCk_Handle _TransientEntity;
+    bool _Closing = false;
 
     TPimplPtr<CkBodyActivationListener> _BodyActivationListener;
     TPimplPtr<CkContactListener> _ContactListener;

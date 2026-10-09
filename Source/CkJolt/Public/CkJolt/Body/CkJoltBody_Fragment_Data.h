@@ -24,10 +24,98 @@ UENUM(BlueprintType)
 enum class ECk_JoltBody_ShapeSource : uint8
 {
     ExplicitShape,
-    StaticMeshAsset
+    StaticMeshAsset,
+    RuntimeConvex
 };
 
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_JoltBody_ShapeSource);
+
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace ck::jolt_body
+{
+    // Bounds the one copy Add makes of a caller's point cloud; the native hull cap applies after reduction.
+    constexpr auto MaxRuntimeConvexPoints = int32{2048};
+    // Four points is the fewest that can span a volume; the magnitude bound keeps every point exact enough in
+    // float for the hull tolerance to mean something.
+    constexpr auto MinRuntimeConvexPoints = int32{4};
+    constexpr auto MaxRuntimeConvexPointMagnitudeCm = 1.e6;
+
+    constexpr auto MaxSetupWaiters = int32{128};
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+// Ready means the body has been added to the Jolt world (Get_IsBodyAdded), not merely that its shape was built.
+UENUM(BlueprintType)
+enum class ECk_JoltBody_SetupState : uint8
+{
+    Pending,
+    Ready,
+    Failed
+};
+
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_JoltBody_SetupState);
+
+// --------------------------------------------------------------------------------------------------------------------
+
+UENUM(BlueprintType)
+enum class ECk_JoltBody_SetupFailure : uint8
+{
+    None,
+    UnsupportedWorld,
+    InvalidInput,
+    InvalidMass,
+    InvalidScale,
+    HullLimitExceeded,
+    HullFailed,
+    ShapeFailed,
+    InvalidProfile,
+    LayerCapacityExceeded,
+    BodyCapacityExceeded,
+    Cancelled
+};
+
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_JoltBody_SetupFailure);
+
+// --------------------------------------------------------------------------------------------------------------------
+
+/** Points in the body entity's local frame, in cm; the body is their convex hull (concave detail is filled).
+    Admission requires unit entity and shape scale and MassSource Explicit with a positive MassKg. */
+USTRUCT(BlueprintType)
+struct CKJOLT_API FCk_JoltBody_RuntimeConvexSpec
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(FCk_JoltBody_RuntimeConvexSpec);
+
+public:
+    friend class UCk_Utils_JoltBody_UE;
+
+private:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    TArray<FVector> _PointsCm;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true, ClampMin = "0.000001"))
+    float _HullToleranceCm = 0.001f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true, ClampMin = "0.0"))
+    float _MaxConvexRadiusCm = 0.0f;
+
+public:
+    CK_PROPERTY(_PointsCm);
+    CK_PROPERTY(_HullToleranceCm);
+    CK_PROPERTY(_MaxConvexRadiusCm);
+
+public:
+    /** MinRuntimeConvexPoints..MaxRuntimeConvexPoints finite points within MaxRuntimeConvexPointMagnitudeCm, a positive
+     *  finite hull tolerance and a non-negative finite convex radius. Whether they span a volume is the hull's verdict. */
+    auto Get_IsValid() const -> bool;
+};
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -102,6 +190,7 @@ struct CKJOLT_API FCk_JoltBody_Spec
 
 public:
     CK_GENERATED_BODY(FCk_JoltBody_Spec);
+    friend class UCk_Utils_JoltBody_UE;
 
 private:
     UPROPERTY(EditAnywhere, BlueprintReadWrite,
@@ -119,6 +208,11 @@ private:
               meta = (AllowPrivateAccess = true,
                       EditCondition = "_ShapeSource == ECk_JoltBody_ShapeSource::StaticMeshAsset"))
     TSoftObjectPtr<UStaticMesh> _StaticMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true,
+                      EditCondition = "_ShapeSource == ECk_JoltBody_ShapeSource::RuntimeConvex"))
+    FCk_JoltBody_RuntimeConvexSpec _RuntimeConvex;
 
     // Multiplies into the entity-transform scale when a StaticMeshAsset shape is built (setup-time
     // only — a live body's shape never rescales; ExplicitShape dimensions are typed and authors bake
@@ -218,6 +312,7 @@ public:
     CK_PROPERTY_GET(_ShapeSource);
     CK_PROPERTY(_ShapeDimensions);
     CK_PROPERTY(_StaticMesh);
+    CK_PROPERTY(_RuntimeConvex);
     CK_PROPERTY(_ShapeScale);
     CK_PROPERTY(_MotionType);
     CK_PROPERTY(_MotionQuality);
@@ -240,6 +335,14 @@ public:
 public:
     CK_DEFINE_CONSTRUCTORS(FCk_JoltBody_Spec, _ShapeSource);
 };
+
+// --------------------------------------------------------------------------------------------------------------------
+
+DECLARE_DYNAMIC_DELEGATE_ThreeParams(
+    FCk_Delegate_JoltBody_OnSetupResolved,
+    FCk_Handle_JoltBody, InBody,
+    ECk_JoltBody_SetupState, InState,
+    ECk_JoltBody_SetupFailure, InFailure);
 
 // --------------------------------------------------------------------------------------------------------------------
 

@@ -87,6 +87,40 @@ public:
     Get_IsBodyAdded(
         const FCk_Handle_JoltBody& InJoltBody);
 
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|JoltBody",
+              DisplayName = "[Ck][JoltBody] Get Setup State")
+    static ECk_JoltBody_SetupState
+    Get_SetupState(
+        const FCk_Handle_JoltBody& InJoltBody);
+
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|JoltBody",
+              DisplayName = "[Ck][JoltBody] Get Setup Failure")
+    static ECk_JoltBody_SetupFailure
+    Get_SetupFailure(
+        const FCk_Handle_JoltBody& InJoltBody);
+
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|JoltBody",
+              DisplayName = "[Ck][JoltBody] Get Setup Diagnostic")
+    static FString
+    Get_SetupDiagnostic(
+        const FCk_Handle_JoltBody& InJoltBody);
+
+    /** Fires InDelegate once with the body's terminal setup result: immediately when it is already Ready or Failed,
+        otherwise when setup resolves, or as Failed/Cancelled when the entity or its world ends first. Returns false
+        (and never fires) for an invalid handle or unbound delegate, during world cleanup, for a pending body past
+        BeginDestroy or without a Jolt subsystem, and once ck::jolt_body::MaxSetupWaiters are pending. A destroyed
+        UObject receiver is simply not called. */
+    UFUNCTION(BlueprintCallable,
+              Category = "Ck|Utils|JoltBody",
+              DisplayName = "[Ck][JoltBody] Try Promise On Setup Resolved")
+    static bool
+    TryPromise_OnSetupResolved(
+        const FCk_Handle_JoltBody& InJoltBody,
+        const FCk_Delegate_JoltBody_OnSetupResolved& InDelegate);
+
     // The body's CURRENT simulation velocity (UE units/s), read straight from the Jolt body via the
     // locking BodyInterface (safe against an in-flight async step). Zero until the body is added.
     UFUNCTION(BlueprintPure,

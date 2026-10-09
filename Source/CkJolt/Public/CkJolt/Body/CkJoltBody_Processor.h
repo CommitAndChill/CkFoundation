@@ -34,8 +34,9 @@ namespace ck::jolt
 
 namespace ck
 {
-    // An absent Jolt world is legal (non-Jolt worlds): the whole tick silent-returns and the NeedsSetup
-    // entities retry once a world exists.
+    // An absent Jolt world is legal (non-Jolt worlds): legacy-source entities keep NeedsSetup and retry once a
+    // world exists, while RuntimeConvex admission fails UnsupportedWorld. Setup waiters are delivered after
+    // the batched add, never from inside the view.
     class CKJOLT_API FProcessor_JoltBody_Setup : public ck_exp::TProcessor<
             FProcessor_JoltBody_Setup,
             FCk_Handle_JoltBody,
@@ -71,6 +72,18 @@ namespace ck
             JPH::BodyID _BodyId;
         };
 
+        struct FSetupDelivery
+        {
+            FCk_Handle_JoltBody _Handle;
+            ECk_JoltBody_SetupState _State = ECk_JoltBody_SetupState::Pending;
+            ECk_JoltBody_SetupFailure _Failure = ECk_JoltBody_SetupFailure::None;
+            TArray<FCk_Delegate_JoltBody_OnSetupResolved> _Waiters;
+        };
+
+        auto
+        DoQueue_SetupDelivery(
+            FSetupDelivery&& InDelivery) -> void;
+
         auto
         DoBatchAdd(
             JPH::BodyInterface& InBodyInterface,
@@ -85,6 +98,7 @@ namespace ck
         // Split by initial activation because Jolt's AddBodiesFinalize takes ONE EActivation per batch.
         TArray<FPendingBody> _PendingActivate;
         TArray<FPendingBody> _PendingDontActivate;
+        TArray<FSetupDelivery> _SetupDeliveries;
     };
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -323,6 +337,8 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
+    // Runs in every world type: an editor world hosts a Jolt world when EditorStaticWorldMode is on, and a body
+    // created there must be released. A body that was never created (no Jolt subsystem) is a no-op.
     class CKJOLT_API FProcessor_JoltBody_EndPlay : public ck_exp::TProcessor<
             FProcessor_JoltBody_EndPlay,
             FCk_Handle_JoltBody,
@@ -332,9 +348,6 @@ namespace ck
     {
     public:
         using Group = FGroup_EndPlay;
-        // Non-runtime worlds never have a Jolt subsystem, so running there would fire the teardown ensure for
-        // bodies that were never created.
-        static constexpr auto WorldTypeRequirement = ECk_ProcessorWorldTypeRequirement::RuntimeOnly;
 
     public:
         using TProcessor::TProcessor;
@@ -352,6 +365,42 @@ namespace ck
     private:
         TWeakPtr<JPH::PhysicsSystem> _PhysicsSystem;
         FJoltWorld* _JoltWorld = nullptr;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // Completes every still-Pending setup as Failed/Cancelled when its entity ends, so an accepted waiter is
+    // never stranded. Callbacks fire after the view, never from inside it.
+    class CKJOLT_API FProcessor_JoltBody_CancelSetupWaiters : public ck_exp::TProcessor<
+            FProcessor_JoltBody_CancelSetupWaiters,
+            FCk_Handle_JoltBody,
+            ck::TReadWrite<FFragment_JoltBody>,
+            CK_IF_END_PLAY>
+    {
+    public:
+        using Group = FGroup_EndPlay;
+        using RunAfter = TDepList<FProcessor_JoltBody_EndPlay>;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        auto DoTick(TimeType InDeltaT) -> void;
+
+        auto
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            FFragment_JoltBody& InJoltBody) -> void;
+
+    private:
+        struct FDelivery
+        {
+            FCk_Handle_JoltBody _Handle;
+            TArray<FCk_Delegate_JoltBody_OnSetupResolved> _Waiters;
+        };
+
+        TArray<FDelivery> _Deliveries;
     };
 }
 
