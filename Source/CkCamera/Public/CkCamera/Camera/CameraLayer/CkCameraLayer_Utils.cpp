@@ -2,6 +2,7 @@
 
 #include "CkCamera/CkCamera_Log.h"
 #include "CkCamera/Camera/CkCamera_Fragment.h"
+#include "CkCamera_Context_Private.h"
 #include "CkCamera/Camera/CameraLayer/CkCameraLayer_Fragment.h"
 #include "CkCamera/Camera/CameraLayer/EntityScripts/CkCameraLayer_EntityScript.h"
 
@@ -12,13 +13,19 @@
 #include "CkEcs/EntityScript/CkEntityScript_Utils.h"
 #include "CkEcs/Handle/CkHandle_Utils.h"
 #include "CkEcs/Snapshot/CkSnapshot_RestoreMarker.h" // FTag_Snapshot_SaveTransient
+#include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
+
+#include "CkEcsExt/Transform/CkTransform_Fragment.h"
 
 #include "CkAttribute/FloatAttribute/CkFloatAttribute_Utils.h"
 #include "CkAttribute/VectorAttribute/CkVectorAttribute_Utils.h"
 #include "CkAttribute/RotatorAttribute/CkRotatorAttribute_Utils.h"
 #include "CkAttribute/IntegerAttribute/CkIntegerAttribute_Utils.h"
 
+#include <Engine/World.h>
+
 // --------------------------------------------------------------------------------------------------------------------
+
 
 auto
     UCk_Utils_CameraLayer_UE::
@@ -27,11 +34,55 @@ auto
         TSubclassOf<UCk_CameraLayer_EntityScript> InLayerClass)
     -> FCk_Handle_CameraLayer
 {
-    CK_ENSURE_IF_NOT(ck::IsValid(InLayerClass),
-        TEXT("Create CameraLayer: invalid layer class on camera [{}]"), InCamera)
+    const auto ClassIsValid = ck::IsValid(InLayerClass);
+    CK_ENSURE_IF_NOT(ClassIsValid,
+        TEXT("Create CameraLayer: invalid layer class on camera [{}]"), InCamera) {}
+    if (NOT ClassIsValid)
+    { return {}; }
+
+    const auto* LayerClass = InLayerClass.Get();
+    const auto ClassCanInstantiate = NOT LayerClass->HasAnyClassFlags(CLASS_Abstract) &&
+        NOT LayerClass->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed);
+    CK_ENSURE_IF_NOT(ClassCanInstantiate,
+        TEXT("Create CameraLayer: abstract or retiring layer class on camera [{}]"), InCamera) {}
+    if (NOT ClassCanInstantiate)
+    { return {}; }
+
+    const auto CameraIsValid = ck::IsValid(InCamera);
+    CK_ENSURE_IF_NOT(CameraIsValid, TEXT("Create CameraLayer: invalid camera")) {}
+    if (NOT CameraIsValid)
+    { return {}; }
+
+    const auto HasRequiredFeatures = InCamera.Has<ck::FFragment_Camera_Params>() &&
+        InCamera.Has<ck::FFragment_Transform>() &&
+        InCamera.Has<ck::FFragment_LifetimeOwner>();
+    CK_ENSURE_IF_NOT(HasRequiredFeatures,
+        TEXT("Create CameraLayer: camera [{}] lacks required composition"), InCamera) {}
+    if (NOT HasRequiredFeatures)
+    { return {}; }
+
+    auto Context = ck::camera::FCameraContext{};
+    const auto OwnerWorldIsSafe = ck::camera::TryResolveCameraContext(InCamera, Context);
+    CK_ENSURE_IF_NOT(OwnerWorldIsSafe,
+        TEXT("Create CameraLayer: camera [{}] has unsafe owner world"), InCamera) {}
+    if (NOT OwnerWorldIsSafe)
+    { return {}; }
+
+    const auto CanCreate =
+        NOT UCk_Utils_EntityLifetime_UE::Get_IsPendingDestroy(InCamera,
+            ECk_EntityLifetime_DestructionPhase::BeginDestroy) &&
+        UCk_Utils_EntityLifetime_UE::Get_CanCreateEntity(InCamera);
+    CK_ENSURE_IF_NOT(CanCreate,
+        TEXT("Create CameraLayer: camera [{}] is retiring or world is closed"), InCamera) {}
+    if (NOT CanCreate)
     { return {}; }
 
     auto NewLayer = UCk_Utils_EntityLifetime_UE::Request_CreateEntity(InCamera);
+    const auto NewLayerIsValid = ck::IsValid(NewLayer);
+    CK_ENSURE_IF_NOT(NewLayerIsValid,
+        TEXT("Create CameraLayer: camera [{}] could not allocate a layer"), InCamera) {}
+    if (NOT NewLayerIsValid)
+    { return {}; }
 
     // Derived presentation — save-transient, the camera's re-drive re-pushes it (see CkSmTask_Utils::Create).
     NewLayer.Add<ck::FTag_Snapshot_SaveTransient>();
@@ -50,9 +101,26 @@ auto
     ck::FUtils_RecordOfCameraLayers::AddIfMissing(InCamera);
     ck::FUtils_RecordOfCameraLayers::Request_Connect(
         InCamera, TypedLayer, ECk_Record_LabelRequirementPolicy::Optional);
+    const auto Connected = ck::FUtils_RecordOfCameraLayers::Get_ContainsEntry(InCamera, TypedLayer);
+    CK_ENSURE_IF_NOT(Connected,
+        TEXT("Create CameraLayer: layer [{}] was not connected to camera [{}]"), TypedLayer, InCamera) {}
+    if (NOT Connected)
+    {
+        UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(NewLayer);
+        return {};
+    }
 
-    // Synchronous, and last: Construct must see the back-ref, params and record entry already in place.
-    UCk_Utils_EntityScript_UE::Add(NewLayer, InLayerClass, FInstancedStruct{});
+    // The pending admission must be retained. Construction completes separately.
+    const auto Pending = UCk_Utils_EntityScript_UE::Add(NewLayer, InLayerClass, FInstancedStruct{});
+    const auto PendingIsValid = ck::IsValid(Pending);
+    CK_ENSURE_IF_NOT(PendingIsValid,
+        TEXT("Create CameraLayer: script admission rejected layer [{}]"), TypedLayer) {}
+    if (NOT PendingIsValid)
+    {
+        ck::FUtils_RecordOfCameraLayers::Request_Disconnect(InCamera, TypedLayer);
+        UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(NewLayer);
+        return {};
+    }
 
     return TypedLayer;
 }
