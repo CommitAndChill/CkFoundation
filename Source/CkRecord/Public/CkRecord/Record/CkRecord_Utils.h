@@ -86,6 +86,14 @@ namespace ck
         Get_Entries(
             const FCk_Handle& InRecordHandle) -> TArray<RecordEntryMaybeTypeSafeHandle>;
 
+        // Snapshot only this record's direct entries; no extension traversal or
+        // callback is permitted while a caller prepares a stable iteration.
+        [[nodiscard]]
+        static auto
+        TryGet_DirectEntries(
+            const FCk_Handle& InRecordHandle,
+            TArray<RecordEntryMaybeTypeSafeHandle>& OutEntries) -> bool;
+
         [[nodiscard]]
         static auto
         Get_ValidEntries(
@@ -389,6 +397,22 @@ namespace ck
         });
 
         return Entries;
+    }
+
+    template <typename T_DerivedRecord>
+    auto
+        TUtils_RecordOfEntities<T_DerivedRecord>::
+        TryGet_DirectEntries(
+            const FCk_Handle& InRecordHandle,
+            TArray<RecordEntryMaybeTypeSafeHandle>& OutEntries)
+        -> bool
+    {
+        OutEntries.Reset();
+        if (NOT ck::IsValid(InRecordHandle) || NOT InRecordHandle.Has<RecordType>())
+        { return false; }
+
+        OutEntries = InRecordHandle.Get<RecordType>()._RecordEntries;
+        return true;
     }
 
     template <typename T_DerivedRecord>
