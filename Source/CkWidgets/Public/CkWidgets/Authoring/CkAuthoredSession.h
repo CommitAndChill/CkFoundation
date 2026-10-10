@@ -14,6 +14,7 @@ class FCkUiCollection;
 class FCkUiAuthoredInputReleaseGuard;
 class FSlateUser;
 class SWidget;
+class SCkUiWorldMap;
 class UCommonActivatableWidget;
 class ULocalPlayer;
 class UWorld;
@@ -168,6 +169,8 @@ private:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
     bool _RegisterItemControls = false;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
+    bool _RegisterMapControls = false;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
     TArray<FString> _Actions;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ck|UI|Authoring", meta = (AllowPrivateAccess = true))
     TArray<FCk_UI_AuthoredCollection> _Collections;
@@ -190,6 +193,7 @@ public:
     CK_PROPERTY(_RegisterHudControls);
     CK_PROPERTY(_RegisterRadialControls);
     CK_PROPERTY(_RegisterItemControls);
+    CK_PROPERTY(_RegisterMapControls);
     CK_PROPERTY(_Actions);
     CK_PROPERTY(_Collections);
     CK_PROPERTY(_ItemActions);
@@ -263,6 +267,16 @@ public:
     /** Focus a visible, enabled native control by its full authored tag, including repeat scopes. */
     UFUNCTION(BlueprintCallable, Category = "Ck|UI|Authoring")
     bool TryFocusControl(const FString& InId);
+    /** Operate a unique visible map in the active owned surface. Rejected requests preserve its camera. */
+    UFUNCTION(BlueprintCallable, Category = "Ck|UI|Authoring")
+    bool TrySetMapCamera(const FString& InId, FVector2D InCenter, float InZoom);
+    UFUNCTION(BlueprintCallable, Category = "Ck|UI|Authoring")
+    bool TryZoomMap(const FString& InId, float InFactor);
+    UFUNCTION(BlueprintCallable, Category = "Ck|UI|Authoring")
+    bool TryRevealMapMarker(const FString& InId, const FString& InKey);
+    /** Failure preserves both outputs. Input ownership is required, including for this query. */
+    UFUNCTION(BlueprintCallable, Category = "Ck|UI|Authoring")
+    bool TryGetMapCamera(const FString& InId, FVector2D& OutCenter, float& OutZoom);
     /** Queries exact current button focus for the active admitted user without refreshing attributes. */
     UFUNCTION(BlueprintPure, Category = "Ck|UI|Authoring")
     bool Get_IsButtonFocused(const FString& InId) const;
@@ -306,6 +320,7 @@ private:
     auto CanDispatchEvents() const -> bool;
     auto HasOwnedInputContext() const -> bool;
     auto FindFocusableButton(const FString& InId) -> TSharedPtr<SWidget>;
+    auto FindWorldMap(const FString& InId) -> TSharedPtr<SCkUiWorldMap>;
     auto DoFocusButton(const FString& InId, const TSharedPtr<SWidget>& InButton) -> bool;
     bool _Initialized = false;
     bool _Released = false;

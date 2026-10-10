@@ -67,7 +67,9 @@ Optional `Config.Set_RegisterHudControls(true)` registers `hud-meter`, `hud-grap
 `Set_RegisterItemControls(true)` registers `item-slot`, `atlas-image` and
 `inventory-grid`. The [spatial inventory contract](../CkSlateLayout/AUTHORING.md#spatial-inventory-grids)
 documents multi-cell records, rotation, cross-grid proposals and their ownership.
-All three flags default to false. Registration is completed
+`Set_RegisterMapControls(true)` registers `world-map`; its
+[native grammar and marker schema](../CkSlateLayout/AUTHORING.md#world-maps)
+are documented alongside the other custom controls. All four flags default to false. Registration is completed
 before view publication, and a failed registration rejects the full session.
 The native [HUD and radial grammar](../CkSlateLayout/AUTHORING.md) remains the
 source of control properties and collection schema requirements.
@@ -188,6 +190,56 @@ is the consumer for this boundary. Its focused fresh Editor gate passed 32
 selected tests with 33 inspected captures. The receipt separates reflected flat
 support from native nested-collection sibling coverage and preserves the earlier
 failed admission and geometry attempts.
+
+### World maps from scripts
+
+Opt in with `Config.Set_RegisterMapControls(true)`. Declare a `Markers` flat
+collection with the [world-map schema](../CkSlateLayout/AUTHORING.md#world-maps),
+an image resource through `Config.Set_Images`, a Text scalar for the selected
+key, a Bool scalar for route visibility, and a keyed action through
+`Config.Set_ItemActions`. The host retains the `UTexture2D` used by the image
+declaration. For example:
+
+```html
+<world-map id="map-view" markers-bind="Markers" image-bind="MapImage"
+           select="SelectMarker" selected-key-bind="SelectedKey"
+           route-bind="RouteVisible" origin-x="0.3" origin-y="0.55"
+           font-family="map-ui" class="map" />
+```
+
+`select` dispatches `OnItemAction(ActionName, Key)` with the marker's copied
+stable key. The script validates current eligibility and publishes
+`TrySetText("SelectedKey", FText::FromString(Key))`; the native map does not
+change selection on its own. The script owns filter and route policy. Keep
+filtered records in the collection with Bool `visible` if identity should
+survive filter changes, and change or clear a selection before hiding its key.
+The `selected-key-bind` shown above is required for the map's arrow/D-pad
+selection and Enter/face-button confirmation; without it those keys are
+unhandled, though pointer selection can still propose a key.
+`RouteVisible` only requests a straight visual line from the authored origin;
+the control does not calculate a traversable route.
+
+An owned, active, mounted session exposes `TrySetMapCamera(Id, Center, Zoom)`,
+`TryZoomMap(Id, Factor)`, `TryRevealMapMarker(Id, Key)`, and
+`TryGetMapCamera(Id, OutCenter, OutZoom)`. They resolve one visible, enabled
+map by its exact authored ID in the admitted surface and reject if input is
+inactive, the control is ambiguous, an operation is in flight, or a pointer
+gesture blocks the camera change. Zoom is restricted to `[1, 8]` and the
+center is clamped to the fitted image. Reveal requires a visible enabled key.
+Rejected requests preserve the current camera; a failed getter preserves both
+outputs. Camera state belongs to the retained widget, so compatible reloads
+keep it, while a newly created session starts from the default camera.
+
+`TrySetRecords` validates the flat collection schema and replaces its records
+atomically. The map then validates normalized coordinates, supported kinds,
+and its 1024-record limit against that revision. A schema-valid but map-invalid
+update can be accepted by the collection while the map keeps its last accepted
+marker snapshot and refuses input. Validate the complete candidate before
+publishing it; do not treat a successful collection setter alone as map
+admission. An invalid source reload preserves the last accepted document;
+reload during map pointer capture rejects. End owned input before hiding or
+removing the screen, and release the session on terminal teardown. The native
+map drains its transient capture and callbacks on ownership loss or release.
 
 ### CommonUI input and authored button focus
 
