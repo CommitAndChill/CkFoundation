@@ -131,12 +131,10 @@ namespace ck
 
                     UCk_Ecs_ReplicatedObject_UE::Destroy(EcsRO);
 
-                    // In this case, we are one of the clients, and we do NOT need to go any further
-                    if (const auto OutermostActor = UCk_Utils_Actor_UE::Get_OutermostActor_RemoteAuthority(InRO.Get());
-                        ck::Is_NOT_Valid(OutermostActor, ck::IsValid_Policy_IncludePendingKill{}))
-                    { return; }
-
-                    EcsRO->Request_TriggerDestroyAssociatedEntity();
+                    //++CK
+                    // Explicit remote subobject destruction invokes the client's
+                    // PreDestroyFromReplication to retire its associated entity.
+                    //--CK
                 });
         }
 

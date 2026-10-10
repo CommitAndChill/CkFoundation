@@ -71,12 +71,17 @@ auto
     if (ck::Is_NOT_Valid(InRo->_ReplicatedActor))
     { return; }
 
-    InRo->_ReplicatedActor->RemoveReplicatedSubObject(InRo);
+    //++CK
+    if (InRo->_ReplicatedActor->HasAuthority())
+    { InRo->_ReplicatedActor->DestroyReplicatedSubObjectOnRemotePeers(InRo); }
+    else
+    { InRo->_ReplicatedActor->RemoveReplicatedSubObject(InRo); }
 
     // ---- Idempotency: the deferred EntityLifetime destroy path AND the GC BeginDestroy() path both call
     // Destroy(). Null the actor so a second call early-outs above instead of issuing a double
-    // RemoveReplicatedSubObject() — the Iris registry does not expect the same subobject removed twice.
+    // teardown operation - the Iris registry does not expect the same subobject retired twice.
     InRo->_ReplicatedActor = nullptr;
+    //--CK
 }
 
 auto
