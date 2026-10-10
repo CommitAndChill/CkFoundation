@@ -136,6 +136,55 @@ namespace ck
 
         // Every state script is attached, so DefineState has run and children are readable.
 
+        //++CK
+        // Task creation stores its class and attaches its script directly; there is no
+        // spawn-request child to inspect. Resolve nested definitions from class defaults.
+        // Validate the entire batch before changing progress or retiring any temp state,
+        // so a missing required definition cannot publish a complete partial graph.
+        auto SubSmInitialStates = TMap<TSubclassOf<UCk_SmTask_EntityScript>,
+            TSubclassOf<UCk_SmState_EntityScript>>{};
+        auto TaskDefinitionsComplete = true;
+
+        for (const auto& Pending : Progress._PendingEntities)
+        {
+            UCk_Utils_StateMachine_UE::RecordOfSmTasks_Utils::ForEach_ValidEntry(Pending.EntityHandle,
+            [&](FCk_Handle_SmTask InTask)
+            {
+                if (NOT TaskDefinitionsComplete)
+                { return; }
+
+                const auto TaskClass = UCk_Utils_SmTask_UE::Get_ScriptClass(InTask);
+                if (ck::Is_NOT_Valid(TaskClass))
+                {
+                    TaskDefinitionsComplete = false;
+                    return;
+                }
+
+                if (NOT TaskClass->IsChildOf(UCk_SmTask_SubStateMachine::StaticClass()))
+                { return; }
+
+                const auto* SubSmTask = Cast<UCk_SmTask_SubStateMachine>(TaskClass->GetDefaultObject(false));
+                if (ck::Is_NOT_Valid(SubSmTask))
+                {
+                    TaskDefinitionsComplete = false;
+                    return;
+                }
+
+                const auto InitialStateClass = SubSmTask->Get_InitialStateClass();
+                if (ck::Is_NOT_Valid(InitialStateClass))
+                {
+                    TaskDefinitionsComplete = false;
+                    return;
+                }
+
+                SubSmInitialStates.Add(TaskClass, InitialStateClass);
+            });
+
+            if (NOT TaskDefinitionsComplete)
+            { return; }
+        }
+        //--CK
+
         for (const auto& Pending : Progress._PendingEntities)
         {
             auto StateDef = FCk_SmDebug_StateDefinition{};
@@ -196,36 +245,18 @@ namespace ck
                     TaskDef.Mode = ECk_SmTaskMode::Tick;
                 }
 
-                // Read directly (same path the live cache uses): the RequestSpawnEntity child
-                // fragment leaves ClassName empty once the spawn request has been consumed.
+                //++CK
+                // The stored task class remains available before and after script attachment.
                 TaskDef.ScriptClass = UCk_Utils_SmTask_UE::Get_ScriptClass(InTask);
-                if (ck::IsValid(TaskDef.ScriptClass))
+                TaskDef.ClassName = UCk_Utils_Object_UE::Get_CleanClassName(TaskDef.ScriptClass);
+
+                if (const auto* SubSmInitial = SubSmInitialStates.Find(TaskDef.ScriptClass))
                 {
-                    TaskDef.ClassName = UCk_Utils_Object_UE::Get_CleanClassName(TaskDef.ScriptClass);
+                    TaskDef.HasSubStateMachine = true;
+                    TaskDef.SubSmInitialStateClass = *SubSmInitial;
+                    Progress._PendingSubSmWalks.Add({Pending.StateClass, *SubSmInitial});
                 }
-
-                // Sub-SM detection still needs the archetype (to read its InitialStateClass).
-                auto TaskChildren = UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(InTask);
-                for (const auto& RequestChild : TaskChildren)
-                {
-                    if (NOT RequestChild.Has<FFragment_EntityScript_RequestSpawnEntity>())
-                    { continue; }
-
-                    const auto& Request = RequestChild.Get<FFragment_EntityScript_RequestSpawnEntity>();
-                    auto* Archetype = Request.Get_EntityScriptClassArchetype().Get();
-
-                    if (ck::Is_NOT_Valid(Archetype))
-                    { continue; }
-
-                    auto* SubSmTask = Cast<UCk_SmTask_SubStateMachine>(Archetype);
-                    if (ck::IsValid(SubSmTask) && ck::IsValid(SubSmTask->Get_InitialStateClass()))
-                    {
-                        TaskDef.HasSubStateMachine = true;
-                        TaskDef.SubSmInitialStateClass = SubSmTask->Get_InitialStateClass();
-                        Progress._PendingSubSmWalks.Add(
-                            {Pending.StateClass, SubSmTask->Get_InitialStateClass()});
-                    }
-                }
+                //--CK
 
                 StateDef.Tasks.Add(MoveTemp(TaskDef));
             });
