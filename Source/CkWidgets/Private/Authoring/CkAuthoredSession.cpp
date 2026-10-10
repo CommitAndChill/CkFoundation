@@ -10,6 +10,7 @@
 #include "CkSlateLayout/CkUiRadialSelector.h"
 #include "CkSlateLayout/CkUiItemSlot.h"
 #include "CkSlateLayout/CkUiInventoryGrid.h"
+#include "CkSlateLayout/CkUiWorldMap.h"
 #include "CkSlateLayout/CkUiActionCard.h"
 #include "CkSlateLayout/SCkUiRepeat.h"
 #include "CkSlateLayout/CkUiAtlasImage.h"
@@ -464,6 +465,11 @@ auto
         if (!Atlas.Succeeded) { OutErrors = Atlas.Errors; return false; }
         const FCkUiLoadResult Grid = RegisterInventoryGridUiControl(Registry);
         if (!Grid.Succeeded) { OutErrors = Grid.Errors; return false; }
+    }
+    if (InConfig.Get_RegisterMapControls())
+    {
+        const FCkUiLoadResult Map = RegisterWorldMapUiControl(Registry);
+        if (!Map.Succeeded) { OutErrors = Map.Errors; return false; }
     }
 
     const TWeakObjectPtr<UCk_UI_AuthoredSession_UE> Weak{this};
@@ -1006,6 +1012,93 @@ auto
     const FString Id = InId;
     TGuardValue<bool> InputGuard(_InputOperationActive, true);
     return DoFocusButton(Id, FindFocusableButton(Id));
+}
+
+auto
+    UCk_UI_AuthoredSession_UE::
+    FindWorldMap(const FString& InId)
+    -> TSharedPtr<SCkUiWorldMap>
+{
+    if (!Get_IsInputActive() || _OperationActive || InId.IsEmpty()) { return {}; }
+    const auto View = _View;
+    const auto Revision = View->GetRevision();
+    const auto Generation = _InputGeneration;
+    const auto* Surface = _MountedSurface.Get();
+    const auto Root = IsValid(Surface) ? Surface->GetCachedWidget() : TSharedPtr<SWidget>{};
+    if (!Root.IsValid()) { return {}; }
+    TSharedPtr<SCkUiWorldMap> Match;
+    bool Ambiguous = false;
+    TFunction<void(const TSharedRef<SWidget>&)> Visit;
+    Visit = [&Visit, &Match, &Ambiguous, &InId](const TSharedRef<SWidget>& Node)
+    {
+        if (Ambiguous) { return; }
+        if (Node->HasRegisteredSlateAttribute() && Node->IsAttributesUpdatesEnabled())
+        {
+            FSlateAttributeMetaData::UpdateAllAttributes(*Node,
+                FSlateAttributeMetaData::EInvalidationPermission::AllowInvalidationIfConstructed);
+        }
+        if (!Node->GetVisibility().IsVisible() || !Node->IsEnabled()) { return; }
+        if (Node->GetTypeAsString() == TEXT("SCkUiWorldMap") && Node->GetTag() == FName(*InId))
+        {
+            const auto Candidate = StaticCastSharedRef<SCkUiWorldMap>(Node);
+            if (Match.IsValid() && Match != Candidate) { Ambiguous = true; return; }
+            Match = Candidate;
+        }
+        const auto* Children = Node->GetChildren();
+        for (int32 Index = 0; Children != nullptr && Index < Children->Num(); ++Index)
+        { Visit(ConstCastSharedRef<SWidget>(Children->GetChildAt(Index))); }
+    };
+    Visit(Root.ToSharedRef());
+    if (Ambiguous || !Get_IsInputActive() || _View != View
+        || View->GetRevision() != Revision || _InputGeneration != Generation) { return {}; }
+    return Match;
+}
+
+auto
+    UCk_UI_AuthoredSession_UE::
+    TrySetMapCamera(const FString& InId, FVector2D InCenter, float InZoom)
+    -> bool
+{
+    if (_InputOperationActive || _OperationActive || !Get_IsInputActive()) { return false; }
+    TGuardValue<bool> Guard(_InputOperationActive, true);
+    const auto Map = FindWorldMap(InId);
+    return Map.IsValid() && Map->TrySetCamera(InCenter, InZoom);
+}
+
+auto
+    UCk_UI_AuthoredSession_UE::
+    TryZoomMap(const FString& InId, float InFactor)
+    -> bool
+{
+    if (_InputOperationActive || _OperationActive || !Get_IsInputActive()) { return false; }
+    TGuardValue<bool> Guard(_InputOperationActive, true);
+    const auto Map = FindWorldMap(InId);
+    return Map.IsValid() && Map->TryZoomBy(InFactor);
+}
+
+auto
+    UCk_UI_AuthoredSession_UE::
+    TryRevealMapMarker(const FString& InId, const FString& InKey)
+    -> bool
+{
+    if (_InputOperationActive || _OperationActive || !Get_IsInputActive()) { return false; }
+    TGuardValue<bool> Guard(_InputOperationActive, true);
+    const auto Map = FindWorldMap(InId);
+    return Map.IsValid() && Map->TryRevealMarker(InKey);
+}
+
+auto
+    UCk_UI_AuthoredSession_UE::
+    TryGetMapCamera(const FString& InId, FVector2D& OutCenter, float& OutZoom)
+    -> bool
+{
+    if (_InputOperationActive || _OperationActive || !Get_IsInputActive()) { return false; }
+    TGuardValue<bool> Guard(_InputOperationActive, true);
+    const auto Map = FindWorldMap(InId);
+    if (!Map.IsValid()) { return false; }
+    OutCenter = Map->GetCameraCenter();
+    OutZoom = Map->GetZoom();
+    return true;
 }
 
 auto

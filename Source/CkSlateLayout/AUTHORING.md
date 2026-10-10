@@ -79,6 +79,86 @@ the same production placement contract to native integrations.
 The [tactical inventory gym](../../../CkTests/Documentation/UI/TacticalInventoryProof/README.md)
 is an optional consumer example; CkTests is not a runtime dependency.
 
+### World maps
+
+Register `RegisterWorldMapUiControl(registry)` from
+[`CkUiWorldMap.h`](Public/CkSlateLayout/CkUiWorldMap.h) before creating the view,
+and check the registration result. Reflected UMG sessions opt in with
+`Config.Set_RegisterMapControls(true)`. The control renders a host-owned image,
+keyed markers, selection feedback and an optional route:
+
+```html
+<world-map id="district-map" markers-bind="Markers" image-bind="MapImage"
+           select="SelectMarker" selected-key-bind="SelectedKey"
+           route-bind="RouteVisible" origin-x="0.3" origin-y="0.55"
+           font-family="map-ui" class="district-map" />
+```
+
+`markers-bind`, `image-bind` and `select` are required. Bind a collection through
+`FDataBindings.Collections`, a brush with finite positive image dimensions
+through `FDataBindings.Images`, and a keyed `StringChanged` callback through
+`FDataBindings.StringChanged`. `selected-key-bind` is an optional Text binding;
+`route-bind` is an optional Bool binding. The callback proposes a stable marker
+key; the host validates it and publishes the selected key. The map does not
+change the model by itself. The host owns the image and brush lifetime.
+
+The collection schema requires Number `x`, `y`; Text `label`, `kind`; and Bool
+`enabled`. Bool `visible` is optional, but if declared every record must supply
+it. Each record needs a unique nonempty stable key. Coordinates must be finite,
+normalized to `[0, 1]`, and refer to positions on the image. Supported exact
+`kind` values are `quest`, `fast-travel`, `vendor`, `player`, `hazard`, and
+`generic`; the collection is limited to 1024 records. Disabled markers remain
+visible at reduced opacity but cannot be selected. `visible=false` suppresses
+painting and selection without removing the stable record identity. The host
+must keep the selected key eligible when filtering or removing markers.
+
+The image is aspect-fitted, then zoomed and clipped to the map viewport. Markers
+and their hover/selected labels use the same normalized image coordinates;
+labels are constrained to the viewport. The optional `origin-x`/`origin-y`
+are finite normalized route start coordinates, defaulting to `(0.3, 0.55)`.
+With `route-bind=true`, the control draws one straight line to the selected,
+enabled, visible marker. This is an illustrative vector, not pathfinding or a
+distance calculation. CSS accepts `-ck-map-background`, `-ck-map-border`,
+`-ck-map-marker`, `-ck-map-selected`, and `-ck-map-route` colors. Optional
+`-ck-map-quest`, `-ck-map-service`, `-ck-map-hazard`, and `-ck-map-player`
+color the corresponding marker kinds; `fast-travel` and `vendor` share the
+service color, while `generic` uses `-ck-map-marker`. The default linear RGBA
+colors are quest `(0.94, 0.65, 0.25, 1)`, service `(0.30, 0.75, 0.78, 1)`,
+hazard `(0.85, 0.37, 0.25, 1)`, and player `(0.90, 0.95, 0.93, 1)`.
+Selected color takes precedence over kind color; disabled markers reduce the
+resulting opacity. All map colors use the same finite-color validation.
+`-ck-map-label-font-size` accepts 8 through 48 Slate units. The optional literal
+`font-family` selects an admitted Regular face for labels; CSS font inheritance
+does not apply to this custom control.
+
+The camera is local to the retained map widget: center defaults to `(0.5, 0.5)`,
+zoom ranges from 1 through 8, and pan is clamped to the fitted image. A mouse
+click on an enabled visible marker proposes selection; left drag pans, the wheel
+zooms around its pointer, `W/A/S/D` pans, arrows or D-pad cycle eligible markers,
+and Enter or the gamepad bottom face button proposes the selected marker. Keyboard selection
+and confirmation require `selected-key-bind`; without it these keys are unhandled.
+Plus,
+minus and shoulder buttons zoom. These inputs require focus and an admitted
+owner where the host uses owned input. Events outside the fitted image do not
+start a map gesture. Escape cancels an active pointer gesture; ordinary close
+policy belongs to the host.
+
+`SCkUiWorldMap` exposes `TrySetCamera`, `TryZoomBy`, `TryRevealMarker`,
+`GetCameraCenter`, `GetZoom`, and project/unproject helpers. Failed camera and
+projection requests preserve their outputs or current camera. A collection
+setter validates its declared schema atomically, but a later update with a
+map-specific semantic error (such as an unsupported kind or out-of-range
+coordinate) can pass collection admission. In that case the retained map keeps
+its last accepted marker snapshot and suppresses interaction until a valid
+revision arrives. Validate map semantics before publishing a candidate.
+Initial construction and source reload reject invalid map configuration while
+preserving the committed view on a rejected reload. Reload during an active
+pointer gesture rejects; accepted reload cancels transient map interaction and
+retains the compatible widget/camera. Capture loss, hidden ownership and
+release cancel transient gestures; released controls cannot dispatch callbacks.
+
+### Document structure
+
 ```html
 <ui version="1">
   <region name="main">
