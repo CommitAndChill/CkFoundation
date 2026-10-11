@@ -10,6 +10,7 @@
 #include "CkCore/Validation/CkIsValid.h"
 
 #include "Engine/Texture.h"
+#include "MaterialDomain.h"
 #include "HAL/FileManager.h"
 #include "Misc/App.h"
 #include "Materials/Material.h"
