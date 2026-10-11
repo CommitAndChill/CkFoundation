@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "canvas": {
+    "width": 2,
+    "height": 2
+  },
+  "events": [
+    {
+      "name": "loaded",
+      "payload": {
+        "ready": true
+      }
+    }
+  ],
+  "metadata": {
+    "number": 1234567890123456789012345678901234567890,
+    "nested": {
+      "typed": [
+        null,
+        true,
+        false,
+        1.25,
+        "text",
+        {
+          "x": [
+            1,
+            2
+          ]
+        }
+      ]
+    }
+  },
+  "animations": {
+    "walk": {
+      "playback": "loop",
+      "events": [
+        {
+          "name": "step",
+          "at": 1
+        }
+      ],
+      "metadata": {
+        "layer": "body",
+        "priority": 2
+      },
+      "frames": [
+        {
+          "source": "red.xpm",
+          "duration_ms": 125,
+          "anchors": {
+            "origin": [
+              1,
+              1
+            ],
+            "hand": [
+              0,
+              0
+            ]
+          },
+          "events": [
+            {
+              "name": "touch",
+              "data": [
+                false,
+                null,
+                3
+              ]
+            }
+          ],
+          "metadata": {
+            "tag": "first"
+          }
+        },
+        {
+          "source": "blue.xpm",
+          "duration_ms": 250,
+          "anchors": {
+            "origin": [
+              0,
+              1
+            ]
+          }
+        },
+        {
+          "source": "red.xpm",
+          "duration_ms": 375,
+          "metadata": {
+            "repeat": true
+          }
+        }
+      ]
+    }
+  }
+}

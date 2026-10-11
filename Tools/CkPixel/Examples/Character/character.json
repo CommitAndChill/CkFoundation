@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "canvas": {
+    "width": 16,
+    "height": 16
+  },
+  "metadata": {
+    "description": "Small robot with grounded feet and a shared 8,15 origin."
+  },
+  "animations": {
+    "idle": {
+      "playback": "loop",
+      "frames": [
+        {
+          "source": "idle_1.xpm",
+          "duration_ms": 240,
+          "anchors": {
+            "origin": [
+              8,
+              15
+            ]
+          }
+        },
+        {
+          "source": "idle_2.xpm",
+          "duration_ms": 100,
+          "anchors": {
+            "origin": [
+              8,
+              15
+            ]
+          }
+        },
+        {
+          "source": "idle_3.xpm",
+          "duration_ms": 260,
+          "anchors": {
+            "origin": [
+              8,
+              15
+            ]
+          }
+        }
+      ]
+    },
+    "walk": {
+      "playback": "loop",
+      "frames": [
+        {
+          "source": "walk_1.xpm",
+          "duration_ms": 110,
+          "anchors": {
+            "origin": [
+              8,
+              15
+            ]
+          }
+        },
+        {
+          "source": "walk_2.xpm",
+          "duration_ms": 95,
+          "anchors": {
+            "origin": [
+              8,
+              15
+            ]
+          }
+        },
+        {
+          "source": "walk_3.xpm",
+          "duration_ms": 110,
+          "anchors": {
+            "origin": [
+              8,
+              15
+            ]
+          }
+        },
+        {
+          "source": "walk_4.xpm",
+          "duration_ms": 95,
+          "anchors": {
+            "origin": [
+              8,
+              15
+            ]
+          }
+        }
+      ]
+    },
+    "attack": {
+      "playback": "once",
+      "frames": [
+        {
+          "source": "attack_1.xpm",
+          "duration_ms": 90,
+          "anchors": {
+            "origin": [
+              8,
+              15
+            ]
+          }
+        },
+        {
+          "source": "attack_2.xpm",
+          "duration_ms": 70,
+          "anchors": {
+            "origin": [
+              8,
+              15
+            ]
+          }
+        },
+        {
+          "source": "attack_3.xpm",
+          "duration_ms": 150,
+          "anchors": {
+            "origin": [
+              8,
+              15
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,6 @@
+static char * image[] = {
+"1 1 2 1",
+". c red",
+". c blue",
+"."
+};

@@ -1,0 +1,102 @@
+{
+  "generator": "ckpixel-native-gate-fixtures-v1",
+  "run_id": "checked-in-ordinary-v1",
+  "cases": [
+    {
+      "name": "ordinary_valid",
+      "manifest": "ordinary/ordinary-valid.json",
+      "expected_valid": true,
+      "expected_code": null,
+      "supported": true,
+      "skip_reason": ""
+    },
+    {
+      "name": "late_missing_second_source",
+      "manifest": "ordinary/late-missing-second-source.json",
+      "expected_valid": false,
+      "expected_code": "io",
+      "supported": true,
+      "skip_reason": ""
+    },
+    {
+      "name": "dimension_mismatch",
+      "manifest": "ordinary/dimension-mismatch.json",
+      "expected_valid": false,
+      "expected_code": "canvas",
+      "supported": true,
+      "skip_reason": ""
+    },
+    {
+      "name": "utf8_bom_manifest",
+      "manifest": "ordinary/utf8-bom-valid.json",
+      "expected_valid": true,
+      "expected_code": null,
+      "supported": true,
+      "skip_reason": ""
+    },
+    {
+      "name": "malformed_utf8_manifest",
+      "manifest": "ordinary/malformed-utf8-manifest.json",
+      "expected_valid": false,
+      "expected_code": "utf8",
+      "supported": true,
+      "skip_reason": ""
+    },
+    {
+      "name": "raw_nul_json",
+      "manifest": "ordinary/raw-nul-manifest.json",
+      "expected_valid": false,
+      "expected_code": "json",
+      "supported": true,
+      "skip_reason": ""
+    },
+    {
+      "name": "malformed_utf8_xpm",
+      "manifest": "ordinary/malformed-utf8-xpm.json",
+      "expected_valid": false,
+      "expected_code": "utf8",
+      "supported": true,
+      "skip_reason": ""
+    },
+    {
+      "name": "directory_link",
+      "manifest": "ordinary/directory-link.json",
+      "expected_valid": false,
+      "expected_code": "io",
+      "supported": false,
+      "skip_reason": "Optional link fixture requires the local native_gate_fixtures.py run"
+    },
+    {
+      "name": "file_link",
+      "manifest": "ordinary/file-link.json",
+      "expected_valid": false,
+      "expected_code": "io",
+      "supported": false,
+      "skip_reason": "Optional link fixture requires the local native_gate_fixtures.py run"
+    },
+    {
+      "name": "linked_root",
+      "manifest": "linked_root/ordinary-valid.json",
+      "expected_valid": false,
+      "expected_code": "io",
+      "supported": false,
+      "skip_reason": "Optional link fixture requires the local native_gate_fixtures.py run"
+    },
+    {
+      "name": "junction_inside",
+      "manifest": "ordinary/junction-inside.json",
+      "expected_valid": false,
+      "expected_code": "io",
+      "supported": false,
+      "skip_reason": "Optional link fixture requires the local native_gate_fixtures.py run"
+    },
+    {
+      "name": "junction_outside",
+      "manifest": "junction_outside/ordinary-valid.json",
+      "expected_valid": false,
+      "expected_code": "io",
+      "supported": false,
+      "skip_reason": "Optional link fixture requires the local native_gate_fixtures.py run"
+    }
+  ]
+}

@@ -1,0 +1,506 @@
+{
+  "format": "ckpixel-manifest-conformance-v1",
+  "valid": [
+    {
+      "file": "valid-loop.json",
+      "canvas": [
+        2,
+        2
+      ],
+      "animation_order": [
+        "walk"
+      ],
+      "source_count": 2,
+      "events": [
+        {
+          "name": "loaded",
+          "payload": {
+            "ready": true
+          }
+        }
+      ],
+      "metadata": {
+        "number": "1234567890123456789012345678901234567890",
+        "nested": {
+          "typed": [
+            null,
+            true,
+            false,
+            1.25,
+            "text",
+            {
+              "x": [
+                1,
+                2
+              ]
+            }
+          ]
+        }
+      },
+      "animations": [
+        {
+          "name": "walk",
+          "playback": "loop",
+          "frame_sources": [
+            "red.xpm",
+            "blue.xpm",
+            "red.xpm"
+          ],
+          "durations_ms": [
+            125,
+            250,
+            375
+          ],
+          "source_indices": [
+            0,
+            1,
+            0
+          ],
+          "anchors": [
+            {
+              "origin": [
+                1,
+                1
+              ],
+              "hand": [
+                0,
+                0
+              ]
+            },
+            {
+              "origin": [
+                0,
+                1
+              ]
+            },
+            {}
+          ],
+          "events": [
+            {
+              "name": "step",
+              "at": 1
+            }
+          ],
+          "metadata": {
+            "layer": "body",
+            "priority": 2
+          },
+          "frame_events": [
+            [
+              {
+                "name": "touch",
+                "data": [
+                  false,
+                  null,
+                  3
+                ]
+              }
+            ],
+            [],
+            []
+          ],
+          "frame_metadata": [
+            {
+              "tag": "first"
+            },
+            {},
+            {
+              "repeat": true
+            }
+          ],
+          "samples": [
+            [
+              0,
+              0
+            ],
+            [
+              124,
+              0
+            ],
+            [
+              125,
+              1
+            ],
+            [
+              374,
+              1
+            ],
+            [
+              375,
+              2
+            ],
+            [
+              749,
+              2
+            ],
+            [
+              750,
+              0
+            ],
+            [
+              -1,
+              2
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "file": "valid-once.json",
+      "canvas": [
+        2,
+        2
+      ],
+      "animation_order": [
+        "idle"
+      ],
+      "source_count": 2,
+      "animations": [
+        {
+          "name": "idle",
+          "playback": "once",
+          "frame_sources": [
+            "red.xpm",
+            "blue.xpm"
+          ],
+          "durations_ms": [
+            100,
+            200
+          ],
+          "source_indices": [
+            0,
+            1
+          ],
+          "samples": [
+            [
+              -100,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              99,
+              0
+            ],
+            [
+              100,
+              1
+            ],
+            [
+              300,
+              1
+            ],
+            [
+              900,
+              1
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "file": "valid-ping-pong.json",
+      "canvas": [
+        2,
+        2
+      ],
+      "animation_order": [
+        "bounce"
+      ],
+      "source_count": 2,
+      "animations": [
+        {
+          "name": "bounce",
+          "playback": "ping-pong",
+          "frame_sources": [
+            "red.xpm",
+            "blue.xpm",
+            "red.xpm"
+          ],
+          "durations_ms": [
+            100,
+            200,
+            300
+          ],
+          "source_indices": [
+            0,
+            1,
+            0
+          ],
+          "samples": [
+            [
+              0,
+              0
+            ],
+            [
+              99,
+              0
+            ],
+            [
+              100,
+              1
+            ],
+            [
+              299,
+              1
+            ],
+            [
+              300,
+              2
+            ],
+            [
+              599,
+              2
+            ],
+            [
+              600,
+              1
+            ],
+            [
+              799,
+              1
+            ],
+            [
+              800,
+              0
+            ],
+            [
+              -1,
+              1
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "file": "valid-multi-animation.json",
+      "canvas": [
+        2,
+        2
+      ],
+      "animation_order": [
+        "idle",
+        "attack"
+      ],
+      "source_count": 2,
+      "animations": [
+        {
+          "name": "idle",
+          "playback": "loop",
+          "frame_sources": [
+            "red.xpm"
+          ],
+          "durations_ms": [
+            50
+          ],
+          "source_indices": [
+            0
+          ],
+          "samples": [
+            [
+              0,
+              0
+            ],
+            [
+              50,
+              0
+            ]
+          ]
+        },
+        {
+          "name": "attack",
+          "playback": "once",
+          "frame_sources": [
+            "blue.xpm",
+            "red.xpm"
+          ],
+          "durations_ms": [
+            75,
+            125
+          ],
+          "source_indices": [
+            1,
+            0
+          ],
+          "samples": [
+            [
+              0,
+              0
+            ],
+            [
+              75,
+              1
+            ],
+            [
+              200,
+              1
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "file": "valid-escaped-extras.json",
+      "canvas": [2, 2],
+      "animation_order": ["idle"],
+      "source_count": 1,
+      "metadata": {"ab": "plain", "a\u0000b": "nul-key"},
+      "animations": [{
+        "name": "idle",
+        "playback": "once",
+        "frame_sources": ["red.xpm"],
+        "durations_ms": [100],
+        "source_indices": [0],
+        "frame_metadata": [{"text": "before\u0000after"}],
+        "samples": [[0, 0], [100, 0]]
+      }]
+    },
+    {
+      "file": "valid-anchor-negative-zero.json",
+      "canvas": [2, 2],
+      "animation_order": ["idle"],
+      "source_count": 1,
+      "animations": [{
+        "name": "idle",
+        "playback": "loop",
+        "frame_sources": ["red.xpm"],
+        "durations_ms": [100],
+        "source_indices": [0],
+        "anchors": [{"origin": [0, 1]}],
+        "samples": [[0, 0], [100, 0]]
+      }]
+    }
+  ],
+  "invalid": [
+    {
+      "file": "invalid-duplicate-decoded-key.json",
+      "code": "json"
+    },
+    {
+      "file": "invalid-duplicate-nested-key.json",
+      "code": "json"
+    },
+    {
+      "file": "invalid-duplicate-escaped-nul-key.json",
+      "code": "json"
+    },
+    {
+      "file": "invalid-version-bool.json",
+      "code": "version"
+    },
+    {
+      "file": "invalid-version-float.json",
+      "code": "version"
+    },
+    {
+      "file": "invalid-version-exponent.json",
+      "code": "version"
+    },
+    {
+      "file": "invalid-version-string.json",
+      "code": "version"
+    },
+    {
+      "file": "invalid-width-bool.json",
+      "code": "schema"
+    },
+    {
+      "file": "invalid-width-float.json",
+      "code": "schema"
+    },
+    {
+      "file": "invalid-width-exponent.json",
+      "code": "schema"
+    },
+    {
+      "file": "invalid-width-string.json",
+      "code": "schema"
+    },
+    {
+      "file": "invalid-unknown.json",
+      "code": "schema"
+    },
+    {
+      "file": "invalid-layers.json",
+      "code": "layers_unsupported"
+    },
+    {
+      "file": "invalid-duration-zero.json",
+      "code": "duration"
+    },
+    {
+      "file": "invalid-duration-over.json",
+      "code": "duration"
+    },
+    {
+      "file": "invalid-duration-bool.json",
+      "code": "duration"
+    },
+    {
+      "file": "invalid-duration-string.json",
+      "code": "duration"
+    },
+    {
+      "file": "invalid-canvas-zero.json",
+      "code": "schema"
+    },
+    {
+      "file": "invalid-canvas-mismatch.json",
+      "code": "canvas"
+    },
+    {
+      "file": "invalid-anchor-outside.json",
+      "code": "schema"
+    },
+    {
+      "file": "invalid-anchor-float.json",
+      "code": "schema"
+    },
+    {
+      "file": "invalid-path-traversal.json",
+      "code": "source_path"
+    },
+    {
+      "file": "invalid-path-device.json",
+      "code": "source_path"
+    },
+    {
+      "file": "invalid-path-device-spaced-con.json",
+      "code": "source_path"
+    },
+    {
+      "file": "invalid-path-device-spaced-com1.json",
+      "code": "source_path"
+    },
+    {
+      "file": "invalid-path-device-spaced-nul-child.json",
+      "code": "source_path"
+    },
+    {
+      "file": "invalid-source-nul.json",
+      "code": "source_path"
+    },
+    {
+      "file": "invalid-missing-source.json",
+      "code": "io"
+    },
+    {
+      "file": "invalid-malformed.json",
+      "code": "json"
+    },
+    {
+      "file": "invalid-trailing.json",
+      "code": "json"
+    },
+    {
+      "file": "invalid-metadata-overflow.json",
+      "code": "json"
+    },
+    {
+      "file": "invalid-utf8.json",
+      "code": "utf8"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+/* XPM */
+static char * image[] = {
+"4 1 4 1",
+"\" c white",
+"\\ c black",
+"\077 c yellow",
+"\x27 c red",
+"\"\\\077\x27"
+};

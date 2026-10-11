@@ -1,0 +1,6 @@
+/* Unicode comments are valid: café */
+char * pixels[] = {
+"1 1 1 1",
+". c red",
+"é"
+};

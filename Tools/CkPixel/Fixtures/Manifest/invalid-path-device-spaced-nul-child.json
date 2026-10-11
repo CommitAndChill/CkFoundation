@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "canvas": {"width": 2, "height": 2},
+  "animations": {"idle": {"playback": "loop", "frames": [
+    {"source": "dir/NUL .xpm", "duration_ms": 100}
+  ]}}
+}

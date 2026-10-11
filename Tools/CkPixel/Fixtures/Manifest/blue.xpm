@@ -1,0 +1,1 @@
+static char * sprite[] = {"2 2 2 1", ". c None", "b c blue", ".b", "b."};

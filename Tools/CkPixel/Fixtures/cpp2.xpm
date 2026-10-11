@@ -1,0 +1,7 @@
+/* Unicode comment: café */
+const char * sprite[] = {
+"2 1 2 2",
+"a  s accent c #123456789",
+" B c blue",
+"a  B"
+};

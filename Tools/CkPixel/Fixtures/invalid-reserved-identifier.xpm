@@ -1,0 +1,5 @@
+static char * char[] = {
+"1 1 1 1",
+". c green",
+"."
+};

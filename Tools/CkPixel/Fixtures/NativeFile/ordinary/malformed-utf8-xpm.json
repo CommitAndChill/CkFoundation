@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "canvas": {
+    "width": 2,
+    "height": 2
+  },
+  "animations": {
+    "idle": {
+      "playback": "loop",
+      "frames": [
+        {
+          "source": "red.xpm",
+          "duration_ms": 100
+        },
+        {
+          "source": "malformed-utf8.xpm",
+          "duration_ms": 100
+        }
+      ]
+    }
+  }
+}

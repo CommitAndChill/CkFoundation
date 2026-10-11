@@ -107,3 +107,7 @@ Source/CkScripts/.idea
 Source/CkCore/Public/CkCore/Generated/CkCore_BuildId.h
 *.orig
 Source/CkWatermark/Public/CkWatermark/Generated/CkWatermark_BuildId.h
+!Source/CkPixelSprite/Claude.md
+!Source/CkPixelSpriteEditor/Claude.md
+!Tools/CkPixel/README.md
+!Tools/CkPixel/UNREAL.md

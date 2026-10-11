@@ -1,0 +1,5 @@
+char * pixels[] = {
+"1 1 1 1 XPMEXT",
+". c red",
+"."
+};

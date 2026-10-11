@@ -1,0 +1,5 @@
+static static char * sprite[] = {
+"1 1 1 1",
+". c green",
+"."
+};

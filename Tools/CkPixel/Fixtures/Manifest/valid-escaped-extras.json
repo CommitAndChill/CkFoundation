@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "canvas": {"width": 2, "height": 2},
+  "animations": {
+    "idle": {
+      "playback": "once",
+      "frames": [{"source": "red.xpm", "duration_ms": 100,
+                  "metadata": {"text": "before\u0000after"}}]
+    }
+  },
+  "metadata": {"ab": "plain", "a\u0000b": "nul-key"}
+}

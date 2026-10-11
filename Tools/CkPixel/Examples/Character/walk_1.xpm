@@ -1,0 +1,27 @@
+/* XPM */
+static char * sprite[] = {
+"16 16 7 1",
+". c None",
+"K c #17233F",
+"B c #148C9F",
+"C c #64DFD9",
+"E c #FFE37A",
+"G c #8C9CAF",
+"R c #FF6A5A",
+".......EE.......",
+".......KK.......",
+"....KKKKKKKK....",
+"....KCCCCCCK....",
+"....KCECCECK....",
+"....KCCKKCCK....",
+"....KKKKKKKK....",
+".....KKKKKK.....",
+"..GGGKBCCBKGGG..",
+"..GGGKBBBBKGGG..",
+"..KK.KBBBBK.KK..",
+"..KK.GGKKKK.KK..",
+".....GG.........",
+".....GG..GG.....",
+".....GG..GG.....",
+"...KKKKKKKKK...."
+};
