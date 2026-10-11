@@ -307,6 +307,31 @@ namespace ck
         }
         return Result;
     }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        ComposeProceduralBodyPoseAction(
+            const FTransform& InBase,
+            const FTransform& InAction)
+        -> TOptional<FTransform>
+    {
+        if (NOT Get_IsProceduralBodyPoseActionAdmissible(InBase) || NOT Get_IsProceduralBodyPoseActionAdmissible(InAction))
+        { return {}; }
+
+        return FTransform{(InBase.GetRotation() * InAction.GetRotation()).GetNormalized(),
+            InBase.GetLocation() + InAction.GetLocation()};
+    }
+
+    auto
+        Get_IsProceduralBodyPoseActionAdmissible(
+            const FTransform& InAction)
+        -> bool
+    {
+        return NOT InAction.ContainsNaN()
+            && InAction.GetScale3D().Equals(FVector::OneVector, KINDA_SMALL_NUMBER)
+            && InAction.GetRotation().IsNormalized();
+    }
 }
 
 // --------------------------------------------------------------------------------------------------------------------

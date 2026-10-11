@@ -5,6 +5,7 @@
 #include "CkCore/Validation/CkIsValid.h"
 
 #include "CkEcs/Handle/CkHandle_TypeSafe.h"
+#include "CkEcs/Request/CkRequest_Data.h"
 
 #include "CkEcsExt/Transform/CkTransform_Fragment_Data.h"
 
@@ -228,5 +229,72 @@ CK_DEFINE_CUSTOM_IS_VALID_INLINE(FCk_ProceduralBodyPose_Spec, IsValid_Policy_Def
         && ck::IsValid(InParams.Get_Support())
         && ck::IsValid(InParams.Get_Conform());
 });
+
+// --------------------------------------------------------------------------------------------------------------------
+
+/** A rigid action offset in the simulation body's axes, in centimetres, composed after the environmental base offset:
+    translation adds to the base's, rotation composes as Base * Action. Unit scale and a normalized rotation are required.
+    SampleId is the caller's positive, increasing token; the published ActionSample carries it once a pose includes this
+    input. Identity with a new token clears the action. One caller owns a body pose's action. */
+USTRUCT(BlueprintType)
+struct CKPROCEDURALANIMATION_API FCk_Request_ProceduralBodyPose_SetActionOffset : public FCk_Request_Base
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(FCk_Request_ProceduralBodyPose_SetActionOffset);
+    CK_REQUEST_DEFINE_DEBUG_NAME(FCk_Request_ProceduralBodyPose_SetActionOffset);
+
+private:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    FTransform _Offset = FTransform::Identity;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    int64 _SampleId = 0;
+
+public:
+    CK_PROPERTY_GET(_Offset);
+    CK_PROPERTY_GET(_SampleId);
+
+public:
+    CK_DEFINE_CONSTRUCTORS(FCk_Request_ProceduralBodyPose_SetActionOffset, _Offset, _SampleId);
+};
+
+// --------------------------------------------------------------------------------------------------------------------
+
+/** The pose the last successful body pose update submitted to the presentation: its world transform, the action token
+    that update included (0 before any action input) and a revision that advances once per successful positive-time
+    update (0 before the first). */
+USTRUCT(BlueprintType)
+struct CKPROCEDURALANIMATION_API FCk_ProceduralBodyPose_ActionSample
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(FCk_ProceduralBodyPose_ActionSample);
+
+private:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+              meta = (AllowPrivateAccess = true))
+    FTransform _WorldTransform = FTransform::Identity;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+              meta = (AllowPrivateAccess = true))
+    int64 _SampleId = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+              meta = (AllowPrivateAccess = true))
+    int64 _PoseRevision = 0;
+
+public:
+    CK_PROPERTY_GET(_WorldTransform);
+    CK_PROPERTY_GET(_SampleId);
+    CK_PROPERTY_GET(_PoseRevision);
+
+public:
+    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralBodyPose_ActionSample, _WorldTransform, _SampleId, _PoseRevision);
+};
 
 // --------------------------------------------------------------------------------------------------------------------

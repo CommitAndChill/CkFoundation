@@ -185,6 +185,24 @@ namespace ck
             const FTransform& InProposedOffset,
             TArrayView<const FProceduralBodyPoseReachAnchor> InAnchors)
         -> TOptional<FProceduralBodyPoseReachProjection>;
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // The final rigid offset for a body-local action layered on a base offset: the translations add, unrotated by the
+    // base, and the rotation is (Base * Action) normalized, with unit scale. Unset when either input is not a rigid
+    // offset (see Get_IsProceduralBodyPoseActionAdmissible).
+    CKPROCEDURALANIMATION_API auto
+        ComposeProceduralBodyPoseAction(
+            const FTransform& InBase,
+            const FTransform& InAction)
+        -> TOptional<FTransform>;
+
+    // A rigid offset: finite translation, rotation and scale, scale within KINDA_SMALL_NUMBER of one and a normalized,
+    // non-degenerate rotation.
+    CKPROCEDURALANIMATION_API auto
+        Get_IsProceduralBodyPoseActionAdmissible(
+            const FTransform& InAction)
+        -> bool;
 }
 
 // --------------------------------------------------------------------------------------------------------------------

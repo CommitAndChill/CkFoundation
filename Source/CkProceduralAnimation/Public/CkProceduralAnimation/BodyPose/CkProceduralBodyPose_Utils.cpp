@@ -1,6 +1,7 @@
 #include "CkProceduralAnimation/BodyPose/CkProceduralBodyPose_Utils.h"
 
 #include "CkProceduralAnimation/BodyPose/CkProceduralBodyPose_Fragment.h"
+#include "CkProceduralAnimation/Core/CkProceduralBodySupport.h"
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Fragment.h"
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Fragment.h"
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Utils.h"
@@ -90,6 +91,7 @@ auto
     InGait.Add<ck::FFragment_ProceduralBodyPose_Params>(InParams.Get_Presentation(), InParams.Get_Spring(), InParams.Get_Support());
     InGait.Add<ck::FFragment_ProceduralBodyPose_SupportLayout>(MoveTemp(HipLocals));
     InGait.Add<ck::FFragment_ProceduralBodyPose>(BodyRotation);
+    InGait.Add<ck::FFragment_ProceduralBodyPose_Action>();
 
     const auto& Conform = InParams.Get_Conform();
     if (Conform.Get_Mode() == ECk_ProceduralBodyPose_ConformMode::PlantedFeet)
@@ -158,6 +160,63 @@ auto
     return ck::IsValid(InBodyPose)
         ? InBodyPose.Get<ck::FFragment_ProceduralBodyPose_Params>().Get_Presentation()
         : FCk_Handle_Transform{};
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    UCk_Utils_ProceduralBodyPose_UE::
+    Request_SetActionOffset(
+        FCk_Handle_ProceduralBodyPose& InBodyPose,
+        const FCk_Request_ProceduralBodyPose_SetActionOffset& InRequest,
+        const FCk_Delegate_Request_OnCompleted& InDelegate)
+    -> FCk_Handle_ProceduralBodyPose
+{
+    auto Request = InRequest;
+    if (InDelegate.IsBound())
+    { Request.Set_CompletionDelegate(InDelegate); }
+
+    const auto RequestValid = ck::IsValid(InBodyPose)
+        && Has(InBodyPose)
+        && NOT InBodyPose.Has<ck::FTag_DestroyEntity_Initiate>()
+        && NOT InBodyPose.Has<ck::FFragment_ProceduralBodyPose_Failure>()
+        && ck::Get_IsProceduralBodyPoseActionAdmissible(InRequest.Get_Offset())
+        && InRequest.Get_SampleId() > 0;
+    CK_ENSURE_IF_NOT(RequestValid,
+        TEXT("Procedural body pose Request_SetActionOffset rejected body pose [{}] with sample id [{}]: the body pose must be live, "
+             "not pending destruction and not failed; the offset must be finite with unit scale and a normalized rotation, and "
+             "the sample id positive."),
+        InBodyPose, InRequest.Get_SampleId())
+    {
+        Request.TryFireCompletion(InBodyPose, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return InBodyPose;
+    }
+
+    InBodyPose.AddOrGet<ck::FFragment_ProceduralBodyPose_Requests>()._Requests.Emplace(MoveTemp(Request));
+
+    return InBodyPose;
+}
+
+auto
+    UCk_Utils_ProceduralBodyPose_UE::
+    Get_ActionOffset(
+        const FCk_Handle_ProceduralBodyPose& InBodyPose)
+    -> FTransform
+{
+    return Get_Status(InBodyPose) == ECk_ProceduralAnimation_Status::Ready
+        ? InBodyPose.Get<ck::FFragment_ProceduralBodyPose_Action>().Get_Offset()
+        : FTransform::Identity;
+}
+
+auto
+    UCk_Utils_ProceduralBodyPose_UE::
+    Get_ActionSample(
+        const FCk_Handle_ProceduralBodyPose& InBodyPose)
+    -> FCk_ProceduralBodyPose_ActionSample
+{
+    return Get_Status(InBodyPose) == ECk_ProceduralAnimation_Status::Ready
+        ? InBodyPose.Get<ck::FFragment_ProceduralBodyPose_Action>().Get_Sample()
+        : FCk_ProceduralBodyPose_ActionSample{};
 }
 
 // --------------------------------------------------------------------------------------------------------------------

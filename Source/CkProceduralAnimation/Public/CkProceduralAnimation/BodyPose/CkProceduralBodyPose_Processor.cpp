@@ -4,16 +4,21 @@
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Utils.h"
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Fragment.h"
 
+#include "CkCore/Algorithms/CkAlgorithms.h"
 #include "CkCore/Ensure/CkEnsure.h"
+#include "CkCore/TypeTraits/CkTypeTraits.h"
 
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
+#include "CkEcs/Request/CkRequest_Completion.h"
 #include "CkEcs/Scheduler/CkProcessorRegistration.h"
 
 #include "CkEcsExt/Transform/CkTransform_Utils.h"
 
 #include <Kismet/KismetMathLibrary.h>
 
+CK_REGISTER_PROCESSOR(ck::FProcessor_ProceduralBodyPose_HandleRequests);
 CK_REGISTER_PROCESSOR(ck::FProcessor_ProceduralBodyPose_Update);
+CK_REGISTER_PROCESSOR(ck::FProcessor_ProceduralBodyPose_CancelPendingRequests);
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -60,6 +65,49 @@ namespace ck_procedural_body_pose_processor
 namespace ck
 {
     auto
+        FProcessor_ProceduralBodyPose_HandleRequests::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            FFragment_ProceduralBodyPose_Action& InActionComp,
+            FFragment_ProceduralBodyPose_Requests& InRequestsComp)
+        -> void
+    {
+        auto Requests = MoveTemp(InRequestsComp._Requests);
+        InRequestsComp._Requests.Reset();
+
+        algo::ForEachRequest(Requests, ck::Visitor(
+        [&](const auto& InRequest) -> void
+        {
+            auto Result = ECk_Request_OperationResult::Failed_Cancelled;
+            const auto Guard = MakeCompletionGuard(InRequest, InHandle, Result);
+
+            if (InHandle.Has<FTag_DestroyEntity_Initiate>())
+            { return; }
+
+            DoHandleRequest(InHandle, InActionComp, InRequest);
+            Result = ECk_Request_OperationResult::Succeeded;
+        }), policy::DontResetContainer{});
+
+        if (InRequestsComp._Requests.IsEmpty())
+        { InHandle.Remove<MarkedDirtyBy>(); }
+    }
+
+    auto
+        FProcessor_ProceduralBodyPose_HandleRequests::
+        DoHandleRequest(
+            HandleType InHandle,
+            FFragment_ProceduralBodyPose_Action& InActionComp,
+            const FCk_Request_ProceduralBodyPose_SetActionOffset& InRequest)
+        -> void
+    {
+        InActionComp._Offset = InRequest.Get_Offset();
+        InActionComp._SampleId = InRequest.Get_SampleId();
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
         FProcessor_ProceduralBodyPose_Update::
         ForEachEntity(
             TimeType InDeltaT,
@@ -67,6 +115,7 @@ namespace ck
             const FFragment_ProceduralBodyPose_Params& InParams,
             const FFragment_ProceduralBodyPose_SupportLayout& InSupportLayout,
             FFragment_ProceduralBodyPose& InPoseComp,
+            FFragment_ProceduralBodyPose_Action& InActionComp,
             const FFragment_ProceduralGait& InGaitComp,
             const FFragment_Transform& InTransform)
         -> void
@@ -196,19 +245,19 @@ namespace ck
         // The rotation spring's angular velocity lives in the offset's own frame (q' = q w / 2), so a rotation applied on
         // the body side of the offset leaves it unchanged: it already turns with the offset.
         const auto& Spring = InParams.Get_Spring();
-        const auto PreviousOffset = InPoseComp._Offset;
-        const auto LagDegrees = FMath::RadiansToDegrees(InPoseComp._Offset.GetRotation().AngularDistance(TargetRotation));
+        const auto PreviousOffset = InPoseComp._BaseOffset;
+        const auto LagDegrees = FMath::RadiansToDegrees(InPoseComp._BaseOffset.GetRotation().AngularDistance(TargetRotation));
         const auto Carried = FQuat::Slerp(FQuat::Identity, Transport,
             ck_procedural_body_pose_processor::Get_TransportShare(LagDegrees, Spring.Get_MaxAttitudeLag()));
-        InPoseComp._Offset.SetRotation((Carried * InPoseComp._Offset.GetRotation()).GetNormalized());
+        InPoseComp._BaseOffset.SetRotation((Carried * InPoseComp._BaseOffset.GetRotation()).GetNormalized());
 
         // The target is a pose that jumps when the supporting set changes, not a moving point: the engine would read
         // that jump as a one-frame target velocity and kick the spring past it (15% overshoot at 60 fps).
         constexpr auto TargetVelocityAmount = 0.0f;
-        const auto Location = UKismetMathLibrary::VectorSpringInterp(InPoseComp._Offset.GetLocation(), TargetLocation,
+        const auto Location = UKismetMathLibrary::VectorSpringInterp(InPoseComp._BaseOffset.GetLocation(), TargetLocation,
             InPoseComp._TranslationSpring, Spring.Get_Stiffness(), Spring.Get_CriticalDampingFactor(), DeltaSeconds, Spring.Get_Mass(),
             TargetVelocityAmount);
-        const auto Rotation = UKismetMathLibrary::QuaternionSpringInterp(InPoseComp._Offset.GetRotation(), TargetRotation,
+        const auto Rotation = UKismetMathLibrary::QuaternionSpringInterp(InPoseComp._BaseOffset.GetRotation(), TargetRotation,
             InPoseComp._RotationSpring, Spring.Get_Stiffness(), Spring.Get_CriticalDampingFactor(), DeltaSeconds, Spring.Get_Mass(),
             TargetVelocityAmount);
         const auto ProposedOffset = FTransform{Rotation.GetNormalized(), Location};
@@ -258,7 +307,7 @@ namespace ck
             }
         }
 
-        InPoseComp._Offset = ProposedOffset;
+        InPoseComp._BaseOffset = ProposedOffset;
         if (NOT ReachAnchors.IsEmpty())
         {
             const auto Projected = ProjectProceduralBodyPoseToReach(Body, PreviousOffset, ProposedOffset,
@@ -269,7 +318,7 @@ namespace ck
                 InHandle.Add<FFragment_ProceduralBodyPose_Failure>(ECk_ProceduralBodyPose_Failure::MalformedSupport);
                 return;
             }
-            InPoseComp._Offset = Projected->Get_Offset();
+            InPoseComp._BaseOffset = Projected->Get_Offset();
             if (Projected->Get_Fraction() < 1.0f)
             {
                 // The spring's velocities are in offset-local translation and rotation frames. Retain the accepted
@@ -279,8 +328,55 @@ namespace ck
             }
         }
 
+        const auto& BaseAccepted = InPoseComp._BaseOffset;
+        const auto& Action = InActionComp._Offset;
+        if (Action.Equals(FTransform::Identity))
+        { InPoseComp._Offset = BaseAccepted; }
+        else
+        {
+            const auto Desired = ComposeProceduralBodyPoseAction(BaseAccepted, Action);
+            const auto DesiredValid = Desired.IsSet();
+            CK_ENSURE_IF_NOT(DesiredValid,
+                TEXT("Procedural body pose [{}] could not compose its action offset onto its base offset; feature is failed."), InHandle)
+            {
+                InHandle.Add<FFragment_ProceduralBodyPose_Failure>(ECk_ProceduralBodyPose_Failure::MalformedSupport);
+                return;
+            }
+
+            InPoseComp._Offset = *Desired;
+            if (NOT ReachAnchors.IsEmpty())
+            {
+                const auto Projected = ProjectProceduralBodyPoseToReach(Body, BaseAccepted, *Desired,
+                    TArrayView<const FProceduralBodyPoseReachAnchor>{ReachAnchors});
+                const auto ProjectedValid = Projected.IsSet();
+                CK_ENSURE_IF_NOT(ProjectedValid,
+                    TEXT("Procedural body pose [{}] received malformed leg reach for its action offset; feature is failed."), InHandle)
+                {
+                    InHandle.Add<FFragment_ProceduralBodyPose_Failure>(ECk_ProceduralBodyPose_Failure::MalformedSupport);
+                    return;
+                }
+
+                InPoseComp._Offset = Projected->Get_Offset();
+            }
+        }
+
         const auto Posed = InPoseComp._Offset * Body;
         UCk_Utils_Transform_UE::Request_SetTransform(Presentation, FCk_Request_Transform_SetTransform{Posed}, {});
+        InActionComp._Sample = FCk_ProceduralBodyPose_ActionSample{Posed, InActionComp._SampleId,
+            InActionComp._Sample.Get_PoseRevision() + 1};
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProcessor_ProceduralBodyPose_CancelPendingRequests::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_ProceduralBodyPose_Requests& InRequestsComp)
+        -> void
+    {
+        request::FireCancelledForPending(InHandle, InRequestsComp.Get_Requests());
     }
 }
 

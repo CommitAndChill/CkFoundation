@@ -6,6 +6,8 @@
 
 #include <Kismet/KismetMathLibrary.h>
 
+#include <variant>
+
 // --------------------------------------------------------------------------------------------------------------------
 
 class UCk_Utils_ProceduralBodyPose_UE;
@@ -15,6 +17,7 @@ class UCk_Utils_ProceduralAnimation_Debug_UE;
 
 namespace ck
 {
+    class FProcessor_ProceduralBodyPose_HandleRequests;
     class FProcessor_ProceduralBodyPose_Update;
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -134,8 +137,12 @@ namespace ck
         friend class ::UCk_Utils_ProceduralAnimation_Debug_UE;
 
     private:
-        // Body-local; the presentation entity is posed at _Offset * Body.
+        // Body-local; the accepted offset the presentation is posed at, _Offset * Body: the base offset with the action
+        // composed and reach-projected.
         FTransform _Offset = FTransform::Identity;
+        // Body-local; the environmental offset the springs carry toward _TargetOffset. The springs, the swing transport and
+        // _LastBodyRotation belong to it; the action never feeds them.
+        FTransform _BaseOffset = FTransform::Identity;
         // Body-local; the pose the springs followed on the last update.
         FTransform _TargetOffset = FTransform::Identity;
         FVectorSpringState _TranslationSpring;
@@ -148,6 +155,52 @@ namespace ck
 
     public:
         CK_DEFINE_CONSTRUCTORS(FFragment_ProceduralBodyPose, _LastBodyRotation);
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    struct CKPROCEDURALANIMATION_API FFragment_ProceduralBodyPose_Action
+    {
+    public:
+        CK_GENERATED_BODY(FFragment_ProceduralBodyPose_Action);
+
+    public:
+        friend class FProcessor_ProceduralBodyPose_HandleRequests;
+        friend class FProcessor_ProceduralBodyPose_Update;
+        friend class ::UCk_Utils_ProceduralBodyPose_UE;
+
+    private:
+        // Body-local, in the simulation body's axes; the last admitted action input, kept until replaced.
+        FTransform _Offset = FTransform::Identity;
+        int64 _SampleId = 0;
+        FCk_ProceduralBodyPose_ActionSample _Sample;
+
+    public:
+        CK_PROPERTY_GET(_Offset);
+        CK_PROPERTY_GET(_SampleId);
+        CK_PROPERTY_GET(_Sample);
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    struct CKPROCEDURALANIMATION_API FFragment_ProceduralBodyPose_Requests
+    {
+    public:
+        CK_GENERATED_BODY(FFragment_ProceduralBodyPose_Requests);
+
+    public:
+        friend class FProcessor_ProceduralBodyPose_HandleRequests;
+        friend class ::UCk_Utils_ProceduralBodyPose_UE;
+
+    public:
+        using RequestType = std::variant<FCk_Request_ProceduralBodyPose_SetActionOffset>;
+        using RequestList = TArray<RequestType>;
+
+    private:
+        RequestList _Requests;
+
+    public:
+        CK_PROPERTY_GET(_Requests);
     };
 }
 
