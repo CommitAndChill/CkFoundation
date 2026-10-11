@@ -20,6 +20,20 @@ namespace ck::runtimemesh::slice
         CK_PROPERTY(_Tangent);
     };
 
+    // UV0 always carries the cap's planar projection; this decides what the layers after it carry.
+    enum class ECapUVPolicy : uint8
+    {
+        PlanarOnAllLayers,
+        PlanarOnLayer0_ZeroOthers,
+        PlanarOnLayer0_KeepInterpolated
+    };
+
+    enum class EIslandPolicy : uint8
+    {
+        RejectMultiple,
+        SplitIslands
+    };
+
     struct FCapOptions
     {
     public:
@@ -30,12 +44,14 @@ namespace ck::runtimemesh::slice
         FVector4f _Color = FVector4f{1, 1, 1, 1};
         double _CmPerUVUnit = 10.0;
         FVector2f _UVOffset = FVector2f::Zero();
+        ECapUVPolicy _UVPolicy = ECapUVPolicy::PlanarOnAllLayers;
 
     public:
         CK_PROPERTY(_MaterialID);
         CK_PROPERTY(_Color);
         CK_PROPERTY(_CmPerUVUnit);
         CK_PROPERTY(_UVOffset);
+        CK_PROPERTY(_UVPolicy);
     };
 
     // Provisional finite work ceilings, not measured frame-time guarantees.
@@ -52,6 +68,7 @@ namespace ck::runtimemesh::slice
         double _RelativeVolumeTolerance = 0.0001;
         int32 _MaximumVertices = 2048;
         int32 _MaximumTriangles = 4096;
+        int32 _MaximumPiecesPerSide = 8;
 
     public:
         CK_PROPERTY(_MinimumOutputVolumeCm3);
@@ -61,6 +78,7 @@ namespace ck::runtimemesh::slice
         CK_PROPERTY(_RelativeVolumeTolerance);
         CK_PROPERTY(_MaximumVertices);
         CK_PROPERTY(_MaximumTriangles);
+        CK_PROPERTY(_MaximumPiecesPerSide);
     };
 
     struct FCutOptions
@@ -72,11 +90,13 @@ namespace ck::runtimemesh::slice
         FPlaneFrameLocal _Plane;
         FCapOptions _Cap;
         FCutLimits _Limits;
+        EIslandPolicy _IslandPolicy = EIslandPolicy::RejectMultiple;
 
     public:
         CK_PROPERTY(_Plane);
         CK_PROPERTY(_Cap);
         CK_PROPERTY(_Limits);
+        CK_PROPERTY(_IslandPolicy);
     };
 
     enum class ECutOutcome : uint8
@@ -91,6 +111,24 @@ namespace ck::runtimemesh::slice
         InternalFailure
     };
 
+    // One connected, admitted solid on one side of the plane.
+    struct FCutPiece
+    {
+    public:
+        CK_GENERATED_BODY(FCutPiece);
+
+    private:
+        geometry::FValidatedGeometryPtr _Geometry;
+        int32 _CapTriangles = 0;
+
+    public:
+        CK_PROPERTY_GET(_Geometry);
+        CK_PROPERTY_GET(_CapTriangles);
+
+    public:
+        CK_DEFINE_CONSTRUCTORS(FCutPiece, _Geometry, _CapTriangles);
+    };
+
     class FCutResult;
 
     CKRUNTIMEMESH_API auto ValidateOptions(
@@ -100,6 +138,8 @@ namespace ck::runtimemesh::slice
         const geometry::FValidatedGeometry& InSource,
         const FCutOptions& InOptions) -> FCutResult;
 
+    // Each side's pieces are ordered by volume, largest first; Get_Positive/Get_Negative and their cap counts name
+    // that first piece. Under EIslandPolicy::RejectMultiple a success has exactly one piece per side.
     class CKRUNTIMEMESH_API FCutResult final
     {
     public:
@@ -111,24 +151,22 @@ namespace ck::runtimemesh::slice
 
         explicit FCutResult(ECutOutcome InOutcome);
         FCutResult(
-            geometry::FValidatedGeometryPtr InPositive,
-            geometry::FValidatedGeometryPtr InNegative,
-            int32 InPositiveCapTriangles,
-            int32 InNegativeCapTriangles);
+            TArray<FCutPiece> InPositivePieces,
+            TArray<FCutPiece> InNegativePieces);
 
         ECutOutcome _Outcome;
-        geometry::FValidatedGeometryPtr _Positive;
-        geometry::FValidatedGeometryPtr _Negative;
-        int32 _PositiveCapTriangles = 0;
-        int32 _NegativeCapTriangles = 0;
+        TArray<FCutPiece> _PositivePieces;
+        TArray<FCutPiece> _NegativePieces;
 
     public:
         CK_PROPERTY_GET(_Outcome);
-        CK_PROPERTY_GET(_Positive);
-        CK_PROPERTY_GET(_Negative);
-        CK_PROPERTY_GET(_PositiveCapTriangles);
-        CK_PROPERTY_GET(_NegativeCapTriangles);
+        CK_PROPERTY_GET(_PositivePieces);
+        CK_PROPERTY_GET(_NegativePieces);
 
+        auto Get_Positive() const -> geometry::FValidatedGeometryPtr;
+        auto Get_Negative() const -> geometry::FValidatedGeometryPtr;
+        auto Get_PositiveCapTriangles() const -> int32;
+        auto Get_NegativeCapTriangles() const -> int32;
         auto Get_IsSuccess() const -> bool;
     };
 }

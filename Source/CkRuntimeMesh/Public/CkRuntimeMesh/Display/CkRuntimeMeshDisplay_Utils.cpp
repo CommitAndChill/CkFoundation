@@ -209,4 +209,58 @@ auto
     return CustomPrimitiveData[InIndex];
 }
 
+auto
+    UCk_Utils_RuntimeMeshDisplay_UE::
+    Request_SetVisibility(
+        FCk_Handle_RuntimeMeshDisplay& InDisplay,
+        const FCk_Request_RuntimeMeshDisplay_SetVisibility& InRequest,
+        const FCk_Delegate_Request_OnCompleted& InDelegate)
+    -> FCk_Handle_RuntimeMeshDisplay
+{
+    const auto IsDisplayValid = ck::IsValid(InDisplay);
+    CK_ENSURE_IF_NOT(IsDisplayValid, TEXT("Cannot set the visibility of invalid RuntimeMeshDisplay [{}]"), InDisplay)
+    {
+        InDelegate.ExecuteIfBound(InDisplay, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return InDisplay;
+    }
+
+    // Legitimate during teardown, hence no ensure: once destruction has begun a queued request could only be
+    // cancelled, and one queued after the EndPlay cancellation has run would never complete.
+    if (InDisplay.Has<ck::FTag_DestroyEntity_Initiate>())
+    {
+        InDelegate.ExecuteIfBound(InDisplay, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return InDisplay;
+    }
+
+    auto Request = InRequest;
+    if (InDelegate.IsBound())
+    { Request.Set_CompletionDelegate(InDelegate); }
+
+    InDisplay.AddOrGet<ck::FFragment_RuntimeMeshDisplay_Requests>()._Requests.Emplace(Request);
+
+    return InDisplay;
+}
+
+auto
+    UCk_Utils_RuntimeMeshDisplay_UE::
+    Get_Visibility(
+        const FCk_Handle_RuntimeMeshDisplay& InDisplay)
+    -> ECk_EnableDisable
+{
+    const auto IsDisplayValid = ck::IsValid(InDisplay);
+    CK_ENSURE_IF_NOT(IsDisplayValid, TEXT("Cannot Get_Visibility on invalid RuntimeMeshDisplay [{}]"), InDisplay)
+    { return ECk_EnableDisable::Disable; }
+
+    const auto& Display = InDisplay.Get<ck::FFragment_RuntimeMeshDisplay>();
+    if (Display.Get_SetupState() != ECk_RuntimeMesh_SetupState::Ready)
+    { return ECk_EnableDisable::Disable; }
+
+    const auto* Component = Display.Get_Component().Get();
+    if (ck::Is_NOT_Valid(Component))
+    { return ECk_EnableDisable::Disable; }
+
+    const auto IsDrawnInGame = Component->GetVisibleFlag() && NOT Component->bHiddenInGame;
+    return IsDrawnInGame ? ECk_EnableDisable::Enable : ECk_EnableDisable::Disable;
+}
+
 // --------------------------------------------------------------------------------------------------------------------

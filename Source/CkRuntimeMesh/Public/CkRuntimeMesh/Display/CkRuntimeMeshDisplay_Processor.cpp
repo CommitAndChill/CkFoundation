@@ -388,6 +388,32 @@ namespace ck
         return ECk_Request_OperationResult::Succeeded;
     }
 
+    auto
+        FProcessor_RuntimeMeshDisplay_HandleRequests::
+        DoHandleRequest(
+            HandleType InHandle,
+            const FFragment_RuntimeMeshDisplay& InDisplay,
+            const FCk_Request_RuntimeMeshDisplay_SetVisibility& InRequest)
+        -> ECk_Request_OperationResult
+    {
+        const auto IsReady = InDisplay.Get_SetupState() == ECk_RuntimeMesh_SetupState::Ready;
+        CK_ENSURE_IF_NOT(IsReady,
+            TEXT("Cannot set the visibility of RuntimeMeshDisplay [{}] - its setup did not reach Ready (failure [{}])"),
+            InHandle, InDisplay.Get_SetupFailure())
+        { return ECk_Request_OperationResult::Failed; }
+
+        auto* Component = InDisplay.Get_Component().Get();
+        const auto HasComponent = ck::IsValid(Component);
+        CK_ENSURE_IF_NOT(HasComponent, TEXT("Ready RuntimeMeshDisplay [{}] no longer has its component"), InHandle)
+        { return ECk_Request_OperationResult::Failed; }
+
+        const auto IsVisible = InRequest.Get_Visibility() == ECk_EnableDisable::Enable;
+        Component->SetVisibility(IsVisible);
+        Component->SetHiddenInGame(NOT IsVisible);
+
+        return ECk_Request_OperationResult::Succeeded;
+    }
+
     // --------------------------------------------------------------------------------------------------------------------
 
     auto

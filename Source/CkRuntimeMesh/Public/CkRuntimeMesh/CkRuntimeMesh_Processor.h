@@ -35,7 +35,9 @@ namespace ck
     // --------------------------------------------------------------------------------------------------------------------
 
     // The queue is world-level (one fragment on the transient entity), so this drains it directly instead of
-    // iterating a view; it runs only in the main pass and executes at most DrainBudgetPerTick slices.
+    // iterating a view; it runs only in the main pass. Each drain executes the oldest queued slice, then further
+    // slices in FIFO order while the wall-clock time spent stays under the project's drain time budget (and at most
+    // the project's maximum slices per drain), so the number of slices per tick depends on the machine.
     class CKRUNTIMEMESH_API FProcessor_RuntimeMesh_Drain : public ck_exp::TProcessor<
         FProcessor_RuntimeMesh_Drain,
         FCk_Handle,
