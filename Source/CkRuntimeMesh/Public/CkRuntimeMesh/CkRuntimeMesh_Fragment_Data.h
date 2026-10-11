@@ -68,6 +68,37 @@ CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_RuntimeMesh_SliceOutcome);
 
 // --------------------------------------------------------------------------------------------------------------------
 
+/** What a cap writes into the UV layers after UV0. UV0 always carries the cap's planar projection. */
+UENUM(BlueprintType)
+enum class ECk_RuntimeMesh_CapUVPolicy : uint8
+{
+    // Every layer carries the same planar projection.
+    PlanarOnAllLayers,
+    // Every layer after UV0 is zero on the cap.
+    PlanarOnLayer0_ZeroOthers,
+    // Every layer after UV0 carries the exterior's interpolated value at the cut rim, so a per-vertex channel baked
+    // into those layers (a morph offset, a mask) stays continuous across the cap edge.
+    PlanarOnLayer0_KeepInterpolated
+};
+
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_RuntimeMesh_CapUVPolicy);
+
+// --------------------------------------------------------------------------------------------------------------------
+
+/** What a slice does when one side of the plane falls apart into several disconnected solids. */
+UENUM(BlueprintType)
+enum class ECk_RuntimeMesh_IslandPolicy : uint8
+{
+    // The slice is RejectedTopology; nothing is published.
+    RejectMultiple,
+    // Every island becomes its own result entity, largest first.
+    SplitIslands
+};
+
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_RuntimeMesh_IslandPolicy);
+
+// --------------------------------------------------------------------------------------------------------------------
+
 USTRUCT(BlueprintType, meta = (HasNativeMake, HasNativeBreak))
 struct CKRUNTIMEMESH_API FCk_Handle_RuntimeMesh : public FCk_Handle_TypeSafe
 {
@@ -214,11 +245,16 @@ private:
               meta = (AllowPrivateAccess = true))
     FVector2D _UVOffset = FVector2D::ZeroVector;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    ECk_RuntimeMesh_CapUVPolicy _UVPolicy = ECk_RuntimeMesh_CapUVPolicy::PlanarOnAllLayers;
+
 public:
     CK_PROPERTY(_MaterialID);
     CK_PROPERTY(_Color);
     CK_PROPERTY(_CmPerUVUnit);
     CK_PROPERTY(_UVOffset);
+    CK_PROPERTY(_UVPolicy);
 };
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -260,6 +296,11 @@ private:
               meta = (AllowPrivateAccess = true))
     int32 _MaximumTriangles = 4096;
 
+    // Read only under SplitIslands: more islands than this on either side is RejectedLimit.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    int32 _MaximumPiecesPerSide = 8;
+
 public:
     CK_PROPERTY(_MinimumOutputVolumeCm3);
     CK_PROPERTY(_MinimumNormalExtentCm);
@@ -268,6 +309,7 @@ public:
     CK_PROPERTY(_RelativeVolumeTolerance);
     CK_PROPERTY(_MaximumVertices);
     CK_PROPERTY(_MaximumTriangles);
+    CK_PROPERTY(_MaximumPiecesPerSide);
 };
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -304,12 +346,17 @@ private:
               meta = (AllowPrivateAccess = true))
     FCk_RuntimeMesh_CutLimits _Limits;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    ECk_RuntimeMesh_IslandPolicy _IslandPolicy = ECk_RuntimeMesh_IslandPolicy::RejectMultiple;
+
 public:
     CK_PROPERTY(_OperationID);
     CK_PROPERTY(_ResultOwner);
     CK_PROPERTY(_Plane);
     CK_PROPERTY(_Cap);
     CK_PROPERTY(_Limits);
+    CK_PROPERTY(_IslandPolicy);
 
 public:
     CK_DEFINE_CONSTRUCTORS(FCk_Request_RuntimeMesh_Slice, _OperationID, _ResultOwner, _Plane);
@@ -365,8 +412,45 @@ public:
 
 // --------------------------------------------------------------------------------------------------------------------
 
+/** One connected solid of a slice result: its own entity under the result owner, its metrics, and how many of its
+ *  triangles are cap. */
+USTRUCT(BlueprintType)
+struct CKRUNTIMEMESH_API FCk_RuntimeMesh_SlicePiece
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(FCk_RuntimeMesh_SlicePiece);
+
+private:
+    UPROPERTY(BlueprintReadOnly,
+              meta = (AllowPrivateAccess = true))
+    FCk_Handle_RuntimeMesh _Mesh;
+
+    UPROPERTY(BlueprintReadOnly,
+              meta = (AllowPrivateAccess = true))
+    FCk_RuntimeMesh_Metrics _Metrics;
+
+    UPROPERTY(BlueprintReadOnly,
+              meta = (AllowPrivateAccess = true))
+    int32 _CapTriangles = 0;
+
+public:
+    CK_PROPERTY_GET(_Mesh);
+    CK_PROPERTY_GET(_Metrics);
+    CK_PROPERTY_GET(_CapTriangles);
+
+public:
+    CK_DEFINE_CONSTRUCTORS(FCk_RuntimeMesh_SlicePiece, _Mesh, _Metrics, _CapTriangles);
+};
+
+// --------------------------------------------------------------------------------------------------------------------
+
 /** Terminal payload of one slice. Positive/negative follow the request plane's normal; both handles are valid
- *  only when the outcome is Succeeded, and the consumer owns their lifetime from then on. */
+ *  only when the outcome is Succeeded, and the consumer owns their lifetime from then on.
+ *  _PositivePieces/_NegativePieces hold every island of each side, largest volume first (exactly one each under
+ *  ECk_RuntimeMesh_IslandPolicy::RejectMultiple); _Positive/_Negative, their metrics and cap counts describe the
+ *  first (largest) piece of each side, so a two-piece consumer can ignore the arrays. Every piece is consumer-owned. */
 USTRUCT(BlueprintType)
 struct CKRUNTIMEMESH_API FCk_RuntimeMesh_SliceResult
 {
@@ -408,6 +492,14 @@ private:
               meta = (AllowPrivateAccess = true))
     int32 _NegativeCapTriangles = 0;
 
+    UPROPERTY(BlueprintReadOnly,
+              meta = (AllowPrivateAccess = true))
+    TArray<FCk_RuntimeMesh_SlicePiece> _PositivePieces;
+
+    UPROPERTY(BlueprintReadOnly,
+              meta = (AllowPrivateAccess = true))
+    TArray<FCk_RuntimeMesh_SlicePiece> _NegativePieces;
+
 public:
     CK_PROPERTY_GET(_OperationID);
     CK_PROPERTY_GET(_Outcome);
@@ -417,6 +509,8 @@ public:
     CK_PROPERTY_GET(_NegativeMetrics);
     CK_PROPERTY_GET(_PositiveCapTriangles);
     CK_PROPERTY_GET(_NegativeCapTriangles);
+    CK_PROPERTY(_PositivePieces);
+    CK_PROPERTY(_NegativePieces);
 
 public:
     CK_DEFINE_CONSTRUCTORS(FCk_RuntimeMesh_SliceResult,

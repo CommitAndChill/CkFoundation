@@ -21,10 +21,9 @@ namespace ck
 
 namespace ck::runtimemesh
 {
-    // Provisional ceilings on in-flight slices per world and on slices executed per drain; tuning inputs to the
-    // benchmark, not measured budgets.
+    // Provisional ceiling on in-flight slices per world. How many of them one drain executes is the project setting
+    // pair UCk_RuntimeMesh_ProjectSettings_UE::_DrainTimeBudget / _MaximumSlicesPerDrain.
     inline constexpr auto QueueCapacity = int32{16};
-    inline constexpr auto DrainBudgetPerTick = int32{2};
 
     namespace ck_runtime_mesh_processor
     {

@@ -85,7 +85,7 @@ public:
 
 public:
     /**
-     * Writes one custom primitive data value on the display's component, the display's only runtime render channel.
+     * Writes one custom primitive data value on the display's component.
      * A request made while setup is still Pending is accepted and queued; it applies once setup reaches Ready.
      * - A value whose floats do not fit the engine's FCustomPrimitiveData::NumCustomPrimitiveDataFloats slots, or an
      *   invalid handle, ensures and completes Failed_NotEnqueued on this call stack; nothing is queued.
@@ -114,4 +114,34 @@ public:
     Get_CustomPrimitiveDataFloat(
         const FCk_Handle_RuntimeMeshDisplay& InDisplay,
         int32 InIndex);
+
+public:
+    /**
+     * Shows or hides the display's component; the geometry, its materials and its custom primitive data are kept, so a
+     * hidden display shown again looks as it was last written. The Spec's Visuals.Visibility is the value at setup.
+     * A request made while setup is still Pending is accepted and queued; it applies once setup reaches Ready.
+     * - An invalid handle ensures and completes Failed_NotEnqueued on this call stack; nothing is queued.
+     * - A request made once the display's entity is being destroyed completes Failed_NotEnqueued with no ensure.
+     * - A queued request still pending when the entity is destroyed completes Failed_Cancelled at EndPlay.
+     * - A display whose setup failed, or a Ready display whose component is gone, ensures and completes Failed.
+     * Requests apply in enqueue order with the display's other requests; the last visibility wins.
+     */
+    UFUNCTION(BlueprintCallable,
+              Category = "Ck|Utils|RuntimeMeshDisplay",
+              DisplayName = "[Ck][RuntimeMeshDisplay] Request Set Visibility",
+              meta = (AutoCreateRefTerm = "InDelegate"))
+    static FCk_Handle_RuntimeMeshDisplay
+    Request_SetVisibility(
+        UPARAM(ref) FCk_Handle_RuntimeMeshDisplay& InDisplay,
+        const FCk_Request_RuntimeMeshDisplay_SetVisibility& InRequest,
+        const FCk_Delegate_Request_OnCompleted& InDelegate);
+
+    // Enable while the display's component is drawn in game; Disable when it is hidden, or when the display is not Ready
+    // or has no component (nothing is drawn).
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|RuntimeMeshDisplay",
+              DisplayName = "[Ck][RuntimeMeshDisplay] Get Visibility")
+    static ECk_EnableDisable
+    Get_Visibility(
+        const FCk_Handle_RuntimeMeshDisplay& InDisplay);
 };

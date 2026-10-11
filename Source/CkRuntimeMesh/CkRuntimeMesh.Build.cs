@@ -9,11 +9,13 @@ public class CkRuntimeMesh : CkModuleRules
             "Core",
             "CoreUObject",
             "Engine",
+            "DeveloperSettings",
             "CkCore",
             "CkEcs",
             "CkEcsExt",
             "CkGraphics",
             "CkResourceLoader",
+            "CkSettings",
             "GeometryCore",
         });
 

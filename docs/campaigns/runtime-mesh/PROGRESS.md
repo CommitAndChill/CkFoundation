@@ -374,3 +374,31 @@ frame-budget decision for the consumer, not a safety limit; a per-tick time budg
   cooked render LODs by engine design (StaticMesh.cpp:7365).
 - Other platforms, pak/IoStore container staging (needs UnrealPak built), replication/persistence stay out
   of scope. No full-suite claim is made: the full `AutomationGate.json` gate was not run this session.
+
+## 2026-10-10 islands, cap UV policy, drain time budget
+
+Branch `feature/runtime-mesh-islands-uvpolicy` (CkFoundation and CkTests), uncommitted.
+
+- Cap UV policy: `FCk_RuntimeMesh_Cap::_UVPolicy` (`ECk_RuntimeMesh_CapUVPolicy`). Default `PlanarOnAllLayers` keeps the
+  original output; `PlanarOnLayer0_ZeroOthers` zeroes UV1..3 on the cap; `PlanarOnLayer0_KeepInterpolated` copies the
+  exterior's interpolated value at each rim vertex (lowest-ID exterior triangle), so a baked per-vertex channel (Mars's
+  raw-to-cooked morph offset in UV1/UV2) stays continuous across the cap edge instead of tearing at it.
+- Islands: `FCk_Request_RuntimeMesh_Slice::_IslandPolicy` (`RejectMultiple` default, `SplitIslands`);
+  `FCk_RuntimeMesh_CutLimits::_MaximumPiecesPerSide` (default 8, 1..64, else `RejectedLimit`);
+  `FCk_RuntimeMesh_SliceResult::_PositivePieces/_NegativePieces` (`FCk_RuntimeMesh_SlicePiece`), largest first, scalar
+  fields = piece 0. One island failing a cut limit rejects the whole cut (no subset is ever published); conservation sums
+  every island. Adoption is all-or-nothing across every piece.
+- Drain: `UCk_RuntimeMesh_ProjectSettings_UE::_DrainTimeBudget` (5 ms) and `_MaximumSlicesPerDrain` (2). The oldest
+  slice always runs; another starts only while elapsed < budget and fewer than the maximum ran. `DrainBudgetPerTick`
+  is gone. The maximum defaults to the old count because Mars's
+  `Mars_AutoTest_FoodPiece_SourceDestroyedWhilePendingCommitsNothing` needs queued slices to wait several frames (it went
+  red with a default of 16: all fillers drained in one tick).
+- Ceilings kept at 2048 / 4096: the import preflight packs triangle/edge keys with a 2048 radix (raising the vertex
+  ceiling would alias keys), and admission's pair loop is quadratic. Measured here (4 test lanes, loaded machine):
+  Box3072 admit median 19.9-24.8 ms, cut 25.3-27.8 ms; Box768 cut median 3.8-4.2 ms. An 8k-triangle source extrapolates
+  (slope ~1.67 from 768 to 3072) to roughly 90-125 ms admit and 70-90 ms cut, which no drain budget can split.
+- Gates: `--build --test --test-pattern Ck.RuntimeMesh --no-live` 47/47 (three runs, final on the 2/5 ms defaults:
+  Saved/Logs/BuildTest-RuntimeMesh3.log). Mars `FoodPiece` 20/20, `FoodBoard` 14/14, `Cutting` 33/34: the red
+  `Mars_AutoTest_CuttingStation_MushroomConfigCutsThroughTheSameStation` fails at step 2 (platter construction, before
+  any slice) and stays red alone; not attributed (passed 2026-10-10 02:51 before this work; uncommitted concurrent Mars
+  AngelScript changes to Food_Def / FeedStation were present).

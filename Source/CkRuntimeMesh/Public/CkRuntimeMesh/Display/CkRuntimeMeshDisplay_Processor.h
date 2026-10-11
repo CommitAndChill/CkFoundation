@@ -127,14 +127,20 @@ namespace ck
             HandleType InHandle,
             const FFragment_RuntimeMeshDisplay& InDisplay,
             const FCk_Request_RuntimeMeshDisplay_SetCustomPrimitiveData& InRequest) -> ECk_Request_OperationResult;
+
+        static auto
+        DoHandleRequest(
+            HandleType InHandle,
+            const FFragment_RuntimeMeshDisplay& InDisplay,
+            const FCk_Request_RuntimeMeshDisplay_SetVisibility& InRequest) -> ECk_Request_OperationResult;
     };
 
     // --------------------------------------------------------------------------------------------------------------------
 
     // HandleRequests excludes owners already tagged for destruction, so a destroyed display's still-queued requests
     // are never drained. This completes each of them with Failed_Cancelled so a caller awaiting completion terminates
-    // instead of hanging. Request_SetCustomPrimitiveData refuses to enqueue once that tag is present, so nothing can be
-    // queued behind this pass.
+    // instead of hanging. Every Request_* refuses to enqueue once that tag is present, so nothing can be queued behind
+    // this pass.
     class CKRUNTIMEMESH_API FProcessor_RuntimeMeshDisplay_CancelPendingRequests : public ck_exp::TProcessor<
             FProcessor_RuntimeMeshDisplay_CancelPendingRequests,
             FCk_Handle_RuntimeMeshDisplay,

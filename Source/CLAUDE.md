@@ -220,7 +220,7 @@ but **deps must never point to a higher band**. Editor/UncookedOnly modules are 
 | CkInteraction | Attribute,Core,Ecs,EcsExt,Label,Log,Provider,Record,Settings |
 | CkInventory | Attribute,Core,Ecs,EcsExt,Grid,Label,Log,Record,Settings,TagSet |
 | CkJolt | Core,Ecs,EcsExt,Log,ResourceLoader,Settings,ThirdParty (owns the Jolt world; extracted from CkSpatialQuery 2026-07-16; +EcsExt Phase 3, also engine PhysicsCore/Landscape) |
-| CkRuntimeMesh | Core,Ecs,EcsExt,Graphics,ResourceLoader (immutable solid import, deferred plane slicing, optional DynamicMesh display; engine GeometryCore/DynamicMesh/GeometryFramework/MeshConversionEngineTypes; no CkJolt dependency; Graphics added 2026-10-09 for the display's custom-primitive-data request's `FCk_CustomPrimitiveData` — same-tier dep) |
+| CkRuntimeMesh | Core,Ecs,EcsExt,Graphics,ResourceLoader,Settings (immutable solid import, deferred plane slicing, optional DynamicMesh display; engine GeometryCore/DynamicMesh/GeometryFramework/MeshConversionEngineTypes; no CkJolt dependency; Graphics added 2026-10-09 for the display's custom-primitive-data request's `FCk_CustomPrimitiveData` — same-tier dep; Settings added 2026-10-10 for the slice drain's time-budget project settings) |
 | CkIsmRenderer | Core,Ecs,EcsExt,Graphics,Label,Log,Provider,Record,Settings |
 | CkIskmRenderer | Animation,Core,Ecs,EcsExt,Graphics,IskmRendererVF,Label,Log,Physics,Provider,Record,ResourceLoader,Settings |
 | CkMessaging | Core,Ecs,EcsExt,Label,Log,Provider,Record,Settings |

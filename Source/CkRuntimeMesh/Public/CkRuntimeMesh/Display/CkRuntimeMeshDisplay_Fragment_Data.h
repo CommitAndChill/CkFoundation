@@ -134,3 +134,26 @@ public:
      *  FCustomPrimitiveData::NumCustomPrimitiveDataFloats slots, starting at a non-negative index. */
     auto Get_IsValid() const -> bool;
 };
+
+// --------------------------------------------------------------------------------------------------------------------
+
+USTRUCT(BlueprintType)
+struct CKRUNTIMEMESH_API FCk_Request_RuntimeMeshDisplay_SetVisibility : public FCk_Request_Base
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(FCk_Request_RuntimeMeshDisplay_SetVisibility);
+    CK_REQUEST_DEFINE_DEBUG_NAME(FCk_Request_RuntimeMeshDisplay_SetVisibility);
+
+private:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    ECk_EnableDisable _Visibility = ECk_EnableDisable::Enable;
+
+public:
+    CK_PROPERTY_GET(_Visibility);
+
+public:
+    CK_DEFINE_CONSTRUCTORS(FCk_Request_RuntimeMeshDisplay_SetVisibility, _Visibility);
+};

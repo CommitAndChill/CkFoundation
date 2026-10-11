@@ -76,7 +76,9 @@ namespace ck
         friend class ::UCk_Utils_RuntimeMeshDisplay_UE;
 
     public:
-        using RequestType = std::variant<FCk_Request_RuntimeMeshDisplay_SetCustomPrimitiveData>;
+        using RequestType = std::variant<
+            FCk_Request_RuntimeMeshDisplay_SetCustomPrimitiveData,
+            FCk_Request_RuntimeMeshDisplay_SetVisibility>;
         using RequestList = TArray<RequestType>;
 
     private:

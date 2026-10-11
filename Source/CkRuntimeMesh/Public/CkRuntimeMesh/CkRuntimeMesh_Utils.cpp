@@ -12,6 +12,24 @@
 
 namespace ck::runtimemesh
 {
+    namespace ck_runtime_mesh_utils
+    {
+        // The kernel's policy enums mirror the reflected ones value for value, so the mapping is a cast; an
+        // out-of-range reflected value stays out of range and fails slice::ValidateOptions.
+        static_assert(static_cast<uint8>(ECk_RuntimeMesh_CapUVPolicy::PlanarOnAllLayers)
+            == static_cast<uint8>(slice::ECapUVPolicy::PlanarOnAllLayers));
+        static_assert(static_cast<uint8>(ECk_RuntimeMesh_CapUVPolicy::PlanarOnLayer0_ZeroOthers)
+            == static_cast<uint8>(slice::ECapUVPolicy::PlanarOnLayer0_ZeroOthers));
+        static_assert(static_cast<uint8>(ECk_RuntimeMesh_CapUVPolicy::PlanarOnLayer0_KeepInterpolated)
+            == static_cast<uint8>(slice::ECapUVPolicy::PlanarOnLayer0_KeepInterpolated));
+        static_assert(static_cast<uint8>(ECk_RuntimeMesh_IslandPolicy::RejectMultiple)
+            == static_cast<uint8>(slice::EIslandPolicy::RejectMultiple));
+        static_assert(static_cast<uint8>(ECk_RuntimeMesh_IslandPolicy::SplitIslands)
+            == static_cast<uint8>(slice::EIslandPolicy::SplitIslands));
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
     auto
         MakeImportOptions(
             const FCk_RuntimeMesh_ImportLimits& InLimits)
@@ -50,6 +68,7 @@ namespace ck::runtimemesh
         Cap.Set_UVOffset(FVector2f{
             static_cast<float>(ReflectedCap.Get_UVOffset().X),
             static_cast<float>(ReflectedCap.Get_UVOffset().Y)});
+        Cap.Set_UVPolicy(static_cast<slice::ECapUVPolicy>(ReflectedCap.Get_UVPolicy()));
 
         const auto& ReflectedLimits = InRequest.Get_Limits();
         auto Limits = slice::FCutLimits{};
@@ -60,11 +79,13 @@ namespace ck::runtimemesh
         Limits.Set_RelativeVolumeTolerance(ReflectedLimits.Get_RelativeVolumeTolerance());
         Limits.Set_MaximumVertices(ReflectedLimits.Get_MaximumVertices());
         Limits.Set_MaximumTriangles(ReflectedLimits.Get_MaximumTriangles());
+        Limits.Set_MaximumPiecesPerSide(ReflectedLimits.Get_MaximumPiecesPerSide());
 
         auto Options = slice::FCutOptions{};
         Options.Set_Plane(Plane);
         Options.Set_Cap(Cap);
         Options.Set_Limits(Limits);
+        Options.Set_IslandPolicy(static_cast<slice::EIslandPolicy>(InRequest.Get_IslandPolicy()));
         return Options;
     }
 

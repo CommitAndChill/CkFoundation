@@ -1,8 +1,10 @@
 #include "CkRuntimeMesh/CkRuntimeMesh_Processor.h"
 
 #include "CkRuntimeMesh/CkRuntimeMesh_Utils.h"
+#include "CkRuntimeMesh/Settings/CkRuntimeMesh_ProjectSettings.h"
 
 #include "CkCore/Ensure/CkEnsure.h"
+#include "CkCore/Time/CkTime.h"
 #include "CkCore/Validation/CkIsValid.h"
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
 #include "CkEcs/Scheduler/CkProcessorRegistration.h"
@@ -157,28 +159,99 @@ namespace ck::runtimemesh::ck_runtime_mesh_processor
         if (Outcome != ECk_RuntimeMesh_SliceOutcome::Succeeded)
         { return MakeTerminal(InEntry, Outcome); }
 
-        auto Positive = UCk_Utils_RuntimeMesh_UE::Adopt_Validated(ResultOwner, Cut.Get_Positive());
-
-        if (ck::Is_NOT_Valid(Positive))
+        const auto HasEveryPiece = Cut.Get_IsSuccess();
+        CK_ENSURE_IF_NOT(HasEveryPiece,
+            TEXT("RuntimeMesh slice [{}] of source [{}] succeeded without a valid piece on each side"),
+            InEntry.Get_Request().Get_OperationID().ToString(), Source)
         { return MakeTerminal(InEntry, ECk_RuntimeMesh_SliceOutcome::InternalFailure); }
 
-        const auto Negative = UCk_Utils_RuntimeMesh_UE::Adopt_Validated(ResultOwner, Cut.Get_Negative());
+        // All or nothing: a piece that cannot be adopted releases every piece adopted before it.
+        auto PositivePieces = TArray<FCk_RuntimeMesh_SlicePiece>{};
+        auto NegativePieces = TArray<FCk_RuntimeMesh_SlicePiece>{};
+        auto IsEveryPieceAdopted = true;
 
-        if (ck::Is_NOT_Valid(Negative))
+        for (const auto& Piece : Cut.Get_PositivePieces())
         {
-            UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(Positive);
+            const auto Adopted = UCk_Utils_RuntimeMesh_UE::Adopt_Validated(ResultOwner, Piece.Get_Geometry());
+            IsEveryPieceAdopted = ck::IsValid(Adopted);
+
+            if (NOT IsEveryPieceAdopted)
+            { break; }
+
+            PositivePieces.Emplace(Adopted, MakeMetrics(*Piece.Get_Geometry()), Piece.Get_CapTriangles());
+        }
+
+        for (const auto& Piece : Cut.Get_NegativePieces())
+        {
+            if (NOT IsEveryPieceAdopted)
+            { break; }
+
+            const auto Adopted = UCk_Utils_RuntimeMesh_UE::Adopt_Validated(ResultOwner, Piece.Get_Geometry());
+            IsEveryPieceAdopted = ck::IsValid(Adopted);
+
+            if (NOT IsEveryPieceAdopted)
+            { break; }
+
+            NegativePieces.Emplace(Adopted, MakeMetrics(*Piece.Get_Geometry()), Piece.Get_CapTriangles());
+        }
+
+        if (NOT IsEveryPieceAdopted)
+        {
+            const auto DestroyPieces = [](const TArray<FCk_RuntimeMesh_SlicePiece>& InPieces)
+            {
+                for (const auto& Piece : InPieces)
+                {
+                    auto Adopted = Piece.Get_Mesh();
+                    UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(Adopted);
+                }
+            };
+
+            DestroyPieces(PositivePieces);
+            DestroyPieces(NegativePieces);
             return MakeTerminal(InEntry, ECk_RuntimeMesh_SliceOutcome::InternalFailure);
         }
 
-        return FCk_RuntimeMesh_SliceResult{
+        const auto& Positive = PositivePieces[0];
+        const auto& Negative = NegativePieces[0];
+
+        auto Result = FCk_RuntimeMesh_SliceResult{
             InEntry.Get_Request().Get_OperationID(),
             Outcome,
-            Positive,
-            Negative,
-            MakeMetrics(*Cut.Get_Positive()),
-            MakeMetrics(*Cut.Get_Negative()),
-            Cut.Get_PositiveCapTriangles(),
-            Cut.Get_NegativeCapTriangles()};
+            Positive.Get_Mesh(),
+            Negative.Get_Mesh(),
+            Positive.Get_Metrics(),
+            Negative.Get_Metrics(),
+            Positive.Get_CapTriangles(),
+            Negative.Get_CapTriangles()};
+
+        Result.Set_PositivePieces(PositivePieces);
+        Result.Set_NegativePieces(NegativePieces);
+
+        return Result;
+    }
+
+    auto
+        Get_DrainLimits(
+            FCk_Time& OutTimeBudget,
+            int32& OutMaximumSlices)
+        -> void
+    {
+        const auto* Settings = UCk_Utils_RuntimeMesh_Settings_UE::Get();
+        OutTimeBudget = Settings->Get_DrainTimeBudget();
+        OutMaximumSlices = Settings->Get_MaximumSlicesPerDrain();
+
+        const auto AreLimitsValid = FMath::IsFinite(OutTimeBudget.Get_Seconds())
+            && OutTimeBudget.Get_Seconds() >= 0.0
+            && OutMaximumSlices >= 1
+            && OutMaximumSlices <= QueueCapacity;
+        CK_ENSURE_IF_NOT(AreLimitsValid,
+            TEXT("RuntimeMesh drain settings are out of range (time budget [{}], maximum slices per drain [{}] of 1..{}); "
+                 "draining one slice per tick until they are fixed"),
+            OutTimeBudget, OutMaximumSlices, QueueCapacity)
+        {
+            OutTimeBudget = FCk_Time{};
+            OutMaximumSlices = 1;
+        }
     }
 }
 
@@ -260,19 +333,34 @@ namespace ck
         if (InQueue._Closing)
         { return; }
 
-        // Detach before executing: a callback may enqueue, and that request must wait for a later drain.
-        // Nothing below touches InQueue once the batch is detached.
-        const auto Count = FMath::Min(runtimemesh::DrainBudgetPerTick, InQueue._Pending.Num());
-        auto Batch = TArray<FRuntimeMesh_QueuedSlice>{};
-        Batch.Reserve(Count);
+        auto TimeBudget = FCk_Time{};
+        auto MaximumSlices = int32{1};
+        runtimemesh::ck_runtime_mesh_processor::Get_DrainLimits(TimeBudget, MaximumSlices);
 
-        for (auto Index = 0; Index < Count; ++Index)
-        { Batch.Add(MoveTemp(InQueue._Pending[Index])); }
+        // Only entries queued before this drain are eligible: a callback may enqueue, and that request must wait for a
+        // later drain. Callbacks only append to the queue or close it, so the eligible entries stay at its front in
+        // FIFO order. Each entry is detached before it executes, and the queue is resolved again after every callback.
+        const auto Eligible = FMath::Min(MaximumSlices, InQueue._Pending.Num());
+        auto Elapsed = FCk_Time{};
 
-        InQueue._Pending.RemoveAt(0, Count, EAllowShrinking::No);
-
-        for (auto& Entry : Batch)
+        for (auto Executed = 0; Executed < Eligible; ++Executed)
         {
+            if (Executed > 0 && NOT (Elapsed < TimeBudget))
+            { return; }
+
+            if (ck::Is_NOT_Valid(InHandle, ck::IsValid_Policy_IncludePendingKill{})
+                || NOT InHandle.Has<FFragment_RuntimeMesh_Queue>())
+            { return; }
+
+            auto& Queue = InHandle.Get<FFragment_RuntimeMesh_Queue, ck::IsValid_Policy_IncludePendingKill>();
+
+            if (Queue._Closing || Queue._Pending.IsEmpty())
+            { return; }
+
+            auto Entry = MoveTemp(Queue._Pending[0]);
+            Queue._Pending.RemoveAt(0, 1, EAllowShrinking::No);
+
+            FCk_ScopedStopwatch Stopwatch{Elapsed};
             const auto Result = runtimemesh::ck_runtime_mesh_processor::Process(Entry);
             runtimemesh::ck_runtime_mesh_processor::Latch(Entry);
             runtimemesh::ck_runtime_mesh_processor::FireTerminal(Entry, Result);
