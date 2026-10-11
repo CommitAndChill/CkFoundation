@@ -17,6 +17,16 @@
   "Installed": false,
   "Modules": [
     {
+      "Name": "CkPixelSpriteEditor",
+      "Type": "Editor",
+      "LoadingPhase": "Default",
+      "WhitelistPlatforms": [
+        "Win64",
+        "Mac",
+        "Linux"
+      ]
+    },
+    {
       "Name": "CkPixelSprite",
       "Type": "Runtime",
       "LoadingPhase": "Default",
