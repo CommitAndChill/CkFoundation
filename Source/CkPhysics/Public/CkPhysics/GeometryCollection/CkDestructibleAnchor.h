@@ -2,6 +2,7 @@
 
 #include "CkCore/Format/CkFormat.h"
 
+#include <Components/StaticMeshComponent.h>
 #include <Field/FieldSystemComponent.h>
 
 #include "CkDestructibleAnchor.generated.h"

@@ -1,5 +1,7 @@
 #include "CkNavigation/Revision/CkNavigationRevision_Subsystem.h"
 
+#include "CkCore/Ensure/CkEnsure.h"
+
 #include "CkCore/Validation/CkIsValid.h"
 
 #include "CkNavigation/CkNavigation_Log.h"

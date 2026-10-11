@@ -1,5 +1,7 @@
 #include "CkUsfRenderer/Outline/CkUsf_Outline_Renderer.h"
 
+#include "ShaderCompilerCore.h"
+
 #include "DataDrivenShaderPlatformInfo.h"
 #include "GlobalShader.h"
 #include "PostProcess/PostProcessMaterialInputs.h"

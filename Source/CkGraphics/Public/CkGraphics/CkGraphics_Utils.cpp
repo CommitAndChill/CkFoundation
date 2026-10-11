@@ -3,6 +3,7 @@
 #include "CkCore/Ensure/CkEnsure.h"
 #include "CkGraphics/CkGraphics_Common.h"
 
+#include <Components/MeshComponent.h>
 #include <Components/PrimitiveComponent.h>
 #include <Engine/Texture.h>
 #include <Engine/World.h>

@@ -1,6 +1,10 @@
 #include "CkDynamic_AngelScript.h"
 
 #if WITH_ANGELSCRIPT_CK
+#include "UObject/UObjectIterator.h"
+#endif
+
+#if WITH_ANGELSCRIPT_CK
 
 #include "CkCore/Ensure/CkEnsure_Utils.h"
 #include "CkCore/Format/CkFormat.h"

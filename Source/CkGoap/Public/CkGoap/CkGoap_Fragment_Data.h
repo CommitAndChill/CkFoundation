@@ -1,4 +1,6 @@
 #pragma once
+#include "GameplayTagContainer.h"
+
 
 #include "CkCore/Format/CkFormat.h"
 #include "CkEcs/Handle/CkHandle_TypeSafe.h"

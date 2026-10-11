@@ -1,4 +1,6 @@
 #pragma once
+#include "CkCore/Time/CkTime_Utils.h"
+
 
 #include "CkCore/Macros/CkMacros.h"
 #include "CkCore/Time/CkTime.h"

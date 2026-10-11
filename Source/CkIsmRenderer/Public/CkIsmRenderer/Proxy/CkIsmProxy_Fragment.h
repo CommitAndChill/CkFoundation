@@ -1,4 +1,6 @@
 #pragma once
+#include "InstanceDataTypes.h"
+
 
 #include "CkCore/Macros/CkMacros.h"
 

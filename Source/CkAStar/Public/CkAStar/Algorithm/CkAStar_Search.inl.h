@@ -1,4 +1,6 @@
 #pragma once
+#include "CkCore/Macros/CkMacros.h"
+
 
 #include "CkAStar/CkAStar_Stats.h"
 

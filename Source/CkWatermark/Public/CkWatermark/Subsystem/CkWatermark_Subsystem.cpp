@@ -1,5 +1,7 @@
 #include "CkWatermark_Subsystem.h"
 
+#include "Engine/GameViewportClient.h"
+
 #include "CkCore/Engine/CkGameInstance.h"
 #include "CkCore/Ensure/CkEnsure.h"
 #include "CkCore/Game/CkGame_Utils.h"

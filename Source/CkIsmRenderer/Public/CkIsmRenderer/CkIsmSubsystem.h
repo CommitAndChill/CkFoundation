@@ -1,4 +1,6 @@
 #pragma once
+#include "Components/InstancedStaticMeshComponent.h"
+
 
 #include "CkCore/Subsystems/GameWorldSubsytem/CkGameWorldSubsystem.h"
 

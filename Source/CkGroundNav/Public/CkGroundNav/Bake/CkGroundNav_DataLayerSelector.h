@@ -1,6 +1,8 @@
 #pragma once
 
 #include <CoreMinimal.h>
+#include "CkCore/Format/CkFormat.h"
+#include "CkCore/Macros/CkMacros.h"
 
 #include "CkGroundNav_DataLayerSelector.generated.h"
 

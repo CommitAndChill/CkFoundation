@@ -1,4 +1,6 @@
 #pragma once
+#include "Engine/MemberReference.h"
+
 
 #include "CkEcs/Handle/CkHandle.h"
 #include "CkEcs/Handle/CkHandle_TypeSafe.h"

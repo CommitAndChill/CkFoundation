@@ -1,4 +1,6 @@
 #pragma once
+#include "Kismet/BlueprintFunctionLibrary.h"
+
 
 #include "CkChaos_Utils.generated.h"
 

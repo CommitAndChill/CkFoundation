@@ -1,5 +1,7 @@
 ﻿#include "CkMessaging_K2Node.h"
 
+#include "CkCore/GameplayTag/CkGameplayTag_Utils.h"
+
 #include "CkCore/EditorOnly/CkEditorOnly_Utils.h"
 #include "CkCore/Ensure/CkEnsure_Utils.h"
 #include "CkCore/IO/CkIO_Utils.h"

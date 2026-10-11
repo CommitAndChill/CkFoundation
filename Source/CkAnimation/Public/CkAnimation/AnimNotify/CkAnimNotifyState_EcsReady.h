@@ -1,5 +1,8 @@
 ﻿#pragma once
 #include "CkAnimation/AnimNotify/CkAnimNotifyState.h"
+#include "CkCore/Time/CkTime.h"
+#include "CkEcs/Handle/CkHandle.h"
+#include "CkEcs/Net/CkNet_Common.h"
 
 #include "CkAnimNotifyState_EcsReady.generated.h"
 

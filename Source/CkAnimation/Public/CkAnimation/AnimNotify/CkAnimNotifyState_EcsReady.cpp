@@ -1,4 +1,10 @@
 ﻿#include "CkAnimNotifyState_EcsReady.h"
+#include "CkCore/Time/CkTime_Utils.h"
+#include "CkEcs/Net/CkNet_Utils.h"
+#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimSequenceBase.h"
+#include "Animation/AnimNotifies/AnimNotify.h"
 
 #include "CkCore/Game/CkGame_Utils.h"
 

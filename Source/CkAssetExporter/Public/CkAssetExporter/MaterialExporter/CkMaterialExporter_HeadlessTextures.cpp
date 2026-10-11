@@ -1,5 +1,7 @@
 #include "CkMaterialExporter_HeadlessTextures.h"
 
+#include "Engine/Texture2D.h"
+
 #include "CkCore/Format/CkFormat.h"
 #include "CkCore/Validation/CkIsValid.h"
 

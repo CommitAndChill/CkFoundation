@@ -1,4 +1,6 @@
 #pragma once
+#include "CkCore/Enums/CkEnums.h"
+
 
 #include "CkCore/Macros/CkMacros.h"
 

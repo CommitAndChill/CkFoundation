@@ -1,4 +1,7 @@
 ﻿#include "CkAnimNotifyState.h"
+#include "Components/SkeletalMeshComponent.h"
+
+#include "Animation/AnimInstance.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 

@@ -1,5 +1,8 @@
 #include "CkDebugScene_Mesh.h"
 
+#include "CkCore/Format/CkFormat.h"
+#include "UObject/Package.h"
+
 #include "CkCore/Ensure/CkEnsure.h"
 #include "CkCore/Validation/CkIsValid.h"
 

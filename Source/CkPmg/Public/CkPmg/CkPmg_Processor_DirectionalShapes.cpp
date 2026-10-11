@@ -14,6 +14,7 @@
 #include "CkPmg/CkPmg_Utils_FlatShapes.h"
 
 #include <MaterialDomain.h>
+#include <Materials/Material.h>
 #include <Materials/MaterialInstanceDynamic.h>
 #include <ProceduralMeshComponent.h>
 

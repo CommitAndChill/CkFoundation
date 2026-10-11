@@ -13,6 +13,8 @@
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
 #include "CkEcs/OwningActor/CkOwningActor_Utils.h"
 
+#include <GameFramework/PlayerState.h>
+
 // --------------------------------------------------------------------------------------------------------------------
 
 auto

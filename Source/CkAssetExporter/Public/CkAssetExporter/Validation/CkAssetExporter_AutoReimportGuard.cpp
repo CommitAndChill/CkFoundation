@@ -1,5 +1,7 @@
 #include "CkAssetExporter_AutoReimportGuard.h"
 
+#include "Misc/WildcardString.h"
+
 #include "CkAssetExporter_Log.h"
 #include "CkAssetExporter/ExportMeta/CkAssetExporter_ExportMeta.h"
 

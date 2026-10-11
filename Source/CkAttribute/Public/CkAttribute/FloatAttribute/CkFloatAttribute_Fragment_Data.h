@@ -10,6 +10,7 @@
 
 #include "CkProvider/CkProvider_Data.h"
 
+#include <Curves/CurveFloat.h>
 #include <NativeGameplayTags.h>
 
 #include "CkFloatAttribute_Fragment_Data.generated.h"

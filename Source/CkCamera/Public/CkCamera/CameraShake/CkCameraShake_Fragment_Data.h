@@ -1,4 +1,6 @@
 #pragma once
+#include "Camera/CameraShakeBase.h"
+
 
 #include "CkCore/Macros/CkMacros.h"
 

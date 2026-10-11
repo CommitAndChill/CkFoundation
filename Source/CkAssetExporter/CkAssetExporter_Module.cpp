@@ -1,4 +1,7 @@
 #include "CkAssetExporter_Module.h"
+#include "Framework/Application/SlateApplication.h"
+
+#include "Widgets/Docking/SDockTab.h"
 
 #include "CkAssetExporter/AssetAction/CkBehaviorTreeExporter_AssetAction.h"
 #include "CkAssetExporter/AutoSidecar/CkAssetExporter_OnSaveHook.h"

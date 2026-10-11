@@ -1,4 +1,8 @@
 #pragma once
+#include "Sound/SoundBase.h"
+#include "Sound/SoundAttenuation.h"
+#include "Sound/SoundConcurrency.h"
+
 
 #include "CkEcs/Handle/CkHandle.h"
 #include "CkEcs/Handle/CkHandle_TypeSafe.h"

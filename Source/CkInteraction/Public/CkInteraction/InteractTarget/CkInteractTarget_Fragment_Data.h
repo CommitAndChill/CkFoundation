@@ -1,4 +1,6 @@
 #pragma once
+#include "Engine/MemberReference.h"
+
 
 #include "CkEcs/Handle/CkHandle.h"
 #include "CkCore/Macros/CkMacros.h"

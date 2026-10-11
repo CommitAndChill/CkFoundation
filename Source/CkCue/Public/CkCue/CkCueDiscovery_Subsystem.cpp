@@ -1,5 +1,8 @@
 #include "CkCueSubsystem_Base.h"
 
+#include "UObject/UObjectIterator.h"
+#include "Engine/BlueprintGeneratedClass.h"
+
 #include "CkCore/Algorithms/CkAlgorithms.h"
 #include "CkCore/Debug/CkDebug_Utils.h"
 #include "CkCore/IO/CkIO_Utils.h"

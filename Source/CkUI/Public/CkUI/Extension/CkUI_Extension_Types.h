@@ -1,6 +1,8 @@
 // Copyright 2025 CkFoundation. All Rights Reserved.
 
 #pragma once
+#include "CkCore/Format/CkFormat.h"
+
 
 #include "CkCore/Macros/CkMacros.h"
 #include "CkCore/Validation/CkIsValid.h"

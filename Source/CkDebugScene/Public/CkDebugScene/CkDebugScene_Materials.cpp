@@ -1,5 +1,7 @@
 #include "CkDebugScene/CkDebugScene_Materials.h"
 
+#include "CkCore/Macros/CkMacros.h"
+
 #include <Materials/Material.h>
 #include <Materials/MaterialInterface.h>
 #include <UObject/StrongObjectPtr.h>

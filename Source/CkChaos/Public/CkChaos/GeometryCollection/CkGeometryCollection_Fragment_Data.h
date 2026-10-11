@@ -1,4 +1,6 @@
 #pragma once
+#include "Curves/CurveFloat.h"
+
 
 #include "CkCore/Macros/CkMacros.h"
 

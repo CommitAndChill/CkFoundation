@@ -1,5 +1,7 @@
 #include "CkGraphics_Common.h"
 
+#include "CkCore/Ensure/CkEnsure.h"
+
 // --------------------------------------------------------------------------------------------------------------------
 
 FCk_CustomPrimitiveData_Value::

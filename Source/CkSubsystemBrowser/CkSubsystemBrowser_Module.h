@@ -1,4 +1,6 @@
 #pragma once
+#include "Widgets/Docking/SDockTab.h"
+
 
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"

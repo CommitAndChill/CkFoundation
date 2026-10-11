@@ -1,5 +1,8 @@
 #pragma once
 
+#include "Engine/TextureRenderTarget2D.h"
+#include "Engine/Texture2D.h"
+#include "GameFramework/PlayerState.h"
 #include "CkCore/Macros/CkMacros.h"
 
 #include "CkEcs/Handle/CkDebugCallstack_Macros.h"

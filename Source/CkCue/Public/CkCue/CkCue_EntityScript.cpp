@@ -1,5 +1,9 @@
 #include "CkCue_EntityScript.h"
 
+#if WITH_EDITOR
+#include "UObject/AssetRegistryTagsContext.h"
+#endif
+
 #include "CkCue/CkCue_Fragment.h"
 #include "CkCore/GameplayTag/CkGameplayTag_Utils.h"
 #include "CkCore/Object/CkObject_Utils.h"

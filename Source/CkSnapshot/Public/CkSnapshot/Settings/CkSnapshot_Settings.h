@@ -1,4 +1,6 @@
 #pragma once
+#include "Misc/AutomationTest.h"
+
 
 #include <Engine/DeveloperSettings.h>
 

@@ -1,5 +1,7 @@
 #include "CkCueSubsystem_Base.h"
 
+#include "UObject/UObjectIterator.h"
+
 #include "CkCore/Algorithms/CkAlgorithms.h"
 #include "CkCore/GameplayTag/CkGameplayTag_Utils.h"
 #include "CkCore/Math/Arithmetic/CkArithmetic_Utils.h"

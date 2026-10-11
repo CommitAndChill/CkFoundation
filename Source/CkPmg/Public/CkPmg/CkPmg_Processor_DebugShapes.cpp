@@ -21,6 +21,7 @@
 #include "CkPmg_Utils_SymbolShapes.h"
 
 #include <MaterialDomain.h>
+#include <Materials/Material.h>
 #include <Materials/MaterialInstanceDynamic.h>
 #include <ProceduralMeshComponent.h>
 

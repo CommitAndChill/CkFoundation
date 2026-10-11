@@ -1,5 +1,7 @@
 #include "CkDebugScene_Target.h"
 
+#include "CkCore/Format/CkFormat.h"
+
 #include "CkDebugScene/CkDebugScene_Materials.h"
 
 #include "CkCore/Ensure/CkEnsure.h"

@@ -1,4 +1,6 @@
 #pragma once
+#include "GameplayTagContainer.h"
+
 
 #include "CkCore/Macros/CkMacros.h"
 

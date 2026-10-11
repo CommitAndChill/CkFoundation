@@ -12,6 +12,7 @@
 #include "CkPmg/CkPmg_Utils_DebugShapes.h"
 
 #include <MaterialDomain.h>
+#include <Materials/Material.h>
 #include <Materials/MaterialInstanceDynamic.h>
 #include <ProceduralMeshComponent.h>
 

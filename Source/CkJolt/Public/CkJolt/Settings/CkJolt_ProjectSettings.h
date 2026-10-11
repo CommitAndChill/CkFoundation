@@ -7,6 +7,7 @@
 
 #include <CoreMinimal.h>
 #include <Engine/EngineTypes.h>
+#include <Misc/AutomationTest.h>
 #include <UObject/StrongObjectPtr.h>
 
 #include "CkJolt_ProjectSettings.generated.h"
