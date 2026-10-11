@@ -12,6 +12,7 @@
 
 #include "AngelscriptInclude.h"
 #include "StartAngelscriptHeaders.h"
+#include "as_scriptengine.h"
 #include "as_scriptfunction.h"
 #include "as_callfunc.h"
 #include "EndAngelscriptHeaders.h"

@@ -6,6 +6,8 @@
 #include "CkCore/Time/CkTime.h"
 
 #include <Kismet/BlueprintFunctionLibrary.h>
+#include <Curves/RichCurve.h>
+#include <Curves/SimpleCurve.h>
 
 #include "CkCurve_Utils.generated.h"
 

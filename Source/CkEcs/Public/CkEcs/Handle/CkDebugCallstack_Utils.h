@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CkEcs/Handle/CkDebugCallstack_Fragment.h"
+#include "CkEcs/Handle/CkHandle.h"
 
 namespace ck
 {

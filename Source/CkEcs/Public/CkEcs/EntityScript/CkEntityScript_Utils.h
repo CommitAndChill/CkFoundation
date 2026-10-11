@@ -1,4 +1,6 @@
 #pragma once
+#include "CkEcs/EntityLifetime/CkEntityLifetime_Fragment_Data.h"
+
 
 #include "CkEntityScript_Fragment.h"
 

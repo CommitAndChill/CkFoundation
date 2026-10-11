@@ -32,6 +32,7 @@
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Core/QuickSort.h>
 #include <Jolt/Core/ScopeExit.h>
+#include <Traits/IsCharEncodingCompatibleWith.h>
 #include <ProfilingDebugging/CountersTrace.h>
 #include <ProfilingDebugging/CpuProfilerTrace.h>
 #ifdef JPH_DEBUG_RENDERER

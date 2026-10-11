@@ -19,6 +19,7 @@
 #include "Net/Core/PushModel/PushModel.h"
 
 #include <Engine/World.h>
+#include <Engine/LocalPlayer.h>
 
 #include <Net/UnrealNetwork.h>
 

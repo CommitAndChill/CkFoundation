@@ -18,6 +18,7 @@
 #include <Logging/MessageLog.h>
 #include <Logging/TokenizedMessage.h>
 #include <Framework/Docking/TabManager.h>
+#include <Widgets/Docking/SDockTab.h>
 
 #include <Misc/UObjectToken.h>
 

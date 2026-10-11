@@ -5,6 +5,7 @@
 #include "CkCore/Ensure/CkEnsure.h"
 
 #include <GameFramework/HUD.h>
+#include <GameFramework/PlayerController.h>
 
 // --------------------------------------------------------------------------------------------------------------------
 

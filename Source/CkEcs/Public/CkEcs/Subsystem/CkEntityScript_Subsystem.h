@@ -10,6 +10,7 @@
 
 #if WITH_EDITOR
 #include "Editor.h"
+#include <EdGraph/EdGraphPin.h>
 #endif
 
 #include "CkEntityScript_Subsystem.generated.h"

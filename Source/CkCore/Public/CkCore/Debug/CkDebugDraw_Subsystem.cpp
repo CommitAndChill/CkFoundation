@@ -7,6 +7,7 @@
 #include "CkCore/Validation/CkIsValid.h"
 
 #include <DrawDebugHelpers.h>
+#include <Engine/Canvas.h>
 #include <GameFramework/HUD.h>
 
 // --------------------------------------------------------------------------------------------------------------------

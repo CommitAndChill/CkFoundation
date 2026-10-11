@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CkCore/Macros/CkMacros.h"
+#include "CkCore/Format/CkFormat.h"
 
 #include <Engine/DataAsset.h>
 #include <CoreMinimal.h>

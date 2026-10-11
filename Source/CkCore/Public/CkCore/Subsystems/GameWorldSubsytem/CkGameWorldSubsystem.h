@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CkCore/Macros/CkMacros.h"
+#include "CkCore/Format/CkFormat.h"
 
 #include <Subsystems/WorldSubsystem.h>
 

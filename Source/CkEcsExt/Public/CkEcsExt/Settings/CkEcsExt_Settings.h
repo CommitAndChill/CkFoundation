@@ -3,6 +3,7 @@
 #include <CoreMinimal.h>
 
 #include "CkCore/Macros/CkMacros.h"
+#include "CkCore/Format/CkFormat.h"
 #include "CkSettings/ProjectSettings/CkProjectSettings.h"
 
 #include "CkEcsExt_Settings.generated.h"

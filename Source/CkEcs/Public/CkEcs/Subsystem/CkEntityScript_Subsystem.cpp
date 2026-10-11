@@ -12,6 +12,7 @@
 #include <AssetRegistry/IAssetRegistry.h>
 #include <Misc/ScopeExit.h>
 #include <UObject/StrongObjectPtr.h>
+#include <UObject/UObjectIterator.h>
 
 #if WITH_EDITOR
 #include <Subsystems/EditorAssetSubsystem.h>

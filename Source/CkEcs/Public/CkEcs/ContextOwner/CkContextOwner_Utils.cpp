@@ -2,6 +2,7 @@
 
 #include "CkCore/Algorithms/CkAlgorithms.h"
 #include "CkEcs/ContextOwner/CkContextOwner_Fragment.h"
+#include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 

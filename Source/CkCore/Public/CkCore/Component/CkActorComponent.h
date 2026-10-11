@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CkCore/Format/CkFormat.h"
 #include "CkCore/Macros/CkMacros.h"
 
 #include <Components/ActorComponent.h>

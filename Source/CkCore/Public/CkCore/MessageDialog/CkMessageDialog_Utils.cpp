@@ -4,8 +4,11 @@
 #include "CkCore/Ensure/CkEnsure.h"
 
 #include <Windows/WindowsPlatformApplicationMisc.h> // required for clipboard copy
+#include <Runtime/Launch/Resources/Version.h>
 
 #include <Misc/MessageDialog.h>
+#include <Framework/Text/SlateHyperlinkRun.h>
+#include <Styling/SlateStyle.h>
 
 #include <Widgets/SBoxPanel.h>
 #include <Widgets/SNullWidget.h>
@@ -14,6 +17,7 @@
 #include <Widgets/Layout/SBox.h>
 #include <Widgets/Layout/SScrollBox.h>
 #include <Widgets/Text/STextBlock.h>
+#include <Widgets/Text/SRichTextBlock.h>
 
 // --------------------------------------------------------------------------------------------------------------------
 
