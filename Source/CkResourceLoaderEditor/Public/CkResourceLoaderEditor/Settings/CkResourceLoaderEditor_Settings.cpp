@@ -1,5 +1,7 @@
 #include "CkResourceLoaderEditor_Settings.h"
 
+#include "Widgets/Input/SButton.h"
+
 #include "CkCore/Object/CkObject_Utils.h"
 
 #include "CkResourceLoaderEditor/Subsystem/CkEditorAssetLoader_Subsystem.h"

@@ -1,5 +1,7 @@
 #include "CkAttributeEditor_Module.h"
 
+#include "PropertyEditorModule.h"
+
 #include "CkAttribute/ByteAttribute/CkByteAttribute_Fragment_Data.h"
 #include "CkAttribute/Public/CkAttribute/FloatAttribute/CkFloatAttribute_Fragment_Data.h"
 #include "CkAttribute/IntegerAttribute/CkIntegerAttribute_Fragment_Data.h"

@@ -1,4 +1,7 @@
 #include "CkEcsEditor_Module.h"
+#include "Framework/Application/SlateApplication.h"
+
+#include "PropertyEditorModule.h"
 
 #include "CkEcs/EntityConstructionScript/CkEntity_ConstructionScript.h"
 #include "CkEcs/EntityScript/CkEntityScript.h"

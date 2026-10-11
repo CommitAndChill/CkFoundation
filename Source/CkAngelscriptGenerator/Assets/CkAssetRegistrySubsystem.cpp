@@ -1,4 +1,5 @@
 #include "CkAssetRegistrySubsystem.h"
+#include "CkCore/Ensure/CkEnsure.h"
 
 #include "CkAssetRegistryConfig.h"
 #include "CkAngelscriptGenerator/Assets/CkAssetRegistry_ClassResolver.h"

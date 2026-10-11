@@ -1,5 +1,7 @@
 #include "CkCueEditor_Module.h"
 
+#include "Framework/Application/SlateApplication.h"
+
 #include "CkCueEditor/Toolbox/CkCueToolbox.h"
 #include "CkCueEditor/Toolbox/CkCueToolboxCommands.h"
 #include "CkCueEditor/Toolbox/CkCueToolboxStyle.h"

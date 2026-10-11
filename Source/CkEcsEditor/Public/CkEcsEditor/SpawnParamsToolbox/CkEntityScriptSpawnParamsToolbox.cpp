@@ -1,4 +1,7 @@
 #include "CkEntityScriptSpawnParamsToolbox.h"
+#include "UObject/UObjectIterator.h"
+
+#include "UserDefinedStructure/UserDefinedStructEditorData.h"
 
 #include "CkCore/IO/CkIO_Utils.h"
 #include "CkCore/Reflection/CkReflection_Utils.h"

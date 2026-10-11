@@ -1,9 +1,16 @@
 #include "CkStructTypeSelector_Widget.h"
 
+#include "CkCore/Macros/CkMacros.h"
+
+#include <Framework/Application/SlateApplication.h>
 #include <UObject/UObjectIterator.h>
 
 #include <Widgets/Input/SSearchBox.h>
+#include <Widgets/Layout/SBorder.h>
+#include <Widgets/Layout/SBox.h>
 #include <Widgets/Layout/SScrollBox.h>
+#include <Widgets/SBoxPanel.h>
+#include <Widgets/Text/STextBlock.h>
 #include <Styling/AppStyle.h>
 
 // --------------------------------------------------------------------------------------------------------------------

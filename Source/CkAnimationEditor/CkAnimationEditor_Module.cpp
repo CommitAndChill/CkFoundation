@@ -1,5 +1,7 @@
 #include "CkAnimationEditor_Module.h"
 
+#include "Widgets/Docking/SDockTab.h"
+
 #include "CkAnimationEditor/Toolbox/CkAnimationToolbox.h"
 #include "CkAnimationEditor/Toolbox/CkAnimationToolbox_Commands.h"
 #include "CkAnimationEditor/Toolbox/CkAnimationToolbox_Style.h"

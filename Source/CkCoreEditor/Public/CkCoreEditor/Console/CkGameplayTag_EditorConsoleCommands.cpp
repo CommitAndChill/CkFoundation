@@ -1,5 +1,7 @@
 ﻿#include "CkGameplayTag_EditorConsoleCommands.h"
 
+#include "CkCore/GameplayTag/CkGameplayTag_Utils.h"
+
 #include "CkCoreEditor/CkCoreEditor_Log.h"
 
 #include "HAL/IConsoleManager.h"

@@ -1,4 +1,6 @@
 #include "CkCoreEditor_Module.h"
+#include "UObject/UObjectIterator.h"
+#include "Misc/ConfigCacheIni.h"
 
 #include "CkCore/Component/CkActorComponent.h"
 #include "CkCore/EditorOnly/CkEditorOnly_Utils.h"

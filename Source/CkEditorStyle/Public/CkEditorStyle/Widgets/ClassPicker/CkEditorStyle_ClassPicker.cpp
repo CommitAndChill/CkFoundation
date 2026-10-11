@@ -1,5 +1,14 @@
 #include "CkEditorStyle_ClassPicker.h"
 
+#include "Modules/ModuleManager.h"
+#include "CkCore/Format/CkFormat.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/SWindow.h"
+#include "Widgets/Layout/SBorder.h"
+#include "Widgets/Text/STextBlock.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/Layout/SBox.h"
+
 #include "CkCore/Macros/CkMacros.h"
 #include "CkCore/Validation/CkIsValid.h"
 

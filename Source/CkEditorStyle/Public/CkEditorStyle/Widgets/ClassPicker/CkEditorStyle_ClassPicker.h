@@ -1,5 +1,9 @@
 #pragma once
 
+#include "CkCore/Format/CkFormat.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/SCompoundWidget.h"
+
 #include "CkCore/Macros/CkMacros.h"
 
 // -----------------------------------------------------------------------------------------

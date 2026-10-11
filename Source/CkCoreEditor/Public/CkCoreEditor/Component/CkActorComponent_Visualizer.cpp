@@ -1,5 +1,7 @@
 #include "CkActorComponent_Visualizer.h"
 
+#include "SceneView.h"
+
 #include "CkCore/Component/CkActorComponent.h"
 #include "CkCore/Scene/CkScene.h"
 #include "CkCore/Validation/CkIsValid.h"

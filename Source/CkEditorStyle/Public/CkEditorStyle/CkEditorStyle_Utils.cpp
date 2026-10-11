@@ -1,5 +1,7 @@
 #include "CkEditorStyle_Utils.h"
 
+#include "Framework/Application/SlateApplication.h"
+
 #include "CkCore/Ensure/CkEnsure.h"
 #include "CkCore/IO/CkIO_Utils.h"
 #include "CkCore/Validation/CkIsValid.h"

@@ -1,5 +1,7 @@
 ﻿#include "CkEntityScript_K2Node.h"
 
+#include "Widgets/Layout/SScrollBox.h"
+
 #include "CkCore/EditorOnly/CkEditorOnly_Utils.h"
 #include "CkCore/IO/CkIO_Utils.h"
 #include "CkCore/Object/CkObject_Utils.h"

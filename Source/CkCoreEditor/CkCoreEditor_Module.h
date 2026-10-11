@@ -1,4 +1,6 @@
 #pragma once
+#include "Engine/SCS_Node.h"
+
 
 #include <Subsystems/AssetEditorSubsystem.h>
 

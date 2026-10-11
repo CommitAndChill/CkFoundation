@@ -1,4 +1,6 @@
 #pragma once
+#include "Kismet/BlueprintFunctionLibrary.h"
+
 
 #include "CoreMinimal.h"
 #include "CkAssetRegistrySubsystem.h"

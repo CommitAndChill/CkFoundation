@@ -1,5 +1,7 @@
 #include "CkEditorStyle_Settings.h"
 
+#include "Widgets/Input/SButton.h"
+
 #include "CkCore/Ensure/CkEnsure.h"
 
 #include "CkEditorStyle/Widgets/ClassPicker/CkEditorStyle_ClassPicker.h"

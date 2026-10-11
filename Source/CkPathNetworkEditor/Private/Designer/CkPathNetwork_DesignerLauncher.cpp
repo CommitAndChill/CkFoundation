@@ -1,4 +1,5 @@
 #include "CkPathNetworkEditor/Designer/CkPathNetwork_DesignerLauncher.h"
+#include "EditorModeManager.h"
 
 #include "CkPathNetworkEditor/Designer/CkPathNetwork_DesignerEdMode.h"
 

@@ -5,6 +5,7 @@
 #include <ThumbnailRendering/ThumbnailManager.h>
 #include <Engine/Texture2D.h>
 #include <TextureResource.h>
+#include <BatchedElements.h>
 #include <CanvasItem.h>
 #include <CanvasTypes.h>
 

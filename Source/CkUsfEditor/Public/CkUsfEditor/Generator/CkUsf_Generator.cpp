@@ -1,5 +1,7 @@
 #include "CkUsfEditor/Generator/CkUsf_Generator.h"
 
+#include "MaterialDomain.h"
+
 #include "CkUsf/LookDefinition/CkUsf_LookDefinition.h"
 #include "CkUsfEditor/Generator/CkUsf_LookValidator.h"
 #include "CkUsfEditor_Log.h"

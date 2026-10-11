@@ -1,5 +1,7 @@
 #include "CkAnimationToolbox_Detector.h"
 
+#include "Animation/AttributesRuntime.h"
+
 #include "CkAnimationEditor_Log.h"
 
 #include <AssetRegistry/AssetRegistryModule.h>

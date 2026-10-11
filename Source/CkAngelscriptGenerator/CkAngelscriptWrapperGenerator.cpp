@@ -1,4 +1,7 @@
 #include "CkAngelscriptWrapperGenerator.h"
+#include "CkCore/Ensure/CkEnsure.h"
+#include "CkCore/Macros/CkMacros.h"
+#include "UObject/TextProperty.h"
 
 #include "CkAngelscriptGenerator/CkAngelscriptGenerator_Log.h"
 #include "CkAngelscriptGenerator/CkAngelscriptGenerator_RegenOwnership.h"

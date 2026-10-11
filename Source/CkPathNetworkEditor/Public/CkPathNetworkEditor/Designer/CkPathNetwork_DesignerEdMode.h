@@ -1,6 +1,7 @@
 #pragma once
 
 #include <CoreMinimal.h>
+#include "UnrealEdMisc.h"
 #include <Tools/LegacyEdModeWidgetHelpers.h>
 
 #include "CkPathNetwork_DesignerEdMode.generated.h"
