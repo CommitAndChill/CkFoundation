@@ -46,8 +46,11 @@ namespace ck
             CK_IGNORE_PENDING_KILL>
     {
     public:
-        using Group = FGroup_PostTransform;
-        using RunAfter = TDepList<FProcessor_UnrealComponent_Setup>;
+        using RunAfter = TDepList<FProcessor_UnrealComponent_Setup, FGroup_Gameplay_Camera>;
+        using RunBefore = TDepList<FGroup_PostTransform>;
+        // Replicated applies can resolve Transform requests in the final dirty pump,
+        // after PostTransform. Push those poses before next-frame update cleanup.
+        using MarkedDirtyBy = FTag_Transform_Updated;
 
     public:
         using TProcessor::TProcessor;
