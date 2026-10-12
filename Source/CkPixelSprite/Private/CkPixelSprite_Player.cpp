@@ -687,6 +687,53 @@ auto
 
 auto
     UCk_PixelSpritePlayer_UE::
+    TryGet_CurrentPixels(
+        TArray<FColor>& OutPixels,
+        FIntPoint& OutCanvas) const
+    -> bool
+{
+    const auto Frame = Get_CurrentFrame();
+    if (NOT _Snapshot.IsValid() || NOT _Animation._Frames.IsValidIndex(Frame))
+    {
+        return false;
+    }
+    const auto Source = _Animation._Frames[Frame]._SourceIndex;
+    if (NOT _Snapshot->_Sources.IsValidIndex(Source))
+    {
+        return false;
+    }
+    const auto& Grid = _Snapshot->_Sources[Source]._Grid;
+    const auto Count = int64{Grid._Width} * Grid._Height;
+    if (Grid._Width <= 0 || Grid._Height <= 0 || Count > 1048576
+        || Count != Grid._Indices.Num())
+    {
+        return false;
+    }
+    auto Pixels = TArray<FColor>{};
+    Pixels.Reserve(Grid._Indices.Num());
+    for (const auto Index : Grid._Indices)
+    {
+        if (NOT Grid._Palette.IsValidIndex(Index))
+        {
+            return false;
+        }
+        Pixels.Add(Grid._Palette[Index]._Color);
+    }
+    OutPixels = MoveTemp(Pixels);
+    OutCanvas = FIntPoint{Grid._Width, Grid._Height};
+    return true;
+}
+
+auto
+    UCk_PixelSpritePlayer_UE::
+    Get_SourceAsset() const
+    -> TObjectPtr<UCk_PixelSpriteAsset_UE>
+{
+    return _Asset;
+}
+
+auto
+    UCk_PixelSpritePlayer_UE::
     Get_NormalizedTime() const
     -> double
 {

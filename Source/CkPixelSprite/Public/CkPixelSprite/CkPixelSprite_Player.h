@@ -114,6 +114,17 @@ public:
     int32
     Get_CurrentFrame() const;
 
+    /** Authored straight-alpha sRGB pixels for the currently presented frame; failure preserves both outputs. */
+    UFUNCTION(BlueprintPure, Category = "Ck|Pixel Sprite")
+    bool
+    TryGet_CurrentPixels(
+        TArray<FColor>& OutPixels,
+        FIntPoint& OutCanvas) const;
+
+    auto
+        Get_SourceAsset() const
+        -> TObjectPtr<UCk_PixelSpriteAsset_UE>;
+
     UFUNCTION(BlueprintPure, Category = "Ck|Pixel Sprite")
     int32
     Get_LogicalFrame() const;
