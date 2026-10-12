@@ -41,6 +41,10 @@ public:
     auto
     Get_RequiresOwningActorBeforeReplicationDriver() const -> bool override;
 
+    [[nodiscard]]
+    auto
+    Get_IsUnsolicitedClientReplica(const FCk_Handle& InEntity) const -> bool override;
+
     auto
     EndPlay() -> void override;
 

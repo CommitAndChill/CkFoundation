@@ -974,33 +974,95 @@ auto
     if (NOT ck_entity_script_utils::ValidateRetainedSpawnParams(TEXT("Request_ReplicateEntityScript"), InSpawnParams))
     { return; }
 
-    CK_ENSURE_IF_NOT(ck::IsValid(InEntityScript),
-        TEXT("Cannot replicate EntityScript for [{}]: the EntityScript instance is invalid"), InHandle)
-    { return; }
-
+    const auto ScriptReady = ck::IsValid(InEntityScript);
+    CK_ENSURE_IF_NOT(ScriptReady, TEXT("Cannot replicate invalid EntityScript")) {}
+    if (NOT ScriptReady) { return; }
+    const auto TargetReady = ck::IsValid(InHandle);
+    CK_ENSURE_IF_NOT(TargetReady, TEXT("Cannot replicate invalid EntityScript target")) {}
+    if (NOT TargetReady) { return; }
+    auto* TargetWorld = static_cast<UWorld*>(nullptr);
+    const auto TargetContextReady = ck_entity_script_utils::TryResolveSpawnOwnerWorld(InHandle, TargetWorld);
+    CK_ENSURE_IF_NOT(TargetContextReady, TEXT("EntityScript target has no live world context")) {}
+    if (NOT TargetContextReady) { return; }
+    const auto HasTargetNet = InHandle.Has<ck::FFragment_Net_Params>();
+    CK_ENSURE_IF_NOT(HasTargetNet, TEXT("EntityScript target has no NetParams")) {}
+    if (NOT HasTargetNet) { return; }
+    const auto TargetReplicates = InHandle.Get<ck::FFragment_Net_Params>().Get_ConnectionSettings().Get_Replication() == ECk_Replication::Replicates;
+    CK_ENSURE_IF_NOT(TargetReplicates, TEXT("EntityScript target does not replicate")) {}
+    if (NOT TargetReplicates) { return; }
+    if (InContextOwnerOverride.IsSet())
+    {
+        const auto Context = InContextOwnerOverride.GetValue();
+        auto* ContextWorld = static_cast<UWorld*>(nullptr);
+        const auto ContextReady = ck_entity_script_utils::TryResolveSpawnOwnerWorld(Context, ContextWorld);
+        CK_ENSURE_IF_NOT(ContextReady, TEXT("EntityScript context override is invalid")) {}
+        if (NOT ContextReady) { return; }
+        const auto ContextExact = ContextWorld == TargetWorld &&
+            Context.Get_RegistryView().Get_RegistryHandle() == InHandle.Get_RegistryView().Get_RegistryHandle();
+        CK_ENSURE_IF_NOT(ContextExact, TEXT("EntityScript context override belongs to another world")) {}
+        if (NOT ContextExact) { return; }
+    }
     auto ReplicatedOwner = InReplicatedOwner;
+    const auto OwnerReady = ck::IsValid(ReplicatedOwner);
+    CK_ENSURE_IF_NOT(OwnerReady, TEXT("EntityScript replication owner is invalid")) {}
+    if (NOT OwnerReady) { return; }
+    auto* OwnerWorld = static_cast<UWorld*>(nullptr);
+    const auto OwnerContextReady = ck_entity_script_utils::TryResolveSpawnOwnerWorld(ReplicatedOwner, OwnerWorld);
+    CK_ENSURE_IF_NOT(OwnerContextReady, TEXT("EntityScript owner has no live world context")) {}
+    if (NOT OwnerContextReady) { return; }
+    const auto SameContext = OwnerWorld == TargetWorld && ReplicatedOwner.Get_RegistryView().Get_RegistryHandle() == InHandle.Get_RegistryView().Get_RegistryHandle();
+    CK_ENSURE_IF_NOT(SameContext, TEXT("EntityScript owner and target contexts differ")) {}
+    if (NOT SameContext) { return; }
     const auto IsSelfOwned = ReplicatedOwner == InHandle;
-
     if (NOT IsSelfOwned)
     {
-        CK_ENSURE_IF_NOT(UCk_Utils_Net_UE::Get_Replication(ReplicatedOwner) == ECk_Replication::Replicates,
-            TEXT("Cannot replicate EntityScript for [{}]: replicated owner [{}] does NOT replicate"),
-            InHandle, ReplicatedOwner)
-        { return; }
+        const auto HasOwner = InHandle.Has<ck::FFragment_LifetimeOwner>();
+        CK_ENSURE_IF_NOT(HasOwner, TEXT("EntityScript target has no lifetime owner")) {}
+        if (NOT HasOwner) { return; }
+        const auto ExactOwner = InHandle.Get<ck::FFragment_LifetimeOwner>().Get_Entity() == ReplicatedOwner;
+        CK_ENSURE_IF_NOT(ExactOwner, TEXT("EntityScript replication owner is not direct lifetime owner")) {}
+        if (NOT ExactOwner) { return; }
+        const auto HasOwnerNet = ReplicatedOwner.Has<ck::FFragment_Net_Params>();
+        CK_ENSURE_IF_NOT(HasOwnerNet, TEXT("EntityScript replication owner has no NetParams")) {}
+        if (NOT HasOwnerNet) { return; }
+        const auto OwnerReplicates = ReplicatedOwner.Get<ck::FFragment_Net_Params>().Get_ConnectionSettings().Get_Replication() == ECk_Replication::Replicates;
+        CK_ENSURE_IF_NOT(OwnerReplicates, TEXT("EntityScript direct owner does not replicate")) {}
+        if (NOT OwnerReplicates) { return; }
     }
-
-    CK_ENSURE_IF_NOT(InHandle.Has<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>(),
-        TEXT("Cannot replicate EntityScript for [{}]: entity has no ReplicationDriver"), InHandle)
-    { return; }
-
-    const auto& OwnerReplicationDriver = IsSelfOwned
-        ? InHandle.Get<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>()
-        : ReplicatedOwner.Get<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>();
-
-    CK_ENSURE_IF_NOT(ck::IsValid(OwnerReplicationDriver),
-        TEXT("Cannot replicate EntityScript for [{}]: owner [{}] ReplicationDriver is invalid"),
-        InHandle, ReplicatedOwner)
-    { return; }
+    const auto HasTargetDriver = InHandle.Has<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>();
+    CK_ENSURE_IF_NOT(HasTargetDriver, TEXT("EntityScript Target has no replication driver")) {}
+    if (NOT HasTargetDriver) { return; }
+    const auto TargetDriver = InHandle.Get<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>();
+    const auto TargetDriverReady = ck::IsValid(TargetDriver);
+    CK_ENSURE_IF_NOT(TargetDriverReady, TEXT("EntityScript Target driver is invalid")) {}
+    if (NOT TargetDriverReady) { return; }
+    const auto TargetDriverExact = TargetDriver->Get_AssociatedEntity() == InHandle;
+    CK_ENSURE_IF_NOT(TargetDriverExact, TEXT("EntityScript Target driver identity differs")) {}
+    if (NOT TargetDriverExact) { return; }
+    const auto* TargetActor = TargetDriver->GetOwningActor();
+    const auto TargetActorReady = ck::IsValid(TargetActor);
+    CK_ENSURE_IF_NOT(TargetActorReady, TEXT("EntityScript Target driver actor is invalid")) {}
+    if (NOT TargetActorReady) { return; }
+    const auto TargetActorContext = ck_entity_script_utils::Get_HasLiveActorWireChannel(TargetActor, TargetWorld);
+    CK_ENSURE_IF_NOT(TargetActorContext, TEXT("EntityScript Target driver actor context differs")) {}
+    if (NOT TargetActorContext) { return; }
+    const auto HasOwnerDriver = ReplicatedOwner.Has<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>();
+    CK_ENSURE_IF_NOT(HasOwnerDriver, TEXT("EntityScript Owner has no replication driver")) {}
+    if (NOT HasOwnerDriver) { return; }
+    const auto OwnerReplicationDriver = ReplicatedOwner.Get<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>();
+    const auto OwnerDriverReady = ck::IsValid(OwnerReplicationDriver);
+    CK_ENSURE_IF_NOT(OwnerDriverReady, TEXT("EntityScript Owner driver is invalid")) {}
+    if (NOT OwnerDriverReady) { return; }
+    const auto OwnerDriverExact = OwnerReplicationDriver->Get_AssociatedEntity() == ReplicatedOwner;
+    CK_ENSURE_IF_NOT(OwnerDriverExact, TEXT("EntityScript Owner driver identity differs")) {}
+    if (NOT OwnerDriverExact) { return; }
+    const auto* OwnerActor = OwnerReplicationDriver->GetOwningActor();
+    const auto OwnerActorReady = ck::IsValid(OwnerActor);
+    CK_ENSURE_IF_NOT(OwnerActorReady, TEXT("EntityScript Owner driver actor is invalid")) {}
+    if (NOT OwnerActorReady) { return; }
+    const auto OwnerActorContext = ck_entity_script_utils::Get_HasLiveActorWireChannel(OwnerActor, TargetWorld);
+    CK_ENSURE_IF_NOT(OwnerActorContext, TEXT("EntityScript Owner driver actor context differs")) {}
+    if (NOT OwnerActorContext) { return; }
 
     if (ReplicatedOwner.Has<ck::FTag_EntityJustCreated>())
     {

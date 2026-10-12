@@ -109,6 +109,12 @@ public:
     virtual auto
     Get_RequiresOwningActorBeforeReplicationDriver() const -> bool;
 
+    // Classification for a client replica that was created by an already replicated actor,
+    // rather than by a local pending spawn. A false result preserves the retry warning.
+    [[nodiscard]]
+    virtual auto
+    Get_IsUnsolicitedClientReplica(const FCk_Handle& InEntity) const -> bool;
+
     // Snapshot respawn opt-in, with exactly two consumers:
     //  (a) UCk_EntityScript_WithActor_UE::Construct stamps FFragment_ActorSpawnIntent when this returns true, which
     //      is what makes the capture record an actor recipe and the load re-spawn the bridged actor.

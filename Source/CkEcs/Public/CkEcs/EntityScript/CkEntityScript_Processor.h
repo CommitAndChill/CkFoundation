@@ -116,6 +116,7 @@ namespace ck
         static constexpr auto NetModeRequirement = ECk_ProcessorNetModeRequirement::AuthorityOnly;
         static constexpr auto WorldTypeRequirement = ECk_ProcessorWorldTypeRequirement::RuntimeOnly;
         using MarkedDirtyBy = FRequest_EntityScript_Replicate;
+        using LocalSettleAfter = FGroup_Gameplay_Script;
         static constexpr auto LoadPolicy = ECk_ProcessorLoadPolicy::RunsDuringLoad; // load-gate kernel
         static constexpr auto HydrationQuarantinePolicy = ECk_ProcessorHydrationQuarantine::Exempt; // load-gate kernel
 
@@ -166,7 +167,7 @@ namespace ck
             FCk_Handle_EntityScript,
             ck::TReadOnly<FFragment_EntityScript>,
             FTag_EntityScript_PendingReplicationRetry,
-            ck::TReadOnly<FFragment_EntityScript_PendingReplicationRetryTimestamp>,
+            ck::TReadWrite<FFragment_EntityScript_PendingReplicationRetryTimestamp>,
             CK_IGNORE_PENDING_KILL>
     {
     public:
@@ -185,7 +186,7 @@ namespace ck
             const TimeType& InDeltaT,
             HandleType InHandle,
             const FFragment_EntityScript& InEntityScript,
-            const FFragment_EntityScript_PendingReplicationRetryTimestamp& InTimestamp) -> void;
+            FFragment_EntityScript_PendingReplicationRetryTimestamp& InTimestamp) -> void;
     };
 
     // --------------------------------------------------------------------------------------------------------------------

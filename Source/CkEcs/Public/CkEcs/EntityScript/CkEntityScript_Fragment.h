@@ -39,9 +39,13 @@ namespace ck
 
     private:
         FCk_Time _TaggedAt;
+        bool _SawClassPending = false;
 
     public:
         CK_PROPERTY_GET(_TaggedAt);
+        CK_PROPERTY_GET(_SawClassPending);
+
+        auto Mark_SawClassPending() -> void { _SawClassPending = true; }
 
     public:
         CK_DEFINE_CONSTRUCTORS(FFragment_EntityScript_PendingReplicationRetryTimestamp, _TaggedAt);
@@ -135,7 +139,8 @@ namespace ck
         ConsumeFirst(
             UClass* InEntityScriptClass,
             const UCk_EntityScript_UE* InCDO,
-            const FCk_Handle& InConstructedEntity) -> FCk_Handle;
+            const FCk_Handle& InConstructedEntity,
+            bool* OutHadClassEntry = nullptr) -> FCk_Handle;
 
         auto
         CleanupRemaining() -> void;

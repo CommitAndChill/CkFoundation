@@ -9,6 +9,11 @@
 
 // --------------------------------------------------------------------------------------------------------------------
 
+class AActor;
+class UWorld;
+
+// --------------------------------------------------------------------------------------------------------------------
+
 UCLASS(NotBlueprintable)
 class CKECS_API UCk_Utils_EntityReplicationDriver_UE : public UBlueprintFunctionLibrary
 {
@@ -95,6 +100,16 @@ public:
     static bool
     Has(
         const FCk_Handle& InEntity);
+
+    // Native read-only proof for a client handle's private weak replication-driver identity.
+    // Client replicas do not carry the host-only driver UObject fragment.
+    [[nodiscard]]
+    static auto
+    Get_HasExactClientDriverAssociation(
+        const FCk_Handle& InEntity,
+        const UWorld* InExpectedWorld,
+        const AActor* InExpectedActor,
+        const UClass* InExpectedScriptClass) -> bool;
 
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|ReplicationDriver",

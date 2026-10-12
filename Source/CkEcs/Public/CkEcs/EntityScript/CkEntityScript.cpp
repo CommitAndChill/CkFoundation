@@ -184,6 +184,14 @@ auto
 
 auto
     UCk_EntityScript_UE::
+    Get_IsUnsolicitedClientReplica(const FCk_Handle&) const
+    -> bool
+{
+    return false;
+}
+
+auto
+    UCk_EntityScript_UE::
     Get_IsSnapshotRespawnable() const
     -> bool
 {

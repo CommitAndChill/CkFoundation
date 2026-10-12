@@ -22,6 +22,7 @@
 #include "CkEcs/Tag/CkTag_EditorOnly.h"
 
 #include <HAL/IConsoleManager.h>
+#include <Engine/World.h>
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -571,35 +572,62 @@ namespace ck
         // pump / next frame — the feature Setups this construction just queued have not drained yet.
         InHandle.AddOrGet<FTag_EntityScript_ConstructedThisFrame>();
 
+        const auto ScriptWeak = InEntityScript.Get_Script();
         UUtils_Signal_OnConstructed::Broadcast(InHandle, ck::MakePayload(InHandle));
 
-        if (ck::Is_NOT_Valid(InEntityScript.Get_Script()))
+        // The callback may retire the entity or replace its script feature before this
+        // processor resumes. Never read the processor's borrowed fragment afterward.
+        if (NOT ck::IsValid(InHandle) ||
+            InHandle.Has_Any<FTag_DestroyEntity_Initiate, FTag_DestroyEntity_EndPlay,
+                FTag_DestroyEntity_Teardown, FTag_DestroyEntity_Await, FTag_DestroyEntity_Finalize>() ||
+            NOT InHandle.Has<FFragment_EntityScript>())
+        { return; }
+        auto* Script = ScriptWeak.Get();
+        if (NOT ck::IsValid(Script) ||
+            Script->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+            InHandle.Get<FFragment_EntityScript>().Get_Script().Get() != Script ||
+            Script->Get_AssociatedEntity() != InHandle)
+        { return; }
+        auto* ScriptClass = Script->GetClass();
+        if (NOT ck::IsValid(ScriptClass) ||
+            ScriptClass->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed))
         { return; }
 
         auto WasConsumed = false;
+        auto SawClassPending = false;
         auto LifetimeOwner = UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InHandle);
 
         if (ck::IsValid(LifetimeOwner) && LifetimeOwner.Has<FFragment_PendingReplication>())
         {
             auto& PendingFragment = LifetimeOwner.AddOrGet<FFragment_PendingReplication>();
-            auto* Cdo = InEntityScript.Get_Script()->GetClass()->GetDefaultObject<UCk_EntityScript_UE>();
+            auto* Cdo = ScriptClass->GetDefaultObject<UCk_EntityScript_UE>();
             auto PendingEntity = PendingFragment.ConsumeFirst(
-                InEntityScript.Get_Script()->GetClass(), Cdo, InHandle);
+                ScriptClass, Cdo, InHandle, &SawClassPending);
 
             if (ck::IsValid(PendingEntity))
             {
                 UUtils_Signal_OnConstructed::Broadcast(PendingEntity, ck::MakePayload(InHandle));
-                UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(PendingEntity);
+                if (ck::IsValid(PendingEntity) &&
+                    NOT PendingEntity.Has_Any<FTag_DestroyEntity_Initiate, FTag_DestroyEntity_EndPlay,
+                        FTag_DestroyEntity_Teardown, FTag_DestroyEntity_Await, FTag_DestroyEntity_Finalize>())
+                { UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(PendingEntity); }
                 WasConsumed = true;
             }
         }
 
         if (NOT WasConsumed
-            && InEntityScript.Get_Script()->Get_EffectiveReplication() == ECk_Replication::Replicates
+            && Script->Get_EffectiveReplication() == ECk_Replication::Replicates
             && ck::IsValid(LifetimeOwner)
             && UCk_Utils_Net_UE::Get_EntityNetMode(LifetimeOwner) == ECk_Net_NetModeType::Client)
         {
             const auto World = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InHandle);
+            if (NOT ck::IsValid(World) ||
+                World->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) || World->bIsTearingDown)
+            { return; }
+            if (NOT ck::IsValid(Script) ||
+                Script->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+                Script->GetClass() != ScriptClass)
+            { return; }
             // WALL time: this backoff is a kernel watchdog that has to keep running while a snapshot load holds
             // game time frozen — one that freezes with the world it is retrying against is a wedge, not a retry.
             const auto TimeParams = FCk_Utils_Time_GetWorldTime_Params{World}
@@ -607,7 +635,9 @@ namespace ck
             const auto CurrentTime = UCk_Utils_Time_UE::Get_WorldTime(TimeParams).Get_WorldTime().Get_Time();
 
             InHandle.Add<FTag_EntityScript_PendingReplicationRetry>();
-            InHandle.Add<FFragment_EntityScript_PendingReplicationRetryTimestamp>(CurrentTime);
+            auto& Retry = InHandle.Add<FFragment_EntityScript_PendingReplicationRetryTimestamp>(CurrentTime);
+            if (SawClassPending)
+            { Retry.Mark_SawClassPending(); }
         }
     }
 
@@ -625,48 +655,121 @@ namespace ck
             const TimeType&,
             HandleType InHandle,
             const FFragment_EntityScript& InEntityScript,
-            const FFragment_EntityScript_PendingReplicationRetryTimestamp& InTimestamp)
+            FFragment_EntityScript_PendingReplicationRetryTimestamp& InTimestamp)
         -> void
     {
+        const auto OriginalTaggedAt = InTimestamp.Get_TaggedAt();
         auto LifetimeOwner = UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InHandle);
+        auto SawClassPending = false;
+        const auto ScriptWeak = InEntityScript.Get_Script();
+        const auto* Script = InEntityScript.Get_Script().Get();
+        const auto ScriptIsLive = ck::IsValid(Script) &&
+            NOT Script->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed);
+        auto* ScriptClass = ScriptIsLive ? Script->GetClass() : nullptr;
+        const auto ClassIsLive = ck::IsValid(ScriptClass) &&
+            NOT ScriptClass->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed);
+        const auto HasRetainedRetry = [&]() -> bool
+        {
+            if (NOT ck::IsValid(InHandle) ||
+                InHandle.Has_Any<FTag_DestroyEntity_Initiate, FTag_DestroyEntity_EndPlay,
+                    FTag_DestroyEntity_Teardown, FTag_DestroyEntity_Await, FTag_DestroyEntity_Finalize>() ||
+                NOT InHandle.Has<FTag_EntityScript_PendingReplicationRetry>() ||
+                NOT InHandle.Has<FFragment_EntityScript_PendingReplicationRetryTimestamp>())
+            { return false; }
+            return InHandle.Get<FFragment_EntityScript_PendingReplicationRetryTimestamp>().Get_TaggedAt() ==
+                OriginalTaggedAt;
+        };
+        const auto HasExactScript = [&]() -> bool
+        {
+            if (NOT HasRetainedRetry() || NOT InHandle.Has<FFragment_EntityScript>())
+            { return false; }
+            auto* CurrentScript = ScriptWeak.Get();
+            return ck::IsValid(CurrentScript) &&
+                NOT CurrentScript->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) &&
+                InHandle.Get<FFragment_EntityScript>().Get_Script().Get() == CurrentScript &&
+                CurrentScript->Get_AssociatedEntity() == InHandle;
+        };
 
-        if (ck::IsValid(LifetimeOwner) && LifetimeOwner.Has<FFragment_PendingReplication>())
+        if (ClassIsLive && ck::IsValid(LifetimeOwner) &&
+            LifetimeOwner.Has<FFragment_PendingReplication>())
         {
             auto& PendingFragment = LifetimeOwner.AddOrGet<FFragment_PendingReplication>();
-            auto* Cdo = InEntityScript.Get_Script()->GetClass()->GetDefaultObject<UCk_EntityScript_UE>();
+            auto* Cdo = ScriptClass->GetDefaultObject<UCk_EntityScript_UE>();
             auto PendingEntity = PendingFragment.ConsumeFirst(
-                InEntityScript.Get_Script()->GetClass(), Cdo, InHandle);
+                ScriptClass, Cdo, InHandle, &SawClassPending);
+
+            // Matching is virtual and may synchronously retire the constructed entity.
+            if (NOT HasExactScript())
+            { return; }
+
+            if (SawClassPending)
+            { InHandle.Get<FFragment_EntityScript_PendingReplicationRetryTimestamp>().Mark_SawClassPending(); }
 
             if (ck::IsValid(PendingEntity))
             {
                 UUtils_Signal_OnConstructed::Broadcast(PendingEntity, ck::MakePayload(InHandle));
-                UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(PendingEntity);
+                if (ck::IsValid(PendingEntity) &&
+                    NOT PendingEntity.Has_Any<FTag_DestroyEntity_Initiate, FTag_DestroyEntity_EndPlay,
+                        FTag_DestroyEntity_Teardown, FTag_DestroyEntity_Await, FTag_DestroyEntity_Finalize>())
+                { UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(PendingEntity); }
 
-                InHandle.Remove<FTag_EntityScript_PendingReplicationRetry>();
-                InHandle.Remove<FFragment_EntityScript_PendingReplicationRetryTimestamp>();
+                if (HasExactScript())
+                {
+                    InHandle.Try_Remove<FTag_EntityScript_PendingReplicationRetry>();
+                    InHandle.Try_Remove<FFragment_EntityScript_PendingReplicationRetryTimestamp>();
+                }
                 return;
             }
         }
 
+        // A virtual matcher can leave a valid entity while replacing its retry receipt.
+        if (NOT HasRetainedRetry())
+        { return; }
+        auto& CurrentTimestamp = InHandle.Get<FFragment_EntityScript_PendingReplicationRetryTimestamp>();
         const auto World = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InHandle);
+        if (NOT ck::IsValid(World) ||
+            World->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) || World->bIsTearingDown)
+        {
+            ck::ecs::Warning(TEXT("PendingReplicationRetry has no live World for entity [{}]."), InHandle);
+            InHandle.Remove<FTag_EntityScript_PendingReplicationRetry>();
+            InHandle.Remove<FFragment_EntityScript_PendingReplicationRetryTimestamp>();
+            return;
+        }
         // WALL time, matching the stamp above: a load freezes game time, so a game-timed elapsed would read zero
         // for the whole hold and this timeout could never fire inside the window it exists to bound.
         const auto TimeParams = FCk_Utils_Time_GetWorldTime_Params{World}
             .Set_TimeType(ECk_Time_WorldTimeType::RealTime);
         const auto CurrentTime = UCk_Utils_Time_UE::Get_WorldTime(TimeParams).Get_WorldTime().Get_Time();
-        const auto ElapsedSeconds = (CurrentTime - InTimestamp.Get_TaggedAt()).Get_Seconds();
+        const auto ElapsedSeconds = (CurrentTime - CurrentTimestamp.Get_TaggedAt()).Get_Seconds();
 
         if (ElapsedSeconds >= PendingReplicationRetryTimeoutSeconds)
         {
-            ck::ecs::Warning(
-                TEXT("PendingReplicationRetry timed out after [{}]s for entity [{}] with script [{}]. "
-                     "No matching PendingEntity was found on the client."),
-                ElapsedSeconds,
-                InHandle,
-                InEntityScript.Get_Script()->GetClass()->GetName());
+            const auto SawClassPendingAtExpiry = CurrentTimestamp.Get_SawClassPending();
+            const auto ScriptName = ClassIsLive ? ScriptClass->GetName() : FString(TEXT("<invalid>"));
+            const auto IsProvenUnsolicited = NOT SawClassPendingAtExpiry
+                && ScriptIsLive && ClassIsLive
+                && Script->Get_IsUnsolicitedClientReplica(InHandle);
+            if (NOT HasRetainedRetry() || (ScriptIsLive && NOT HasExactScript()))
+            { return; }
+            if (IsProvenUnsolicited)
+            {
+                ck::ecs::Display(
+                    TEXT("PendingReplicationRetry expired for unsolicited client WithActor entity [{}] "
+                         "with script [{}]; no same-class PendingEntity was observed."),
+                    InHandle, ScriptName);
+            }
+            else
+            {
+                ck::ecs::Warning(
+                    TEXT("PendingReplicationRetry timed out after [{}]s for entity [{}] with script [{}]. "
+                         "No matching PendingEntity was found on the client."),
+                    ElapsedSeconds, InHandle, ScriptName);
+            }
 
-            InHandle.Remove<FTag_EntityScript_PendingReplicationRetry>();
-            InHandle.Remove<FFragment_EntityScript_PendingReplicationRetryTimestamp>();
+            if (NOT HasRetainedRetry())
+            { return; }
+            InHandle.Try_Remove<FTag_EntityScript_PendingReplicationRetry>();
+            InHandle.Try_Remove<FFragment_EntityScript_PendingReplicationRetryTimestamp>();
         }
     }
 
