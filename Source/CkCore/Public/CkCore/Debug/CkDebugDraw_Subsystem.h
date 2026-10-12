@@ -174,6 +174,10 @@ private:
 
 private:
     RequestList _PendingDrawRequests;
+    RequestList _FrameDrawRequests;
+    TSet<TWeakObjectPtr<AHUD>> _RenderedHUDsThisFrame;
+    uint64 _DrawFrame = MAX_uint64;
+    bool _bSuppressedThisFrame = false;
 
     FDelegateHandle _PostRenderHUD_DelegateHandle;
 };
