@@ -1,5 +1,7 @@
 #include "CkTransform_Processor.h"
 
+#include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
+
 #include "CkCore/Algorithms/CkAlgorithms.h"
 
 #include "CkProfile/Stats/CkCpuWork.h"
@@ -754,6 +756,13 @@ namespace ck
             const FFragment_Transform& InComp)
             -> void
     {
+        // An earlier output callback can synchronously initiate this actor's teardown.
+        if (ck::Is_NOT_Valid(InHandle))
+        { return; }
+        if (UCk_Utils_EntityLifetime_UE::Get_IsPendingDestroy(InHandle,
+                ECk_EntityLifetime_DestructionPhase::BeginDestroy))
+        { return; }
+
         const auto RootComponent = InTransformRootComp.Get_RootComponent().Get();
 
         CK_ENSURE_IF_NOT(ck::IsValid(RootComponent), TEXT("Entity [{}] does NOT have a valid RootComponent. Was it destroyed?"), InHandle)
