@@ -228,7 +228,7 @@ namespace ck_autotest_netstub_generator
         Block += ck::Format_UE(TEXT("    constexpr auto kTimeoutSeconds_{} = 30.0f;\n"), Suffix);
         Block += TEXT("}\n\n");
 
-        Block += TEXT("IMPLEMENT_SIMPLE_AUTOMATION_TEST(\n");
+        Block += TEXT("CK_IMPLEMENT_NET_AUTOMATION_TEST(\n");
         Block += ck::Format_UE(TEXT("    {},\n"), TestClassName);
         Block += ck::Format_UE(TEXT("    \"{}\",\n"), TestPath);
         Block += TEXT("    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)\n\n");
@@ -247,7 +247,7 @@ namespace ck_autotest_netstub_generator
         Block += TEXT("\n");
         Block += TEXT("    const auto MapPath = FString{TEXT(\"/Engine/Maps/Entry\")};\n\n");
 
-        Block += TEXT("    ADD_LATENT_AUTOMATION_COMMAND(FCk_Latent_StartPIEMultiClient(NumPIEClients, MapPath));\n");
+        Block += TEXT("    ADD_LATENT_AUTOMATION_COMMAND(FCk_Latent_StartPIEMultiClient(NumPIEClients, MapPath, Parameters));\n");
         Block += TEXT("    ADD_LATENT_AUTOMATION_COMMAND(FCk_Latent_WaitForPIEReady(ExpectedTotalWorlds, ReadyTimeoutSeconds));\n\n");
 
         if (IsReplicated)
@@ -277,9 +277,18 @@ namespace ck_autotest_netstub_generator
 
         // The emitted `FString{...}` initializer collides with fmt substitution syntax, hence the
         // `{{` / `}}` escaping around `kAsClassPath_<Suffix>`.
-        Block += ck::Format_UE(
-            TEXT("    ADD_LATENT_AUTOMATION_COMMAND(FCk_Latent_RunAsTestOnAllWorlds(this, FString{{kAsClassPath_{}}}, kTimeoutSeconds_{}));\n\n"),
-            Suffix, Suffix);
+        if (IsReplicated)
+        {
+            Block += ck::Format_UE(
+                TEXT("    ADD_LATENT_AUTOMATION_COMMAND(FCk_Latent_RunAsTestOnAllWorlds(this, FString{{kAsClassPath_{}}}, kTimeoutSeconds_{}));\n\n"),
+                Suffix, Suffix);
+        }
+        else
+        {
+            Block += ck::Format_UE(
+                TEXT("    ADD_LATENT_AUTOMATION_COMMAND(FCk_Latent_RunAsTestOnAllWorlds(this, FString{{kAsClassPath_{}}}, kTimeoutSeconds_{}, true));\n\n"),
+                Suffix, Suffix);
+        }
 
         Block += TEXT("    ADD_LATENT_AUTOMATION_COMMAND(FCk_Latent_EndPIE());\n\n");
 
