@@ -349,6 +349,8 @@ namespace ck
         const auto TransmitIsAllowed = InTunables.Get_TransmitMode() != ECk_VoiceChat_TransmitMode::Disabled;
         CK_ENSURE_IF_NOT(TransmitIsAllowed,
             TEXT("StartTransmit on VoiceTalker [{}] whose transmit mode is Disabled"), InHandle)
+        { }
+        if (NOT TransmitIsAllowed)
         { return false; }
 
         const auto SampleRate = UCk_Utils_VoiceChat_Settings_UE::Get_SampleRate();
@@ -369,6 +371,8 @@ namespace ck
                 TEXT("Opus encoder could not be created for VoiceTalker [{}] - the engine Voice module "
                      "is disabled ([Voice] bEnabled=true missing in the host project's DefaultEngine.ini?)"),
                 InHandle)
+            { }
+            if (NOT EncoderCreated)
             { return false; }
 
             InCapture._Encoder->SetBitrate(UCk_Utils_VoiceChat_Settings_UE::Get_BitrateBps());
