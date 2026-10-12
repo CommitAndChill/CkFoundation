@@ -50,25 +50,44 @@ namespace ck
         ConsumeFirst(
             UClass* InEntityScriptClass,
             const UCk_EntityScript_UE* InCDO,
-            const FCk_Handle& InConstructedEntity)
+            const FCk_Handle& InConstructedEntity,
+            bool* OutHadClassEntry)
         -> FCk_Handle
     {
+        if (OutHadClassEntry != nullptr)
+        { *OutHadClassEntry = false; }
+
+        if (NOT ck::IsValid(InEntityScriptClass) ||
+            InEntityScriptClass->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed))
+        { return {}; }
+
         auto* Pending = _PendingByClass.Find(InEntityScriptClass);
         if (Pending == nullptr || Pending->Num() == 0)
         { return {}; }
 
-        const auto* ConstructedScript = static_cast<const UCk_EntityScript_UE*>(nullptr);
-        if (InConstructedEntity.Has<FFragment_EntityScript>())
-        {
-            ConstructedScript = InConstructedEntity.Get<FFragment_EntityScript>().Get_Script().Get();
-        }
+        if (OutHadClassEntry != nullptr)
+        { *OutHadClassEntry = true; }
+
+        if (NOT ck::IsValid(InCDO) ||
+            InCDO->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+            InCDO->GetClass() != InEntityScriptClass)
+        { return {}; }
+        if (NOT ck::IsValid(InConstructedEntity) ||
+            NOT InConstructedEntity.Has<FFragment_EntityScript>())
+        { return {}; }
+
+        const auto* ConstructedScript = InConstructedEntity.Get<FFragment_EntityScript>().Get_Script().Get();
+        if (NOT ck::IsValid(ConstructedScript) ||
+            ConstructedScript->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+            ConstructedScript->GetClass() != InEntityScriptClass ||
+            ConstructedScript->Get_AssociatedEntity() != InConstructedEntity)
+        { return {}; }
 
         for (auto Index = 0; Index < Pending->Num(); ++Index)
         {
             auto& Entry = (*Pending)[Index];
 
-            if (ck::IsValid(InCDO)
-                && NOT InCDO->Get_AreSpawnParamsMatching(Entry._SpawnParams, ConstructedScript))
+            if (NOT InCDO->Get_AreSpawnParamsMatching(Entry._SpawnParams, ConstructedScript))
             { continue; }
 
             auto Result = Entry._Entity;

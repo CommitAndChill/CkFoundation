@@ -2,11 +2,19 @@
 #include "CkEntityScript_WithActor_Data.h"
 
 #include "CkEcs/CkEcsLog.h"
+#include "CkCore/Validation/CkIsValid.h"
 
 #include <Engine/World.h>
 #include <GameFramework/Actor.h>
 #include "CkEcs/Handle/CkHandle_Utils.h"
+#include "CkEcs/EntityLifetime/CkEntityLifetime_Fragment.h"
+#include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
+#include "CkEcs/EntityScript/CkEntityScript_Fragment.h"
+#include "CkEcs/Net/CkNet_Fragment.h"
+#include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_Utils.h"
 #include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/OwningActor/CkOwningActor_Fragment.h"
+#include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
 #include "CkEcs/Snapshot/CkSaveKey_Fragment.h"
 #include "CkEcsExt/Transform/CkTransform_Utils.h"
 #include "CkEcsExt/OwningActor/CkActorSpawnIntent_Fragment.h"
@@ -145,6 +153,55 @@ auto
     -> bool
 {
     return true;
+}
+
+auto
+    UCk_EntityScript_WithActor_UE::
+    Get_IsUnsolicitedClientReplica(const FCk_Handle& InEntity) const
+    -> bool
+{
+    if (NOT IsInGameThread() || NOT ck::IsValid(this) || NOT ck::IsValid(InEntity))
+    { return false; }
+    if (UCk_Utils_EntityLifetime_UE::Get_IsPendingDestroy(
+        InEntity, ECk_EntityLifetime_DestructionPhase::BeginDestroy))
+    { return false; }
+    if (NOT InEntity.Has<ck::FFragment_EntityScript>() ||
+        InEntity.Get<ck::FFragment_EntityScript>().Get_Script().Get() != this)
+    { return false; }
+    if (Get_AssociatedEntity() != InEntity)
+    { return false; }
+
+    auto* Actor = _OwningActor.Get();
+    if (NOT ck::IsValid(Actor) || Actor->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+        Actor->IsActorBeingDestroyed() || Actor->HasAuthority() || NOT Actor->GetIsReplicated())
+    { return false; }
+    auto* World = Actor->GetWorld();
+    if (NOT ck::IsValid(World) || World->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+        World->bIsTearingDown || World->GetNetMode() != NM_Client)
+    { return false; }
+    if (NOT InEntity.Has<TWeakObjectPtr<UWorld>>() ||
+        InEntity.Get<TWeakObjectPtr<UWorld>>().Get() != World)
+    { return false; }
+
+    const auto Root = UCk_Utils_EcsWorld_Subsystem_UE::TryGet_TransientEntityForWorld(*World);
+    if (NOT ck::IsValid(Root) ||
+        UCk_Utils_EntityLifetime_UE::Get_IsPendingDestroy(
+            Root, ECk_EntityLifetime_DestructionPhase::BeginDestroy))
+    { return false; }
+    if (NOT InEntity.Has<ck::FFragment_LifetimeOwner>() ||
+        InEntity.Get<ck::FFragment_LifetimeOwner>().Get_Entity() != Root)
+    { return false; }
+    if (NOT InEntity.Has<ck::FFragment_OwningActor>() ||
+        InEntity.Get<ck::FFragment_OwningActor>().Get_EntityOwningActor().Get() != Actor)
+    { return false; }
+    if (UCk_Utils_OwningActor_UE::TryGet_ActorEntityHandle(Actor) != InEntity)
+    { return false; }
+    if (NOT InEntity.Has<ck::FFragment_Net_Params>() ||
+        InEntity.Get<ck::FFragment_Net_Params>().Get_ConnectionSettings().Get_Replication() !=
+            ECk_Replication::Replicates)
+    { return false; }
+    return UCk_Utils_EntityReplicationDriver_UE::Get_HasExactClientDriverAssociation(
+        InEntity, World, Actor, GetClass());
 }
 
 auto

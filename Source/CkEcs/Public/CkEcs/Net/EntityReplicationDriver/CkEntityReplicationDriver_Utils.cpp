@@ -24,7 +24,11 @@
 #endif
 
 #include <Engine/PackageMapClient.h>
+#include <Engine/World.h>
 #include <Engine/NetDriver.h>
+#include <GameFramework/Actor.h>
+#include <UObject/UObjectHash.h> // GetObjectsWithOuter
+#include <UObject/GarbageCollection.h> // IsGarbageCollecting
 #include <numeric>
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -500,6 +504,58 @@ auto
     -> bool
 {
     return InEntity.Has<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>();
+}
+
+auto
+    UCk_Utils_EntityReplicationDriver_UE::
+    Get_HasExactClientDriverAssociation(
+        const FCk_Handle& InEntity,
+        const UWorld* InExpectedWorld,
+        const AActor* InExpectedActor,
+        const UClass* InExpectedScriptClass)
+    -> bool
+{
+    if (NOT IsInGameThread() || IsGarbageCollecting() || NOT ck::IsValid(InEntity) ||
+        NOT ck::IsValid(InExpectedWorld) || NOT ck::IsValid(InExpectedActor) ||
+        NOT ck::IsValid(InExpectedScriptClass) ||
+        InExpectedWorld->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+        InExpectedWorld->bIsTearingDown || InExpectedWorld->GetNetMode() != NM_Client ||
+        InExpectedActor->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+        InExpectedScriptClass->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+        InExpectedActor->IsActorBeingDestroyed() ||
+        InExpectedActor->GetWorld() != InExpectedWorld)
+    { return false; }
+    if (UCk_Utils_EntityLifetime_UE::Get_IsPendingDestroy(
+        InEntity, ECk_EntityLifetime_DestructionPhase::BeginDestroy))
+    { return false; }
+
+    // On clients OnRep_ReplicationData_EntityScript links its locally created entity
+    // through a handle cache, while fresh processor handles omit that cache. The
+    // replicated driver remains a direct subobject of the expected actor. Do not
+    // infer association from a global scan or create a client-side ECS fragment.
+    auto DirectObjects = TArray<UObject*>{};
+    GetObjectsWithOuter(InExpectedActor, DirectObjects, false);
+    const UCk_Fragment_EntityReplicationDriver_Rep* ExactDriver = nullptr;
+    for (auto* Object : DirectObjects)
+    {
+        if (NOT ck::IsValid(Object) ||
+            Object->HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) ||
+            Object->HasAnyInternalFlags(EInternalObjectFlags::Garbage | EInternalObjectFlags::Unreachable))
+        { continue; }
+        const auto* Driver = Cast<UCk_Fragment_EntityReplicationDriver_Rep>(Object);
+        if (NOT ck::IsValid(Driver) || Driver->GetOuter() != InExpectedActor ||
+            Driver->Get_AssociatedEntity() != InEntity)
+        { continue; }
+        if (ExactDriver != nullptr)
+        { return false; }
+        ExactDriver = Driver;
+    }
+    if (ExactDriver == nullptr || ExactDriver->GetWorld() != InExpectedWorld ||
+        NOT InExpectedActor->GetIsReplicated())
+    { return false; }
+    const auto& ScriptPayload = ExactDriver->Get_ReplicationData_EntityScript();
+    return ScriptPayload.Get_EntityScriptClass().Get() == InExpectedScriptClass &&
+        ScriptPayload.Get_OwningEntityDriver().Get() == ExactDriver;
 }
 
 auto
