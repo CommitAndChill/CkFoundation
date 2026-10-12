@@ -5,7 +5,6 @@ public class CkSettings : CkModuleRules
 {
     public CkSettings(ReadOnlyTargetRules Target) : base(Target)
     {
-        PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PrivateIncludePaths.AddRange(new string[] {
         });
 
