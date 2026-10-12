@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "canvas": {
+    "width": 32,
+    "height": 32
+  },
+  "metadata": {
+    "description": "Sproutling: gentle grounded breath, leaf-ear sway and brief blink.",
+    "palette": "Ten fixed indexed entries including transparency.",
+    "design": "Approved eight-frame Sproutling concept; native pixel transcription."
+  },
+  "animations": {
+    "idle": {
+      "playback": "loop",
+      "frames": [
+        {
+          "source": "idle_01.xpm",
+          "duration_ms": 450,
+          "anchors": {
+            "origin": [
+              16,
+              29
+            ]
+          }
+        },
+        {
+          "source": "idle_02.xpm",
+          "duration_ms": 220,
+          "anchors": {
+            "origin": [
+              16,
+              29
+            ]
+          }
+        },
+        {
+          "source": "idle_03.xpm",
+          "duration_ms": 220,
+          "anchors": {
+            "origin": [
+              16,
+              29
+            ]
+          }
+        },
+        {
+          "source": "idle_04.xpm",
+          "duration_ms": 90,
+          "anchors": {
+            "origin": [
+              16,
+              29
+            ]
+          }
+        },
+        {
+          "source": "idle_05.xpm",
+          "duration_ms": 110,
+          "anchors": {
+            "origin": [
+              16,
+              29
+            ]
+          }
+        },
+        {
+          "source": "idle_06.xpm",
+          "duration_ms": 220,
+          "anchors": {
+            "origin": [
+              16,
+              29
+            ]
+          }
+        },
+        {
+          "source": "idle_07.xpm",
+          "duration_ms": 220,
+          "anchors": {
+            "origin": [
+              16,
+              29
+            ]
+          }
+        },
+        {
+          "source": "idle_08.xpm",
+          "duration_ms": 450,
+          "anchors": {
+            "origin": [
+              16,
+              29
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
