@@ -5,6 +5,8 @@ public class CkVisualLod : CkModuleRules
 {
     public CkVisualLod(ReadOnlyTargetRules Target) : base(Target)
     {
+        PrivateDependencyModuleNames.AddRange(new string[] { "CkRecord" });
+
         PrivateIncludePaths.AddRange(new string[] {
             // ... add other private include paths required here ...
         });
