@@ -56,6 +56,19 @@ public:
         FTransform InLocalTransform,
         FCk_Handle_SceneNode& OutSceneNode);
 
+    // Compose a foreign-component follower on an existing movable actor-backed Transform leaf.
+    // Its own root remains the output bridge; the foreign component supplies the input pose.
+    // Requires a direct lifetime child, canonical parent chain, no prior SceneNode state or
+    // allocated dependents. Rejection preserves the existing Transform and actor bridge.
+    // Uses the same game-thread, alias and numeric-envelope restrictions as TryAdd_Anchor.
+    UFUNCTION(BlueprintCallable, Category = "Ck|Utils|SceneNode")
+    static bool TryAdd_AnchorToExistingTransform(
+        UPARAM(ref) FCk_Handle_Transform& InChild,
+        UPARAM(ref) FCk_Handle_Transform& InAttachTo,
+        USceneComponent* InSceneComponent,
+        FTransform InLocalTransform,
+        FCk_Handle_SceneNode& OutSceneNode);
+
     // InLocalTransform is the offset from the owner (KeepRelative semantics): the node's world becomes
     // InLocalTransform * ownerWorld and tracks the owner as it moves. Identity == glued exactly to the
     // owner. Offset is runtime-mutable via Request_UpdateOffset.
@@ -119,7 +132,8 @@ private:
         FCk_Handle_Transform& InAttachTo,
         USceneComponent* InSceneComponent,
         FTransform InLocalTransform,
-        FCk_Handle_SceneNode& OutSceneNode);
+        FCk_Handle_SceneNode& OutSceneNode,
+        bool InExistingTransform = false);
 
     static FCk_Handle_SceneNode
     DoAdd(

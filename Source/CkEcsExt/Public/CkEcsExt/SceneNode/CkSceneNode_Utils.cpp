@@ -597,10 +597,19 @@ bool UCk_Utils_SceneNode_UE::TryAdd_AnchorToUnrealComponent(
         InLocalTransform, OutSceneNode);
 }
 
+bool UCk_Utils_SceneNode_UE::TryAdd_AnchorToExistingTransform(
+    FCk_Handle_Transform& InChild, FCk_Handle_Transform& InAttachTo,
+    USceneComponent* InSceneComponent, FTransform InLocalTransform,
+    FCk_Handle_SceneNode& OutSceneNode)
+{
+    return TryAdd_FreshAnchorImpl(InChild, InAttachTo, InSceneComponent,
+        InLocalTransform, OutSceneNode, true);
+}
+
 bool UCk_Utils_SceneNode_UE::TryAdd_FreshAnchorImpl(
     FCk_Handle& InRawChild, FCk_Handle_Transform& InAttachTo,
     USceneComponent* InSceneComponent, FTransform InLocalTransform,
-    FCk_Handle_SceneNode& OutSceneNode)
+    FCk_Handle_SceneNode& OutSceneNode, bool InExistingTransform)
 {
     // An adversarial C++ alias must not erase the caller's only raw creator identity.
     if (static_cast<const void*>(&OutSceneNode) == static_cast<const void*>(&InRawChild) ||
@@ -625,22 +634,57 @@ bool UCk_Utils_SceneNode_UE::TryAdd_FreshAnchorImpl(
         NOT ck_scene_node_fresh_anchor::IsWithinSafeCompositionEnvelope(InLocalTransform))
     { return false; }
 
-    // This API is for a newly allocated leaf only, never an implicit repair or reparent.
-    if (InRawChild.Has_Any<ck::FFragment_Transform, ck::FFragment_Transform_Previous,
-            ck::FFragment_SceneNode, ck::SceneNodeParent,
+    // Neither overload repairs or reparents an existing node.
+    if (InRawChild.Has_Any<ck::FFragment_SceneNode, ck::SceneNodeParent,
             ck::FFragment_SceneNode_UnrealAnchor, ck::FFragment_SceneNode_Requests,
             ck::FFragment_SceneNode_PropagationState, ck::FFragment_RecordOfSceneNodes,
             ck::FFragment_RecordOfEntityExtensions, ck::FFragment_RecordEntry,
-            ck::FFragment_LifetimeDependents,
             ck::FFragment_Transform_Requests,
-            ck::FFragment_Transform_RootComponent,
-            ck::FFragment_Transform_RootComponentTeleportType,
             ck::FFragment_Transform_MeshSocket,
-            ck::FTag_Transform_ExternallyDriven, ck::FTag_Transform_Movable,
-            ck::FTag_Transform_Updated,
+            ck::FTag_Transform_ExternallyDriven,
             ck::FTag_SceneNode_RelativeTransformUpdated,
             ck::FTag_SceneNode_PropagationQueued>() ||
-        ck_scene_node_fresh_anchor::CountLayers(InRawChild) != 0 ||
+        ck_scene_node_fresh_anchor::CountLayers(InRawChild) != 0)
+    { return false; }
+
+    if (InExistingTransform)
+    {
+        if (InSceneComponent == nullptr ||
+            NOT InRawChild.Has_All<ck::FFragment_Transform, ck::FFragment_Transform_Previous,
+                ck::FFragment_Transform_RootComponent, ck::FTag_Transform_Movable>() ||
+            NOT UCk_Utils_OwningActor_UE::Has(InRawChild) ||
+            NOT ck_scene_node_fresh_anchor::HasExactLiveActorBridge(InRawChild) ||
+            NOT ck_scene_node_fresh_anchor::IsFinite(
+                InRawChild.Get<ck::FFragment_Transform>().Get_Transform()) ||
+            NOT ck_scene_node_fresh_anchor::IsFinite(
+                InRawChild.Get<ck::FFragment_Transform_Previous>().Get_Transform()))
+        { return false; }
+        const auto* const Root = InRawChild.Get<ck::FFragment_Transform_RootComponent>()
+            .Get_RootComponent().Get();
+        const auto* const Actor = UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor(InRawChild);
+        if (Root != Actor->GetRootComponent() ||
+            Root->Mobility != EComponentMobility::Movable)
+        { return false; }
+        TSet<const USceneComponent*> AnchorChain;
+        for (const auto* Component = InSceneComponent; Component != nullptr;
+             Component = Component->GetAttachParent())
+        {
+            if (NOT ck_scene_node_fresh_anchor::IsLiveComponentInRegistry(Component, InRawChild) ||
+                Component == Root || Component->GetOwner() == Actor || AnchorChain.Contains(Component))
+            { return false; }
+            AnchorChain.Add(Component);
+        }
+        if (InRawChild.Has<ck::FFragment_LifetimeDependents>())
+        {
+            // Lifetime history is retained after request-carrier deallocation.
+            for (const auto& Dependent : InRawChild.Get<ck::FFragment_LifetimeDependents>().Get_Entities())
+            { if (ck::IsValid(Dependent, ck::IsValid_Policy_IncludePendingKill{})) { return false; } }
+        }
+    }
+    else if (InRawChild.Has_Any<ck::FFragment_Transform, ck::FFragment_Transform_Previous,
+            ck::FFragment_LifetimeDependents, ck::FFragment_Transform_RootComponent,
+            ck::FFragment_Transform_RootComponentTeleportType,
+            ck::FTag_Transform_Movable, ck::FTag_Transform_Updated>() ||
         UCk_Utils_OwningActor_UE::Has(InRawChild))
     { return false; }
 
@@ -702,7 +746,8 @@ bool UCk_Utils_SceneNode_UE::TryAdd_FreshAnchorImpl(
     if (NOT ck_scene_node_fresh_anchor::IsFinite(SeedWorld))
     { return false; }
 
-    if (NOT UCk_Utils_Transform_UE::TryStage_FreshSceneNodeTransform(InRawChild, SeedWorld))
+    if (NOT InExistingTransform &&
+        NOT UCk_Utils_Transform_UE::TryStage_FreshSceneNodeTransform(InRawChild, SeedWorld))
     { return false; }
     auto TransformChild = UCk_Utils_Transform_UE::Cast(InRawChild);
     if (InSceneComponent != nullptr)
@@ -720,8 +765,11 @@ bool UCk_Utils_SceneNode_UE::TryAdd_FreshAnchorImpl(
         ck_scene_node_fresh_anchor::RemoveLayer(InRawChild, ChildLayer);
         if (InSceneComponent != nullptr)
         { InRawChild.Try_Remove<ck::FFragment_SceneNode_UnrealAnchor>(); }
-        InRawChild.Try_Remove<ck::FFragment_Transform_Previous>();
-        InRawChild.Try_Remove<ck::FFragment_Transform>();
+        if (NOT InExistingTransform)
+        {
+            InRawChild.Try_Remove<ck::FFragment_Transform_Previous>();
+            InRawChild.Try_Remove<ck::FFragment_Transform>();
+        }
         return false;
     }
 
@@ -734,7 +782,18 @@ bool UCk_Utils_SceneNode_UE::TryAdd_FreshAnchorImpl(
     UCk_Utils_Handle_UE::Set_DebugName(InRawChild, *DebugName);
     ck::FUtils_SceneNodePropagation::Queue(InRawChild);
     OutSceneNode = Node;
-    UCk_Utils_Transform_UE::Publish_StagedSceneNodeTransform(TransformChild);
+    if (InExistingTransform)
+    {
+        InRawChild.Add<ck::FTag_Transform_ExternallyDriven>();
+        UCk_Utils_Transform_UE::Apply_SetTransform_DirectWrite(
+            InRawChild.Get<ck::FFragment_Transform>(),
+            InRawChild.Get<ck::FFragment_Transform_Previous>(), SeedWorld);
+        InRawChild.AddOrGet<ck::FTag_Transform_Updated>();
+        // A call after the Transform pass must still publish on the next frame.
+        UCk_Utils_Transform_TypeUnsafe_UE::Request_ForceRefresh(TransformChild, {});
+    }
+    else
+    { UCk_Utils_Transform_UE::Publish_StagedSceneNodeTransform(TransformChild); }
     // A synchronous editor observer may retire Node. Caller revalidates before admission.
     return true;
 }
