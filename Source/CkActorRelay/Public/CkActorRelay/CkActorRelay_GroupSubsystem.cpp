@@ -560,6 +560,15 @@ auto
         APlayerController* InPlayerController)
     -> void
 {
+    auto* World = GetWorld();
+    if (ck::Is_NOT_Valid(World) || World->IsNetMode(NM_Client))
+    { return; }
+    if (ck::Is_NOT_Valid(InPlayerController) || InPlayerController->GetWorld() != World)
+    { return; }
+    const auto PlayerState = InPlayerController->PlayerState;
+    if (ck::Is_NOT_Valid(PlayerState) || PlayerState->GetWorld() != World)
+    { return; }
+
     auto AlreadyRegistered = false;
     _RegisteredPlayerControllers.Add(InPlayerController, &AlreadyRegistered);
 
@@ -574,13 +583,9 @@ auto
     for (auto Index = 0; Index < NumChannels; ++Index)
     {
         [[maybe_unused]] auto Channel = DoSpawnAndRegister_Channel(
-            [&](ACk_ActorRelay_UE* InNewChannel)
+            [PlayerState](ACk_ActorRelay_UE* InNewChannel)
             {
-                if (const auto PlayerState = InPlayerController->PlayerState;
-                    ck::IsValid(PlayerState))
-                {
-                    InNewChannel->SetOwner(PlayerState);
-                }
+                InNewChannel->SetOwner(PlayerState);
             });
     }
 }
@@ -696,6 +701,16 @@ auto
         APlayerController* InNewPlayer)
     -> void
 {
+    // GameMode events are process-global, including a departing client's
+    // standalone destination. Never admit a player from another world.
+    auto* World = GetWorld();
+    if (ck::Is_NOT_Valid(World) || World->IsNetMode(NM_Client))
+    { return; }
+    if (ck::Is_NOT_Valid(InGameMode) || InGameMode->GetWorld() != World)
+    { return; }
+    if (ck::Is_NOT_Valid(InNewPlayer) || InNewPlayer->GetWorld() != World)
+    { return; }
+
     if (Get_OwnershipPolicy() == ECk_ActorRelay_OwnershipPolicy::ServerOwned)
     { return; }
 
@@ -715,6 +730,14 @@ auto
         AController* InController)
     -> void
 {
+    auto* World = GetWorld();
+    if (ck::Is_NOT_Valid(World) || World->IsNetMode(NM_Client))
+    { return; }
+    if (ck::Is_NOT_Valid(InGameMode) || InGameMode->GetWorld() != World)
+    { return; }
+    if (ck::Is_NOT_Valid(InController) || InController->GetWorld() != World)
+    { return; }
+
     if (Get_OwnershipPolicy() == ECk_ActorRelay_OwnershipPolicy::ServerOwned)
     { return; }
 
@@ -727,7 +750,7 @@ auto
 
     auto PlayerState = PlayerController->PlayerState;
 
-    if (ck::Is_NOT_Valid(PlayerState))
+    if (ck::Is_NOT_Valid(PlayerState) || PlayerState->GetWorld() != World)
     { return; }
 
     if (Get_DisconnectPolicy() == ECk_ActorRelay_DisconnectPolicy::DestroyChannels)
