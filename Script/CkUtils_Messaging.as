@@ -1,5 +1,42 @@
 namespace utils_messaging
 {
+    FCk_Handle
+    TryGet_MessengerEntity(FCk_Handle InHandle, UScriptStruct MessagePayloadTemplate)
+    {
+        if (!ck::IsValid(InHandle) || !ck::IsValid(MessagePayloadTemplate))
+        { return FCk_Handle(); }
+
+        auto MessagePayloadStructName = MessagePayloadTemplate.GetName();
+        // Bind/Broadcast register this name. Lookup must not create a missing gameplay tag.
+        auto MessageName = FGameplayTag::RequestGameplayTag(
+            FName(f"Message.{MessagePayloadStructName}"), false);
+        return utils_messaging::TryGet_MessengerEntity(InHandle, MessageName);
+    }
+
+    int
+    Get_NumBoundTo_OnBroadcast(
+        FCk_Handle InHandle, UScriptStruct MessagePayloadTemplate,
+        ECk_Signal_PostFireBehavior InPostFireBehavior)
+    {
+        if (!ck::IsValid(InHandle) || !ck::IsValid(MessagePayloadTemplate)) { return 0; }
+        auto MessageName = FGameplayTag::RequestGameplayTag(
+            FName(f"Message.{MessagePayloadTemplate.GetName()}"), false);
+        return utils_messaging::Get_NumBoundTo_OnBroadcast(InHandle, MessageName, InPostFireBehavior);
+    }
+
+    int
+    Get_NumUnconditionalBindingsTo_OnBroadcast(
+        FCk_Handle InHandle, UScriptStruct MessagePayloadTemplate,
+        const FCk_Delegate_Messaging_OnBroadcast &in InDelegate,
+        ECk_Signal_PostFireBehavior InPostFireBehavior)
+    {
+        if (!ck::IsValid(InHandle) || !ck::IsValid(MessagePayloadTemplate)) { return 0; }
+        auto MessageName = FGameplayTag::RequestGameplayTag(
+            FName(f"Message.{MessagePayloadTemplate.GetName()}"), false);
+        return utils_messaging::Get_NumUnconditionalBindingsTo_OnBroadcast(
+            InHandle, MessageName, InDelegate, InPostFireBehavior);
+    }
+
     void
     Broadcast(FCk_Handle InHandle, FAngelscriptAnyStructParameter InPayload)
     {

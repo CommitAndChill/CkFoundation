@@ -28,6 +28,8 @@ namespace ck_signal_utils
             TEXT("Signal [{}] operation [{}] rejected invalid/tombstone handle"),
             ck::Get_RuntimeTypeToString<T_SignalType>(),
             InOperation)
+        {}
+        if (NOT IsHandleValid)
         { return false; }
 
         return true;
@@ -47,6 +49,8 @@ namespace ck_signal_utils
         CK_ENSURE_IF_NOT(HasPayloadStruct,
             TEXT("Signal [{}] rejected an InstancedStruct payload without a reflected struct type"),
             InSignalType)
+        {}
+        if (NOT HasPayloadStruct)
         { return false; }
 
         const auto Safety = ck::Analyze_UntracedStructSafety(PayloadStruct);
@@ -57,6 +61,8 @@ namespace ck_signal_utils
             PayloadStruct->GetName(),
             Safety.FailurePath,
             Safety.FailureReason)
+        {}
+        if (NOT IsPayloadSafe)
         { return false; }
 
         return true;
@@ -374,6 +380,8 @@ namespace ck
         CK_ENSURE_IF_NOT(HasSignalState,
             TEXT("Signal [{}] Unbind rejected a handle without signal state"),
             ck::Get_RuntimeTypeToString<SignalType>())
+        {}
+        if (NOT HasSignalState)
         { return; }
 
         auto& Signal = InHandle.template Get<SignalType, ck::IsValid_Policy_IncludePendingKill>();
@@ -396,6 +404,8 @@ namespace ck
         CK_ENSURE_IF_NOT(HasSignalState,
             TEXT("Signal [{}] Unbind rejected a handle without signal state"),
             ck::Get_RuntimeTypeToString<SignalType>())
+        {}
+        if (NOT HasSignalState)
         { return; }
 
         auto& Signal = InHandle.template Get<SignalType, ck::IsValid_Policy_IncludePendingKill>();
@@ -425,14 +435,13 @@ namespace ck
         if (NOT InDelegate.IsBound())
         { return; }
 
-        auto& Signal          = InHandle.template AddOrGet<SignalType>();
-        auto& DelegateFragment = InHandle.template AddOrGet<T_DerivedSignal_Delegate>();
-        const auto& ContainsDelegateWithSignature = [&]()
+        const auto ContainsDelegateWithSignature = [&]()
         {
-            if (const auto& IsConditionalDelegate = InInvocationPredicate != nullptr)
+            if (InInvocationPredicate != nullptr || NOT InHandle.template Has<T_DerivedSignal_Delegate>())
             { return false; }
 
-            for (const auto& ExistingDelegate : DelegateFragment._UnconditionalDelegates)
+            const auto& ExistingFragment = InHandle.template Get<T_DerivedSignal_Delegate>();
+            for (const auto& ExistingDelegate : ExistingFragment._UnconditionalDelegates)
             {
                 if (ExistingDelegate == InDelegate)
                 { return true; }
@@ -440,11 +449,17 @@ namespace ck
             return false;
         }();
 
-        CK_ENSURE_IF_NOT(NOT ContainsDelegateWithSignature,
+        const auto CanBindDelegate = NOT ContainsDelegateWithSignature;
+        CK_ENSURE_IF_NOT(CanBindDelegate,
             TEXT("The Delegate Signal already has the Delegate [{}] bound.[{}]"),
             InDelegate.GetFunctionName().ToString(),
             ck::Context(InHandle))
+        {}
+        if (NOT CanBindDelegate)
         { return; }
+
+        auto& Signal = InHandle.template AddOrGet<SignalType>();
+        auto& DelegateFragment = InHandle.template AddOrGet<T_DerivedSignal_Delegate>();
 
         // A parked pool instance keeps its pointer identity, so a bind it made on an entity that
         // outlives it would leak into its next vend. Hook the pool's release to disconnect;
