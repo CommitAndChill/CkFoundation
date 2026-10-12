@@ -5,6 +5,8 @@ public class CkSnapshot : CkModuleRules
 {
     public CkSnapshot(ReadOnlyTargetRules Target) : base(Target)
     {
+        PrivateDependencyModuleNames.AddRange(new string[] { "CkRecord" });
+
         PublicDependencyModuleNames.AddRange(new string[]
         {
             "Core",

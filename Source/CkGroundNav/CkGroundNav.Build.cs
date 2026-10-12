@@ -5,6 +5,8 @@ public class CkGroundNav : CkModuleRules
 {
     public CkGroundNav(ReadOnlyTargetRules Target) : base(Target)
     {
+        PrivateDependencyModuleNames.AddRange(new string[] { "CkResourceLoader" });
+
         PrivateIncludePaths.AddRange(new string[] {
             // ... add other private include paths required here ...
         });

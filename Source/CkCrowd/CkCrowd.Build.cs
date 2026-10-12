@@ -5,6 +5,8 @@ public class CkCrowd : CkModuleRules
 {
     public CkCrowd(ReadOnlyTargetRules Target) : base(Target)
     {
+        PrivateDependencyModuleNames.AddRange(new string[] { "CkResourceLoader" });
+
         PrivateIncludePaths.AddRange(new string[] {
         });
 
