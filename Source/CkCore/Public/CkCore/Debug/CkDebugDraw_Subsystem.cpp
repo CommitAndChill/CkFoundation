@@ -8,7 +8,9 @@
 
 #include <DrawDebugHelpers.h>
 #include <Engine/Canvas.h>
+#include <Engine/Engine.h>
 #include <GameFramework/HUD.h>
+#include <GameFramework/PlayerController.h>
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -37,12 +39,19 @@ auto
     Deinitialize()
     -> void
 {
+    if (_PostRenderHUD_DelegateHandle.IsValid())
+    {
+        AHUD::OnHUDPostRender.Remove(_PostRenderHUD_DelegateHandle);
+        _PostRenderHUD_DelegateHandle.Reset();
+    }
+
+    _PendingDrawRequests.Reset();
+    _FrameDrawRequests.Reset();
+    _RenderedHUDsThisFrame.Reset();
+    _DrawFrame = MAX_uint64;
+    _bSuppressedThisFrame = false;
+
     Super::Deinitialize();
-
-    if (GetWorld()->IsNetMode(NM_DedicatedServer) || GetWorld()->IsNetMode(NM_ListenServer))
-    { return; }
-
-    AHUD::OnHUDPostRender.Remove(_PostRenderHUD_DelegateHandle);
 }
 
 auto
@@ -78,24 +87,50 @@ auto
         UCanvas* InCanvas)
     -> void
 {
+    const auto* World = GetWorld();
+    const auto* Owner = ck::IsValid(InHUD) ? InHUD->GetOwningPlayerController() : nullptr;
+    const bool bValidOwner =
+        ck::IsValid(World) &&
+        ck::IsValid(InHUD) &&
+        InHUD->GetWorld() == World &&
+        ck::IsValid(Owner) &&
+        Owner->GetWorld() == World &&
+        Owner->IsLocalController() &&
+        ck::IsValid(InCanvas) &&
+        InCanvas->Canvas != nullptr;
+    if (!bValidOwner)
+    { return; }
+
+    if (_DrawFrame != GFrameCounter)
+    {
+        _DrawFrame = GFrameCounter;
+        _RenderedHUDsThisFrame.Reset();
+        _bSuppressedThisFrame = false;
+        Swap(_PendingDrawRequests, _FrameDrawRequests);
+        _PendingDrawRequests.Reset();
+    }
+
     if (ck::diagnostic_visibility::Is_HiddenForStreamerMode())
     {
-        FlushPersistentDebugLines(GetWorld());
-        FlushDebugStrings(GetWorld());
+        if (!_bSuppressedThisFrame)
+        {
+            FlushPersistentDebugLines(GetWorld());
+            FlushDebugStrings(GetWorld());
+        }
+        _bSuppressedThisFrame = true;
         _PendingDrawRequests.Reset();
+        _FrameDrawRequests.Reset();
         return;
     }
 
-    auto DrawRequests = decltype(_PendingDrawRequests){};
-    Swap(_PendingDrawRequests, DrawRequests);
-
-    if (ck::Is_NOT_Valid(InHUD))
+    if (_bSuppressedThisFrame || _RenderedHUDsThisFrame.Contains(InHUD))
     { return; }
+    _RenderedHUDsThisFrame.Add(InHUD);
 
-    ck::algo::ForEachRequest(DrawRequests, ck::Visitor([&](const auto& RequestVariant)
+    ck::algo::ForEachRequest(_FrameDrawRequests, ck::Visitor([&](const auto& RequestVariant)
     {
         DoHandleRequest(InHUD, InCanvas, RequestVariant);
-    }));
+    }), ck::policy::DontResetContainer{});
 }
 
 auto
@@ -136,7 +171,10 @@ auto
         const FCk_Request_DebugDrawOnScreen_Text& InRequest)
         -> void
 {
-    CK_ENSURE_IF_NOT(ck::IsValid(InCanvas), TEXT("Canvas is not valid"))
+    const bool bValidCanvas = ck::IsValid(InCanvas) && InCanvas->Canvas != nullptr;
+    CK_ENSURE_IF_NOT(bValidCanvas, TEXT("Canvas is not valid"))
+    {}
+    if (!bValidCanvas)
     { return; }
 
     // Set text rendering properties
@@ -144,11 +182,20 @@ auto
     const auto TextScale = FVector2D(InRequest.Get_TextScale(), InRequest.Get_TextScale());
 
     // Use default font (you could make this configurable via the request if needed)
-    auto Font = GEngine->GetMediumFont();
-    CK_ENSURE_IF_NOT(ck::IsValid(Font), TEXT("Failed to get medium font"))
-    { Font = GEngine->GetSmallFont(); } // Fallback to small font
+    const bool bValidEngine = ck::IsValid(GEngine);
+    CK_ENSURE_IF_NOT(bValidEngine, TEXT("Engine is not valid"))
+    {}
+    if (!bValidEngine)
+    { return; }
 
-    CK_ENSURE_IF_NOT(ck::IsValid(Font), TEXT("No valid font available for text rendering"))
+    auto* Font = GEngine->GetMediumFont();
+    if (!ck::IsValid(Font))
+    { Font = GEngine->GetSmallFont(); }
+
+    const bool bValidFont = ck::IsValid(Font);
+    CK_ENSURE_IF_NOT(bValidFont, TEXT("No valid font available for text rendering"))
+    {}
+    if (!bValidFont)
     { return; }
 
     // Draw the text
