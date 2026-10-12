@@ -68,3 +68,18 @@ Use one aspect-fit transform for background art, overlays and hit testing. Rejec
 Release only the current user/pointer's actual capture before dispatching callbacks that can close, replace or reactivate a screen. Camera commands must reject during an active pan instead of being overwritten by its next move. Test callback-driven teardown and held-gesture teardown, not only ordinary mouse-up. In synthetic Slate tests, keep the pressed-button set alive as long as its FPointerEvent: Unreal retains a pointer to that set. Exercise the routed production path and inspect the real captor.
 
 Schema admission and control semantics are separate checks. Validate normalized coordinates, supported kinds and complete state before publication. A malformed current revision may retain accepted presentation, but must not dispatch stale interaction. Close vector outlines using a copied first point; appending an element from the same TArray triggers aliasing validation. Use an explicit flex spacer for alignment within a row; horizontal-align controls the surrounding slot and does not by itself justify that row's children.
+
+## Gameplay adapters and persistence
+
+Keep fixture state and real gameplay adapters explicit. A fixture catalog's key/count validation is not a general inventory contract. Project committed backend state and definition `FText`/icons through the authored bindings; do not invent equipment statistics, reuse unrelated fixture paintings, or report an enqueued action as completed. Suppress duplicate pending requests and re-query after processing. Compare unchanged projections before publishing so idle polling does not invalidate a retained collection every frame.
+
+World pause and UI input ownership are separate policies. Deferred ECS actions cannot finish while their world is paused; an interactive gameplay adapter must allow the required processors to run. Validate the source world and authority before admission, and retire interaction when the source ends. Deferred completion should update backend/request status without calling a closed widget.
+
+Persist durable catalog/domain identities and committed values, never transient ECS handles or presenter IDs. Validate a complete versioned payload before composing a replacement; keep the accepted owner until every required hydration request and committed-value check succeeds. Pending work and storage failures must produce explicit save failure. Same-process recreation from disk, a fresh process restart, Editor `-game`, and a cooked packaged client are distinct proof obligations; record each separately. Runtime resource declarations also require verification in the staged client.
+
+For native controller tests, account for the host's input preprocessor: CommonUI
+may translate Accept into a virtual pointer press/release. Establish the intended
+focus, pointer hit path and hover state, then assert exactly one action and its
+committed model effect. A handled input event alone is insufficient. Explicit
+synthetic cursor placement does not verify physical focus-to-cursor behavior;
+keep that as a separate acceptance check.
