@@ -3,6 +3,7 @@
 #include "CkEcsExt/CkEcsExt_Log.h"
 
 #include "CkEcs/Net/CkNet_Utils.h"
+#include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_Fragment.h"
 #include "CkEcs/Registry/CkRegistry_SlotTable.h"
 
 #include <Components/MeshComponent.h>
@@ -38,6 +39,54 @@ namespace ck_transform_utils
 }
 
 // --------------------------------------------------------------------------------------------------------------------
+
+bool UCk_Utils_Transform_UE::TryPrepare_ExistingSceneNodePublication(
+    const FCk_Handle& InHandle,
+    TWeakObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>& OutDriver)
+{
+    OutDriver.Reset();
+    if (ck::Is_NOT_Valid(InHandle)) { return false; }
+    if (NOT UCk_Utils_Net_UE::Get_HasAuthority(InHandle) ||
+        NOT UCk_Utils_Net_UE::Get_IsEntityNetMode_Host(InHandle))
+    { return true; }
+    if (NOT InHandle.Has_Any<ck::FFragment_ContainerRef_Location,
+        ck::FFragment_ContainerRef_Rotation, ck::FFragment_ContainerRef_Scale>())
+    { return true; }
+    if (NOT InHandle.Has_All<ck::FFragment_ContainerRef_Location,
+        ck::FFragment_ContainerRef_Rotation, ck::FFragment_ContainerRef_Scale,
+        TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>())
+    { return false; }
+
+    const TWeakObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep> Driver =
+        InHandle.Get<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>().Get();
+    if (NOT Driver.IsValid() || Driver->Get_AssociatedEntity() != InHandle)
+    { return false; }
+    const auto& Location = InHandle.Get<ck::FFragment_ContainerRef_Location>();
+    const auto& Rotation = InHandle.Get<ck::FFragment_ContainerRef_Rotation>();
+    const auto& Scale = InHandle.Get<ck::FFragment_ContainerRef_Scale>();
+    if (Location.Get_Driver() != Driver || Rotation.Get_Driver() != Driver || Scale.Get_Driver() != Driver)
+    { return false; }
+    const bool HasLocation = Driver->FindEntry(FCk_RepData_Location::StaticStruct()) != nullptr;
+    const bool HasRotation = Driver->FindEntry(FCk_RepData_Rotation::StaticStruct()) != nullptr;
+    const bool HasScale = Driver->FindEntry(FCk_RepData_Scale::StaticStruct()) != nullptr;
+    if (NOT HasLocation || NOT HasRotation || NOT HasScale) { return false; }
+    if (Driver->FindEntry(FCk_RepData_Location::StaticStruct())->Data.GetScriptStruct() != FCk_RepData_Location::StaticStruct() ||
+        Driver->FindEntry(FCk_RepData_Rotation::StaticStruct())->Data.GetScriptStruct() != FCk_RepData_Rotation::StaticStruct() ||
+        Driver->FindEntry(FCk_RepData_Scale::StaticStruct())->Data.GetScriptStruct() != FCk_RepData_Scale::StaticStruct())
+    { return false; }
+    OutDriver = Driver;
+    return true;
+}
+
+void UCk_Utils_Transform_UE::Publish_ExistingSceneNodeTransform(
+    UCk_Fragment_EntityReplicationDriver_Rep& InDriver,
+    const FTransform& InWorldTransform)
+{
+    // Preflight proved all entries before composition. These writes have no observer or callback.
+    InDriver.SetFragmentData<FCk_RepData_Location>(FCk_RepData_Location{InWorldTransform.GetLocation()});
+    InDriver.SetFragmentData<FCk_RepData_Rotation>(FCk_RepData_Rotation{InWorldTransform.GetRotation()});
+    InDriver.SetFragmentData<FCk_RepData_Scale>(FCk_RepData_Scale{InWorldTransform.GetScale3D()});
+}
 
 bool UCk_Utils_Transform_UE::TryStage_FreshSceneNodeTransform(
     FCk_Handle& InHandle, const FTransform& InWorldTransform)

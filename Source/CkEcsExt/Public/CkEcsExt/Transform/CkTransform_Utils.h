@@ -55,6 +55,10 @@ private:
     // SceneNode's fresh-leaf transaction stages these without an observer or request seeing a subset.
     static bool TryStage_FreshSceneNodeTransform(FCk_Handle& InHandle, const FTransform& InWorldTransform);
     static void Publish_StagedSceneNodeTransform(FCk_Handle_Transform& InHandle);
+    static bool TryPrepare_ExistingSceneNodePublication(const FCk_Handle& InHandle,
+        TWeakObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>& OutDriver);
+    static void Publish_ExistingSceneNodeTransform(UCk_Fragment_EntityReplicationDriver_Rep& InDriver,
+        const FTransform& InWorldTransform);
 
 #if WITH_EDITOR
 public:

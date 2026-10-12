@@ -252,16 +252,19 @@ namespace ck
 
     private:
         // Internal SceneNode-only transaction for a fresh, unlabeled entry. It has no callback and
-        // does not mutate either entity on ordinary rejection. Existing Request_Connect is unchanged.
+        // does not mutate either entity on ordinary rejection. Existing WithActor transforms may opt in
+        // to retaining their production unnamed label. Existing Request_Connect is unchanged.
         static auto
         CanConnectFreshUnlabeled(
             const FCk_Handle& InRecordHandle,
-            const FCk_Handle& InRawEntry) -> bool;
+            const FCk_Handle& InRawEntry,
+            bool InAllowExistingUnnamedLabel = false) -> bool;
 
         static auto
         TryConnectFreshUnlabeled(
             FCk_Handle& InRecordHandle,
-            MaybeTypeSafeHandle& InRecordEntry) -> bool;
+            MaybeTypeSafeHandle& InRecordEntry,
+            bool InAllowExistingUnnamedLabel = false) -> bool;
 
     public:
         static auto
@@ -1011,7 +1014,8 @@ namespace ck
         TUtils_RecordOfEntities<T_DerivedRecord>::
         CanConnectFreshUnlabeled(
             const FCk_Handle& InRecordHandle,
-            const FCk_Handle& InRawEntry)
+            const FCk_Handle& InRawEntry,
+            bool InAllowExistingUnnamedLabel)
         -> bool
     {
         if (NOT IsInGameThread() ||
@@ -1027,7 +1031,9 @@ namespace ck
                 InRawEntry.Get_RegistryView().Get_RegistryHandle() ||
             InRecordHandle.Has<FFragment_RecordOfEntityExtensions>() ||
             InRawEntry.Has<FFragment_RecordEntry>() ||
-            UCk_Utils_GameplayLabel_UE::Has(InRawEntry))
+            (UCk_Utils_GameplayLabel_UE::Has(InRawEntry) &&
+                (NOT InAllowExistingUnnamedLabel ||
+                    NOT UCk_Utils_GameplayLabel_UE::Get_IsUnnamedLabel(InRawEntry))))
         { return false; }
 
         if (InRecordHandle.Has<RecordType>())
@@ -1068,11 +1074,12 @@ namespace ck
         TUtils_RecordOfEntities<T_DerivedRecord>::
         TryConnectFreshUnlabeled(
             FCk_Handle& InRecordHandle,
-            MaybeTypeSafeHandle& InRecordEntry)
+            MaybeTypeSafeHandle& InRecordEntry,
+            bool InAllowExistingUnnamedLabel)
         -> bool
     {
         if (NOT ck::IsValid(InRecordEntry) ||
-            NOT CanConnectFreshUnlabeled(InRecordHandle, InRecordEntry))
+            NOT CanConnectFreshUnlabeled(InRecordHandle, InRecordEntry, InAllowExistingUnnamedLabel))
         { return false; }
 
         // All ordinary rejection points are above; commit has no callback or fallible request.

@@ -713,7 +713,7 @@ bool UCk_Utils_SceneNode_UE::TryAdd_FreshAnchorImpl(
         if (NOT ck_scene_node_fresh_anchor::HasExactExistingDirectChildren(
                 Ancestor, ExpectedDirectLayer) ||
             NOT ck::FUtils_RecordOfSceneNodes::CanConnectFreshUnlabeled(
-                Ancestor, InRawChild))
+                Ancestor, InRawChild, InExistingTransform))
         { return false; }
         if (Index == 0) { continue; }
         if (NOT Ancestor.Has<ck::FFragment_RecordOfSceneNodes>()) { return false; }
@@ -746,6 +746,11 @@ bool UCk_Utils_SceneNode_UE::TryAdd_FreshAnchorImpl(
     if (NOT ck_scene_node_fresh_anchor::IsFinite(SeedWorld))
     { return false; }
 
+    TWeakObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep> PublicationDriver;
+    if (InExistingTransform &&
+        NOT UCk_Utils_Transform_UE::TryPrepare_ExistingSceneNodePublication(InRawChild, PublicationDriver))
+    { return false; }
+
     if (NOT InExistingTransform &&
         NOT UCk_Utils_Transform_UE::TryStage_FreshSceneNodeTransform(InRawChild, SeedWorld))
     { return false; }
@@ -757,7 +762,7 @@ bool UCk_Utils_SceneNode_UE::TryAdd_FreshAnchorImpl(
     InRawChild.Add<ck::FFragment_SceneNode>(InLocalTransform);
     ck::USceneNodeParent_Utils::AddOrReplace(InRawChild, InAttachTo);
     auto Node = Cast(InRawChild);
-    if (NOT ck::FUtils_RecordOfSceneNodes::TryConnectFreshUnlabeled(InAttachTo, Node))
+    if (NOT ck::FUtils_RecordOfSceneNodes::TryConnectFreshUnlabeled(InAttachTo, Node, InExistingTransform))
     {
         InRawChild.Try_Remove<ck::SceneNodeParent>();
         InRawChild.Try_Remove<ck::FFragment_SceneNode>();
@@ -789,6 +794,9 @@ bool UCk_Utils_SceneNode_UE::TryAdd_FreshAnchorImpl(
             InRawChild.Get<ck::FFragment_Transform>(),
             InRawChild.Get<ck::FFragment_Transform_Previous>(), SeedWorld);
         InRawChild.AddOrGet<ck::FTag_Transform_Updated>();
+        // Publish the committed seed before an observation-only refresh can clear its dirty mask.
+        if (PublicationDriver.IsValid())
+        { UCk_Utils_Transform_UE::Publish_ExistingSceneNodeTransform(*PublicationDriver.Get(), SeedWorld); }
         // A call after the Transform pass must still publish on the next frame.
         UCk_Utils_Transform_TypeUnsafe_UE::Request_ForceRefresh(TransformChild, {});
     }
