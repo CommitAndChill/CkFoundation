@@ -4,6 +4,33 @@ using UnrealBuildBase;
 using UnrealBuildTool;
 public class CkModuleRules : ModuleRules
 {
+    public static void ApplyProjectPCHOptions(ModuleRules Rules, ReadOnlyTargetRules Target)
+    {
+        if (Target.Type != TargetType.Editor || Target.ProjectFile == null)
+        {
+            return;
+        }
+
+        FileReference OptionsFile = FileReference.Combine(Target.ProjectFile.Directory, "Saved", "UnrealBuildTool", "CkCloneBuildOptions.json");
+        if (!FileReference.Exists(OptionsFile))
+        {
+            return;
+        }
+
+        JsonObject Options = JsonObject.Read(OptionsFile);
+        if (Options.GetIntegerField("Schema") != 1)
+        {
+            throw new BuildException("Unsupported storage options schema: {0}", OptionsFile);
+        }
+
+        bool UseProjectPCH = Options.GetBoolField("ProjectPCH");
+        Rules.ExternalDependencies.Add(OptionsFile.FullName);
+        if (!UseProjectPCH)
+        {
+            Rules.PCHUsage = PCHUsageMode.NoPCHs;
+        }
+    }
+
     enum BuildConfiguration
     {
         MatchWithUnreal,
@@ -203,6 +230,7 @@ public class CkModuleRules : ModuleRules
         bUseUnity = UseUnityBuild;
         CppStandard = CppStandardVersion.Cpp20;
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+        ApplyProjectPCHOptions(this, Target);
 
         SetupIrisSupport(Target);
 

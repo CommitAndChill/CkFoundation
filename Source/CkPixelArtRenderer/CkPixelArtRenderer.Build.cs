@@ -11,6 +11,7 @@ public class CkPixelArtRenderer : ModuleRules
     {
         CppStandard = CppStandardVersion.Cpp20;
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+        CkModuleRules.ApplyProjectPCHOptions(this, Target);
 
         // ISpatialUpscaler is declared in the renderer's PRIVATE headers, and the engine explicitly provides no
         // backward compatibility for it across versions. This module is therefore recompile-coupled to the pinned

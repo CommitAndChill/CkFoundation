@@ -9,6 +9,7 @@ public class CkIskmRendererVF : ModuleRules
     {
         CppStandard = CppStandardVersion.Cpp20;
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+        CkModuleRules.ApplyProjectPCHOptions(this, Target);
 
         PublicDependencyModuleNames.AddRange(new string[]
         {

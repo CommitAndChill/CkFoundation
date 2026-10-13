@@ -8,6 +8,7 @@ public class CkUsfRenderer : ModuleRules
     {
         CppStandard = CppStandardVersion.Cpp20;
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+        CkModuleRules.ApplyProjectPCHOptions(this, Target);
         PublicDependencyModuleNames.AddRange(new[] { "Core", "CoreUObject", "Engine" });
         PrivateDependencyModuleNames.AddRange(new[] { "Renderer", "RenderCore", "RHI", "Projects" });
     }
