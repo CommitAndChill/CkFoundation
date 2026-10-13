@@ -89,7 +89,7 @@ strip `Ck_` prefix, strip `_UE` suffix, snake_case the rest → `UCk_Utils_Timer
 
 Each wrapper function forwards to whichever form the engine actually bound — the **member form for
 mixin-matched functions, the static form otherwise** (see 1.2 citations). That is why the doctrine
-rule "ALWAYS use `utils_*`, NEVER `UCk_Utils_X_UE::`" (Script/CLAUDE.md §5) is mechanically correct:
+rule "ALWAYS use `utils_*`, NEVER `UCk_Utils_X_UE::`" (Script/ARCHITECTURE.md §5) is mechanically correct:
 the namespace form works uniformly; the full-class-name form randomly fails on exactly the functions
 whose arg0 matches the mixin target. Hand-written sugar in `Script/CkUtils_*.as` merges into the
 same namespaces (AS merges namespace blocks across files).
@@ -97,7 +97,7 @@ same namespaces (AS merges namespace blocks across files).
 The `_UE` suffix on every utils class is also load-bearing: the engine strips BFL suffixes
 `Statics/Library/BlueprintLibrary/BlueprintFunctionLibrary/FunctionLibrary` and prefixes
 `UKismet/UBlueprint` when namespacing (`Public/AngelscriptSettings.h:124-139`) — `_UE` is not on the
-list, so names round-trip. See catalog item 4 and Script/CLAUDE.md §16.1.
+list, so names round-trip. See catalog item 4 and Script/ARCHITECTURE.md §16.1.
 
 ### 1.5 `CK_PROPERTY` / `CK_DEFINE_CONSTRUCTORS` — struct accessors in AS
 

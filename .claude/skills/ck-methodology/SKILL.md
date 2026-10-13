@@ -8,7 +8,7 @@ description: "Use when Ck work spans sessions, many files, a new module, or arch
 ## Overview
 
 This skill is the depth behind the root doctrine's **Collaboration protocol**
-(`Plugins/CkFoundation/CLAUDE.md` — Research → Plan → Implement, phase gates, stuck protocol; cited,
+(`Plugins/CkFoundation/DEVELOPMENT.md` — Research → Plan → Implement, phase gates, stuck protocol; cited,
 not restated). It turns that section into templates and rituals, each distilled from a **named real
 campaign artifact in this repo** — including two that failed and now serve as cautionary exhibits.
 Core principle: a campaign is steered by three documents — PROMPT.md (stable mission), Gate_N.md
@@ -38,7 +38,7 @@ Invoke the full doc set (§3) when **any one** of these holds:
 | **New module or architectural change** | Needs locked decisions + usually a CTO review (§8) |
 | **Any campaign with unknowns** — a step whose outcome you cannot predict | Unknowns need gates with branch-on-observation, not a straight-line task list |
 
-Otherwise a **simple plan suffices**: files touched / approach / risks (root CLAUDE.md,
+Otherwise a **simple plan suffices**: files touched / approach / risks (root DEVELOPMENT.md,
 Collaboration protocol), written in the conversation, plus per-step verification in the
 `step → verify:` form (§2). No PROMPT/GATE/PROGRESS files for an afternoon's work.
 
@@ -113,7 +113,7 @@ the list within 1 frame" (`Gate_00_Foundation.md`, criterion 6).
 
 ## 5. The stuck protocol
 
-From root CLAUDE.md (Collaboration protocol), operationalized:
+From root DEVELOPMENT.md (Collaboration protocol), operationalized:
 
 **STOP → delegate investigation → step back and re-read the requirements → simplify → ask the
 maintainer "[A] vs [B]?".** Two failed attempts = stop and present options. **Never a silent third
@@ -256,4 +256,4 @@ staleness/count claim below was re-derived from git that day. Re-verification (G
 - **Root collaboration section:** `rg -n 'Collaboration protocol' CLAUDE.md`.
 - **Tooling caveat:** the Grep/Glob tools are blind under this plugin's `docs/`, `Script/`,
   `Content/` and CkTests' `Script/` (superproject `.ignore`) — verify with Bash
-  `rg --no-ignore -n` or `Get-ChildItem`, per root CLAUDE.md provenance notes.
+  `rg --no-ignore -n` or `Get-ChildItem`, per root DEVELOPMENT.md provenance notes.

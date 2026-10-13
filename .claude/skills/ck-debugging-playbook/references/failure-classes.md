@@ -97,9 +97,9 @@ Order inside every reflected Ck struct/class — each line depends on the ones a
 6. `#include "<File>.generated.h"` must be the header's LAST include, or UHT errors "#include found
    after .generated.h file" (engine `EpicGames.UHT/Parsers/UhtHeaderFileParser.cs`).
 
-Also: UFUNCTION declarations cannot use trailing-return syntax (UHT rejects them — root CLAUDE.md
+Also: UFUNCTION declarations cannot use trailing-return syntax (UHT rejects them — root DEVELOPMENT.md
 "Code style"). Full macro expansions, constraints, and add-a-new-X checklists: load
-`ck-macros-and-codegen`. Canonical ordered exemplar: the fragment-data shape in root CLAUDE.md
+`ck-macros-and-codegen`. Canonical ordered exemplar: the fragment-data shape in root DEVELOPMENT.md
 ("Encapsulation") and `Source/CkTimer/Public/CkTimer/CkTimer_Fragment_Data.h`.
 
 ## 3. Cross-module linker errors
@@ -111,7 +111,7 @@ both:
    (`CKCORE_API`, `CKTIMER_API`, ...). A header-visible symbol without it links fine inside its own
    module and fails from every other one.
 2. **Missing Build.cs dependency.** Add the module to your `PublicDependencyModuleNames` — but check the
-   **module tier table** in `Source/CLAUDE.md` first: deps must never point to a higher tier, and runtime
+   **module tier table** in `Source/ARCHITECTURE.md` first: deps must never point to a higher tier, and runtime
    modules must never depend on T5 (editor) modules. If the dependency you "need" violates the tier, the
    design is wrong, not the Build.cs.
 
@@ -146,7 +146,7 @@ the FIRST editor boot may print a wall of `"'FCk_Handle_X' is not a data type"` 
 `"Hot reload failed ... Keeping all old script code"` — then the self-heal generator regenerates
 (`DynamicHandleTypes.json`, recovery stubs) and reloads clean IN THE SAME BOOT. That transient is
 EXPECTED; gate on the post-regen clean reload, not first-pass silence
-(`Script/CLAUDE.md` §22.3, `Source/CkAngelscriptGenerator/Claude.md`). **Discriminator: boot a second
+(`Script/ARCHITECTURE.md` §22.3, `Source/CkAngelscriptGenerator/Claude.md`). **Discriminator: boot a second
 time. Second boot still red = a real error in your script; fix it, don't blame the generator.**
 Opt-outs when you need the dispatcher out of the way: `-NoCkAsRegen` (per launch) or
 `UCk_AngelscriptGenerator_ProjectSettings_UE::_EnableAsBootstrapSelfHeal` (generator Claude.md:149-150).
@@ -232,7 +232,7 @@ Symptom: standalone / `-nullrhi` runs destroyed the PlayerController ~1.2s after
 sessions fine. Cause (commit body): the per-entity replication-driver UObject had NO strong GC root —
 every reference was weak (`TWeakObjectPtr`, `FSubObjectRegistry`) or GC-invisible: **UE GC does not trace
 UPROPERTY refs inside EnTT fragments** (a fragment is plain C++ data, not reflected object state — the
-rule is now doctrine, root CLAUDE.md "UObject refs in fragments"). A live netdriver's
+rule is now doctrine, root DEVELOPMENT.md "UObject refs in fragments"). A live netdriver's
 UNetConnection→FObjectReplicator chain had been *incidentally* keeping it alive; remove the netdriver and
 the first GC sweep reclaimed it, whose `BeginDestroy` cascaded into destroying the owning actor. Fix:
 the fragment owns its objects via `TArray<TStrongObjectPtr<...>>` (current at
@@ -255,28 +255,31 @@ Walk every axis; each has a verified precedent.
 2. **Cook-time stripping / editor-only classes.** `700b5ef95`: project autotest wrappers inherit a class
    that doesn't exist in Shipping/Test, so the generator `#if EDITOR`-wraps the PROJECT wrapper bucket
    (and must NOT wrap the plugin bucket). Runtime modules must never depend on T5 editor modules
-   (`Source/CLAUDE.md` tier table, `Source/EDITOR_MODULES.md`).
+   (`Source/ARCHITECTURE.md` tier table, `Source/EDITOR_MODULES.md`).
 3. **Discovery/scan differences.** `362e8917a`: cue class discovery missed in packaged builds and needed
    an explicit fallback — asset/class iteration that works against the editor's registry can return less
    when cooked.
 4. **Define gates flip per configuration.** The full 17-define × 5-config matrix is owned by
    `ck-macros-and-codegen` §2.4 (source of truth: `CkBuildConfig.Build.cs`, `SetBuildConfiguration`
-   :65-198). The rows that most often explain a packaged-only divergence: ensure checks stay ON
-   everywhere (`CK_DISABLE_ENSURE_CHECKS=0` incl. Shipping) but go silent in Test/Shipping
-   (`_DEBUGGING=1`); `CK_DISABLE_ECS_HANDLE_DEBUGGING=1` outside Debug/Dev-editor; and
-   `CK_BUILD_DEBUG_DRAW=0` only in Shipping.
+   :65-198). The current matrix keeps ensure checks on everywhere (`CK_DISABLE_ENSURE_CHECKS=0`
+   incl. Shipping) but silences diagnostics in Test/Shipping (`_DEBUGGING=1`). Intended Shipping
+   policy is to omit the branch unless a documented crash or deadline exception enables it; this
+   requires a build-configuration change. The other relevant flags are
+   `CK_DISABLE_ECS_HANDLE_DEBUGGING=1` outside Debug/Dev-editor and `CK_BUILD_DEBUG_DRAW=0`
+   only in Shipping.
    Same-pattern plugin gate: `WITH_CK_DEBUG_OVERLAY` = 0 only in Shipping
    (`Plugins/CkGameplayDebugger/Source/CkEntityDebugOverlay/CkEntityDebugOverlay.Build.cs:36-39`).
    `WITH_ANGELSCRIPT_CK` flips on engine-plugin presence, not configuration (CkBuildConfig.Build.cs:53-61).
 5. **Ensure behavior differs by config AND run mode** (`CK_ENSURE_IF_NOT` expansion,
-   `Source/CkCore/Public/CkCore/Ensure/CkEnsure.h:44-53`):
-   - Test/Shipping (`CK_DISABLE_ENSURE_DEBUGGING=1`): the predicate IS evaluated and the recovery block
-     DOES run — but with zero logging/dialog. An ensure "not firing" in Test is it firing silently.
+   `Source/CkCore/Public/CkCore/Ensure/CkEnsure.h:62-81`):
+   - Current Test/Shipping (`CK_DISABLE_ENSURE_CHECKS=0`, `_DEBUGGING=1`): the predicate is evaluated
+     and the recovery block runs without logging/dialog. An ensure "not firing" in Test may be silent.
    - `-unattended` / commandlet runs: full Error log, but never a dialog (`CkEnsure.cpp:221-222`,
      `0eb3208aa`) — grep the log, don't wait for UI.
-   - The recovery block must therefore be a correct silent-failure path in every config (root
-     non-negotiable #3); it becomes dead code (`if constexpr(false)`) only under the opt-in Profile
-     override (`CK_DISABLE_ENSURE_CHECKS=1`, CkBuildConfig.Build.cs:190-195).
+   - The macro body owns rejection, rollback, completion, and approved recovery where needed. Do not
+     follow an empty ensure body with a duplicate ordinary condition. When checks are disabled, as
+     intended by default for Shipping, the body is omitted (`if constexpr(false)`); currently only
+     the opt-in Profile override sets `CK_DISABLE_ENSURE_CHECKS=1` (CkBuildConfig.Build.cs:190-195).
    - `CK_DISABLE_ECS_HANDLE_DEBUGGING=1` also strips request debug names and the request vtable —
      request structs change `sizeof` across configs (CkRequest_Data.h; depth: `ck-macros-and-codegen`).
 6. **Config file differences.** Cooked targets read cooked/staged ini layers; a `[/Script/...]` setting
@@ -307,5 +310,5 @@ Environment setup from scratch: load `ck-build-and-env`.
    stale locks are impossible). If generated files seem frozen in one instance, check which process owns
    the lock. The dual-editor ping-pong incident that motivated it: `ck-failure-archaeology`.
 5. **Never blanket-delete `Script/Generated/`** — the AS hot-reload watcher is mtime-based; any mtime
-   change there triggers a full reload sweep (`Script/CLAUDE.md` §22.4).
+   change there triggers a full reload sweep (`Script/ARCHITECTURE.md` §22.4).
 

@@ -9,7 +9,7 @@ This is THE canonical path for adding a gameplay feature to a CkFoundation game.
 here means a reusable gameplay capability composed onto entities — a door, a lootable bin, a
 turnstile, an employee — expressed as fragments + a utils composer + processors, and delivered
 into the world by an EntityScript. (Jargon — Entity/Fragment/Processor/Handle/Request/Signal —
-is defined once in the framework root doctrine's Lingo table: `Plugins/CkFoundation/CLAUDE.md`.)
+is defined once in the framework root doctrine's Lingo table: `Plugins/CkFoundation/DEVELOPMENT.md`.)
 
 Two settled rulings frame everything below (maintainer, 2026-07-03):
 
@@ -25,7 +25,7 @@ Two settled rulings frame everything below (maintainer, 2026-07-03):
 
 | You want to... | Load instead |
 |---|---|
-| AS language rules, hot-reload loop, silent AS failure modes | `ck-game-angelscript-gameplay` + `Plugins/CkFoundation/Script/CLAUDE.md` |
+| AS language rules, hot-reload loop, silent AS failure modes | `ck-game-angelscript-gameplay` + `Plugins/CkFoundation/Script/ARCHITECTURE.md` |
 | Choose an entity archetype / parent-vs-child / lifetime owner in depth | `ck-game-entity-composition-patterns` |
 | Wire the feature into a world-owner ("driver") and its discovery | `ck-game-driver-architecture` |
 | Make the feature replicate correctly / spawn replicated entities | `ck-game-replication-patterns` |
@@ -40,7 +40,7 @@ Two settled rulings frame everything below (maintainer, 2026-07-03):
 ## 1. Before writing any code
 
 **Step 0a — read a neighboring feature in full.** Root doctrine non-negotiable #1
-(`Plugins/CkFoundation/CLAUDE.md`, "Non-negotiables"): *mimicry of adjacent code beats invention;
+(`Plugins/CkFoundation/DEVELOPMENT.md`, "Non-negotiables"): *mimicry of adjacent code beats invention;
 if your change doesn't resemble the code around it, you have not researched enough.* Pick the
 existing feature in YOUR game closest in shape to what you're building and read its whole dir.
 If your game is new and has none, read the framework's `CkTimer` quartet plus the corpus example
@@ -240,7 +240,7 @@ A feature is done when ALL of these hold — not when the code compiles:
 2. **AS compile log clean.** Never claim done without reading the fresh editor log — grep it for
    `Angelscript: Error` / warnings naming your files. A green-looking editor that kept old
    script code ("Hot reload failed ... Keeping all old script code") is running your PREVIOUS
-   code. (Rule and log locations: `Plugins/CkFoundation/Script/CLAUDE.md` §22 and your project's
+   code. (Rule and log locations: `Plugins/CkFoundation/Script/ARCHITECTURE.md` §22 and your project's
    CLAUDE.md verification rules.)
 3. **`DynamicHandleTypes.json` regenerated and committed** with the feature commit (§3 step 3).
 4. **Signals unbound on teardown.** Every cross-entity `BindTo_On*` has a `DoEndPlay` /
@@ -304,7 +304,7 @@ request/mutation surface — it's a quartet feature; use the recipe.
 - **Broadcasting before clearing the request fragment** → re-entrant requests wiped
   (`BB_Trashcan_Processor_Requests.as:28-29`).
 - **Editing `Script/Generated/` by hand or blanket-deleting it** → hot-reload sweep / phantom
-  namespaces (`Plugins/CkFoundation/Script/CLAUDE.md` §22).
+  namespaces (`Plugins/CkFoundation/Script/ARCHITECTURE.md` §22).
 
 ## Provenance and maintenance
 
@@ -314,7 +314,7 @@ Independently verified by the author: all cited commits via `git show --stat` (`
 `345903a10`, `287ee6601`, `66ac804db`, `1ca589b0d`, `de3099e1c`, `4713da549`, and the Employee
 chain `5df283d37`…`cdf71b36a`); full reads of `Script/ECS/Entryway/{Feature,Utils,EntityScript,
 Processor_Setup}.as`, `Script/ECS/Trashcan/{Feature,Utils,Processor_Requests}.as`, the Entryway
-AutoTest, `Plugins/CkFoundation/Script/CLAUDE.md`, and the root doctrine Non-negotiables.
+AutoTest, `Plugins/CkFoundation/Script/ARCHITECTURE.md`, and the root doctrine Non-negotiables.
 Generic-vs-BB-specific labels come from the Venus recon (second consumer, CkFoundation pinned
 2026-03-25).
 

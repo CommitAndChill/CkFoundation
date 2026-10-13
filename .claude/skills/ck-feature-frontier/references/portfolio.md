@@ -36,7 +36,7 @@ another repo is named.
 
 ### 2. Fragment-held UObject GC audit automation — robustness
 
-- **Gap.** UE's garbage collector does not trace fragment members (root CLAUDE.md, "UObject refs
+- **Gap.** UE's garbage collector does not trace fragment members (root DEVELOPMENT.md, "UObject refs
   in fragments") — an object only a fragment points at gets collected unless something else roots
   it. This shipped a real incident: the per-entity replication driver was reclaimed mid-session
   whenever no netdriver incidentally kept it alive (fix `56b344310`; history:
@@ -67,7 +67,7 @@ another repo is named.
   silently dropped on save/load" (`Source/CkEcs/Public/CkEcs/Snapshot/CkSnapshot_Audit.cpp:55-57`).
   Today: **119** `CK_REGISTER_SNAPSHOTABLE(` call sites vs **295** `FFragment_` declarations in
   `*_Fragment.h` — nobody can currently say which part of that gap is intentional (Transient) vs
-  unowned. CkSnapshot also has no per-module `Claude.md` (Source/CLAUDE.md table notes).
+  unowned. CkSnapshot also has no per-module `Claude.md` (Source/ARCHITECTURE.md table notes).
 - **This codebase's asset.** The classification machinery is built and self-documenting:
   `FSnapshotPolicy_RoundTrip` / `FSnapshotPolicy_Transient` with the design rationale in-header
   (`Source/CkEcs/Public/CkEcs/Snapshot/CkSnapshot_Policy.h:9-19`); a capture-time audit that
@@ -157,14 +157,14 @@ another repo is named.
 
 - **Gap.** AngelScript binding regressions are silent. Verified failure shape: a Utils function
   whose first parameter type matches its class's ScriptMixin target binds as a handle **member
-  only** — "the static form does not even resolve" (`Script/CLAUDE.md:116-119`). A signature drift
+  only** — "the static form does not even resolve" (`Script/ARCHITECTURE.md:116-119`). A signature drift
   can therefore remove a callable symbol with no compile error on the C++ side and no runtime
   error until some script calls it. The existing CI guard does NOT cover this: the drift
   commandlet checks only the three self-heal generators — "EntitySpawnParams, AutoTestActors, and
   DynamicHandleTypes.json" (its own header,
   `Source/CkAngelscriptGenerator/Commandlets/CkAngelscriptGenerator_DriftCommandlet.h:11-20`).
 - **This codebase's asset.** The generator already enumerates the C++ surface: the wrapper
-  generator emits 268 `utils_*` namespaces at editor boot (`Script/CLAUDE.md:113`; on disk today:
+  generator emits 268 `utils_*` namespaces at editor boot (`Script/ARCHITECTURE.md:113`; on disk today:
   274 generated `.as` files under `Script/Generated/`, which includes non-wrapper files). The
   drift commandlet is the ready-made headless-CI harness pattern to extend.
 - **First three steps.** (1) Build the inventory: reflection-walk `UCk_Utils_*_UE` classes for the

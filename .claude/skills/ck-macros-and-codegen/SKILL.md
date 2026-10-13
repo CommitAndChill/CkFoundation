@@ -10,7 +10,7 @@ typed handles, signals, and self-registration, and they encode the framework's c
 expansions. This skill gives you each macro's actual expansion, the generated members, the
 constraints **with the mechanical reason**, one canonical call site, and file-by-file checklists
 for the six "add a new X" rituals. Style/naming rules are owned by the root doctrine
-(`Plugins/CkFoundation/CLAUDE.md`) — this skill only explains the machinery behind them.
+(`Plugins/CkFoundation/DEVELOPMENT.md`) — this skill only explains the machinery behind them.
 
 All file paths below are relative to `Plugins/CkFoundation/Source/`. All line numbers and counts
 verified against source 2026-07-02 (re-verification commands at the bottom).
@@ -23,8 +23,8 @@ verified against source 2026-07-02 (re-verification commands at the bottom).
 | How AS bindings work end-to-end, exposing/verifying script APIs, dynamic handles | `ck-angelscript-interop` |
 | EnTT theory, entity↔actor lifetime, GC interaction | `ckecs-domain-reference` |
 | A build/UHT/linker error that isn't macro-shaped | `ck-debugging-playbook` |
-| Which module a feature belongs in | `Source/CLAUDE.md` (topology) |
-| To USE an existing feature (add a Health attribute, a timer, …) — not author a new one | `Source/CLAUDE.md` decision tree (+ `Script/CLAUDE.md` §5 for AS); no skill needed |
+| Which module a feature belongs in | `Source/ARCHITECTURE.md` (topology) |
+| To USE an existing feature (add a Health attribute, a timer, …) — not author a new one | `Source/ARCHITECTURE.md` decision tree (+ `Script/ARCHITECTURE.md` §5 for AS); no skill needed |
 
 ## 1. Census and family map
 
@@ -95,10 +95,13 @@ Section numbers cited elsewhere in this skill (`§2.7`, `§3.4`, …) point into
    identifier". Move `CK_GENERATED_BODY` up.
 3. **`CK_DEFINE_CONSTRUCTORS` on a UCLASS/AActor** → default-ctor redeclaration errors and (in AS
    builds) placement-new codegen on a UObject. Structs only (§2.3).
-4. **Recovery block with side effects after `CK_ENSURE_IF_NOT`** → behavior differs across build
-   configs (§2.4). Pure bail-out only.
-5. **Assuming ensures vanish in Shipping** → they don't (CHECKS=0 in Shipping); only the
-   diagnostics do. Don't write recovery blocks as "unreachable".
+4. **Empty `CK_ENSURE_IF_NOT` body followed by a duplicate ordinary `if`** → the macro owns the
+   failure branch. Put rejection, required rollback, failure completion, or approved recovery in
+   its body. Skipping that body with checks disabled is intentional.
+5. **Confusing Shipping policy with current flags** → the intended Shipping policy skips checks
+   and recovery; keeping checks to avoid crashes under delivery constraints is an explicit
+   exception. Current Shipping flags retain checks with diagnostics disabled. Verify Build.cs;
+   do not change flags or duplicate the guard as part of a validation fix.
 6. **`CK_REGISTER_SNAPSHOTABLE(ck::FFoo)`** → token-paste error on `::`. File-scope alias first.
 7. **Copying `CK_DEFINE_RECORD_OF_ENTITIES(...)` from an old doc** → `static_assert(false)`
    tombstone. Pick `_ROUNDTRIP` or `_TRANSIENT` (§2.9).
@@ -118,7 +121,7 @@ Section numbers cited elsewhere in this skill (`§2.7`, `§3.4`, …) point into
 ## Provenance and maintenance
 
 Campaign 2026-07-02. Everything above was read from source that day (engine:
-UnrealEngine-Angelscript 5.7.4; EnTT 3.16.0 — per root CLAUDE.md). Macro definitions move;
+UnrealEngine-Angelscript 5.7.4; EnTT 3.16.0 — per root DEVELOPMENT.md). Macro definitions move;
 re-verify before trusting long after that date. From `d:\Repos\BusterBlock` (PowerShell or
 Git Bash; the Grep tool is fine for `Source/` but use `rg --no-ignore` under `Script/`):
 

@@ -11,7 +11,7 @@ description: >-
 
 CkFoundation (the Ck plugin suite, consumed as git submodules) and your game are two codebases
 with one boundary. The framework's side of the contract is documented in its own doctrine chain
-(root `Plugins/CkFoundation/CLAUDE.md` → `Source/CLAUDE.md` → `Script/CLAUDE.md` → the `ck-*`
+(root `Plugins/CkFoundation/DEVELOPMENT.md` → `Source/ARCHITECTURE.md` → `Script/ARCHITECTURE.md` → the `ck-*`
 skills). This skill is the **consumer's side**: the things a game may never do (and why each rule
 exists), the ritual to follow when the framework genuinely doesn't support what you need, the
 path for promoting a proven game pattern INTO the framework, and the obligations a game carries
@@ -23,7 +23,7 @@ The one-sentence version of the whole contract:
 > EntityScripts, requests, signals, providers — and never reaches past them. When a surface is
 > missing, the game files a gap; it does not tunnel.**
 
-Jargon used below, defined once (full vocabulary: root CLAUDE.md "Lingo" table): a **fragment**
+Jargon used below, defined once (full vocabulary: root DEVELOPMENT.md "Lingo" table): a **fragment**
 is an ECS component; a **processor** is an ECS system; a **request** is a deferred mutation
 struct queued on a `_Requests` fragment; **Utils** (`UCk_Utils_[Feature]_UE`, reached from
 AngelScript as `utils_[feature]::`) is the ONLY public API surface of a feature; an
@@ -33,7 +33,7 @@ AngelScript as `utils_[feature]::`) is the ONLY public API surface of a feature;
 
 | You are actually trying to… | Load instead |
 |---|---|
-| Compose an existing framework feature into your game (the normal path) | `ck-game-feature-recipe`; module lookup = `Source/CLAUDE.md` "Finding the right module — 'I need to…'" |
+| Compose an existing framework feature into your game (the normal path) | `ck-game-feature-recipe`; module lookup = `Source/ARCHITECTURE.md` "Finding the right module — 'I need to…'" |
 | Structure entities/lifetimes/archetypes within the contract | `ck-game-entity-composition-patterns` |
 | Modify the framework itself (you've decided the change belongs there) | `ck-change-control` (gates) + the relevant framework skill |
 | Decide what the framework should build/harden next | `ck-feature-frontier` |
@@ -57,7 +57,7 @@ Most "the framework can't do X" moments are wrong-module choices or timing misus
 Run this ritual in order; do not skip to (d).
 
 **(a) Re-read before concluding.** The target module's `Source/<Module>/Claude.md`, then
-`Source/CLAUDE.md`'s "I need to…" decision tree (~70 rows — the capability usually exists under
+`Source/ARCHITECTURE.md`'s "I need to…" decision tree (~70 rows — the capability usually exists under
 a name you didn't guess). For AS-surface confusion ("the function exists but won't resolve"),
 that's `ck-angelscript-interop` §1.2/§1.4, not a gap.
 
@@ -160,7 +160,7 @@ The contract runs both ways. A consuming game owes:
 4. **Doc-drift reports.** Per-module `Claude.md` files can go stale (framework DECISIONS.md §15
    records known cases); when code contradicts a framework doc you relied on, say so in the same
    channels (§2c) — "trust code over doc on conflict and note the drift" is the framework's own
-   standing rule (root CLAUDE.md "Where things live").
+   standing rule (root DEVELOPMENT.md "Where things live").
 5. **Skill/doc sync.** Consume framework skills via the provided junction script
    (`Plugins/CkFoundation/.claude/scripts/sync-skills.ps1`) rather than copying them — copies
    are silent forks of documentation.
@@ -229,8 +229,8 @@ rg -n '\bfriend\b' Source/<Game>
 rg --no-ignore -n '\b(ensure|ensureMsgf|check)\(' Source/<Game>; rg --no-ignore -n '\bcheck\(' Script -g '*.as'
 
 # Doctrine anchors still where cited:
-rg -n 'runtime code must NEVER depend' Plugins/CkFoundation/Source/CLAUDE.md
-rg -n 'logs get ignored' Plugins/CkFoundation/CLAUDE.md
+rg -n 'runtime code must NEVER depend' Plugins/CkFoundation/Source/ARCHITECTURE.md
+rg -n 'logs get ignored' Plugins/CkFoundation/DEVELOPMENT.md
 rg -n 'the agent just needs to ask me' Plugins/CkFoundation/.claude/reports/ADJUDICATIONS.md
 
 # CK-GAP adoption status (this skill's §2d proposal — promote from PROPOSAL if hits appear):

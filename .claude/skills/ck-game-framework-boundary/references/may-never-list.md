@@ -15,7 +15,7 @@ maintainer ruling recorded 2026-07-03. `<Prefix>` = your game's class prefix (Bu
 | 2 | Touch fragment members directly / bypass the Utils surface | Fragments are friend-gated by design; Utils is the ONLY public API of a feature — everything else is an implementation detail free to change under you | Root CLAUDE.md "Lingo" (Utils row) + "Encapsulation" block; `ckecs-architecture-contract` §4 |
 | 3 | Swallow errors — log-and-continue where validation failed, or use stock `ensure`/`ensureMsgf`/`check` | Maintainer rationale, verbatim: "logs get ignored, ensures do not"; stock ensures also compile out in Shipping while `CK_ENSURE_IF_NOT` stays active | Root CLAUDE.md non-negotiables **#2/#3**; decision table in `ck-change-control` "Never silently handle an error" |
 | 4 | Ship a public C++ API verified in fewer than three environments (C++, Blueprint, AngelScript) | "Works in C++" is one third of done — AS is a first-class consumer of every public API on this engine fork | Root CLAUDE.md non-negotiable **#4**; verification recipe in `ck-angelscript-interop` §4 |
-| 5 | Depend on Tier-5 / editor modules from runtime code | Editor modules don't exist in packaged builds; the link succeeds in-editor and the packaged game fails to boot | `Source/CLAUDE.md` §"T5 — editor modules (… runtime code must NEVER depend on these)" + "Module-authoring rules" |
+| 5 | Depend on Tier-5 / editor modules from runtime code | Editor modules don't exist in packaged builds; the link succeeds in-editor and the packaged game fails to boot | `Source/ARCHITECTURE.md` §"T5 — editor modules (… runtime code must NEVER depend on these)" + "Module-authoring rules" |
 | 6 | Author gameplay `AActor` subclasses when an EntityScript serves | EntityScripts are the placeable unit (~95% Actor replacement); the Actor path forfeits ECS lifetime, composition, and test harness support | Maintainer ruling 2026-07-03 (settled doctrine); exceptions in §1.6 below; archetypes in `ck-game-entity-composition-patterns` |
 | 7 | Introduce global access / service-locator patterns (manager singletons, static registries, "get the X subsystem") | The maintainer's named **worst debt** category (2026-07-03); globals break scoping, multi-world PIE, and testability | Maintainer ruling 2026-07-03; sanctioned alternatives in §1.7; `ckecs-architecture-contract` §6 "there is no DI module" |
 | 8 | Edit framework submodule code from a game session without switching to framework change-control | Framework changes carry their own gates (classification, three-environment verification, per-plugin versioning) that a game session isn't running | `ck-change-control` (whole skill); per-plugin versioning convention (§1.8 below) |
@@ -39,7 +39,7 @@ state, and about never mutating *any* ECS state outside a processor.
 ### 1.2 The Utils surface is the API; fragments are private
 
 `ck::FFragment_*` runtime fragments declare their processors and Utils as friends; nothing else
-can write `_Members` (root CLAUDE.md "Encapsulation"). From AngelScript you physically cannot
+can write `_Members` (root DEVELOPMENT.md "Encapsulation"). From AngelScript you physically cannot
 reach C++ fragment internals — the temptation exists only in game C++. Never add a `friend`
 declaration to a framework fragment to let your class in (that is a framework edit — rule 8 —
 and a design breach besides). If the read you need has no `Get_*`/`TryGet_*` on the Utils
@@ -74,7 +74,7 @@ with near-zero C++ (see §5) — but it binds the moment you write reflected C++
 
 ### 1.5 Tier discipline
 
-`Source/CLAUDE.md`'s module tier table bands all 99 modules T0–T5; deps point same-or-lower,
+`Source/ARCHITECTURE.md`'s module tier table bands all 99 modules T0–T5; deps point same-or-lower,
 and **runtime never depends on T5** (editor/UncookedOnly). For a game: your runtime game module's
 `Build.cs` may list T0–T4 Ck modules; anything editor-only (test harnesses, editor tooling) goes
 in a separate editor-target plugin. Corpus example (BusterBlock):

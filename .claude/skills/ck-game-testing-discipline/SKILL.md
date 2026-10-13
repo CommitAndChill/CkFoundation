@@ -171,7 +171,7 @@ Section numbers cited elsewhere in this skill point into these files.
 
 Aligned with the framework's evidence rules — `ck-tests-authoring-and-running` §4 is the
 canonical statement (verdict artifacts, stale-binary trap, net-stub rebuild rule, baseline
-capture); root doctrine `Plugins/CkFoundation/CLAUDE.md` non-negotiable #4 (three-environment
+capture); root doctrine `Plugins/CkFoundation/DEVELOPMENT.md` non-negotiable #4 (three-environment
 verification) and `ck-change-control` §4 govern anything that touches a public API surface.
 Consumer-side deltas worth restating:
 
@@ -275,7 +275,7 @@ authoring, §3 running, §4 evidence rules); `Plugins/CkTests/Script/Common/CkAu
 (§4 naming, §6 base API, §7 patterns, §8 gotchas, §9 per-project setup, §11 scaling);
 `CkGym_CreationSpecification.txt` (§2/§5 templates — check `Plugins/CkTests/CLAUDE.md`'s
 trust table for its stale rows); `CkGauntlet_CreationSpecification.txt` (§7 dispatcher,
-§9 exit codes, §10 gotchas); `Plugins/CkFoundation/CLAUDE.md` (non-negotiable #4);
+§9 exit codes, §10 gotchas); `Plugins/CkFoundation/DEVELOPMENT.md` (non-negotiable #4);
 `ck-change-control` §4; `ckecs-architecture-contract` §3. Adjudication watch: A2 (C++ test
 naming). If BusterBlockTests moves again or the harness suppression list changes, update
 §3.1/§6.2 and the counts above.

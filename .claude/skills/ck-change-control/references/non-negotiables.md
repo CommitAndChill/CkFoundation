@@ -4,26 +4,25 @@ Reference for `ck-change-control`: each non-negotiable with why it exists and ex
 
 ## The non-negotiables (rationale + evidence)
 
-The one-line rules are root `CLAUDE.md` non-negotiables #1–#4. This section carries the *why* and
+The one-line rules are root `DEVELOPMENT.md` non-negotiables #1–#4. This section carries the *why* and
 the evidence, so you can defend the rule instead of just obeying it.
 
 ### 1. Fire `CK_ENSURE_IF_NOT` — never stock `ensure`/`ensureMsgf`/`check` for recoverable validation
 
-Compile modes, verified at `Source/CkCore/Public/CkCore/Ensure/CkEnsure.h:44-53` + the define
+Compile modes, verified at `Source/CkCore/Public/CkCore/Ensure/CkEnsure.h:62-81` + the define
 matrix in `Source/CkBuildConfig/CkBuildConfig.Build.cs`:
 
-In two lines (the full 17-define × 5-config matrix and expansion mechanics are owned by
-`ck-macros-and-codegen` §2.4): **`CK_DISABLE_ENSURE_CHECKS=0` in every standard configuration —
-including Test and Shipping** — so the predicate evaluates and the recovery block runs (silently
-where `_DEBUGGING=1` drops the diagnostics). Only the possibly-vestigial Profile override expands
-to `if constexpr(false)` and compiles guards out.
+The full define matrix and expansion mechanics are owned by `ck-macros-and-codegen` §2.4. In the
+current `CkBuildConfig.Build.cs`, `CK_DISABLE_ENSURE_CHECKS=0` in every standard configuration,
+including Shipping. Test and Shipping also set `_DEBUGGING=1`, so the predicate and recovery run
+silently. This is the current configuration, not the intended Shipping policy: Shipping should omit
+the ensure branch unless a documented crash or deadline exception explicitly enables it.
 
 Why this macro is the mandate:
 
-- **It stays active in Shipping.** `CHECKS=0` in every standard configuration — the guard branch
-  ships, unlike stock `ensure` (compiled out of Shipping by default). The Profile configuration
-  that removes guards is reachable only by editing the hardcoded const at
-  `CkBuildConfig.Build.cs:47` and is flagged possibly-vestigial (`DECISIONS.md` §26).
+- **It owns the failure branch.** The predicate and recovery belong to the same inverted `if`.
+  Current Shipping configuration retains that branch; the intended default is to omit it unless
+  a documented crash or deadline exception calls for a shipped guard.
 - **It is loud with context.** fmt-style message with the failing values, plus C++ AND Blueprint
   AND AngelScript callstacks, frame number, PIE-ID, server/client attribution
   (`CkEnsure.cpp:92+`). `PLATFORM_BREAK()` is expanded textually at the call site so the debugger
@@ -34,13 +33,15 @@ Why this macro is the mandate:
 - **It fails your test gate.** The AutoTest runner forces LogOnly display
   (comment `CkEnsure.cpp:217-219`), so a fired ensure logs at **Error** severity — which the
   automation framework reports as a test failure. Ensures are visible in CI; warnings are not.
-- **Shipped tripwires catch real bugs.** The packaged-build GC crash was diagnosed
+- **Deliberate shipped tripwires can catch real bugs.** The packaged-build GC crash was diagnosed
   (`d77810096`), root-caused (`feb08ee94` — pre-GC rooting pass), and then fenced with a tripwire
   ensure that stays in the build (`a8a93baac`). Detection survived the fix.
 
-Consequences for the `{ ... }` recovery block — it must be a **pure bail-out** (`return {};` /
-`return;` / `continue;`) that is *correct silent-failure behavior*, because in Test/Shipping it
-runs for real with zero diagnostics, and under Profile it does not exist at all. Real shape
+The `{ ... }` body owns rejection and recovery: roll back partial state, complete a rejected
+request, or perform another approved recovery before returning as the operation requires. Compute
+a side-effect-safe predicate once. Never use an empty ensure body followed by an ordinary `if`
+that repeats the predicate merely to keep recovery enabled. In the current Test and Shipping
+configuration the body runs silently; with checks disabled it is omitted. Simple bail-out shape
 (`Source/CkEcs/Public/CkEcs/EntityLifetime/CkEntityLifetime_Utils.cpp:114-117`):
 
 ```cpp
@@ -67,27 +68,27 @@ Any hit you introduced in runtime Ck code is a review rejection unless engine-fo
 Maintainer's direct statement (2026-07-02, recorded in `.claude/reports/DECISIONS.md` §22): the
 mandate is to fire an ensure rather than silently ignore the error behind a Warning/Error log,
 because **logs get ignored, ensures don't**. A log-and-continue where validation failed is a
-review rejection — and so is any fallback that hides a problem (root `CLAUDE.md` #3).
+review rejection — and so is any fallback that hides a problem (root `DEVELOPMENT.md` #3).
 
 Decision table when a check fails:
 
 | Situation | Do |
 |---|---|
-| Recoverable precondition violation (bad handle, missing fragment, invalid params) | `CK_ENSURE_IF_NOT` + pure bail-out |
+| Recoverable precondition violation (bad handle, missing fragment, invalid params) | `CK_ENSURE_IF_NOT` with rollback, completion, or approved recovery in its body, then terminate the rejected operation |
 | Unreachable branch (switch default on an enum) | `CK_INVALID_ENUM` / `CK_TRIGGER_ENSURE` |
-| Legitimate, expected absence | `TryGet_*` contract: return the invalid handle quietly, **no ensure** — absence is not an error. (`Get_*` must not fail; `TryGet_*` may. Root `CLAUDE.md` naming rules.) |
+| Legitimate, expected absence | `TryGet_*` contract: return the invalid handle quietly, **no ensure** — absence is not an error. (`Get_*` must not fail; `TryGet_*` may. Root `DEVELOPMENT.md` naming rules.) |
 | "Log a warning and use a default" | Never, unless the maintainer explicitly requested a fallback |
 
 ### 3. Research first — the reading ritual
 
 Maintainer's direct statement (recorded in `DECISIONS.md` §23): incoming sessions "don't research
-the codebase enough". The test from root `CLAUDE.md` #1: **if your change doesn't resemble the
+the codebase enough". The test from root `DEVELOPMENT.md` #1: **if your change doesn't resemble the
 code around it, you have not researched enough.**
 
 For an ECS change, read IN THIS ORDER before writing anything:
 
-1. Root `Plugins/CkFoundation/CLAUDE.md` — re-read the style block and non-negotiables.
-2. `Source/CLAUDE.md` — locate your module via the "I need to…" decision tree; confirm dependency
+1. Root `Plugins/CkFoundation/DEVELOPMENT.md` — re-read the style block and non-negotiables.
+2. `Source/ARCHITECTURE.md` — locate your module via the "I need to…" decision tree; confirm dependency
    tier discipline (deps only point to same-or-lower tiers).
 3. `Source/<TargetModule>/Claude.md` — purpose, key API, anti-patterns. Some are stale
    (`DECISIONS.md` §15): trust code over doc on conflict and note the drift.
@@ -107,7 +108,7 @@ invention, and reviewers check.
 
 ### 4. Three environments: C++, Blueprint, AngelScript
 
-Root `CLAUDE.md` #4: every public API must work — and be **verified** — in all three. "Works in
+Root `DEVELOPMENT.md` #4: every public API must work — and be **verified** — in all three. "Works in
 C++" is one third of done. What each environment's check actually is:
 
 | Env | "Verified" means | How |
@@ -173,7 +174,7 @@ gate is unaffected); without it, a canceled boot can orphan UBT and delete modul
 multi-session environments — `ck-build-and-env` §4 owns the boot shape (trap T3).
 
 Exact flags, the multi-instance generator lock, and why a clean boot is NOT enough (e.g. a raw
-handle in an AS f-string throws only at PIE/exec time — `Script/CLAUDE.md` §22 item 1): all owned
+handle in an AS f-string throws only at PIE/exec time — `Script/ARCHITECTURE.md` §22 item 1): all owned
 by `ck-angelscript-interop`. If the change is callable from AS, exercise it at runtime (AutoTest or
 PIE), not just at boot.
 

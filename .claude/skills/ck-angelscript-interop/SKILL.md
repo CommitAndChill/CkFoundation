@@ -25,11 +25,11 @@ relative to that plugin's `Source/AngelscriptCode/`. Line numbers verified 2026-
 
 | You actually want | Go to |
 |---|---|
-| AS language deltas from C++ (no lambdas, `float` is 64-bit, const rules, `asset ... of ...`) | `Plugins/CkFoundation/Script/CLAUDE.md` |
+| AS language deltas from C++ (no lambdas, `float` is 64-bit, const rules, `asset ... of ...`) | `Plugins/CkFoundation/Script/ARCHITECTURE.md` |
 | Write/run gyms, AutoTests, Gauntlet | `ck-tests-authoring-and-running` skill (CkTests) |
 | Engine/plugin setup, build failures, UHT/linker errors | `ck-build-and-env`, `ck-debugging-playbook` |
 | `CK_` macro shapes, add a fragment/handle/request | `ck-macros-and-codegen` |
-| Style, naming, non-negotiables | root `Plugins/CkFoundation/CLAUDE.md` |
+| Style, naming, non-negotiables | root `Plugins/CkFoundation/DEVELOPMENT.md` |
 
 ---
 

@@ -12,7 +12,7 @@ House style throughout: Allman braces, 4-space indent, `auto`, `== false`, no `b
 Two distinct shapes; picking the wrong one is a common review catch.
 
 - **`BindTo_On<Event>`** — recurring subscription to a feature's typed signal. Delegate FIRST;
-  binding policy and post-fire behavior are optional trailing params (`Script/CLAUDE.md` §11–12;
+  binding policy and post-fire behavior are optional trailing params (`Script/ARCHITECTURE.md` §11–12;
   policy semantics: `ckecs-architecture-contract` §5).
 - **`Promise_On<Event>`** — one-shot continuation on a pending operation (entity-script spawn,
   replication readiness). Fires once, then the pending handle is done.
@@ -33,7 +33,7 @@ private void OnAnyTimeAttrChanged(FCk_Handle InAttrOwnerEntity, FCk_Payload_Inte
 
 Corpus example (BusterBlock) — one-shot spawn continuation
 (`Script/ECS/CandyDealer/BB_CandyDealer_EntityScript.as:380`; pattern spec:
-`Script/CLAUDE.md` §10):
+`Script/ARCHITECTURE.md` §10):
 
 ```angelscript
 auto Pending = utils_entity_script::Request_SpawnEntity(LifetimeOwner, UMyFeature_EntityScript, Params);
@@ -108,7 +108,7 @@ calling mutating mixins (BusterBlock fix `48678651a`).
 
 A raw handle in an f-string compiles clean and **throws at runtime** ("Invalid type to append to
 string") — invisible to every compile gate including `-skipcompile` headless boots
-(`Script/CLAUDE.md` §22.1; `ck-angelscript-interop` catalog item 2). Corpus example (BusterBlock),
+(`Script/ARCHITECTURE.md` §22.1; `ck-angelscript-interop` catalog item 2). Corpus example (BusterBlock),
 `Script/ECS/BalloonDarts/BB_BalloonDarts_EntityScript.as:50`:
 
 ```angelscript
@@ -192,7 +192,7 @@ warning: an `EntityTagQuery` continuous-update fires **every frame** — delta-g
 ### 2.8 `assets::` accessors for Blueprint/content references
 
 Never hardcode content paths in gameplay AS. An editor-side registry config
-(`UCkAssetRegistryConfig`, `Script/CLAUDE.md` §13) generates typed accessors into
+(`UCkAssetRegistryConfig`, `Script/ARCHITECTURE.md` §13) generates typed accessors into
 `Script/Generated/<Game>Assets.as`; gameplay code calls them (3,114 call sites in BusterBlock).
 Corpus example (BusterBlock), `Script/UI/InfoWidget/BB_InfoWidgetContainer_Widget.as:63`:
 

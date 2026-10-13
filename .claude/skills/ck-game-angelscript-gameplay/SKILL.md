@@ -19,7 +19,7 @@ rule. Language reference and framework-binding machinery are cited, not restated
 
 **Read first, in this order** (both are prerequisites, not alternatives to this skill):
 
-1. `Plugins/CkFoundation/Script/CLAUDE.md` — the AS language deltas from C++ (no lambdas, `float`
+1. `Plugins/CkFoundation/Script/ARCHITECTURE.md` — the AS language deltas from C++ (no lambdas, `float`
    is 64-bit, RPCs reliable-by-default, by-value struct params read-only, const propagation), the
    `utils_*` layer, dynamic handles, `asset ... of ...` blocks, the §21 mistakes table.
 2. `ck-angelscript-interop` skill — the binding machinery (ScriptMixin rule, generated wrappers,
@@ -36,7 +36,7 @@ EntityScripts replace ~95% of Actor use).
 | You are actually doing | Load instead |
 |---|---|
 | AS compile walls, "not a data type", `_StubRecovery_` files, generator/self-heal behavior, DynamicHandleTypes.json | `ck-angelscript-interop` |
-| Looking up AS syntax (structs, delegates, actors, networking keywords) | `Plugins/CkFoundation/Script/CLAUDE.md` |
+| Looking up AS syntax (structs, delegates, actors, networking keywords) | `Plugins/CkFoundation/Script/ARCHITECTURE.md` |
 | Structuring a new feature (Feature/Utils/EntityScript/Processor files, the arc, definition of done) | `ck-game-feature-recipe` |
 | Entity lifetime, ownership, trait composition, archetypes | `ck-game-entity-composition-patterns` |
 | Replicated spawns, ActorRelay lifetime owners, authority routing | `ck-game-replication-patterns` |
@@ -50,7 +50,7 @@ Everything goes through **`utils_<feature>` namespaces operating on typed handle
 touch fragments of a framework feature directly; you call its utils. This is mechanical, not style:
 a C++ util whose first param matches its class's ScriptMixin target binds as a handle **member
 only** — the static `UCk_Utils_X_UE::` spelling does not resolve for it
-(`ck-angelscript-interop` §1.2, §1.4; `Script/CLAUDE.md` §5).
+(`ck-angelscript-interop` §1.2, §1.4; `Script/ARCHITECTURE.md` §5).
 
 ```angelscript
 auto SelfEntity = ck::ToEntity(this);                       // entity script / actor → handle
@@ -127,7 +127,7 @@ Select-String -Path "$env:PROJECT_ROOT\Saved\Logs\<Project>.log" -Pattern 'Angel
 | Change | Cycle |
 |---|---|
 | Edit existing `.as` (function bodies, new classes, new properties) | Save → ~2s hot reload → read log |
-| New dynamic-handle type (`asset <X>Handle of UCkDynamic_HandleDefinition`) | Land declaration + marker struct + first consumer in ONE edit, then **boot the editor** — self-heal converges in one boot (first-pass "not a data type" errors are expected transients). Live alternative: the `ForceRefreshDynamicHandleBindings()` editor button. Full cycle: `Script/CLAUDE.md` §7 |
+| New dynamic-handle type (`asset <X>Handle of UCkDynamic_HandleDefinition`) | Land declaration + marker struct + first consumer in ONE edit, then **boot the editor** — self-heal converges in one boot (first-pass "not a data type" errors are expected transients). Live alternative: the `ForceRefreshDynamicHandleBindings()` editor button. Full cycle: `Script/ARCHITECTURE.md` §7 |
 | New EntityScript class or changed `ExposeOnSpawn` set | The `Params()` accessor is emitted by a **post-compile** generator — first pass self-heals with a stub, real accessor next pass (`ck-angelscript-interop` catalog item 9) |
 | New/changed C++ (including a new ScriptMixin util) | Close the editor → build C++ → boot; the AS wrapper regenerates at boot, and only then does the AS callsite compile (`ck-angelscript-interop` catalog item 6) |
 
@@ -184,7 +184,7 @@ pre-ECS legacy, not a pattern to copy.
    (`ck-build-and-env`), and a fragment/processor/request/signal quartet follows the
    `ck-macros-and-codegen` §3 add-a-new-X checklists verbatim. Name any AS-exposed function
    library `U<Prefix>_Utils_<X>_UE` — the `_UE` suffix survives the AS namespace strip
-   (`Script/CLAUDE.md` §16.1).
+   (`Script/ARCHITECTURE.md` §16.1).
 3. **Keep the AS surface.** The C++ drop is an implementation move; consumers should still call
    `utils_<feature>::` — build order caveat in §4.2 applies to the first compile after.
 
@@ -193,8 +193,8 @@ candidate. Event-driven logic, composition, UI, AI decision layers → AS, alway
 
 ## 6. Style — the gameplay-code habits
 
-Owner of all style/naming rules: root doctrine `Plugins/CkFoundation/CLAUDE.md` ("Code style") and
-`Plugins/CkFoundation/Script/CLAUDE.md` (AS specifics). Observed uniformly across the gameplay
+Owner of all style/naming rules: root doctrine `Plugins/CkFoundation/DEVELOPMENT.md` ("Code style") and
+`Plugins/CkFoundation/Script/ARCHITECTURE.md` (AS specifics). Observed uniformly across the gameplay
 corpus and expected in review — the delta worth internalizing:
 
 - **Allman braces, 4-space indent**, single-statement guards on one line:

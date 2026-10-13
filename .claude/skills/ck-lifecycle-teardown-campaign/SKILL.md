@@ -12,7 +12,7 @@ cluster won on robustness-first grounds. Run the phases in order; each has a fal
 
 Repo layout assumed: superproject `d:\Repos\BusterBlock`, this plugin at `Plugins/CkFoundation`.
 All shell commands are **Git Bash**, cwd `d:\Repos\BusterBlock` unless stated. Style for any code
-you write: root `Plugins/CkFoundation/CLAUDE.md` (do not restate it — read it).
+you write: root `Plugins/CkFoundation/DEVELOPMENT.md` (do not restate it — read it).
 
 ## When NOT to use this skill
 

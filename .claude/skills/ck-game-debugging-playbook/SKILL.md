@@ -18,7 +18,7 @@ is the single most common failure mode, and the one agents most often skip past.
 
 Jargon, once: **Entity/Handle** — `FCk_Handle`, the typed reference to an ECS entity.
 **Fragment** — an ECS component on an entity. **Request** — a deferred mutation (`Request_*`
-functions queue; a processor consumes later — root `Plugins/CkFoundation/CLAUDE.md` non-negotiable
+functions queue; a processor consumes later — root `Plugins/CkFoundation/DEVELOPMENT.md` non-negotiable
 #5). **Signal** — the framework's bindable event (`BindTo_OnX` / `UnbindFrom_OnX`).
 **EntityScript** — the AngelScript class that composes an entity (the placeable unit).
 **Composition** — a feature's `utils_<feature>::Add(...)` stamping fragments/tags/children.
@@ -197,7 +197,7 @@ Re-verification (Git Bash, cwd = BusterBlock superproject root; NOTE: repo-root 
 
 - Commit exhibits still real:
   `git show --stat 05d2dc527 de3099e1c e0de34899 126ab3ac6 d6f9785a4 66ac804db 1ca589b0d 287ee6601 585fd6035 3688dc72b a31e46f13 742867535`
-- Binding-policy enumerators verbatim: root `Plugins/CkFoundation/CLAUDE.md` Signals block, or
+- Binding-policy enumerators verbatim: root `Plugins/CkFoundation/DEVELOPMENT.md` Signals block, or
   `rg -n 'enum class ECk_Signal_BindingPolicy' -A 10 Plugins/CkFoundation/Source/CkEcs`
 - Debugger console surface: `ck-gameplaydebugger-extension` SKILL.md tables;
   `rg --no-ignore -n 'ck\.DebugOverlay|ck\.EcsDebugger' Plugins/CkGameplayDebugger/Source`

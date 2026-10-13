@@ -5,9 +5,9 @@
 // AngelScript (.as) development against CkFoundation: language deltas from
 // C++, the utils_* layer, dynamic handles, generated-script hygiene. Style,
 // naming, macros, lingo, and the non-negotiables live in the root doctrine
-// (Plugins/CkFoundation/CLAUDE.md) and are NOT restated here. C++ module
-// topology: Source/CLAUDE.md. Engine: UnrealEngine-Angelscript 5.7.x
-// (Hazelight fork) — see root CLAUDE.md "Identity" (verified 2026-07-02).
+// (Plugins/CkFoundation/DEVELOPMENT.md) and are NOT restated here. C++ module
+// topology: Source/ARCHITECTURE.md. Engine: UnrealEngine-Angelscript 5.7.x
+// (Hazelight fork) — see root DEVELOPMENT.md "Identity" (verified 2026-07-02).
 // Do NOT assume framework behavior — verify against existing .as files, or
 // ask. Research → Plan → Implement (root doctrine, Collaboration protocol).
 
@@ -714,7 +714,7 @@ property void  SetHealth(float Value) { _Health = Value; }
 // 19. TESTING
 //============================================================================
 // House testing goes through CkTests (gyms / AutoTests / Gauntlet) — see the
-// root CLAUDE.md skill index (`ck-tests-authoring-and-running`, CkTests) and
+// root DEVELOPMENT.md skill index (`ck-tests-authoring-and-running`, CkTests) and
 // the specs in Plugins/CkTests/Script/Common/. The Hazelight fork also ships
 // a native harness (FUnitTest / FIntegrationTest); it has ZERO in-tree usage
 // in the Ck plugins (verified 2026-07-02) — do not reach for it by default.
@@ -723,7 +723,7 @@ property void  SetHealth(float Value) { _Health = Value; }
 // 20. NAMING
 //============================================================================
 // All naming rules (Get_/TryGet_/Request_ prefixes, no `b` bool prefix,
-// member/param conventions) live in root CLAUDE.md "Code style" and apply
+// member/param conventions) live in root DEVELOPMENT.md "Code style" and apply
 // unchanged in AS.
 
 //============================================================================
@@ -757,7 +757,7 @@ property void  SetHealth(float Value) { _Health = Value; }
 //============================================================================
 // 22. WHAT BREAKS SILENTLY — TOP ITEMS
 //============================================================================
-// Full catalog (13 items) + recipes: `ck-angelscript-interop` skill (root CLAUDE.md skill index).
+// Full catalog (13 items) + recipes: `ck-angelscript-interop` skill (root DEVELOPMENT.md skill index).
 //
 // 1. Raw FCk_Handle in an f-string → RUNTIME throw "Invalid type to append
 //    to string." (engine Bind_FString.cpp:597) at PIE-start/exec time, NOT
@@ -805,12 +805,12 @@ property void  SetHealth(float Value) { _Health = Value; }
 //   rg --no-ignore -n 'BindTo_OnUpdate' Plugins/CkFoundation/Script/Generated/utils_timer.as  → delegate first, policy/postfire defaulted
 //   ls Plugins/CkFoundation/Script/Generated/utils_*.as | wc -l                   → generated-wrapper count (268 on 2026-07-02)
 //   rg -n 'DynamicHandleRegistryDirectory' Config/DefaultCkFoundation.ini         → superproject registry-path override
-// TOOLING (same caveat as root CLAUDE.md provenance): the agent Grep/Glob
+// TOOLING (same caveat as root DEVELOPMENT.md provenance): the agent Grep/Glob
 // tools are silently blind under Script/ (superproject `.ignore`) — ALL .as
 // searches must use `rg --no-ignore` in Bash, or Read with exact paths;
 // re-check any zero-match with `rg --no-ignore --files`.
 
 //============================================================================
-// REMINDER: This file is for AngelScript. C++: Source/CLAUDE.md.
-// Style/macros/non-negotiables: root Plugins/CkFoundation/CLAUDE.md.
+// REMINDER: This file is for AngelScript. C++: Source/ARCHITECTURE.md.
+// Style/macros/non-negotiables: root Plugins/CkFoundation/DEVELOPMENT.md.
 //============================================================================

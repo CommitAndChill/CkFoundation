@@ -41,7 +41,7 @@ Fix: exercise the path — PIE it or autotest it — before claiming done. A `-s
 
 **4.5 CDO `default` statement gotchas.**
 - `default` works on class-level UPROPERTYs only; inside `asset ... of ...` blocks it does not
-  compile — assign fields directly (`Script/CLAUDE.md` §13).
+  compile — assign fields directly (`Script/ARCHITECTURE.md` §13).
 - EntityScripts **replicate by default**: `_Replication = ECk_Replication::Replicates` is the C++
   base default (`Source/CkEcs/Public/CkEcs/EntityScript/CkEntityScript.h:114`, verified
   2026-07-03). Omitting the `default` line does NOT give you a non-replicating script — spawning
@@ -56,7 +56,7 @@ next boot.
 Cause: registration lag by design — self-heal writes a stub, the deferred regen writes the real
 JSON entry, the recompile goes clean, all in one boot.
 Fix: nothing — boot once and gate on the *post-regen* clean reload + the JSON entry. A **second**
-boot still red is a real problem (`Script/CLAUDE.md` §7; `ck-angelscript-interop` item 1).
+boot still red is a real problem (`Script/ARCHITECTURE.md` §7; `ck-angelscript-interop` item 1).
 
 **4.7 Tag-query handlers firing every frame.**
 Symptom: a discovery/driver handler shows up hot in `stat CkScript`; frame cost grows with entity

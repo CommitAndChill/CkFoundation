@@ -5,7 +5,7 @@ Reference for `ck-build-and-env`: the source-build engine (§1), submodule plugi
 ## 1. The engine — UnrealEngine-Angelscript 5.7.4, source build
 
 The suite targets the UnrealEngine-Angelscript fork (Hazelight lineage — AngelScript is a
-first-class consumer of every public API; identity facts: root CLAUDE.md). NOT stock UE, NOT a
+first-class consumer of every public API; identity facts: root DEVELOPMENT.md). NOT stock UE, NOT a
 Launcher binary — a source checkout you register yourself.
 
 Facts read from the authoring machine's checkout `D:/Repos/UnrealEngineAngelscript` (2026-07-02):
@@ -98,7 +98,7 @@ git submodule update --init --recursive Plugins/CkFoundation Plugins/CkGameplayD
   (`:53-61`). No manual switch exists — the engine checkout decides.
 - **With** the engine AS plugin: full `Script/` layer, generated bindings, AS test harnesses.
   **Without**: C++/BP surfaces still build and run; everything guarded by `WITH_ANGELSCRIPT_CK`
-  compiles out. Code touching AS bindings must compile both ways (root CLAUDE.md, Identity).
+  compiles out. Code touching AS bindings must compile both ways (root DEVELOPMENT.md, Identity).
 
 ## 3. `CkModuleRules` — the shared Build.cs spine
 
@@ -119,7 +119,7 @@ Constructor (`CkBuildConfig.Build.cs:201-222`):
 | `SetBuildConfiguration(Target)` | the define matrix below | `:221` |
 
 Unity-on-by-default is why file-local `static` helpers and anonymous namespaces are banned —
-concatenated TUs collide (style rule + named-namespace convention: root CLAUDE.md; failure mode:
+concatenated TUs collide (style rule + named-namespace convention: root DEVELOPMENT.md; failure mode:
 trap T5 below).
 
 **Always set, every configuration:** `CK_FORMAT_FORCE_DETAILED=0` (`:50`),
@@ -132,8 +132,10 @@ ctor body could flip it, and no module touches it), plus `WITH_ANGELSCRIPT_CK` p
 **The full 17-define × 5-config matrix is owned by `ck-macros-and-codegen` §2.4** (with the
 decision notes) — load it there; this skill keeps only the environment facts you must not forget:
 
-- `CK_DISABLE_ENSURE_CHECKS=0` in EVERY configuration **including Shipping** — Ck ensures stay
-  active in Shipping by default (root CLAUDE.md non-negotiable #2 rests on this line).
+- Current `CkBuildConfig.Build.cs` sets `CK_DISABLE_ENSURE_CHECKS=0` in every standard configuration,
+  including Shipping, so the ensure branch still runs silently there. Intended policy is to omit
+  that branch in Shipping unless a documented crash or deadline exception explicitly enables it;
+  changing the policy requires a separate build-configuration change.
 - **Development-Editor ≠ Development-game** (split on `Target.bBuildEditor`, `:107`; four defines
   differ) — PIE and a packaged Development build legitimately behave differently. Check the matrix
   before treating a packaged-only difference as a bug (then load `ck-debugging-playbook`).
@@ -141,7 +143,7 @@ decision notes) — load it there; this skill keeps only the environment facts y
 
 ### The two modules that do NOT inherit `CkModuleRules`
 
-Don't add a third without cause (module-authoring rule: `Source/CLAUDE.md`).
+Don't add a third without cause (module-authoring rule: `Source/ARCHITECTURE.md`).
 
 | Module | Why plain `ModuleRules` |
 |---|---|
@@ -243,15 +245,15 @@ public class CkTimer : CkModuleRules
 2. **uplugin entry** — add to `CkFoundation.uplugin` `Modules` with the standard shape
    (verified against existing entries): `"Type"` = `Runtime` (or `UncookedOnly`/`Editor` for
    Tier-5), `"LoadingPhase": "Default"`, `"WhitelistPlatforms": ["Win64", "Mac", "Linux"]`.
-   **`Default` unless you can justify otherwise** (`Source/CLAUDE.md`) — only 3 of 99 modules
+   **`Default` unless you can justify otherwise** (`Source/ARCHITECTURE.md`) — only 3 of 99 modules
    deviate today: `CkAngelscriptGenerator` + `CkEditorStyle` are `PreDefault` (their
    registrations — AS generator plumbing, shared editor style — must exist before Default-phase
    modules load; role-based inference), and `CkIskmRendererVF` is `PostConfigInit` (verified
    in-code reason: vertex-factory registration before the engine seals the list, §3).
 3. **Tier discipline** — deps point to same-or-lower tiers only, never up; runtime never depends
    on Tier-5 editor modules; editor-only deps go inside `if (Target.bBuildEditor)`. Tier table and
-   authoring rules: `Source/CLAUDE.md`.
-4. **Docs** — ship a `Claude.md` with the module and add its tier-table row (`Source/CLAUDE.md`).
+   authoring rules: `Source/ARCHITECTURE.md`.
+4. **Docs** — ship a `Claude.md` with the module and add its tier-table row (`Source/ARCHITECTURE.md`).
 5. **Regenerate project files** (§4) so the module appears in the solution; build; then follow
    `ck-change-control` for what "done" requires.
 

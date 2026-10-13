@@ -47,6 +47,12 @@ sync.ffs_db
 
 # md files, they should be force added instead
 *.md
+!/AGENTS.md
+!/DEVELOPMENT.md
+!/Source/AGENTS.md
+!/Source/ARCHITECTURE.md
+!/Script/AGENTS.md
+!/Script/CLAUDE.md
 
 # ...except the Claude skill library / reports / project template, which are tracked
 !.claude/**/*.md

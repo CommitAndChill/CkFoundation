@@ -8,7 +8,7 @@ description: "Use when reasoning about why CkEcs is structured as it is or which
 This skill records the load-bearing architectural decisions of CkFoundation's ECS, the reasons
 behind them (with the commits and file:lines that prove them), the invariants any change must
 preserve, and the known-weak points stated plainly. Terminology (Entity/Fragment/Processor/
-Handle/Request/Signal) is defined in the root doctrine's Lingo table — `Plugins/CkFoundation/CLAUDE.md`.
+Handle/Request/Signal) is defined in the root doctrine's Lingo table — `Plugins/CkFoundation/DEVELOPMENT.md`.
 All file paths below are relative to `Plugins/CkFoundation/Source/`; all facts verified 2026-07-02
 against submodule HEAD `7330c1bab` unless labeled INFERRED.
 

@@ -20,7 +20,7 @@ rep-notify bind on MP clients" — StoreDriver subordinate panels were blank on 
   fix (`Script/StoreDriver/BB_StoreDriver_Processor_Setup.as:43-52`) does exactly this, with
   the why in a comment ending "replicated container values are applied AFTER OnConstructed".
 - **(b) Bind with a replay-capable policy.** Ck signal binds take a binding policy; verbatim
-  names from the root doctrine (`Plugins/CkFoundation/CLAUDE.md`, "Signals" — quoted verbatim
+  names from the root doctrine (`Plugins/CkFoundation/DEVELOPMENT.md`, "Signals" — quoted verbatim
   because a past doc typo'd them): `ECk_Signal_BindingPolicy::FireIfPayloadInFlightThisFrame`
   (replay same-frame payload), `FireIfPayloadInFlight` (replay last payload from any frame),
   `IgnorePayloadInFlight` (future fires only). If the bind surface you're using exposes the

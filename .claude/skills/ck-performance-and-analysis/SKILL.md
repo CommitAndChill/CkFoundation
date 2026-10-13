@@ -13,7 +13,7 @@ the code — most of the instrumentation is free because the processor and signa
 automatically — then makes "a valid perf claim" operational: baseline, N≥3 runs, one axis per
 change, numbers with units.
 
-Jargon used below (full lingo table: root `Plugins/CkFoundation/CLAUDE.md`): a **processor** is an
+Jargon used below (full lingo table: root `Plugins/CkFoundation/DEVELOPMENT.md`): a **processor** is an
 ECS system iterating entities via `ForEachEntity`; a **fragment** is an ECS component; a **signal**
 is the fragment-based event system; **AS** = AngelScript.
 

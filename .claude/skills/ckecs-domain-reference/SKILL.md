@@ -59,11 +59,11 @@ restricted grammar. Each restriction below produced a house pattern (style itsel
 
 | UHT limitation | Ck pattern it produced | Evidence |
 |---|---|---|
-| No UFUNCTION overloads (one reflected name each) | suffix vocabulary: `_ByName`, `_ByTag`, `_Simple`, `AddOrReplace`, `TryGet_*`; a plain C++ overload MAY shadow a UFUNCTION name | root CLAUDE.md Naming; e.g. `Get_EntityOwningActor` vs `TryGet_EntityOwningActor` (`CkOwningActor_Utils.h:57-71`) |
-| No trailing return types on UFUNCTION declarations | split declaration: concrete return type on its own line, `static FCk_Handle\nRequest_CreateEntity(...)`; trailing returns everywhere else | `CkEntityLifetime_Utils.h:67-69`; root CLAUDE.md function shapes |
+| No UFUNCTION overloads (one reflected name each) | suffix vocabulary: `_ByName`, `_ByTag`, `_Simple`, `AddOrReplace`, `TryGet_*`; a plain C++ overload MAY shadow a UFUNCTION name | root DEVELOPMENT.md Naming; e.g. `Get_EntityOwningActor` vs `TryGet_EntityOwningActor` (`CkOwningActor_Utils.h:57-71`) |
+| No trailing return types on UFUNCTION declarations | split declaration: concrete return type on its own line, `static FCk_Handle\nRequest_CreateEntity(...)`; trailing returns everywhere else | `CkEntityLifetime_Utils.h:67-69`; root DEVELOPMENT.md function shapes |
 | Historically no `TOptional` in reflected surfaces | enum-mode + value pair (`ECk_...` + payload). UE 5.5+ UHT now accepts TOptional UPROPERTYs and the 3 newest files use it — open fork, see ADJUDICATIONS **A1** before copying either way | `.claude/reports/ADJUDICATIONS.md` A1 |
-| UFUNCTION parameter defaults must be `()`-constructible expressions, not `{}` | `{}` construction everywhere EXCEPT UFUNCTION param defaults, which use `()`; no `= {}` in UFUNCTION signatures | root CLAUDE.md; live: `FLinearColor InColor = FLinearColor(1.0f, 1.0f, 1.0f, 0.5f)` (`CkPmg/CkPmg_Utils_SymbolShapes.h:28`) |
-| UHT owns UObject construction (GENERATED_BODY declares the ctor path; CDO factory) | `CK_DEFINE_CONSTRUCTORS` on value structs ONLY, never UObjects; UObjects configure via UPROPERTY defaults | root CLAUDE.md macro table; mechanism: `ck-macros-and-codegen` |
+| UFUNCTION parameter defaults must be `()`-constructible expressions, not `{}` | `{}` construction everywhere EXCEPT UFUNCTION param defaults, which use `()`; no `= {}` in UFUNCTION signatures | root DEVELOPMENT.md; live: `FLinearColor InColor = FLinearColor(1.0f, 1.0f, 1.0f, 0.5f)` (`CkPmg/CkPmg_Utils_SymbolShapes.h:28`) |
+| UHT owns UObject construction (GENERATED_BODY declares the ctor path; CDO factory) | `CK_DEFINE_CONSTRUCTORS` on value structs ONLY, never UObjects; UObjects configure via UPROPERTY defaults | root DEVELOPMENT.md macro table; mechanism: `ck-macros-and-codegen` |
 
 ---
 
@@ -164,4 +164,4 @@ Re-verification (PowerShell/Git Bash, cwd `d:\Repos\BusterBlock\Plugins\CkFounda
 - A1 status (TOptional): `.claude/reports/ADJUDICATIONS.md` — re-read before teaching optionality.
 - GC incident SHAs: `git log --oneline --no-walk feb08ee94 56b344310` (both exist in this repo's history).
 - Tooling caveat: Grep/Glob tools are blind under `Script/`, `docs/`, `Content/` here — use
-  `rg --no-ignore` (root CLAUDE.md provenance notes).
+  `rg --no-ignore` (root DEVELOPMENT.md provenance notes).

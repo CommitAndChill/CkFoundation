@@ -49,7 +49,7 @@ A driver **is**:
   `UScriptWorldSubsystem` drivers and moved the spawns into the GameState precisely because
   post-login entity-script spawning removed 0.5s tag-race timers
   (`Script/WorldSettings/Gameplay/BB_Gameplay_GameState.as:9-11`, verified). The No-Actors
-  doctrine applies (root doctrine: `Plugins/CkFoundation/CLAUDE.md`).
+  doctrine applies (root doctrine: `Plugins/CkFoundation/DEVELOPMENT.md`).
 - **A scoped context root.** One per world (MissionDriver, DayCycle) or one per gameplay scope
   (StoreDriver: one per store — multi-store maps have several). Its subordinates and discovered
   dependencies are reachable *through it*, and it is itself found through a *scoped* lookup

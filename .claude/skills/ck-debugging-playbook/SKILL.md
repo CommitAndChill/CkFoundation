@@ -10,13 +10,13 @@ breakage, AngelScript compile walls, and the crashes that only exist outside PIE
 table, jump to the numbered section, run the discriminating experiment BEFORE applying a fix — most of
 these symptoms have 2-3 causes and the wrong fix (deleting directories, re-running until green) destroys
 the evidence. Facts and line numbers verified 2026-07-02 against CkFoundation dev `7330c1bab`, engine
-UnrealEngine-Angelscript 5.7.4 at `D:/Repos/UnrealEngineAngelscript` (root CLAUDE.md "Identity");
+UnrealEngine-Angelscript 5.7.4 at `D:/Repos/UnrealEngineAngelscript` (root DEVELOPMENT.md "Identity");
 commands assume cwd = superproject root (the BusterBlock layout is the verified example).
 
 Jargon used below, once: **UBT/UHT** = UnrealBuildTool / UnrealHeaderTool. **Unity build** = UBT
 concatenating many .cpp files into one translation unit (on by default for every Ck module —
 `CkModuleRules` ctor, `Source/CkBuildConfig/CkBuildConfig.Build.cs:203`). **Fragment** = ECS component
-(root CLAUDE.md Lingo). **Ensure** = `CK_ENSURE_IF_NOT`, the house validation macro. **Disregard-for-GC
+(root DEVELOPMENT.md Lingo). **Ensure** = `CK_ENSURE_IF_NOT`, the house validation macro. **Disregard-for-GC
 set** = UE's permanent object pool, closed once at boot (`GUObjectArray.CloseDisregardForGC()`, engine
 `Runtime/Launch/Private/LaunchEngineLoop.cpp:3863`); GC never traverses objects inside it.
 
@@ -98,7 +98,7 @@ Authored 2026-07-02 against CkFoundation dev `7330c1bab`, BusterBlock superproje
 UnrealEngine-Angelscript 5.7.4 (`D:/Repos/UnrealEngineAngelscript`). Engine file:line cites drift with
 engine updates — re-grep rather than trusting numbers. Re-verification (Git Bash, cwd = superproject
 root; NOTE: the agent Grep/Glob tools are blind under `Plugins/CkFoundation/Script/` — use
-`rg --no-ignore` there, per root CLAUDE.md provenance):
+`rg --no-ignore` there, per root DEVELOPMENT.md provenance):
 
 - SHAs still real: `git -C Plugins/CkFoundation show --stat feb08ee94 d77810096 a8a93baac 56b344310 72199da89 700b5ef95 362e8917a 0eb3208aa`
 - Diag commands: `rg -n 'Ck\.Diag\.' Plugins/CkFoundation/Source/CkCore/Public/CkCore/Object/CkObject_Utils.cpp`

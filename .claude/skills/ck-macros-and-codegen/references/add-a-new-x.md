@@ -3,7 +3,7 @@
 All derived from the CkTimer quartet — the canonical smallest complete feature
 (`CkTimer/Public/CkTimer/`: `CkTimer_Fragment_Data.h`, `CkTimer_Fragment.h/.cpp`,
 `CkTimer_Processor.h/.cpp`, `CkTimer_Utils.h/.cpp`). Read it before authoring; mimic, don't
-invent (root non-negotiable #1). Naming table: root CLAUDE.md "ECS naming is two-tier".
+invent (root non-negotiable #1). Naming table: root DEVELOPMENT.md "ECS naming is two-tier".
 
 Build gate for every checklist below: compile per `ck-build-and-env`, then grep-verify each
 registration line exists. Anything that needs PIE is `[EDITOR-VERIFY]` and marked as such — run
@@ -121,7 +121,7 @@ request-node, and BindTo-node checks these checklists tag).
    const FCk_Request_<Feature>_<Action>&) -> void` overload (exemplar `CkTimer_Processor.h:63-85`)
    — the drain loop dispatches via `ck::Visitor` with ONE generic lambda (exemplar
    `CkTimer_Processor.cpp:48-66`; `ck::Visitor` is not a std::visit overload set —
-   `Source/CLAUDE.md` "Variant dispatch").
+   `Source/ARCHITECTURE.md` "Variant dispatch").
 4. Utils: the `Request_<Action>` UFUNCTION takes `UPARAM(ref) FCk_Handle_<Feature>&` (+ request
    struct or the trivial datum), enqueues, returns the handle (chainable):
    ```cpp

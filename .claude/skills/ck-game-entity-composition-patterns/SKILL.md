@@ -12,7 +12,7 @@ pattern here is backed by consumer-corpus evidence (BusterBlock `Bb_`, Venus `Vn
 incidents that proved the rules. Placeholders: `<Game>` = your project name, `<Prefix>` = your
 project prefix (BusterBlock uses `Bb_`/`bb::`, Venus uses `Vns_`/`vns::`).
 
-Jargon used throughout (one-line each; full definitions in `Plugins/CkFoundation/CLAUDE.md`
+Jargon used throughout (one-line each; full definitions in `Plugins/CkFoundation/DEVELOPMENT.md`
 Lingo table): an **Entity** is an ECS id addressed via a typesafe `FCk_Handle`; a **Fragment**
 is a data component on an entity; a **feature** is a reusable capability composed onto an entity
 via `utils_<feature>::Add(...)`; an **EntityScript** is a UObject class (usually AngelScript)

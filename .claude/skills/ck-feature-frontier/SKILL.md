@@ -81,7 +81,7 @@ Section numbers cited elsewhere in this skill point into these files.
 
 - **Reviving a fenced branch by paraphrase.** "Dependency injection for entity scripts" in new
   words is still `feature/dependency-injection-entity-script`. The live DI-flavored mechanisms are
-  CkProvider + ContextOwner (root CLAUDE.md lingo table); anything beyond them needs the
+  CkProvider + ContextOwner (root DEVELOPMENT.md lingo table); anything beyond them needs the
   maintainer.
 - **Building before measuring** on candidates 4/5. The define flip and the group prototype are
   cheap to *write* — that is exactly why the ruling is benchmark-first; an unmeasured "optimization"
@@ -127,7 +127,7 @@ below drift — re-verify before relying on them. Commands are Git Bash from
   (returns `06938bba3` = the deliberate ungating, + `232ae5e06` param rename). `-S` cannot find the
   move/ungate commits — the string count never changed.
 - AS surface: `ls Script/Generated/*.as | wc -l` (274) · emitted-namespace claim at
-  `Script/CLAUDE.md:113` · commandlet scope in `CkAngelscriptGenerator_DriftCommandlet.h:11-20`
+  `Script/ARCHITECTURE.md:113` · commandlet scope in `CkAngelscriptGenerator_DriftCommandlet.h:11-20`
 - Overlay providers: `ls ../CkGameplayDebugger/Source/CkEntityDebugOverlay/Private/Providers/ | wc -l`
   (38 files = 19 providers)
 - Processors: `rg --no-ignore -c "CK_REGISTER_PROCESSOR\(" Source/ --glob '*.cpp'` (sum = 388)

@@ -86,7 +86,7 @@ the originals had the item and it was still skipped (§7).
       (model: Gate_03_Separation_Hybrid_Plan.md pre-flight — "Ck_GymCrowd_Sep_HeadOnNS in PIE
       produces the existing vibration behavior, so we have a baseline to measure improvement against")
 - [ ] Plan's code shapes spot-checked against current doctrine — plans snapshot conventions and
-      conventions move (Gate_00 still teaches the retired ProcessorInjector/; root CLAUDE.md retired it)
+      conventions move (Gate_00 still teaches the retired ProcessorInjector/; root DEVELOPMENT.md retired it)
 
 ## Work items
 Sequenced. Each either names the proven pattern it replicates (file:line) or is flagged

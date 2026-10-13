@@ -9,7 +9,7 @@ from the cause); 11-12 are loud but misleading; 13 is the "where do errors even 
 Format per item: **Symptom → Why silent → Check → Fix.**
 
 **1. Stale/absent `DynamicHandleTypes.json`** — the dynamic-handle registry
-(`asset <X>Handle of UCkDynamic_HandleDefinition` needs a matching JSON entry; Script/CLAUDE.md §7).
+(`asset <X>Handle of UCkDynamic_HandleDefinition` needs a matching JSON entry; Script/ARCHITECTURE.md §7).
 - Symptom: project-wide cascade `Identifier 'FCk_Handle_<X>' is not a data type` at editor start,
   plus `Hot reload failed ... Keeping all old script code`.
 - Why silent/misleading: with self-heal ON (default) these first-pass errors are **expected
@@ -58,7 +58,7 @@ Format per item: **Symptom → Why silent → Check → Fix.**
   (`Public/AngelscriptSettings.h:124-139`).
 - Check: does your BFL name end in a strip-list suffix?
 - Fix: name it `UCk_Utils_<X>_UE` (house rule; `_UE` round-trips), or override with
-  `UCLASS(meta = (ScriptName = "..."))`. Details: Script/CLAUDE.md §16.1.
+  `UCLASS(meta = (ScriptName = "..."))`. Details: Script/ARCHITECTURE.md §16.1.
 
 **5. Unchecked parent handle up-conversion** — the implicit conversion carries no guarantee.
 - Symptom: an ensure/crash **deep inside a downstream util** ("fragment missing") far from the call
@@ -71,7 +71,7 @@ Format per item: **Symptom → Why silent → Check → Fix.**
   especially handles produced while a **permissive dynamic-handle validator** was live (§3) or
   default-constructed.
 - Fix: when provenance is uncertain, use the explicit `As_<Parent>()` / typed cast so the boundary
-  diagnostic fires at the conversion, not three calls later. (Script/CLAUDE.md §6.)
+  diagnostic fires at the conversion, not three calls later. (Script/ARCHITECTURE.md §6.)
 
 **6. New C++ ScriptMixin function — wrong call form, wrong build order.**
 - Symptom: fresh C++ util function compiles, but AS `UCk_Utils_X_UE::Func(Handle, ...)` reports
@@ -148,7 +148,7 @@ Format per item: **Symptom → Why silent → Check → Fix.**
 - Symptom: `Cannot assign, variable is const or is not a valid l-value` at any nesting depth, or
   baffling "no matching signature" when passing a const value to a non-const value param.
 - This is AS language semantics, not a Ck binding bug — full rules and fixes:
-  Script/CLAUDE.md §9.1 (by-value read-only) and §9.2 (const propagation, `Cast<T>` preserves
+  Script/ARCHITECTURE.md §9.1 (by-value read-only) and §9.2 (const propagation, `Cast<T>` preserves
   const, `TArray::Add` of const rejected).
 
 **13. Where AS errors land, and what triggers a recompile** (the map).

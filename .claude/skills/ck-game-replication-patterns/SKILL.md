@@ -17,7 +17,7 @@ Jargon used here: an **entity script** is the AngelScript class (subclass of
 game. A **fragment** is an ECS data component. A **lifetime owner** is the entity a spawn is
 parented under for cascade-destroy. A **cue** is a fire-and-forget replicated gameplay event
 (`UCk_GenericCue_EntityScript`). **Authority** = the machine UE considers the owner of state,
-i.e. the server. See the Lingo table in `Plugins/CkFoundation/CLAUDE.md` for the rest.
+i.e. the server. See the Lingo table in `Plugins/CkFoundation/DEVELOPMENT.md` for the rest.
 
 All corpus citations verified 2026-07-03 against BusterBlock dev tip `52a75e13d`.
 
@@ -112,7 +112,7 @@ loudly:
 
 Generalized from `Script/WorldSettings/Gameplay/BB_Gameplay_GameState.as:69-135` (verified),
 which spawns all of BusterBlock's world-singleton drivers this way. House style per
-`Plugins/CkFoundation/Script/CLAUDE.md`:
+`Plugins/CkFoundation/Script/ARCHITECTURE.md`:
 
 ```angelscript
 class A<Prefix>_Gameplay_GameState : A<Prefix>_Master_GameState
@@ -298,7 +298,7 @@ rg --no-ignore -n -B3 -A10 "bool Is_StoreReady" Plugins/BusterBlockTests/Script/
 rg --no-ignore -l "CkAutoTest_Net" Plugins/BusterBlockTests/Script/Tests/
 
 # Binding-policy names verbatim (§3):
-rg -n "FireIfPayloadInFlight" Plugins/CkFoundation/CLAUDE.md
+rg -n "FireIfPayloadInFlight" Plugins/CkFoundation/DEVELOPMENT.md
 ```
 
 If a re-verify diverges (e.g. the OpenSign cue surface or the StoreDriver setup processor is

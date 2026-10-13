@@ -16,7 +16,7 @@ CLAUDE.md "ECS naming is two-tier"):
 For an all-hot feature the alias form stores the reflected struct **directly as the params
 fragment** (`Add<ck::FFragment_Tween_Params>(InParams)` — one struct serves as editor-facing
 config AND as the immutable ECS fragment). For everything else the Spec is dissolved at `Add()`
-and only the residue survives (root CLAUDE.md § Spec unpacking).
+and only the residue survives (root DEVELOPMENT.md § Spec unpacking).
 
 **Why the split exists** (confirmed structurally):
 
@@ -86,7 +86,7 @@ methods whose bodies are pass-throughs (`return InOther;` —
 `CkEcs/Public/CkEcs/Handle/CkHandle_TypeSafe_AngelScript.h:48-57`): a derived handle flows into any
 parent-typed parameter with **no fragment-presence check at the boundary**; failure surfaces later,
 inside whatever util touches state. Use an explicit cast when provenance is uncertain
-(`Script/CLAUDE.md` §6, lines 160-172).
+(`Script/ARCHITECTURE.md` §6, lines 160-172).
 
 **Handle-inheriting-handle** (`CK_GENERATED_BODY_HANDLE_DERIVED(T, Parent)`, :109-129) exists so a
 derived handle's constructors initialize the direct parent and AS mixin methods propagate down the
@@ -122,7 +122,7 @@ appends a request struct to the feature's `ck::FFragment_X_Requests` fragment; t
 **Struct anatomy** (canonical: `FCk_Request_Timer_Jump`, `CkTimer_Fragment_Data.h:150-169`): one
 struct per request type; derives `FCk_Request_Base`; `CK_REQUEST_DEFINE_DEBUG_NAME` on every one;
 essential params in `CK_DEFINE_CONSTRUCTORS` (you cannot construct an incomplete request),
-optionals via the fluent `Set_*` setters (rationale + shapes: root CLAUDE.md "Requests"). Requests
+optionals via the fluent `Set_*` setters (rationale + shapes: root DEVELOPMENT.md "Requests"). Requests
 are **one-shot**: `PopulateRequestHandle` may be called at most once per struct — construct a fresh
 request per submission (`CkEcs/Public/CkEcs/Request/CkRequest_Data.h:16-18, 60-62`). Two bases
 exist: `ck::FRequest_Base` (:19, C++-only) and `FCk_Request_Base` (:63, USTRUCT/BP-facing, which
@@ -317,7 +317,7 @@ dependency channels:
 | Channel | What it is | Use it for |
 |---|---|---|
 | **ContextOwner** (`CkEcs/ContextOwner/CkContextOwner_Utils.h:29-48`) | Every entity's DI-style context root: `Get_ContextOwner(InHandle)` (BP compact node "CTX"), `Request_Override`, `Request_OverrideToSelf` | Runtime scoping along the entity graph — "which entity is my logical owner" (an ability's entity is owned by the character entity). Walk to the owner, then query features on it. |
-| **CkProvider** (`CkProvider/Public/CkProvider/CkProvider_Data.h`) | Abstract data-asset value providers (`UCk_Provider_PDA` + typed `UCk_Provider_Bool_PDA`, `_Float_PDA`, ... as `EditInlineNew` assets) | Designer-authored configurable values resolved at runtime with entity context: `InParams.Get_MyProvider()->Get_Value(InHandle)` (pattern: `Source/CLAUDE.md` "Reading values from providers") |
+| **CkProvider** (`CkProvider/Public/CkProvider/CkProvider_Data.h`) | Abstract data-asset value providers (`UCk_Provider_PDA` + typed `UCk_Provider_Bool_PDA`, `_Float_PDA`, ... as `EditInlineNew` assets) | Designer-authored configurable values resolved at runtime with entity context: `InParams.Get_MyProvider()->Get_Value(InHandle)` (pattern: `Source/ARCHITECTURE.md` "Reading values from providers") |
 
 Everything else is plain composition: features arrive via `UCk_Utils_X_UE::Add(...)` and read
 their config from their own params fragment. If you find yourself wanting a service locator or a

@@ -47,7 +47,7 @@ registration is a fallback — it checks `TypeInfo->GetMethodByName(...)` first 
 already registered the method (:330-331). Depth: `ck-angelscript-interop`.
 
 Semantics of getter-only vs getter+setter (essential vs optional param) are a doctrine rule —
-root CLAUDE.md "Encapsulation". Canonical call site: `CkTimer_Fragment_Data.h:116-120`.
+root DEVELOPMENT.md "Encapsulation". Canonical call site: `CkTimer_Fragment_Data.h:116-120`.
 
 ### 2.3 `CK_DEFINE_CONSTRUCTORS(T, ...)` — CkMacros.h:160-212
 
@@ -85,7 +85,7 @@ not inside a wrapper lambda, so the debugger lands in YOUR frame — comment :34
 UX (fire-once per site, ignore lists, PIE-ID attribution, C++/BP/AS stacks, modal buttons) lives
 in `CkCore/Public/CkCore/Ensure/CkEnsure.cpp`.
 
-`CK_ENSURE_IF_NOT(InExpression, InFormat, ...)` (CkEnsure.h:44-53) is **an inverted `if`** — the
+`CK_ENSURE_IF_NOT(InExpression, InFormat, ...)` is **an inverted `if`** — the
 `{ ... }` block after it is the failure/recovery path. It has THREE compile modes:
 
 | Active flag | Expansion | Effect |
@@ -138,19 +138,18 @@ Decision-changing notes:
 - `CK_DISABLE_ABILITY_SCRIPT_DEBUGGING` has zero consumers outside CkBuildConfig — vestigial
   since the Ability modules were removed (DECISIONS.md #41).
 
-Net effect on `CK_ENSURE_IF_NOT`: Debug/DebugGame/Development (editor or game) = full diagnostics;
+Current flags, verified 2026-10-02: Debug/DebugGame/Development (editor or game) = full diagnostics;
 Test/Shipping = silent guard — the block still runs; Profile override = guards vanish entirely.
 
-Two rules fall out mechanically:
+**Intended policy:** checks belong in every non-Shipping build. Shipping skips both the predicate
+and recovery body. Checks may explicitly remain enabled in Shipping when needed to avoid crashes
+under delivery constraints; the table above describes today's retained-checks configuration.
+Changing that configuration is a maintainer decision, not part of a validation fix.
 
-1. **Shipping keeps the checks.** `CK_DISABLE_ENSURE_CHECKS=0` in Test AND Shipping — the
-   predicate evaluates and the recovery block executes in shipped builds, just silently. The
-   recovery block must therefore be *correct silent-failure behavior*, not debug-only scaffolding
-   (root non-negotiable #2/#3).
-2. **The recovery block must be a pure bail-out** (`return`/`continue`/`return {};`). Under the
-   Profile override (selectable only by editing the hardcoded const at Build.cs:47 —
-   [possibly-vestigial], DECISIONS.md #26) the block is dead code; code with side effects in the
-   block would change behavior across configs.
+**The macro owns the failure branch.** Compute a side-effect-safe condition once and put the
+return, required rollback, failure completion notification, or approved recovery directly in its
+body. Disabling checks intentionally removes that whole branch. Never add an empty ensure followed
+by a duplicate ordinary `if`, or change the disabled expansion to keep the body running.
 
 Siblings: `CK_TRIGGER_ENSURE(fmt, ...)` = `CK_ENSURE(false, ...)` (:68-69) — unconditional fire,
 use in unreachable paths; `CK_TRIGGER_ENSURE_IF(expr, ...)` fires when expr is TRUE (:73-74);
@@ -199,7 +198,7 @@ Bind/unbind macros (:44-64):
 
 Binding-policy and replay semantics (which payloads replay on Bind, last-payload-only, PostFire
 `Unbind` + replay never connects) are owned by `ckecs-architecture-contract` §5, quick reference
-in root CLAUDE.md §Signals. Spell the enumerators exactly as root lists them —
+in root DEVELOPMENT.md §Signals. Spell the enumerators exactly as root lists them —
 `FireIfPayloadInFlightThisFrame` (a past doc typo'd a lowercase `t` and taught non-compiling code).
 
 Canonical BindTo wrapper (**copy this one**):
@@ -231,7 +230,7 @@ every request struct (root doctrine), immediately after `CK_GENERATED_BODY`.
 #### Completion delegate — required on every new `Request_*`
 
 `FCk_Request_Base` carries a non-reflected `_CompletionDelegate`, so a new request gets completion
-transport for free. What you must add by hand (full contract: root CLAUDE.md § "Request completion",
+transport for free. What you must add by hand (full contract: root DEVELOPMENT.md § "Request completion",
 canonical reference `CkTimer`):
 
 1. **Utils declaration** — trailing `const FCk_Delegate_Request_OnCompleted& InDelegate` with
@@ -254,10 +253,9 @@ canonical reference `CkTimer`):
 Two rules that are easy to get wrong:
 - **`Succeeded` means the caller's intent holds afterwards.** An idempotent no-op succeeds. Reserve
   `Failed` for an intent that does not hold and that retrying will not fix.
-- **Never fire from inside a `CK_ENSURE_IF_NOT` body** (it compiles out under
-  `CK_DISABLE_ENSURE_CHECKS`) — but early-returning from one without firing strands the caller
-  forever. Use non-negotiable #3's shape: hoist the condition, empty ensure body, then an ordinary
-  `if` that fires `Failed_NotEnqueued`.
+- **Complete a rejected request inside the `CK_ENSURE_IF_NOT` body before returning.** Fire
+  `Failed_NotEnqueued` in that same body. Checks disabled means the rejection branch is intentionally
+  skipped; do not split completion into a duplicate ordinary `if` to preserve it in Shipping.
 
 **Vtable-variance constraint (:46, :95-103):** the bases' `virtual Get_RequestDebugName` +
 `virtual ~FCk_Request_Base()` exist ONLY when handle debugging is on. Cross-reference the config

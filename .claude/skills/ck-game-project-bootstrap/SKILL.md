@@ -30,7 +30,7 @@ then continue from Step 3 unchanged.
 | Cook/stage/package flow and its traps (AS staging, two-pass self-heal cook, never-cook lists) | `ck-game-build-and-cook` |
 | Writing an actual gameplay feature past the hello-world below | `ck-game-feature-recipe` |
 | Test-layer choice, coverage norms, running suites | `ck-game-testing-discipline` (+ `ck-tests-authoring-and-running` for mechanics) |
-| AS language, hot-reload loop, silent AS failures | `ck-game-angelscript-gameplay` (+ `Plugins/CkFoundation/Script/CLAUDE.md`) |
+| AS language, hot-reload loop, silent AS failures | `ck-game-angelscript-gameplay` (+ `Plugins/CkFoundation/Script/ARCHITECTURE.md`) |
 | `Script/Generated/` internals, dynamic-handle registry, self-heal | `ck-angelscript-interop` |
 
 ---

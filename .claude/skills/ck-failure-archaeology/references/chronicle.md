@@ -4,7 +4,7 @@ Reference for `ck-failure-archaeology`: the dated record of failures, workaround
 
 ## The chronicle
 
-Lingo (Fragment, Processor, Signal, Handle, Request) is defined in the root CLAUDE.md. "EnTT" is
+Lingo (Fragment, Processor, Signal, Handle, Request) is defined in the root DEVELOPMENT.md. "EnTT" is
 the vendored C++ ECS library under `Source/CkThirdParty/`. Status vocabulary: **fixed** /
 **patched-symptom-only** / **open** / **abandoned**.
 

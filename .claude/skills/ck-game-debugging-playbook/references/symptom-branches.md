@@ -4,7 +4,7 @@ Reference for `ck-game-debugging-playbook`: request never processed, signal into
 
 ## §2. Request never processed
 
-The contract (root CLAUDE.md non-negotiable #5; mechanics in `ckecs-architecture-contract` §3
+The contract (root DEVELOPMENT.md non-negotiable #5; mechanics in `ckecs-architecture-contract` §3
 "Requests — the deferred-mutation contract"): `Request_*` writes into a Requests fragment; a
 processor consumes it on a later pass of the pump. Consequences:
 
@@ -35,7 +35,7 @@ processor consumes it on a later pass of the pump. Consequences:
 Three distinct failure shapes. Identify which one you have before changing anything.
 
 **3a. Bound too late, wrong replay policy.** Binding policies, verbatim from root
-`Plugins/CkFoundation/CLAUDE.md` (Signals block — a past doc typo'd these and taught non-compiling
+`Plugins/CkFoundation/DEVELOPMENT.md` (Signals block — a past doc typo'd these and taught non-compiling
 code): `ECk_Signal_BindingPolicy::FireIfPayloadInFlightThisFrame` (replay same-frame payload),
 `FireIfPayloadInFlight` (replay last payload from any frame), `IgnorePayloadInFlight` (future fires
 only). PostFire: `DoNothing` | `Unbind`. If the producer broadcast once during composition and you
