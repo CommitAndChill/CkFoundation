@@ -11,6 +11,7 @@ public class CkPixelSpriteEditor : CkModuleRules
             "Engine",
             "UnrealEd",
             "AssetDefinition",
+            "CkCore",
             "CkPixelSprite",
         });
 
