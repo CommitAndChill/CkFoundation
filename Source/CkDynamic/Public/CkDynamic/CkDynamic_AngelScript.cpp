@@ -212,7 +212,7 @@ auto
     }
     else
     {
-        ck::dynamic::Log(TEXT("[DynamicHandleTypes] No registry file found at: {} — continuing with stub/test-only registries only"), FilePath);
+        ck::dynamic::Warning(TEXT("[DynamicHandleTypes] No registry file found at: {} — continuing with stub/test-only registries only; dynamic handle types will be unknown to AngelScript"), FilePath);
     }
 
     {

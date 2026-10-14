@@ -33,7 +33,13 @@ auto
         return FPaths::ProjectConfigDir() / ck_dynamic_settings::RegistryFileName;
     }
 
-    return _DynamicHandleRegistryDirectory.Path / ck_dynamic_settings::RegistryFileName;
+    // Relative to the project, not to the executable (which moves between the Unique and Shared build environments)
+    const auto& Directory = _DynamicHandleRegistryDirectory.Path;
+    const auto ResolvedDirectory = FPaths::IsRelative(Directory)
+        ? FPaths::ConvertRelativePathToFull(FPaths::ProjectDir(), Directory)
+        : Directory;
+
+    return ResolvedDirectory / ck_dynamic_settings::RegistryFileName;
 }
 
 // --------------------------------------------------------------------------------------------------------------------

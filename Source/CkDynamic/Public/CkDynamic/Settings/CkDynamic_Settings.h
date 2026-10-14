@@ -21,7 +21,7 @@ public:
 
 private:
     UPROPERTY(Config, EditDefaultsOnly, Category = "Dynamic ECS Handles",
-              meta = (AllowPrivateAccess = true, RelativePath))
+              meta = (AllowPrivateAccess = true, RelativeToGameDir))
     FDirectoryPath _DynamicHandleRegistryDirectory;
 
 public:
