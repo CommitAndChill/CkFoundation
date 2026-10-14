@@ -734,13 +734,12 @@ namespace ck
             }
             if (Binding.Get_Terminal() != FCk_Handle_Transform{})
             {
-                auto Rotation = (Limb.Get_RestEndpointLocal() * Limb.Get_AttachmentLocal() * InPosedBody)
+                const auto RestRotation = (Limb.Get_RestEndpointLocal() * Limb.Get_AttachmentLocal() * InPosedBody)
                     .GetRotation();
-                for (const auto& Target : InTargets)
-                {
-                    if (Target.Get_Id() == Limb.Get_Id())
-                    { Rotation = Target.Get_EndpointWorld().GetRotation(); break; }
-                }
+                const auto* Target = InTargets.FindByPredicate([&](const FProceduralRig_WorldTarget& InTarget)
+                { return InTarget.Get_Id() == Limb.Get_Id(); });
+                const auto Rotation = Get_ProceduralTerminalRotation(RestRotation,
+                    Target != nullptr ? Target->Get_TerminalOrientationWorld() : TOptional<FQuat>{});
                 Parts.Add(Binding.Get_Terminal());
                 PartPoses.Emplace(Rotation, Chosen.Joints.Last(),
                     UCk_Utils_Transform_UE::Get_EntityCurrentTransform(Binding.Get_Terminal()).GetScale3D());
@@ -949,12 +948,11 @@ namespace ck
                 }
                 if (Params.Get_Foot() != FCk_Handle_Transform{})
                 {
-                    auto Rotation = Chain.Leg.Get<FFragment_ProceduralLeg>().Get_Foot().Get_Rotation();
-                    for (const auto& Target : InTargets)
-                    {
-                        if (Target.Get_Id() == LegParams.Get_Id())
-                        { Rotation = Target.Get_EndpointWorld().GetRotation(); break; }
-                    }
+                    const auto* Target = InTargets.FindByPredicate([&](const FProceduralRig_WorldTarget& InTarget)
+                    { return InTarget.Get_Id() == LegParams.Get_Id(); });
+                    const auto Rotation = Get_ProceduralTerminalRotation(
+                        Chain.Leg.Get<FFragment_ProceduralLeg>().Get_Foot().Get_Rotation(),
+                        Target != nullptr ? Target->Get_TerminalOrientationWorld() : TOptional<FQuat>{});
                     Parts.Add(Params.Get_Foot());
                     PartPoses.Emplace(Rotation, Chosen.Joints.Last(),
                         UCk_Utils_Transform_UE::Get_EntityCurrentTransform(Parts.Last()).GetScale3D());
@@ -1028,7 +1026,8 @@ namespace ck
             }
             if (Params.Get_Foot() != FCk_Handle_Transform{})
             {
-                const auto Rotation = Chain.Leg.Get<FFragment_ProceduralLeg>().Get_Foot().Get_Rotation();
+                const auto Rotation = Get_ProceduralTerminalRotation(
+                    Chain.Leg.Get<FFragment_ProceduralLeg>().Get_Foot().Get_Rotation(), TOptional<FQuat>{});
                 if (ArticulationPose != nullptr)
                 {
                     ArticulationPose->_LegacyHandles.Add(Params.Get_Foot());

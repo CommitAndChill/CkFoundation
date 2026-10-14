@@ -22,14 +22,12 @@ public:
     friend class UCk_Utils_Ecs_Base_UE;
 
 public:
-    UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralAction",
-        DisplayName = "[Ck][ProceduralAction] Create Manual")
-    static FCk_Handle_ProceduralAction
-    Create_Manual(
-        UPARAM(ref) FCk_Handle& InScope,
-        const FCk_Handle_ProceduralActionPlayer& InPlayer,
-        const FCk_ProceduralAction_ControlSpec& InSpec);
-
+    /** Plays a clip on the player's subject, as a child entity of InScope. A clip that is already loaded is compiled and
+     *  bound before this returns; a clip that fails to compile or bind still returns its action, already Finished with
+     *  the rejection as its result. An unloaded clip is loaded first (PendingLoad). Returns an invalid handle, with an
+     *  ensure, when the scope, the player or the spec is invalid or the player has no receipt capacity left. The action
+     *  releases itself once its terminal record is acknowledged: by the caller's consume for Explicit delivery, by the
+     *  player for Auto. */
     UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralAction",
         DisplayName = "[Ck][ProceduralAction] Create From Clip")
     static FCk_Handle_ProceduralAction
@@ -37,41 +35,6 @@ public:
         UPARAM(ref) FCk_Handle& InScope,
         const FCk_Handle_ProceduralActionPlayer& InPlayer,
         const FCk_ProceduralAction_PlaySpec& InSpec);
-
-    UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralAction",
-        DisplayName = "[Ck][ProceduralAction] Create From Loaded Clip")
-    static FCk_Handle_ProceduralAction
-    Create_FromLoadedClip(
-        UPARAM(ref) FCk_Handle& InScope,
-        const FCk_Handle_ProceduralActionPlayer& InPlayer,
-        const FCk_ProceduralAction_LoadedPlaySpec& InSpec);
-
-    /** Plays a soft clip and lets the player deliver its receipt stream: records go to listeners bound with
-     *  BindTo_OnManagedRecords, the stream is acknowledged and the finished action released without consumer code.
-     *  The completion fires once, on a later tick than this call, after the terminal record was delivered. Public
-     *  consumes of the identity are refused; Read_Receipts stays a non-consuming observation. A start that cannot be
-     *  created reports Invalid and never completes. Use Create_FromClip when gameplay must consume every record. */
-    UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralAction",
-        DisplayName = "[Ck][ProceduralAction] Play",
-        meta = (AutoCreateRefTerm = "InOnCompleted"))
-    static FCk_ProceduralAction_ManagedStart
-    Play(
-        UPARAM(ref) FCk_Handle& InScope,
-        const FCk_Handle_ProceduralActionPlayer& InPlayer,
-        const FCk_ProceduralAction_PlaySpec& InSpec,
-        const FCk_Delegate_ProceduralAction_OnManagedCompleted& InOnCompleted);
-
-    /** Play for resident content. A clip that fails to compile or bind still returns its action; the rejection
-     *  arrives as the completion's producer result on a later tick, never inside this call. */
-    UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralAction",
-        DisplayName = "[Ck][ProceduralAction] Play Loaded",
-        meta = (AutoCreateRefTerm = "InOnCompleted"))
-    static FCk_ProceduralAction_ManagedStart
-    Play_Loaded(
-        UPARAM(ref) FCk_Handle& InScope,
-        const FCk_Handle_ProceduralActionPlayer& InPlayer,
-        const FCk_ProceduralAction_LoadedPlaySpec& InSpec,
-        const FCk_Delegate_ProceduralAction_OnManagedCompleted& InOnCompleted);
 
     UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralAction",
         DisplayName = "[Ck][ProceduralAction] Validate Data")
@@ -176,24 +139,6 @@ public:
         const FCk_Delegate_ProceduralAction_OnFinished& InDelegate);
 
     UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralAction",
-        DisplayName = "[Ck][ProceduralAction] Request Submit Pose Batch",
-        meta = (AutoCreateRefTerm = "InDelegate"))
-    static FCk_Handle_ProceduralAction
-    Request_SubmitPoseBatch(
-        UPARAM(ref) FCk_Handle_ProceduralAction& InAction,
-        const FCk_Request_ProceduralAction_SubmitPoseBatch& InRequest,
-        const FCk_Delegate_Request_OnCompleted& InDelegate);
-
-    UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralAction",
-        DisplayName = "[Ck][ProceduralAction] Request End",
-        meta = (AutoCreateRefTerm = "InDelegate"))
-    static FCk_Handle_ProceduralAction
-    Request_End(
-        UPARAM(ref) FCk_Handle_ProceduralAction& InAction,
-        const FCk_Request_ProceduralAction_End& InRequest,
-        const FCk_Delegate_Request_OnCompleted& InDelegate);
-
-    UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralAction",
         DisplayName = "[Ck][ProceduralAction] Request Cancel",
         meta = (AutoCreateRefTerm = "InDelegate"))
     static FCk_Handle_ProceduralAction
@@ -202,6 +147,7 @@ public:
         const FCk_Request_ProceduralAction_Cancel& InRequest,
         const FCk_Delegate_Request_OnCompleted& InDelegate);
 
+    // Ends an action early: a running action returns its limbs first. A finished action is destroyed.
     UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralAction",
         DisplayName = "[Ck][ProceduralAction] Request Release",
         meta = (AutoCreateRefTerm = "InDelegate"))
@@ -216,34 +162,12 @@ private:
         DoCreate(
             FCk_Handle& InScope,
             const FCk_Handle_ProceduralActionPlayer& InPlayer,
-            const FCk_ProceduralAction_PlaySpec& InPlay,
-            const FCk_ProceduralAction_ControlSpec& InControl,
-            bool InIsClip,
-            ck::EProceduralActionDelivery InDelivery,
-            const FCk_Delegate_ProceduralAction_OnManagedCompleted& InOnCompleted)
+            const FCk_ProceduralAction_PlaySpec& InPlay)
         -> FCk_Handle_ProceduralAction;
 
     static auto
-        DoCreate_FromClip(
-            FCk_Handle& InScope,
-            const FCk_Handle_ProceduralActionPlayer& InPlayer,
-            const FCk_ProceduralAction_PlaySpec& InSpec,
-            ck::EProceduralActionDelivery InDelivery,
-            const FCk_Delegate_ProceduralAction_OnManagedCompleted& InOnCompleted)
-        -> FCk_Handle_ProceduralAction;
-
-    static auto
-        DoCreate_Loaded(
-            FCk_Handle& InScope,
-            const FCk_Handle_ProceduralActionPlayer& InPlayer,
-            const FCk_ProceduralAction_LoadedPlaySpec& InSpec,
-            ck::EProceduralActionDelivery InDelivery,
-            const FCk_Delegate_ProceduralAction_OnManagedCompleted& InOnCompleted)
-        -> FCk_Handle_ProceduralAction;
-
-    static auto
-        DoMake_ManagedStart(
-            const FCk_Handle_ProceduralAction& InAction,
-            const FString& InAssetPath)
-        -> FCk_ProceduralAction_ManagedStart;
+        DoAdmit_LoadedClip(
+            FCk_Handle_ProceduralAction& InAction,
+            const UCk_ProceduralAction_Data& InClip)
+        -> void;
 };

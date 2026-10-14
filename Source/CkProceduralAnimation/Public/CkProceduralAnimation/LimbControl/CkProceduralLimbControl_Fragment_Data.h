@@ -35,30 +35,8 @@ CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralLimbControl_ReturnState);
 
 // --------------------------------------------------------------------------------------------------------------------
 
-// Geometry limits for each accepted recovery interval, including every intermediate coupled solve.
-USTRUCT(BlueprintType)
-struct CKPROCEDURALANIMATION_API FCk_ProceduralLimbControl_MotionBudget
-{
-    GENERATED_BODY()
-
-public:
-    CK_GENERATED_BODY(FCk_ProceduralLimbControl_MotionBudget);
-
-private:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion", meta = (AllowPrivateAccess = true, Units = "cm", ClampMin = "0.001"))
-    float _MaxEndpointTravelCm = 2.0f;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion", meta = (AllowPrivateAccess = true, Units = "deg", ClampMin = "0.001"))
-    float _MaxSegmentAngularStepDegrees = 5.0f;
-
-public:
-    CK_PROPERTY(_MaxEndpointTravelCm);
-    CK_PROPERTY(_MaxSegmentAngularStepDegrees);
-};
-
-// --------------------------------------------------------------------------------------------------------------------
-
-// Walking-limb recovery captures this policy once. Repeated cancellation cannot extend the deadline.
+// Walking-limb recovery captures this policy once. Repeated cancellation cannot extend the deadline. Each recovery
+// interval is held to the player's sampling limits (FCk_ProceduralAction_Sampling).
 USTRUCT(BlueprintType)
 struct CKPROCEDURALANIMATION_API FCk_ProceduralLimbControl_Return
 {
@@ -84,16 +62,12 @@ private:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Contact", meta = (AllowPrivateAccess = true, Units = "cm", ClampMin = "0"))
     float _ContactToleranceCm = 2.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion", meta = (AllowPrivateAccess = true))
-    FCk_ProceduralLimbControl_MotionBudget _Motion;
-
 public:
     CK_PROPERTY(_Duration);
     CK_PROPERTY(_Timeout);
     CK_PROPERTY(_MaxProbeAttempts);
     CK_PROPERTY(_RetryInterval);
     CK_PROPERTY(_ContactToleranceCm);
-    CK_PROPERTY(_Motion);
 };
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -213,27 +187,6 @@ private:
 public:
     CK_PROPERTY(_Support);
     CK_PROPERTY(_Return);
-};
-
-// --------------------------------------------------------------------------------------------------------------------
-
-// Completion reports admission. Observe Get_LimbControl until the limb returns to Default or Unplanted.
-USTRUCT(BlueprintType)
-struct CKPROCEDURALANIMATION_API FCk_Request_ProceduralArticulation_RecoverLimbs : public FCk_Request_Base
-{
-    GENERATED_BODY()
-
-public:
-    CK_GENERATED_BODY(FCk_Request_ProceduralArticulation_RecoverLimbs);
-    CK_REQUEST_DEFINE_DEBUG_NAME(FCk_Request_ProceduralArticulation_RecoverLimbs);
-
-private:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recovery", meta = (AllowPrivateAccess = true))
-    TArray<FName> _LimbIds;
-
-public:
-    CK_PROPERTY_GET(_LimbIds);
-    CK_DEFINE_CONSTRUCTORS(FCk_Request_ProceduralArticulation_RecoverLimbs, _LimbIds);
 };
 
 // --------------------------------------------------------------------------------------------------------------------

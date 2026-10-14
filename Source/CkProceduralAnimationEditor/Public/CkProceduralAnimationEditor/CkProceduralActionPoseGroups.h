@@ -31,8 +31,15 @@ public:
 
 namespace ck::procedural_action_editor
 {
+    // Two key times name one pose within this tolerance, the precision a gizmo or a curve drag writes at.
+    CKPROCEDURALANIMATIONEDITOR_API auto
+        IsSamePoseTime(
+            double InA,
+            double InB)
+        -> bool;
+
     // A channel joins a group at a key time when it has a body key (the body channel) or a position key (a limb slot)
-    // at exactly that time; orientation and bend keys at the same time ride with their slot.
+    // at that time (IsSamePoseTime); orientation and bend keys at the same time ride with their slot.
     CKPROCEDURALANIMATIONEDITOR_API auto
         DerivePoseGroups(
             const TArray<FCk_ProceduralAction_Phase>& InPhases,

@@ -8,11 +8,46 @@ class FCk_ProceduralActionSolvedCaptureTarget;
 class FCk_ProceduralActionSolvedSnapshot;
 class UCk_ProceduralActionPreview_Config;
 
-// Edits the authored asset only. Each successful command is one editor transaction;
-// Compile remains the authority on whether the resulting draft may play.
-// Pose, mirror and phase-timing commands copy the clip into a draft, apply the builder operations and write it back with
-// Write_Into, keys and editor pose metadata in the same transaction. Every builder operation validates its inputs, but the
-// result may still not compile (a phase without its 0 and 1 keys): such a clip stays saveable and Play reports why.
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace ck::procedural_action_editor
+{
+    // A compiler or builder diagnostic as one line: "<field> [<code>]: expected <expected>; got <actual>".
+    template <typename TDiagnostic>
+    auto
+        Describe(
+            const TDiagnostic& InDiagnostic)
+        -> FString
+    {
+        return FString::Printf(TEXT("%s [%s]: expected %s; got %s"), *InDiagnostic.Get_FieldPath(),
+            *InDiagnostic.Get_Code().ToString(), *InDiagnostic.Get_Expected(), *InDiagnostic.Get_Actual());
+    }
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+// A key that moved in time on one channel, so the pose that named it can follow.
+class CKPROCEDURALANIMATIONEDITOR_API FCk_ProceduralActionRetimedKey
+{
+    CK_GENERATED_BODY(FCk_ProceduralActionRetimedKey);
+
+private:
+    double _From = 0.0;
+    double _To = 0.0;
+
+public:
+    CK_PROPERTY_GET(_From);
+    CK_PROPERTY_GET(_To);
+    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralActionRetimedKey, _From, _To);
+};
+
+// --------------------------------------------------------------------------------------------------------------------
+
+// Edits the authored asset only. Every command copies the clip into a builder draft, applies its edit and writes it back
+// with Write_Into in one editor transaction, keys and editor metadata (pose groups, subject) together; an edit that
+// changes nothing opens no transaction. Every command validates its inputs before the transaction opens, but the result
+// may still not compile (a phase without its key at 1): such a clip stays saveable and Play reports why. A command that
+// moves a key in time moves the pose that names it; a key a pose loses leaves that pose.
 class CKPROCEDURALANIMATIONEDITOR_API FCk_ProceduralActionAuthoringCommands
 {
 public:
@@ -36,6 +71,13 @@ public:
             FName InId,
             FString& OutError)
         -> bool;
+    // Renames the phase and every marker, window edge and pose group that names it.
+    auto
+        RenamePhase(
+            FName InOldId,
+            FName InNewId,
+            FString& OutError)
+        -> bool;
     auto
         AddSlot(
             FName InId,
@@ -46,9 +88,10 @@ public:
             FName InId,
             FString& OutError)
         -> bool;
+    // Renames the slot, its tracks and its subject binding together; with a scenario, its binding and initial pose too.
     auto
         RenameSlot(
-            UCk_ProceduralActionPreview_Config* InConfig,
+            UCk_ProceduralActionPreview_Config* InScenario,
             FName InOldId,
             FName InNewId,
             FString& OutError)
@@ -82,12 +125,33 @@ public:
             const FVector& InValue,
             FString& OutError)
         -> bool;
+    // A bend track needs its key at 0 (a limb may enter the phase with no bend to move from), so the first bend key of a
+    // phase also writes the same direction at 0.
     auto
         SetBendKey(
             FName InPhaseId,
             FName InSlotId,
             double InNormalizedTime,
             const FVector& InValue,
+            FString& OutError)
+        -> bool;
+    // Replaces a phase's body keys and their interpolation; InRetimed names the keys that moved.
+    auto
+        SetBodyKeys(
+            FName InPhaseId,
+            const TArray<FCk_ProceduralAction_TransformKey>& InKeys,
+            ECk_ProceduralAction_Interpolation InInterpolation,
+            const TArray<FCk_ProceduralActionRetimedKey>& InRetimed,
+            FString& OutError)
+        -> bool;
+    // Replaces a slot track's position keys and its interpolation; InRetimed names the keys that moved.
+    auto
+        SetPositionKeys(
+            FName InPhaseId,
+            FName InSlotId,
+            const TArray<FCk_ProceduralAction_VectorKey>& InKeys,
+            ECk_ProceduralAction_Interpolation InInterpolation,
+            const TArray<FCk_ProceduralActionRetimedKey>& InRetimed,
             FString& OutError)
         -> bool;
     auto
@@ -121,9 +185,23 @@ public:
             double InNormalizedTime,
             FString& OutError)
         -> bool;
+    // Moves both edges at once, so a window keeps its length when dragged.
     auto
-        SetTrackSpace(
-            FName InPhaseId,
+        MoveWindow(
+            FName InId,
+            const FCk_ProceduralAction_TimeRef& InStart,
+            const FCk_ProceduralAction_TimeRef& InEnd,
+            FString& OutError)
+        -> bool;
+    // Removes the marker or window named InId.
+    auto
+        RemoveEvent(
+            FName InId,
+            FString& OutError)
+        -> bool;
+    // The slot's frame for the whole clip; refused once any of its tracks has keys, which the change would reinterpret.
+    auto
+        SetSlotSpace(
             FName InSlotId,
             ECk_ProceduralAction_TrackSpace InSpace,
             FString& OutError)
@@ -189,12 +267,10 @@ public:
             FCk_Time InDuration,
             FString& OutError)
         -> bool;
-    // Sets the phase's preset easing and progress curve together, because a custom curve requires Linear easing.
     auto
-        SetPhaseTiming(
+        SetPhaseEasing(
             FName InPhaseId,
             ECk_ProceduralAction_Easing InEasing,
-            const FCk_ProceduralAction_ProgressCurve& InProgress,
             FString& OutError)
         -> bool;
     // Fills an empty clip from a recipe and names each recipe key time as a pose; never overwrites authored content.
@@ -203,11 +279,64 @@ public:
             const FCk_ProceduralAction_RecipeSpec& InRecipe,
             FString& OutError)
         -> bool;
+    // Binds the clip slot to a limb of the preview subject InConfig describes; the binding is kept on the clip's subject.
     auto
         RetargetSlot(
-            UCk_ProceduralActionPreview_Config* InConfig,
+            const UCk_ProceduralActionPreview_Config* InConfig,
             FName InSlotId,
             FName InLimbId,
+            FString& OutError)
+        -> bool;
+    auto
+        SetEditorSubject(
+            const FCk_ProceduralAction_EditorSubject& InSubject,
+            FString& OutError)
+        -> bool;
+    // Writes a pose's keys at its time, replacing the kinds of key it sets (a track the phase lacks is added); pose names
+    // stay as they are.
+    auto
+        SetPoseKeys(
+            FName InPhaseId,
+            const FCk_ProceduralAction_PoseKey& InPose,
+            FString& OutError)
+        -> bool;
+    // SetPoseKeys, then names the pose: the pose already at that phase and time grows to cover these channels, else a new
+    // one is made.
+    auto
+        RecordPose(
+            FName InPhaseId,
+            const FCk_ProceduralAction_PoseKey& InPose,
+            FName InLabel,
+            FGuid& OutPoseId,
+            FString& OutError)
+        -> bool;
+    // Moves every key a channel has at InFrom (position, orientation and bend ride together) to InTo in the same phase.
+    auto
+        MoveKey(
+            FName InPhaseId,
+            FName InChannel,
+            double InFrom,
+            double InTo,
+            FString& OutError)
+        -> bool;
+    auto
+        DeleteKey(
+            FName InPhaseId,
+            FName InChannel,
+            double InTime,
+            FString& OutError)
+        -> bool;
+    auto
+        SetReachPolicy(
+            FName InPhaseId,
+            FName InSlotId,
+            ECk_ProceduralAction_ReachPolicy InPolicy,
+            FString& OutError)
+        -> bool;
+    auto
+        RenamePose(
+            const FGuid& InPoseId,
+            FName InLabel,
             FString& OutError)
         -> bool;
 
@@ -219,3 +348,5 @@ private:
 
     TWeakObjectPtr<UCk_ProceduralAction_Data> _Clip;
 };
+
+// --------------------------------------------------------------------------------------------------------------------

@@ -49,13 +49,6 @@ namespace ck
         auto Pending = MoveTemp(InRequests._Requests);
         InRequests._Requests.Reset();
         algo::ForEachRequest(Pending, ck::Visitor(ck::algo::Overload{
-        [&](const FCk_Request_ProceduralArticulation_RecoverLimbs& InRequest) -> void
-        {
-            const auto Accepted = FCk_ProceduralLimbControl_Control::TryRecover(InHandle, InRequest.Get_LimbIds())
-                == ECk_ProceduralLimbControl_AcquireResult::Accepted;
-            InRequest.TryFireCompletion(InHandle, Accepted
-                ? ECk_Request_OperationResult::Succeeded : ECk_Request_OperationResult::Failed);
-        },
         [&](const FCk_Request_ProceduralArticulation_RecoverUnplantedLimbs& InRequest) -> void
         {
             auto Result = ECk_Request_OperationResult::Failed;

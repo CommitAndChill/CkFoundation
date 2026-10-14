@@ -385,42 +385,6 @@ auto
 
 auto
     UCk_Utils_ProceduralArticulation_UE::
-    Request_RecoverLimbs(
-        FCk_Handle_ProceduralArticulation& InArticulation,
-        const FCk_Request_ProceduralArticulation_RecoverLimbs& InRequest,
-        const FCk_Delegate_Request_OnCompleted& InDelegate)
-    -> FCk_Handle_ProceduralArticulation
-{
-    const auto Valid = ck::IsValid(InArticulation) && Has(InArticulation)
-        && NOT InArticulation.Has<ck::FTag_DestroyEntity_Initiate>()
-        && InArticulation.Has<ck::FFragment_ProceduralLimbControl>()
-        && NOT InRequest.Get_LimbIds().IsEmpty() && InRequest.Get_LimbIds().Num() <= 64;
-    if (NOT Valid)
-    {
-        if (InDelegate.IsBound())
-        { InDelegate.Execute(InArticulation, ECk_Request_OperationResult::Failed_NotEnqueued); }
-        else
-        { InRequest.TryFireCompletion(InArticulation, ECk_Request_OperationResult::Failed_NotEnqueued); }
-        return InArticulation;
-    }
-    auto& Requests = InArticulation.AddOrGet<ck::FFragment_ProceduralLimbControl_Requests>()._Requests;
-    if (Requests.Num() >= 32)
-    {
-        if (InDelegate.IsBound())
-        { InDelegate.Execute(InArticulation, ECk_Request_OperationResult::Failed_NotEnqueued); }
-        else
-        { InRequest.TryFireCompletion(InArticulation, ECk_Request_OperationResult::Failed_NotEnqueued); }
-        return InArticulation;
-    }
-    auto Request = InRequest;
-    if (InDelegate.IsBound())
-    { Request.Set_CompletionDelegate(InDelegate); }
-    Requests.Emplace(MoveTemp(Request));
-    return InArticulation;
-}
-
-auto
-    UCk_Utils_ProceduralArticulation_UE::
     Request_RecoverUnplantedLimbs(
         FCk_Handle_ProceduralArticulation& InArticulation,
         const FCk_Request_ProceduralArticulation_RecoverUnplantedLimbs& InRequest,

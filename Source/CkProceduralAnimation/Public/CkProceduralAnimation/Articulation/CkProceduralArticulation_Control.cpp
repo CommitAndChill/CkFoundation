@@ -180,7 +180,10 @@ namespace ck_procedural_articulation_control
             auto RigTargets = TArray<ck::FProceduralRig_WorldTarget>{};
             RigTargets.Reserve(InTargets.Num());
             for (const auto& Target : InTargets)
-            { RigTargets.Emplace(Target.Get_Id(), Target.Get_RequestedEndpointWorld(), Target.Get_PoleWorld()); }
+            {
+                RigTargets.Emplace(Target.Get_Id(), Target.Get_RequestedEndpointWorld(), Target.Get_PoleWorld(),
+                    Target.Get_AuthoredOrientationWorld());
+            }
             auto Chains = TArray<ck::FProceduralRig_SelectedChain>{};
             if (NOT ck::FProcessor_ProceduralRig_Update::EvaluateSubjectCandidate(Gait,
                 MakeArrayView(RigTargets), TOptional<FTransform>{BodyFrame}, Chains))
@@ -201,8 +204,8 @@ namespace ck_procedural_articulation_control
                 }
                 const auto& LegFoot = Chain.Get_Leg().Get<ck::FFragment_ProceduralLeg>().Get_Foot();
                 const auto* Target = Get_Target(InTargets, Chain.Get_Id());
-                const auto Rotation = Target != nullptr
-                    ? Target->Get_RequestedEndpointWorld().GetRotation() : LegFoot.Get_Rotation();
+                const auto Rotation = ck::Get_ProceduralTerminalRotation(LegFoot.Get_Rotation(),
+                    Target != nullptr ? Target->Get_AuthoredOrientationWorld() : TOptional<FQuat>{});
                 const auto Requested = FTransform{Rotation, Chain.Get_RequestedEndpoint()};
                 const auto Accepted = FTransform{Rotation, Chain.Get_AcceptedEndpoint()};
                 if (Target != nullptr && Target->Get_ReachPolicy() == ECk_ArticulationReachPolicy::RejectUnreachable
@@ -232,7 +235,10 @@ namespace ck_procedural_articulation_control
             auto RigTargets = TArray<ck::FProceduralRig_WorldTarget>{};
             RigTargets.Reserve(InTargets.Num());
             for (const auto& Target : InTargets)
-            { RigTargets.Emplace(Target.Get_Id(), Target.Get_RequestedEndpointWorld(), Target.Get_PoleWorld()); }
+            {
+                RigTargets.Emplace(Target.Get_Id(), Target.Get_RequestedEndpointWorld(), Target.Get_PoleWorld(),
+                    Target.Get_AuthoredOrientationWorld());
+            }
             auto Chains = TArray<ck::FProceduralRig_SelectedChain>{};
             if (NOT ck::FProcessor_ProceduralRig_Update::EvaluateDedicatedCandidate(InSubject,
                 BodyFrame, MakeArrayView(RigTargets), Chains) || Chains.Num() != Layouts.Num())
@@ -248,7 +254,10 @@ namespace ck_procedural_articulation_control
                 const auto Attachment = Layout.Get_AttachmentLocal() * BodyFrame;
                 const auto Default = Layout.Get_RestEndpointLocal() * Attachment;
                 const auto* Target = Get_Target(InTargets, Layout.Get_Id());
-                const auto Requested = Target != nullptr ? Target->Get_RequestedEndpointWorld() : Default;
+                const auto Requested = Target != nullptr
+                    ? FTransform{ck::Get_ProceduralTerminalRotation(Default.GetRotation(),
+                        Target->Get_AuthoredOrientationWorld()), Target->Get_RequestedEndpointWorld().GetLocation()}
+                    : Default;
                 const auto Accepted = FTransform{Requested.GetRotation(), Chain.Get_AcceptedEndpoint()};
                 if (Target != nullptr && Target->Get_ReachPolicy() == ECk_ArticulationReachPolicy::RejectUnreachable
                     && FVector::Distance(Requested.GetLocation(), Accepted.GetLocation()) > 0.1)

@@ -1,7 +1,7 @@
 // Language=angelscript
 
 // Builds a clip in code instead of authoring an asset: a recipe gives editable phases and keys, a pose key shapes the
-// motion, Build_Into compiles the draft and writes it into a clip object the caller owns, and Play_Loaded plays it.
+// motion, Build_Into compiles the draft and writes it into a clip object the caller owns, and Create_FromClip plays it.
 // The clip object must stay referenced (a UPROPERTY, a member of a live script object) while it is built and played.
 namespace ck_procedural_action_builder
 {
@@ -40,18 +40,24 @@ namespace ck_procedural_action_builder
         return utils_procedural_action_builder::Build_Into(Draft, InDestination);
     }
 
-    // Plays a built clip with managed delivery, binding its one slot to a limb of the player's subject.
-    FCk_ProceduralAction_ManagedStart PlayBuilt(
+    // Plays a built clip with Auto delivery, binding its one slot to a limb of the player's subject. InOnFinished fires
+    // once with the outcome, and the action releases itself; a clip that cannot bind finishes Rejected before this
+    // returns. An invalid handle means nothing was created and nothing will fire.
+    FCk_Handle_ProceduralAction PlayBuilt(
         FCk_Handle InScope,
         FCk_Handle_ProceduralActionPlayer InPlayer,
         UCk_ProceduralAction_Data InClip,
         FCk_ProceduralAction_SlotBinding InBinding,
-        const FCk_Delegate_ProceduralAction_OnManagedCompleted& InOnCompleted)
+        const FCk_Delegate_ProceduralAction_OnFinished& InOnFinished)
     {
         auto Bindings = TArray<FCk_ProceduralAction_SlotBinding>();
         Bindings.Add(InBinding);
-        auto Spec = FCk_ProceduralAction_LoadedPlaySpec(InClip);
+        auto Spec = FCk_ProceduralAction_PlaySpec(TSoftObjectPtr<UCk_ProceduralAction_Data>(InClip));
         Spec.Set_SlotBindings(Bindings);
-        return utils_procedural_action::Play_Loaded(InScope, InPlayer, Spec, InOnCompleted);
+        Spec.Set_Delivery(ECk_ProceduralAction_Delivery::Auto);
+        auto Action = utils_procedural_action::Create_FromClip(InScope, InPlayer, Spec);
+        if (ck::IsValid(Action))
+        { utils_procedural_action::BindTo_OnFinished(Action, InOnFinished); }
+        return Action;
     }
 }

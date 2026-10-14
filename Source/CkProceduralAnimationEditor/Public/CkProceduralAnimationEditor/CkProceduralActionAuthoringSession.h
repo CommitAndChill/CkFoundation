@@ -6,15 +6,36 @@
 
 #include "UObject/StrongObjectPtr.h"
 
+// A clip time inside one section: the section and the key time there. A key time is the section's eased progress at that
+// elapsed time (its preset easing or custom curve), the time keys are sampled at; markers and windows stay on raw time.
+class CKPROCEDURALANIMATIONEDITOR_API FCk_ProceduralActionKeyTime
+{
+    CK_GENERATED_BODY(FCk_ProceduralActionKeyTime);
+
+private:
+    FName _PhaseId;
+    FCk_FloatRange_0to1 _KeyTime;
+
+public:
+    CK_PROPERTY_GET(_PhaseId);
+    CK_PROPERTY_GET(_KeyTime);
+    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralActionKeyTime, _PhaseId, _KeyTime);
+};
+
 class CKPROCEDURALANIMATIONEDITOR_API FCk_ProceduralActionAuthoringSession
 {
 public:
     explicit FCk_ProceduralActionAuthoringSession(
         UCk_ProceduralAction_Data* InClip);
 
+    // Previews the clip on InConfig as given; the clip's editor subject is ignored until UseDerivedPreview.
     auto
         SetPreviewConfig(
             UCk_ProceduralActionPreview_Config* InConfig)
+        -> void;
+    // Previews the clip on the preview derived from its editor subject, derived again whenever the subject changes.
+    auto
+        UseDerivedPreview()
         -> void;
     auto
         Refresh()
@@ -60,6 +81,13 @@ public:
         -> const ck::procedural_action::FEvaluatedPose&
     {
         return _Pose;
+    }
+    // Each section's timing and easing; valid whenever the section durations are, even when the clip does not compile.
+    auto
+        GetTiming() const
+        -> const TArray<ck::procedural_action::FCompiledPhase>&
+    {
+        return _Timing;
     }
     auto
         GetDiagnostics() const
@@ -151,6 +179,25 @@ public:
             const FGuid& InId,
             FString& OutError)
         -> bool;
+    // A time at a section boundary belongs to the section that ends there (its key at 1), never to the next section's start;
+    // only time 0 is the first section's start. Both need valid section durations, not a compiling clip.
+    auto
+        ElapsedToKey(
+            FCk_Time InElapsed,
+            FCk_ProceduralActionKeyTime& OutKey) const
+        -> bool;
+    auto
+        KeyToElapsed(
+            FName InPhaseId,
+            FCk_FloatRange_0to1 InKeyTime,
+            FCk_Time& OutElapsed) const
+        -> bool;
+    auto
+        Get_PhaseStart(
+            FName InPhaseId,
+            FCk_Time& OutStart) const
+        -> bool;
+
     auto
         GetStagingPhaseId() const
         -> FName
@@ -174,10 +221,18 @@ private:
     auto
         EvaluateCurrent()
         -> void;
+    auto
+        RefreshTiming()
+        -> void;
+    auto
+        RefreshDerivedPreview()
+        -> void;
 
 private:
     TStrongObjectPtr<UCk_ProceduralAction_Data> _Clip;
     TStrongObjectPtr<UCk_ProceduralActionPreview_Config> _PreviewConfig;
+    TOptional<FCk_ProceduralAction_EditorSubject> _DerivedFrom;
+    TArray<ck::procedural_action::FCompiledPhase> _Timing;
     ck::procedural_action::FCompiledClip _Compiled;
     ck::procedural_action::FInitialPose _Initial;
     ck::procedural_action::FEvaluatedPose _Pose;

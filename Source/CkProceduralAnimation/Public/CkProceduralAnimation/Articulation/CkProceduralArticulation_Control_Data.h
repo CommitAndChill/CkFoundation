@@ -45,6 +45,14 @@ enum class ECk_ArticulationReachPolicy : uint8
 };
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ArticulationReachPolicy);
 
+// RigOwn keeps the rig's terminal rotation: the gait's foot on a walking leg, the rest rotation on a dedicated limb.
+enum class ECk_ArticulationTargetOrientation : uint8
+{
+    Authored,
+    RigOwn
+};
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ArticulationTargetOrientation);
+
 enum class ECk_ArticulationControlResult : uint8
 {
     Accepted,
@@ -77,13 +85,22 @@ private:
     FTransform _RequestedEndpointWorld = FTransform::Identity;
     TOptional<FVector> _PoleWorld;
     ECk_ArticulationReachPolicy _ReachPolicy = ECk_ArticulationReachPolicy::RejectUnreachable;
+    ECk_ArticulationTargetOrientation _Orientation = ECk_ArticulationTargetOrientation::Authored;
 
 public:
     CK_PROPERTY_GET(_Id);
     CK_PROPERTY_GET(_RequestedEndpointWorld);
     CK_PROPERTY_GET(_PoleWorld);
     CK_PROPERTY_GET(_ReachPolicy);
+    CK_PROPERTY(_Orientation);
     CK_DEFINE_CONSTRUCTORS(FCk_ArticulationLimbTarget, _Id, _RequestedEndpointWorld, _PoleWorld, _ReachPolicy);
+
+    auto Get_AuthoredOrientationWorld() const -> TOptional<FQuat>
+    {
+        if (_Orientation == ECk_ArticulationTargetOrientation::RigOwn)
+        { return {}; }
+        return _RequestedEndpointWorld.GetRotation();
+    }
 };
 
 struct CKPROCEDURALANIMATION_API FCk_ArticulationTokenCandidate

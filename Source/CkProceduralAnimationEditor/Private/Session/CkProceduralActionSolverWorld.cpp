@@ -75,38 +75,6 @@ auto
 
 auto
     FCk_ProceduralActionSolverWorld::
-    StartManual(
-        UCk_ProceduralActionPreview_Config* InConfig,
-        const FCk_ProceduralAction_ControlSpec& InControl,
-        uint64 InPreviewRevision)
-    -> bool
-{
-    Reset();
-    if (InConfig == nullptr)
-    { return SetError(TEXT("Select a separate preview subject config before starting Solver.")); }
-    _Config.Reset(InConfig);
-    if (NOT InConfig->ValidateScenario(_Error))
-    { return SetError(_Error); }
-    _ScenarioEvents = InConfig->Get_ScenarioEvents();
-    _ObservationHorizonStep = InConfig->Get_ObservationHorizonStep();
-    _Control = InControl;
-    _PreviewRevision = InPreviewRevision;
-    if (NOT BuildWorld())
-    {
-        DestroyWorld();
-        return false;
-    }
-    const auto ActionState = ck::IsValid(_Action)
-        ? UCk_Utils_ProceduralAction_UE::Get_State(_Action)
-        : ECk_ProceduralAction_State::PendingAdmission;
-    _Status = ActionState == ECk_ProceduralAction_State::Ready
-        || ActionState == ECk_ProceduralAction_State::Playing
-        ? EStatus::Ready : EStatus::Preparing;
-    return true;
-}
-
-auto
-    FCk_ProceduralActionSolverWorld::
     StartClip(
         UCk_ProceduralActionPreview_Config* InConfig,
         UCk_ProceduralAction_Data* InClip,
@@ -129,9 +97,7 @@ auto
     _Clip.Reset(InClip);
     _PlaySpec = FCk_ProceduralAction_PlaySpec{TSoftObjectPtr<UCk_ProceduralAction_Data>{InClip}};
     _PlaySpec.Set_SlotBindings(InSlotBindings);
-    _PlaySpec.Set_AnchorBindings(InConfig->Get_AnchorBindings());
     _PreviewRevision = InPreviewRevision;
-    _UseClip = true;
     if (NOT BuildWorld())
     {
         DestroyWorld();
@@ -140,9 +106,7 @@ auto
     const auto ActionState = ck::IsValid(_Action)
         ? UCk_Utils_ProceduralAction_UE::Get_State(_Action)
         : ECk_ProceduralAction_State::PendingAdmission;
-    _Status = ActionState == ECk_ProceduralAction_State::Ready
-        || ActionState == ECk_ProceduralAction_State::Playing
-        ? EStatus::Ready : EStatus::Preparing;
+    _Status = ActionState == ECk_ProceduralAction_State::Playing ? EStatus::Ready : EStatus::Preparing;
     return true;
 }
 
@@ -172,9 +136,6 @@ auto
     if (NOT ck::procedural_action::ValidateTuning(PlayerSpec.Get_Tuning(), InvalidTuningField))
     { return SetError(FString::Printf(TEXT("Preview Action Tuning has invalid %s."),
         *InvalidTuningField.ToString())); }
-    if (PlayerSpec.Get_Tuning().Get_Sampling().Get_MaxSamples()
-        > PlayerSpec.Get_Capacity().Get_MaxSamplesPerReceipt())
-    { return SetError(TEXT("Preview Action Tuning Sampling.MaxSamples exceeds Player Capacity.MaxSamplesPerReceipt.")); }
     const auto Walking = Config.Get_SubjectMode() == ECk_ProceduralActionPreview_SubjectMode::Walking;
     const auto* Rig = Config.Get_WalkingRig().Get();
     const auto* Gait = Config.Get_WalkingGait().Get();
@@ -352,7 +313,6 @@ auto
 
     _Step = 0;
     _PreparingTicks = 0;
-    _NextInput = 0;
     _NextScenarioEvent = 0;
     _ExpectedFloorPresent = Config.Get_HasStaticFloor();
     _PendingRecoveryIds.Reset();
@@ -389,16 +349,14 @@ auto
     CreateAction()
     -> bool
 {
-    _Action = _UseClip
-        ? UCk_Utils_ProceduralAction_UE::Create_FromClip(_Scope, _Player, _PlaySpec)
-        : UCk_Utils_ProceduralAction_UE::Create_Manual(_Scope, _Player, _Control);
+    _Action = UCk_Utils_ProceduralAction_UE::Create_FromClip(_Scope, _Player, _PlaySpec);
     if (ck::Is_NOT_Valid(_Action))
-    { return SetError(TEXT("Production action rejected the preview clip or control spec.")); }
+    { return SetError(TEXT("Production action rejected the preview clip.")); }
     const auto& Config = *_Config.Get();
     _Recording.Reset(UCk_Utils_ProceduralAction_UE::Get_Identity(_Action),
         FCk_ProceduralActionRecordedStore::FProvenance{
             Config.GetPathName(), _Clip.IsValid() ? _Clip->GetPathName() : FString{},
-            _UseClip ? TEXT("Managed clip playback") : TEXT("Scheduled public manual pose requests"),
+            TEXT("Clip playback"),
             ck_procedural_action_solver_world::FixedStep, _PreviewRevision});
     return true;
 }
@@ -415,37 +373,6 @@ auto
         && UCk_Utils_ProceduralGait_UE::Get_PlantedCount(_Gait) == _Config->Get_WalkingRig()->Get_Legs().Num()
         && UCk_Utils_ProceduralGait_UE::Get_TrustedContactCount(_Gait)
             >= FMath::Max(1, _Config->Get_WalkingLocomotion().Get_Support().Get_MinimumTrustedContacts());
-}
-
-auto
-    FCk_ProceduralActionSolverWorld::
-    QueuePoseAtStep(
-        int64 InStep,
-        const FCk_ProceduralAction_PoseBatch& InBatch)
-    -> bool
-{
-    if (_World == nullptr || InStep <= _Step
-        || _Inputs.ContainsByPredicate([InStep](const auto& InInput) { return InInput.Step == InStep; }))
-    { return false; }
-    _Inputs.Add(FScheduledInput{InStep, InBatch, false});
-    _Inputs.Sort([](const auto& InA, const auto& InB) { return InA.Step < InB.Step; });
-    _NextInput = _Inputs.IndexOfByPredicate([this](const auto& InInput) { return InInput.Step > _Step; });
-    return true;
-}
-
-auto
-    FCk_ProceduralActionSolverWorld::
-    QueueEndAtStep(
-        int64 InStep)
-    -> bool
-{
-    if (_World == nullptr || InStep <= _Step
-        || _Inputs.ContainsByPredicate([InStep](const auto& InInput) { return InInput.Step == InStep; }))
-    { return false; }
-    _Inputs.Add(FScheduledInput{InStep, {}, true});
-    _Inputs.Sort([](const auto& InA, const auto& InB) { return InA.Step < InB.Step; });
-    _NextInput = _Inputs.IndexOfByPredicate([this](const auto& InInput) { return InInput.Step > _Step; });
-    return true;
 }
 
 auto
@@ -470,8 +397,7 @@ auto
     }
     _SeekTarget = InStep;
     const auto ActionReady = ck::IsValid(_Action)
-        && (UCk_Utils_ProceduralAction_UE::Get_State(_Action) == ECk_ProceduralAction_State::Ready
-            || UCk_Utils_ProceduralAction_UE::Get_State(_Action) == ECk_ProceduralAction_State::Playing);
+        && UCk_Utils_ProceduralAction_UE::Get_State(_Action) == ECk_ProceduralAction_State::Playing;
     if (_Recording.Get_Terminal())
     {
         _Status = _SeekTarget != _Step ? EStatus::Seeking
@@ -496,8 +422,7 @@ auto
     { return false; }
     _SeekTarget = INDEX_NONE;
     const auto ActionReady = ck::IsValid(_Action)
-        && (UCk_Utils_ProceduralAction_UE::Get_State(_Action) == ECk_ProceduralAction_State::Ready
-            || UCk_Utils_ProceduralAction_UE::Get_State(_Action) == ECk_ProceduralAction_State::Playing);
+        && UCk_Utils_ProceduralAction_UE::Get_State(_Action) == ECk_ProceduralAction_State::Playing;
     _Status = ActionReady || (_Recording.Get_Terminal() && _ObservationHorizonStep > _Step)
         ? EStatus::Ready : EStatus::Preparing;
     return true;
@@ -524,31 +449,6 @@ auto
         if (ck::Is_NOT_Valid(Body) || NOT UCk_Utils_JoltBody_UE::Get_IsBodyAdded(Body))
         { return false; }
     }
-    return true;
-}
-
-auto
-    FCk_ProceduralActionSolverWorld::
-    ApplyScheduledInput()
-    -> bool
-{
-    if (_NextInput == INDEX_NONE || NOT _Inputs.IsValidIndex(_NextInput)
-        || _Inputs[_NextInput].Step != _Step + 1)
-    { return true; }
-    if (NOT GetAreObstaclesReady())
-    { return SetError(TEXT("Scheduled input reached its step before production Jolt obstacles were added.")); }
-    if (ck::Is_NOT_Valid(_Action)
-        || UCk_Utils_ProceduralAction_UE::Get_State(_Action) != ECk_ProceduralAction_State::Ready)
-    { return SetError(TEXT("Scheduled input reached its step before the production action became Ready.")); }
-    const auto& Input = _Inputs[_NextInput];
-    if (Input.End)
-    { UCk_Utils_ProceduralAction_UE::Request_End(_Action, FCk_Request_ProceduralAction_End{}, {}); }
-    else
-    {
-        UCk_Utils_ProceduralAction_UE::Request_SubmitPoseBatch(_Action,
-            FCk_Request_ProceduralAction_SubmitPoseBatch{Input.Batch}, {});
-    }
-    ++_NextInput;
     return true;
 }
 
@@ -588,8 +488,8 @@ auto
                     *Id.ToString()));
             }
         }
-        UCk_Utils_ProceduralArticulation_UE::Request_RecoverLimbs(_Subject,
-            FCk_Request_ProceduralArticulation_RecoverLimbs{Event.Get_LimbIds()}, {});
+        UCk_Utils_ProceduralArticulation_UE::Request_RecoverUnplantedLimbs(_Subject,
+            FCk_Request_ProceduralArticulation_RecoverUnplantedLimbs{}, {});
         _PendingRecoveryIds.Append(Event.Get_LimbIds());
         break;
     case ECk_ProceduralActionPreview_ScenarioEventKind::DetachLimb:
@@ -665,14 +565,13 @@ auto
         _World->Tick(LEVELTICK_All,
             static_cast<float>(ck_procedural_action_solver_world::FixedStep.Get_Seconds()));
         ++_PreparingTicks;
-        if (ck::IsValid(_Action))
+        if (_Recording.Get_Identity().Get_Value() != 0)
         {
             DrainReceipts();
             if (_Status == EStatus::Error)
             { return false; }
             const auto ActionState = UCk_Utils_ProceduralAction_UE::Get_State(_Action);
-            if (ActionState == ECk_ProceduralAction_State::Ready
-                || ActionState == ECk_ProceduralAction_State::Playing)
+            if (ActionState == ECk_ProceduralAction_State::Playing)
             {
                 _Status = _SeekTarget != INDEX_NONE && _SeekTarget > _Step
                     ? EStatus::Seeking : EStatus::Ready;
@@ -695,8 +594,6 @@ auto
         return true;
     }
     if (_SeekTarget != INDEX_NONE && _Step >= _SeekTarget)
-    { return false; }
-    if (NOT ApplyScheduledInput())
     { return false; }
     if (NOT ApplyScenarioEvent())
     { return false; }
@@ -726,6 +623,8 @@ auto
     DrainReceipts()
     -> void
 {
+    if (_Recording.Get_Terminal())
+    { return; }
     if (ck::Is_NOT_Valid(_Player))
     { SetError(TEXT("Production ActionPlayer became invalid while draining receipts.")); return; }
     constexpr auto MaximumPagesPerFrame = 4;
@@ -803,21 +702,17 @@ auto
     DestroyWorld();
     _Config.Reset();
     _Clip.Reset();
-    _Control = {};
     _PlaySpec = {};
     _Recording.Reset({}, {});
-    _Inputs.Reset();
     _ScenarioEvents.Reset();
     _PendingRecoveryIds.Reset();
     _PendingDetachIds.Reset();
     _Step = 0;
     _PreparingTicks = 0;
     _SeekTarget = INDEX_NONE;
-    _NextInput = 0;
     _NextScenarioEvent = 0;
     _ObservationHorizonStep = 0;
     _PreviewRevision = 0;
-    _UseClip = false;
     _ExpectedFloorPresent = false;
     _Status = EStatus::Idle;
     _Error.Reset();

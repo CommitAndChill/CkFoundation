@@ -208,22 +208,16 @@ namespace ck::procedural_action
         for (const auto& Slot : InClip.Get_Slots())
         {
             const auto* InitialLimb = InInitial.Get_Limbs().Find(Slot.Get_Id());
-            if (InitialLimb == nullptr && NOT (Slot.Get_InitialSource() == ECk_ProceduralAction_InitialSource::AuthoredRest
-                && Slot.Get_HasExplicitRestTarget()))
-            { OutPose = {}; return false; }
-            const auto& InitialTransform = Slot.Get_InitialSource() == ECk_ProceduralAction_InitialSource::AuthoredRest
-                && Slot.Get_HasExplicitRestTarget() ? Slot.Get_ExplicitRestTarget() : *InitialLimb;
-            if (NOT evaluation_detail::IsRigid(InitialTransform)) { OutPose = {}; return false; }
+            if (InitialLimb == nullptr || NOT evaluation_detail::IsRigid(*InitialLimb)) { OutPose = {}; return false; }
+            const auto& InitialTransform = *InitialLimb;
             auto Limb = FLimbPose{};
             Limb.Get_Slot() = Slot.Get_Id();
             Limb.Get_Position() = InitialTransform.GetTranslation();
             Limb.Get_Orientation() = InitialTransform.GetRotation();
-            Limb.Get_HasOrientation() = Slot.Get_RequiresTerminalOrientation();
             if (const auto* Bend = InInitial.Get_BendDirections().Find(Slot.Get_Id()))
             {
                 if (NOT evaluation_detail::IsFinite(*Bend) || Bend->SizeSquared() <= 1.0e-8) { OutPose = {}; return false; }
                 Limb.Get_BendDirection() = Bend->GetSafeNormal();
-                Limb.Get_HasBend() = true;
             }
             OutPose.Get_Limbs().Add(Limb);
         }
@@ -241,7 +235,6 @@ namespace ck::procedural_action
                 auto* Limb = OutPose.Get_Limbs().FindByPredicate([&](const FLimbPose& InLimb) { return InLimb.Get_Slot() == Track.Get_Slot(); });
                 if (Limb == nullptr) { OutPose = {}; return false; }
                 Limb->Get_ReachPolicy() = Track.Get_ReachPolicy();
-                Limb->Get_ClearanceResponse() = Track.Get_ClearanceResponse();
                 if (NOT Track.Get_PositionKeys().IsEmpty())
                 { Limb->Get_Position() = evaluation_detail::SampleVector(Track.Get_PositionKeys(), Progress, Track.Get_Interpolation(), Limb->Get_Position()); }
                 if (NOT Track.Get_OrientationKeys().IsEmpty())

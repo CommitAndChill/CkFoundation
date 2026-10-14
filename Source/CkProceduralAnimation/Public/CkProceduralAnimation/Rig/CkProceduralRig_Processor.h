@@ -23,13 +23,28 @@ namespace ck
         FName _Id = NAME_None;
         FTransform _EndpointWorld = FTransform::Identity;
         TOptional<FVector> _PoleWorld;
+        TOptional<FQuat> _TerminalOrientationWorld;
 
     public:
         CK_PROPERTY_GET(_Id);
         CK_PROPERTY_GET(_EndpointWorld);
         CK_PROPERTY_GET(_PoleWorld);
-        CK_DEFINE_CONSTRUCTORS(FProceduralRig_WorldTarget, _Id, _EndpointWorld, _PoleWorld);
+        CK_PROPERTY_GET(_TerminalOrientationWorld);
+        CK_DEFINE_CONSTRUCTORS(FProceduralRig_WorldTarget, _Id, _EndpointWorld, _PoleWorld, _TerminalOrientationWorld);
     };
+
+    // Prediction and application both pose a terminal part through this, so an unauthored orientation never
+    // replaces the rig's own rotation on one side only.
+    inline auto
+        Get_ProceduralTerminalRotation(
+            const FQuat& InRigRotation,
+            const TOptional<FQuat>& InAuthoredOrientation)
+        -> FQuat
+    {
+        if (InAuthoredOrientation.IsSet())
+        { return *InAuthoredOrientation; }
+        return InRigRotation;
+    }
 
     struct CKPROCEDURALANIMATION_API FProceduralRig_SelectedChain
     {

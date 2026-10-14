@@ -1,6 +1,6 @@
 # Public API and misuse resistance
 
-For the short workflow (compose once, `Play_Loaded` with a completion, the pose builder, explicit receipts for damage), see [GETTING_STARTED.md](GETTING_STARTED.md). Sections 9 to 13 cover the outcome table, the builder, managed playback, player presets and subject queries.
+For the short workflow (compose once, `Create_FromClip` with Auto delivery and `OnFinished`, the pose builder, explicit receipts for damage), see [GETTING_STARTED.md](GETTING_STARTED.md). Sections 8 to 12 cover the outcome table, the builder, delivery and release, the player spec and subject queries.
 
 The public surface is implemented in `Source/CkProceduralAnimation/Public/CkProceduralAnimation/{Action,ActionBuilder,ActionPlayer,Articulation,Limb,LimbControl}`. Native, Blueprint VM and AngelScript focused tests exercise it; [PROGRESS.md](PROGRESS.md) records the current gate and outstanding release evidence. This reference describes callable names, not a certification of every acceptance row.
 
@@ -13,7 +13,7 @@ Reflected values use private UPROPERTY fields and CK accessors. Typesafe handles
 | Articulation on subject root | FCk_Handle_ProceduralArticulation | Add |
 | Generic limb, direct lifetime child of root | FCk_Handle_ProceduralLimb | Created atomically by articulation composition |
 | Player on the articulation root | FCk_Handle_ProceduralActionPlayer | Add |
-| Scope-owned action instance | FCk_Handle_ProceduralAction | Play / Play_Loaded (managed delivery), Create_FromClip / Create_FromLoadedClip / Create_Manual (explicit delivery) |
+| Scope-owned action instance | FCk_Handle_ProceduralAction | Create_FromClip |
 
 Handles add zero members. State/generation are fragments and receipt values, never embedded into typed handles. Utilities expose Has/Cast/CastChecked/Get_InvalidHandle consistently with the existing feature family.
 
@@ -53,13 +53,11 @@ Create_FromClip(
 
 These Add methods are in their respective Utils classes, not overloads in one BPFL. A subject has one player. Duplicate composition is diagnosed, not silently returned as success.
 
-Create_FromClip synchronously validates outer handles and allocates a Pending action entity only; load/compile/admission is deferred. It does not synchronously load assets or claim limbs. A valid returned handle means a request instance exists, NOT that playback has started. Expected load/admission failure is observable on that instance. Invalid outer handles return invalid with a contextual diagnostic and no partial children.
-
-`Create_FromLoadedClip` accepts `FCk_ProceduralAction_LoadedPlaySpec` with a hard `UCk_ProceduralAction_Data*`. It pins the already-resident source for the call, synchronously compiles and copies immutable content, then enters the same deferred claim/publication/return pipeline. It performs no asset IO and retains no strong UObject dependency after compilation. Edits or garbage collection after the call cannot change the active compiled revision. Invalid content/bindings produce a reserved identity with a typed terminal result; invalid outer handles/configuration return invalid. This supports transient clips assembled from consumer tuners. Loaded-clip native/AS and Blueprint VM execution have focused passing evidence in PROGRESS.
+Create_FromClip synchronously validates the outer handles and the spec and reserves the action's receipt stream. A resident clip is compiled and bound before the call returns: the action comes back PendingAdmission, or already Finished with `Rejected` (`ClipBindingsRejected`) or `InvalidContent` (`InvalidClipContent`). An unloaded clip starts PendingLoad and loads asynchronously. Claims and admission are always deferred: a valid returned handle means a request instance exists, NOT that playback has started. Compilation copies immutable content and retains no strong UObject dependency, so edits or garbage collection after the call cannot change the active compiled revision; transient clips assembled from consumer tuners play the same way. Invalid outer handles, an invalid spec or exhausted receipt capacity return invalid with a contextual diagnostic and no partial children.
 
 ### Blueprint flow
 
-Compose subject -> Add Action Player -> Create From Clip -> Is Valid -> bind OnFinished and inspect Get_State. Tooltips distinguish PendingLoad/PendingAdmission from Acquiring, Playing and Finished. Manual actions expose Ready after acquisition; only Ready accepts a pose batch. Example BP must exercise rejection, cancellation, scope destruction and completed return, not just happy-path construction.
+Compose subject -> Add Action Player -> Create From Clip -> Is Valid -> bind OnFinished and inspect Get_State. Tooltips distinguish PendingLoad/PendingAdmission from Acquiring, Playing and Finished. Example BP must exercise rejection, cancellation, scope destruction and completed return, not just happy-path construction.
 
 ### AngelScript flow
 
@@ -76,7 +74,7 @@ if (State == ECk_ProceduralAction_State::Finished)
 }
 ```
 
-The executable helpers in `Script/CkProceduralAnimation/Examples/CkProceduralAction_Noncombat.as` demonstrate manual control using these namespaces and generated request defaults. A valid created handle means an instance exists; wait for Ready before manual submission, or Playing for managed clip playback.
+The executable helpers in `Script/CkProceduralAnimation/Examples/CkProceduralAction_Noncombat.as` play a clip with Auto delivery and an OnFinished completion using these namespaces. A valid created handle means an instance exists; clip playback reaches Playing on its own.
 
 ## 3. Struct essentials and groups
 
@@ -84,17 +82,13 @@ The executable helpers in `Script/CkProceduralAnimation/Examples/CkProceduralAct
 |---|---|---|
 | FCk_ProceduralArticulation_Spec | Layout, Bindings | Presentation, ClearanceSettings |
 | FCk_ProceduralActionPlayer_Spec | none | Tuning, Capacity, Locomotion (support and walking return policy) |
-| FCk_ProceduralAction_PlaySpec | TSoftObjectPtr<UCk_ProceduralAction_Data> Clip | SlotBindings, AnchorBindings, Mirrors, explicit TuningOverride mode/value |
-| FCk_ProceduralAction_LoadedPlaySpec | UCk_ProceduralAction_Data* Clip | Same PlayOptions bindings/mirrors/tuning group as PlaySpec |
-| FCk_ProceduralAction_MirrorSpec | SourceSlot, DestinationSlot, Plane | none; Plane defaults to XZ (normal Y) |
+| FCk_ProceduralAction_PlaySpec | TSoftObjectPtr<UCk_ProceduralAction_Data> Clip | SlotBindings, Delivery (Explicit by default, or Auto) |
+| FCk_ProceduralAction_MirrorSpec | SourceSlot, DestinationSlot, Plane | none; Plane defaults to XZ (normal Y); builder input |
 | FCk_ProceduralAction_SlotBinding | Slot, LimbId | none |
-| FCk_ProceduralAction_AnchorBinding | Id, FTransform Frame | none; snapshot frame, not live entity tracking |
 | FCk_Request_ProceduralAction_Cancel | Reason FName | none; recovery policy belongs to subject/tuning |
-| FCk_Request_ProceduralAction_Release | none | none |
-| FCk_Request_ProceduralAction_End | none | none; manual control only, returns resources then completes |
+| FCk_Request_ProceduralAction_Release | none | none; early teardown only |
 | FCk_Request_ProceduralActionPlayer_ConsumeReceipts | ActionIdentity, ThroughStreamSequence | none; action-scoped cursor, inclusive acknowledgement |
-| FCk_Request_ProceduralActionPlayer_UpdateTuning | Tuning | none; active instances unchanged |
-| FCk_Request_ProceduralArticulation_RecoverLimbs | LimbIds | none; retries use configured finite return budget |
+| FCk_Request_ProceduralArticulation_RecoverUnplantedLimbs | none | none; recovers every limb that is Unplanted when it drains, as one set |
 
 Do not add raw booleans such as Force, IgnoreSupport, SkipValidation, NoReturn, ApplyImmediately or AllowPartial. If a new policy is legitimate, name it, define its safety contract and validate it.
 
@@ -114,24 +108,23 @@ Request_Cancel(
     const FCk_Delegate_Request_OnCompleted& InDelegate);
 ```
 
-Request_Release follows the same form. Request_UpdateTuning targets the player; Request_RecoverLimbs targets the articulation. Request completion uses normal Ck machinery. It is distinct from action completion and observed settlement; terminal outcomes remain pollable when AS callers omit delegates.
+Request_Release follows the same form; Request_RecoverUnplantedLimbs targets the articulation. Request completion uses normal Ck machinery. It is distinct from action completion and observed settlement; terminal outcomes remain pollable when AS callers omit delegates.
 
-Create_Manual has the same scope/player arguments and handle return as Create_FromClip, substituting FCk_ProceduralAction_ControlSpec. Request_End and Request_SubmitPoseBatch follow the action request form above. Read_Receipts(Player, ActionIdentity, AfterStreamSequence, MaxRecords) returns a copied bounded page. Request_ConsumeReceipts targets Player with the request type above; it never acknowledges another action's records. These are separate named UFUNCTIONs, not overloads.
+Read_Receipts(Player, ActionIdentity, AfterStreamSequence, MaxRecords) returns a copied bounded page. Request_ConsumeReceipts targets Player with the request type above; it never acknowledges another action's records, and on an Auto identity it ensures and completes `Failed_NotEnqueued` without moving the cursor. These are separate named UFUNCTIONs, not overloads.
 
 A read cursor behind the gameplay-acknowledged cursor returns `ECk_ProceduralAction_ReadResult::Gap`, inclusive `FirstMissingSequence`/`LastMissingSequence`, and any retained records after that range. `LastStreamSequence` is resumable even when the page contains no records. Negative or future cursors remain `InvalidCursor`. Independent debugger/editor copies never consume gameplay records and retain explicit missing ranges instead of inventing events.
 
-Cancellation never resets an existing return deadline. Duplicate cancellation during Returning/Cancelling or after Finished completes with the standard `ECk_Request_OperationResult::Failed`; query the action state/result for its existing outcome. Request_Release of a running action requests cancellation and removes the instance after recovery. Scope destruction transfers reconciliation to the subject and retained receipt stream without relying on a living delegate target.
+Cancellation never resets an existing return deadline. Duplicate cancellation during Returning/Cancelling or after Finished completes with the standard `ECk_Request_OperationResult::Failed`; query the action state/result for its existing outcome. Request_Release of a running action requests cancellation and removes the instance after recovery; of a finished action, it destroys the instance at once. The normal flow needs neither: an action releases itself once its terminal record is acknowledged (section 10). Scope destruction transfers reconciliation to the subject and retained receipt stream without relying on a living delegate target.
 
-Provide BindTo_OnStateChanged and BindTo_OnFinished using the existing signal binder/unbinder conventions. Terminal payload is a copied value with action identity/generation, result and recovery outcome; never a reference into mutable storage. Emit only after state is committed. Reentrant calls enqueue for a later drain, never mutate the current iteration.
+BindTo_OnStateChanged and BindTo_OnFinished use the existing signal binder/unbinder conventions. OnFinished fires once, when the state commits to Finished, with `FCk_ProceduralAction_Terminal`: a copied value with action identity/generation, result (outcome, recovery, reason) and failure context, never a reference into mutable storage. Emit only after state is committed. Reentrant calls enqueue for a later drain, never mutate the current iteration.
 
 ## 5. Queries
 
 | Query | Result and contract |
 |---|---|
-| Get_State(Action) | PendingLoad, PendingAdmission, Acquiring, Ready (manual only), Playing (clip only), Returning, Cancelling, Finished |
+| Get_State(Action) | PendingLoad, PendingAdmission, Acquiring, Playing, Returning, Cancelling, Finished |
 | Get_Result(Action) | Outcome, Recovery and Reason; default Outcome=None; Finished or a Terminal record establishes completion |
 | Get_LastReceipt(Action) | HasAcceptedPose plus copied receipt; before first publication false |
-| Get_AdmissionReport(Player, PlaySpec) | static/resident-content diagnostics only; Advisory=true, never reserves or guarantees later admission |
 | Get_LimbControl(Subject,LimbId) | State, Owner, Generation, Locomotor, Participating, TrustedSupport and Reason in one copied observation |
 | Get_Health(Subject), Get_Fault(Subject) | Operational/Faulted and typed fault; faulted subjects require recomposition |
 | Get_SettledRevision(Subject) | subject-wide accepted publication revision; other actions/holds can advance it |
@@ -140,7 +133,7 @@ Provide BindTo_OnStateChanged and BindTo_OnFinished using the existing signal bi
 | Read_Receipts(Player,Identity,AfterSequence,MaxRecords) | copied records, last sequence, terminal/pending state; bad cursor rejected, no consumption side effect |
 | Validate_Data(Data) | structured validation report using the same compiler validation as cook/runtime |
 
-Never use 'CanPlay' as a promise: support can change before deferred admission. Get_AdmissionReport explicitly distinguishes AssetNotResident/NotEvaluated from Invalid.
+Never use 'CanPlay' as a promise: support can change before deferred admission. Validate_Data checks content only; binding and admission are reported on the action.
 
 ## 6. Receipt schema
 
@@ -154,35 +147,23 @@ FCk_ProceduralAction_Receipt is an immutable reflected observation:
 - Named windows active throughout each returned half-open interval `[FromTime, ToTime)`. Clip publication stops at every window enter/exit; events at `ToTime` apply after that interval. Point markers may remain interior. Marker crossings have stable sequence IDs.
 - Previous/current settled poses and optional evaluated intermediate samples.
 - Continuity enum: Continuous, FirstSample, Teleported, ControllerChanged, SolverDiscontinuity, Incomplete.
-- Tuning revision and bounded sampling counters.
+- Bounded sampling counters.
 
 The first sample supplies no previous continuous interval. A receipt is not authoritative damage, physics contact, or an observed intermediate rendered frame. Retrieval does not mutate or acknowledge the action; internal publication drives its clock. Diagnostic history may report ReceiptGap; it never fabricates missing events.
 
-Reliable consumption uses player-owned streams keyed by ActionIdentity. Each record has a strictly increasing action-local StreamSequence, distinct from SampleSequence, and a typed kind: AcceptedPose, WindowsClosed, Terminal. Consumers deduplicate by ActionIdentity + StreamSequence. Request_ConsumeReceipts includes that identity and an inclusive ThroughStreamSequence. Reject future/out-of-stream cursors; repeated acknowledgement is idempotent. This is one designated acknowledging consumer per stream; extra observers use signals/diagnostic copies. Signals do not erase the inbox.
+Reliable consumption uses player-owned streams keyed by ActionIdentity. Each record has a strictly increasing action-local StreamSequence, distinct from SampleSequence, and a typed kind: AcceptedPose, WindowsClosed, Terminal. Consumers deduplicate by ActionIdentity + StreamSequence. Request_ConsumeReceipts includes that identity and an inclusive ThroughStreamSequence. Reject future/out-of-stream cursors; repeated acknowledgement is idempotent. This is one designated acknowledging consumer per stream, the caller for an Explicit identity and the player for an Auto one; extra observers use signals/diagnostic copies. Signals do not erase the inbox.
 
 Capacity is a construction group, not mutable live tuning. Reserve one complete stream and result slot at action creation, including two non-pose slots for an unconditional all-window closure summary and terminal record. RecordsPerInstance bounds ordinary records; overflow closes windows, stops new motion and finishes with ReceiptOverflow through the reserved slots. A closure carries all active window IDs and reason with HasAcceptedPose=false; it precedes Terminal, including cancellation/support loss without a new pose. Terminal includes recovery outcome. No event is silently overwritten.
 
-MaxRetainedInstances counts all reserved streams/results, including live actions; MaxConcurrentInstances cannot exceed it. Action Release/scope destruction may remove the entity, but recovery completion still appends its terminal record without touching the dead entity. A finished live entity remains queryable until Release/scope death even after acknowledgement. Reclaim a reservation after entity removal plus terminal acknowledgement. For a removed entity whose consumer never acknowledges, finite OrphanRetentionTimeout starts at terminal publication; expiry reclaims the stream and records a diagnosed abandoned result. Read/consume with its old identity returns StreamExpired, never empty-success. IDs are not reused within player lifetime. Consumers reconcile player/action identity and expiry before retaining window state. This is bounded orphan retention, not infinite delivery to a destroyed scope. Player/subject destruction ends all streams; no delivery claim crosses world teardown.
+Retained streams, live or finished, are capped at four per concurrent action (section 11). A finished action stays queryable until its terminal record is acknowledged; the player's next service pass then destroys it. Scope destruction may remove the entity earlier, but recovery completion still appends its terminal record without touching the dead entity. A stream is reclaimed after entity removal plus terminal acknowledgement. For a removed entity whose consumer never acknowledges, a 2 s orphan retention starts at terminal publication; expiry reclaims the stream and records a diagnosed abandoned result. Read/consume with its old identity returns StreamExpired, never empty-success. IDs are not reused within player lifetime. Consumers reconcile player/action identity and expiry before retaining window state. This is bounded orphan retention, not infinite delivery to a destroyed scope. Player/subject destruction ends all streams; no delivery claim crosses world teardown.
 
 Polling LastReceipt is for presentation/diagnostics. Effects consumers drain after publication and process StreamSequence in order: an accepted interval before closure remains historical evidence, while closure bars intervals at/after its boundary. Closure does not retroactively erase accepted intervals. A consumer may explicitly reject late evidence under its own gameplay policy; the framework neither promises damage nor conceals that discard. Never execute a cached interval twice or keep using a window merely because Enter was once observed.
 
-## 7. Low-level procedural callers
-
-Create_Manual takes FCk_ProceduralAction_ControlSpec containing LimbIds, optional BodyChannel, captured AnchorBindings and InputTimeout. Return policy comes from admitted player tuning/locomotion settings. Manual control uses the same claims, support, solve and return path as clips; it does not start a clip clock.
-
-Request_SubmitPoseBatch takes one complete batch for all claimed channels, an optional opaque correlation token and the standard completion delegate. The framework assigns sequence/generation; caller tokens never authorize writes. Before Ready, or while an earlier batch is unsettled, completion returns Failed with no coalescing. A partial batch rejects atomically. Positive service time without new accepted input beyond InputTimeout initiates return. Manual control cannot submit gameplay markers/windows; callers own those semantics.
-
-`FCk_ProceduralAction_LimbTarget` leaves bend selection to the limb's authored solver pole by default (`HasBend=false`). `Set_BendDirection` explicitly enables a per-target bend override; `Clear_BendDirection` (or `Set_HasBend(false)` in AngelScript) restores the authored pole. The inactive direction value is retained for authoring but ignored during candidate validation and solve. An active override must be finite and nonzero. Blueprint Details exposes `HasBend` and enables `BendDirection` editing only while it is true.
-
-Ready is retained while a manual batch is pending; Get_LastReceipt and the operation outcome expose completion without a transient state race. Request_End stops accepting batches, closes control, returns resources, then reports Completed. It is valid only for a manual instance; clips end by their timeline or Request_Cancel. InputTimeout is a failure result, not normal completion.
-
-This supports code-driven pointing, reaching and procedural inspection without making callers reverse-engineer clip files. It must not create a second unguarded SetFootTarget escape hatch.
-
-## 8. Diagnostics and defaults
+## 7. Diagnostics and defaults
 
 `UCk_Utils_ProceduralAnimation_Debug_UE::Get_ActionSnapshot` and `Get_ControlSnapshot` return reflected value copies for native, Blueprint and AngelScript tools. Call on the game thread. Invalid, removed or wrong-feature handles return `Available=false`; inspecting a subject never reserves resources, loads content, queries the world or advances simulation. Copies are observations, not authority to submit poses or apply effects.
 
-The action snapshot identifies the pinned content/tuning revisions, accepted time, backlog, pending publication (including a queued manual batch), and currently active watchdogs. Deadline elapsed/remaining values use the runtime's serviced clocks. The subject snapshot exposes settled revision, controller ownership, original return deadlines, support leases, committed contacts/reservations and proposed landing destinations. Root-owned recovery remains inspectable after its action entity disappears.
+The action snapshot identifies the pinned content revision, accepted time, backlog, pending publication and currently active watchdogs. Deadline elapsed/remaining values use the runtime's serviced clocks. The subject snapshot exposes settled revision, controller ownership, original return deadlines, support leases, committed contacts/reservations and proposed landing destinations. Root-owned recovery remains inspectable after its action entity disappears.
 
 `SupportFresh` validates the support/root frame; it does not assert that contacts were solved this frame. A lease's `ProjectedRegion` is the uninset convex hull projected onto the support plane through the root proxy. Interpret it together with `Policy.ProjectedRegionInsetCm`, `MinimumEdgeDistanceCm` and `SupportResult`; the drawn hull alone is not a permitted takeoff region. Proposed landing targets and actual trusted contact evidence are separate fields. Recorded receipt poses retain their own stamp and must not be relabeled with current live diagnostics.
 
@@ -197,78 +178,69 @@ The integration acceptance set covers:
 - authored two-limb gesture with body counter-motion.
 These examples use no game enemy classes, damage tags or game-project imports. Consult PROGRESS for each example's executed evidence; this list is not a claim that every example has passed its final runtime gate.
 
-## 9. Outcomes, likely causes and corrective actions
+## 8. Outcomes, likely causes and corrective actions
 
-`FCk_ProceduralAction_Result` carries `Outcome`, `Recovery` and `Reason`; the terminal record and the managed completion also carry `FCk_ProceduralAction_FailureContext` (phase, claimed limb IDs, elapsed against limit for a missed deadline, observed against budget with a unit name). Only measured fields are filled: None, zero and empty mean "not measured". `UCk_Utils_ProceduralAction_UE::Get_ResultText(Result, Context)` renders both for a person; it formats on demand, renders an unknown reason as its identifier and is not meant for branching. Branch on `Outcome`, `Recovery` and, for managed delivery, `ECk_ProceduralAction_DeliveryStatus`.
+`FCk_ProceduralAction_Result` carries `Outcome`, `Recovery` and `Reason`; the terminal record and the OnFinished payload (`FCk_ProceduralAction_Terminal`) also carry `FCk_ProceduralAction_FailureContext` (phase, claimed limb IDs, elapsed against limit for a missed deadline, observed against budget with a unit name). Only measured fields are filled: None, zero and empty mean "not measured". `UCk_Utils_ProceduralAction_UE::Get_ResultText(Result, Context)` renders both for a person; it formats on demand, renders an unknown reason as its identifier and is not meant for branching. Branch on `Outcome` and `Recovery`.
 
-The reasons below are the ones the runtime writes (checked against the `Action/`, `ActionPlayer/` and `LimbControl/` sources on 2026-10-12). Five kinds of failure read differently: rejected input (`Rejected`, `InvalidContent`, `AssetFailed`), unreachable or unsettled motion (`SubjectPoseRejected`, `PublicationFailed`, `PublicationTimeout`, `SamplingBudgetExceeded`), support loss (`SupportLost`), a delivery gap (managed `Delivery` `Gap` or `Expired`, explicit `ReadResult` `Gap` or `StreamExpired`), and a failed return (`Recovery` `Failed`, `RecoveryFailed`).
+The reasons below are the ones the runtime writes (checked against the `Action/`, `ActionPlayer/` and `LimbControl/` sources on 2026-10-13). Five kinds of failure read differently: rejected input (`Rejected`, `InvalidContent`, `AssetFailed`), unreachable or unsettled motion (`SubjectPoseRejected`, `PublicationFailed`, `PublicationTimeout`, `SamplingBudgetExceeded`), support loss (`SupportLost`), a delivery gap on an Explicit stream (`ReadResult` `Gap` or `StreamExpired`), and a failed return (`Recovery` `Failed`, `RecoveryFailed`).
 
 | Outcome | Reason(s) | Likely cause | Corrective action |
 |---|---|---|---|
-| `None` | none | No terminal was observed: the producer never finished before delivery ended (a managed completion with `Delivery` `PlayerLost` or `Expired`), or the action has not finished yet. | Read `Delivery`; never treat `None` as success. Keep the player alive for as long as the action's result matters. |
-| `Completed` | none, or the reason the return reported | The clip reached its end, or `Request_End` ended a manual action, and the limbs returned. | Nothing. Check `Recovery`: `Succeeded` means every claimed limb is back under its default control. |
-| `Rejected` | `ClipBindingsRejected` | A slot without a binding, a binding to a limb the subject lacks, two slots on one limb, a missing anchor binding, or more simultaneous windows or events than the player capacity allows. | `Get_AdmissionReport(Player, PlaySpec)` names the field; fix the bindings or raise `Capacity.MaxWindowsPerReceipt` / `MaxEventsPerReceipt`. |
-| `Rejected` | `MirrorRejected` | A play-option mirror whose destination slot the clip already declares, whose source slot it does not declare or never tracks, whose source track is anchor-relative, or whose destination has no binding to another limb of the subject. | `Get_AdmissionReport` names the mirror (`Mirrors[i]`) and the code (`MirrorDestination`, `MirrorSource`, `MirrorSpace`, `MirrorBinding`, `MirrorPlane`, `ContentLimit`); fix the mirror list or its bindings. |
+| `None` | none | The action has not finished yet. | Wait for `Finished`, `OnFinished` or the terminal record; never treat `None` as success. |
+| `Completed` | none, or the reason the return reported | The clip reached its end and the limbs returned. | Nothing. Check `Recovery`: `Succeeded` means every claimed limb is back under its default control. |
+| `Rejected` | `ClipBindingsRejected` | A slot without a binding, a binding to a limb the subject lacks, two slots on one limb, or more windows (32) or events (64) at one time than a receipt carries. With a resident clip the action is already `Finished` when `Create_FromClip` returns. | Fix the bindings; spread the clip's windows and events. `Validate_Data(Clip)` checks the content itself. |
 | `Rejected` | `Busy`, `UnavailableLimb`, `InvalidChannels`, `InvalidSubject`, `InvalidOwner`, `Faulted`, `AcquireFailed` | Admission found a claimed channel held by another action, a limb that is not available (detached, unplanted, faulted), or a subject that cannot be controlled. | Wait for or cancel the other action; recover unplanted limbs; recompose a faulted subject. Do not retry blindly every frame. |
-| `Rejected` | `SupportUnavailable` | A borrowed walking limb would leave fewer trusted planted contacts than the support policy requires. | Borrow when the walker stands on trusted ground, lower the requirement deliberately, or borrow a different limb. |
-| `Rejected` | `EntryCaptureRejected` | The subject's settled entry pose could not seed the clip's initial values (for example a captured body pose on a subject with no body presentation). | Compose a presentation for body clips; check the slots' initial sources against the subject. |
+| `Rejected` | `SupportUnavailable` | A walking limb is bound while the player's support mode is `Disabled` (the default; Recovery `NotRequired`), or borrowing it would leave fewer trusted planted contacts than the support policy requires. | Author `Locomotion.Support` on the player spec; borrow when the walker stands on trusted ground, lower the requirement deliberately, or borrow a different limb. |
+| `Rejected` | `EntryCaptureRejected` | The subject's settled entry pose could not seed the clip's initial values (for example a captured body pose on a subject with no body presentation). | Compose a presentation for body clips; check the clip's initial sources against the subject. |
 | `InvalidContent` | `InvalidClipContent` | The clip fails the compiler; `Validate_Data(Clip)` lists every diagnostic with its field path. | Fix the clip; the builder's reports use the same field paths. |
-| `AssetFailed` | `AssetLoadFailed`, `LoadTimeout`, `StaleLoadGeneration`, `MissingLoadingState` | The soft clip path does not resolve, or loading outlived `Watchdogs.LoadTimeout` (the context carries elapsed and limit). | Fix the soft path, or preload the clip and use `Play_Loaded` / `Create_FromLoadedClip`. |
+| `AssetFailed` | `AssetLoadFailed`, `LoadTimeout`, `StaleLoadGeneration`, `MissingLoadingState` | The soft clip path does not resolve, or loading outlived `Watchdogs.LoadTimeout` (the context carries elapsed and limit). | Fix the soft path, or preload the clip so `Create_FromClip` compiles it before returning. |
 | `Cancelled` | the caller's cancel reason, or `Released` | `Request_Cancel`, or `Request_Release` of a live action. | Expected when you asked for it; read `Recovery` for the return. |
 | `OwnerLost` | `OwnerLost` | The action's lifetime scope was destroyed. The player still returns the limbs and appends the terminal. | Keep scopes alive while the action matters; drain orphaned explicit streams through `Get_RetainedReceiptIdentities`. |
-| `SubjectLost`, `PartLost` | none | Reserved: no current runtime path writes these. Destroying the player or subject ends managed delivery with `PlayerLost`; losing a bound part faults the subject. | Treat as a failure if seen; read `Get_Health` / `Get_Fault` on the subject. |
-| `SupportLost` | `SupportLost`, `SupportHoldTimeout`, `SupportEmergencyRequested` | While a walking limb was borrowed, the other trusted contacts dropped below the policy, or the gait needed the limb back. | Expected on unstable ground. Require more contacts with `Make_CountOnlySupport`, or keep the action shorter. |
+| `SubjectLost`, `PartLost` | none | Reserved: no current runtime path writes these. Destroying the player ends its streams and destroys its live Auto actions; losing a bound part faults the subject. | Treat as a failure if seen; read `Get_Health` / `Get_Fault` on the subject. |
+| `SupportLost` | `SupportLost`, `SupportHoldTimeout`, `SupportEmergencyRequested` | While a walking limb was borrowed, the other trusted contacts dropped below the policy, or the gait needed the limb back. | Expected on unstable ground. Require more contacts in `Locomotion.Support`, or keep the action shorter. |
 | `AcquisitionTimeout` | `AcquisitionTimeout` | Claims or the first settled entry did not complete within `Watchdogs.AcquisitionTimeout` (context: elapsed, limit). | Look for a held channel or a subject that never settles; raise the watchdog only when acquisition is legitimately slow. |
 | `PublicationTimeout` | `PublicationTimeout`, `ClipPublicationTimeout` | A staged pose was not settled and published in time (context: elapsed, limit). | Usually unreachable or blocked targets: check the endpoint errors in the last receipt and the limb's reach. |
 | `PublicationFailed` | `SettlementFailed`, `HoldSettlementFailed`, `ReceiptRejected` | The solver did not settle the staged pose, or the receipt store refused a record. | Inspect `Get_LastReceipt` endpoint errors and chain state; check the player capacity. |
 | `SubjectPoseRejected` | `SubjectPoseRejected`, `ClipHoldRejected`, `HoldCandidateInvalid`, `ReturnReattachmentDiscontinuity`, or the subject's interruption reason | A requested pose the subject cannot hold: non-rigid or unreachable targets under `RejectUnreachable`, a body offset outside admission, or a reattachment discontinuity. | Keep targets within reach or author `ProjectToReach`; keep body offsets rigid and bounded. |
 | `SamplingBudgetExceeded` | `SamplingBudgetExceeded`, `SettledMotionExceededSamplingLimits` | One accepted step moved an endpoint or a segment farther than the tuned sampling budget (context: observed and budget in micrometres or millidegrees when measured). | Slow the clip (`PlayRate`, longer phases) or raise the `Tuning.Sampling` limits deliberately. |
-| `ReceiptOverflow` | `ReceiptRejected` | Explicit delivery whose consumer did not acknowledge records fast enough (context: pending records against `RecordsPerInstance` at the per-action limit). | Drain and `Request_ConsumeReceipts` every frame, raise `Capacity.RecordsPerInstance`, or use managed delivery. |
-| `InputTimeout` | `InputTimeout` | A manual action received no new accepted input within `InputTimeout` (context: elapsed, limit). | Submit pose batches continuously while the action should hold, or end it with `Request_End`. |
+| `ReceiptOverflow` | `ReceiptRejected` | Explicit delivery whose consumer did not acknowledge records fast enough (context: pending records against `RecordsPerInstance` at the per-action limit). | Drain and `Request_ConsumeReceipts` every frame, raise `Capacity.RecordsPerInstance`, or use Auto delivery. |
 | `RecoveryFailed` | the return's reason: `ReturnTimeout`, `ReturnSettlementTimeout`, `ReturnSettlementFailed`, `ReturnProbeAttemptsExhausted`, `ReturnPreparationFailed`, `ReturnHandoffStale`, `ReturnReattachmentFailed`, `ReturnReattachmentEndpointChanged` | The motion completed but a limb could not return: no trusted ground within the return budget, or the return could not settle. The context carries elapsed and limit only when a deadline was missed. | The limb stays `Unplanted` (`Get_UnplantedLimbIds`). Restore usable ground, then `Request_RecoverUnplantedLimbs`. Any other outcome with `Recovery` `Failed` means the same for its limbs. |
 
-## 10. Pose builder
+## 9. Pose builder
 
 `UCk_Utils_ProceduralActionBuilder_UE` (AngelScript `utils_procedural_action_builder`, header `ActionBuilder/CkProceduralActionBuilder_Utils.h`) edits a value-only `FCk_ProceduralAction_ClipDraft` (the clip's body channel, slots, phases, markers and windows). Every mutation takes the draft by reference, validates every input before writing and returns `FCk_ProceduralAction_ValidationReport`; an `Invalid` report leaves the draft unchanged and names the field with the compiler's field paths. Nothing is sorted, clamped or invented.
 
 | Function | Use |
 |---|---|
-| `Make_FromRecipe(Recipe, OutDraft)` | Starting data: `Blank` (one Motion phase), `BodyLean` (Prepare, Execute and Recover body keys), `Reach` and `Sweep` (one slot). Limb recipes want `LimbRestNormalized`, or an explicit rest target; the report warns otherwise. |
+| `Make_FromRecipe(Recipe, OutDraft)` | Starting data: `Blank` (one Motion phase), `BodyLean` (Prepare, Execute and Recover body keys), `Reach` and `Sweep` (one slot). Limb recipes want `LimbRestNormalized`; the report warns otherwise, and the rest is then the slot frame's origin. |
 | `Make_Draft_FromData(Clip, OutDraft)` | Copies an existing clip for editing. |
-| `Add_Phase`, `Add_Slot`, `Set_BodyChannel`, `Set_SlotFrame`, `Set_PhaseProgress` | Structure, the per-slot coordinate frame, and a phase's progress curve (`Preset` easing, or a monotone `CustomCurve` with `Linear` easing). |
+| `Add_Phase`, `Add_Slot`, `Set_BodyChannel`, `Set_SlotFrame(Draft, Slot, Space)` | Structure and the per-slot coordinate frame. A phase's progress is one preset easing on `FCk_ProceduralAction_Phase`. |
 | `Add_BodyKey`, `Add_LimbKey`, `Add_PoseKey`, `Replace_PoseKey` | Keys. A pose key is atomic over the body and every listed limb; `Replace_PoseKey` requires existing keys at that time. |
 | `Add_Marker`, `Add_Window` | Events on the elapsed phase timeline; windows are half-open. |
-| `Mirror_Slot(Draft, MirrorSpec)` | Writes a reflected copy of a declared source slot's tracks into a declared destination slot (body-local and root-relative frames only; rest-normalized and anchor-relative frames need a subject and are rejected here). |
-| `Build_Into(Draft, Clip)` | Compiles the draft with the clip compiler and, only when it compiles, writes the five fields into a caller-owned clip. Not Play and not an editor transaction. |
-| `Write_Into(Draft, Clip)` | Writes the five fields without compiling, for incremental authoring: a clip still missing keys can be saved. Rejects only a null clip or an unknown compatibility version. Play, the `Create_*` functions and `Build_Into` still compile and refuse such a clip. |
+| `Mirror_Slot(Draft, MirrorSpec)` | Writes a reflected copy of a declared source slot's tracks into a declared destination slot (body-local and root-relative frames only; a rest-normalized frame needs a subject and is rejected here). Bind the destination slot to the opposite limb at play. |
+| `Build_Into(Draft, Clip)` | Compiles the draft with the clip compiler and, only when it compiles, writes the five fields into a caller-owned clip. Not a play and not an editor transaction. |
+| `Write_Into(Draft, Clip)` | Writes the five fields without compiling, for incremental authoring: a clip still missing keys can be saved. Rejects only a null clip or an unknown compatibility version. `Create_FromClip` and `Build_Into` still compile and refuse such a clip. |
 
 The clip object is caller-owned and must stay referenced while it is built and played. Build per input revision, not per frame. `ReflectVector`, `ReflectRotation` (`q' = (w, -S v)`) and `ComputeCatmullRomTangents` in `ck::procedural_action` are the shared pure helpers.
 
-**Runtime mirrors.** `FCk_ProceduralAction_PlayOptions::_Mirrors` (on both `PlaySpec` and `LoadedPlaySpec`) mirrors at play time instead of in the draft. Each `FCk_ProceduralAction_MirrorSpec` adds its destination slot to the play's compiled copy before slots are bound, on the loaded path, the soft-load path and in `Get_AdmissionReport` alike. Positions, tangents and bend guides are reflected across the plane in the body frame, orientations as `(w, -S v)`. Rest-normalized tracks are converted through both bound limbs' rest frames and chain lengths, so the destination stays rest-normalized in its own limb's frame and its endpoints mirror the source's even when the two limbs differ. Body motion, markers and windows are never mirrored or duplicated. The destination slot needs its own binding to a limb other than the source's; a rejected mirror finishes the action `Rejected` with reason `MirrorRejected`. At most 64 mirrors, and at most 64 slots after expansion.
+## 10. Delivery and release
 
-## 11. Managed playback
+`FCk_ProceduralAction_PlaySpec::_Delivery` chooses who acknowledges the action's receipt stream. It is fixed when `Create_FromClip` reserves the identity.
 
-`Play(Scope, Player, PlaySpec, OnCompleted)` and `Play_Loaded(Scope, Player, LoadedPlaySpec, OnCompleted)` return `FCk_ProceduralAction_ManagedStart` (action handle, identity, start report). The framework drains and acknowledges the identity's receipt stream, fires `OnCompleted` once with `FCk_ProceduralAction_ManagedCompletion` (identity, producer `Result`, `Delivery`, failure `Context`), then releases the action. No callback fires inside the call; a clip rejected while `Play_Loaded` runs completes on a later frame.
+- **Explicit** (the default). The caller drains with `Read_Receipts` and acknowledges with `Request_ConsumeReceipts`. Damage that must see every accepted interval uses it.
+- **Auto.** The player acknowledges every record of the identity at the start of each of its service passes. `BindTo_OnFinished` is the completion: it fires once, when the state commits to `Finished`, with `FCk_ProceduralAction_Terminal`. Bind it right after `Create_FromClip`; with the default `FireIfPayloadInFlightThisFrame` policy it also reports a resident clip rejected inside the call. `Request_ConsumeReceipts` on the identity ensures and completes `Failed_NotEnqueued`. `Read_Receipts` stays an ordinary non-consuming read for every identity, so the gameplay debugger keeps recording Auto streams. Auto supports presentation and noncritical effects; it is not a damage channel.
+- **Release.** Either way the action releases itself: once its state is `Finished` and its stream's terminal record is acknowledged, the player's next service pass destroys the action entity (destruction completes in the end-of-frame lifetime pass). For Explicit, acknowledging means `Request_ConsumeReceipts` through the terminal record. For Auto, a terminal written during frame N is acknowledged, and its action destroyed, in the service pass of frame N+1. `Request_Release` is for early teardown only: a finished action is destroyed at once, a running one returns its limbs first. A player's end of play destroys its live Auto actions.
 
-- **Start report.** `Valid` whenever an action was created. `Invalid`, with a `StartRejected` diagnostic, an invalid action and no identity, when nothing was created; no completion follows.
-- **Delivery status.** `Complete`: the terminal and every page before it were delivered. `Expired`: the stream was reclaimed before delivery finished. `PlayerLost`: the player was destroyed first; fired once per uncompleted identity from the player's end-of-play pass, with Outcome `None`, after that pass requested destruction of the identity's live action. Managed delivery is the stream's only acknowledging reader, so pages never carry a gap; records lost to capacity surface as the producer outcome `ReceiptOverflow`.
-- **Sealed identity.** The seal is on the receipt stream, set when the identity is reserved. `Get_IsManagedDelivery(Player, Identity)` is true from the call's return for as long as the stream is retained, including inside and after the completion callback until the released stream is reclaimed. `Request_ConsumeReceipts` on the identity ensures and completes `Failed_NotEnqueued` without moving the cursor. `Read_Receipts` stays an ordinary non-consuming read for every identity, so the gameplay debugger keeps recording managed streams.
-- **Listeners.** `BindTo_OnManagedRecords` (copied pages, contiguous and in order) and `BindTo_OnManagedAcceptedPose` (accepted receipts only), with matching `UnbindFrom_*`. At most 8 of each kind per identity; a duplicate bind is a no-op; binding to an unknown, explicit or completed identity ensures. A bind made after pages were delivered sees only later pages. A listener may call `Play`, cancel, release or destroy from inside its callback; the next dispatch pass sees the result.
-- **Budget.** `Capacity.ManagedRecordsPerTick` (default 32) bounds the records dispatched per player per tick, shared fairly across identities.
-- **When not to use it.** Managed notifications support presentation and noncritical effects. Damage that must see every accepted interval uses explicit delivery (`Create_*` with `Read_Receipts` and `Request_ConsumeReceipts`). `BindTo_OnFinished` remains the producer's completion and may precede the managed completion.
+## 11. Player spec
 
-## 12. Player presets
+`FCk_ProceduralActionPlayer_Spec` has three groups, set directly and passed to `Add`.
 
-On `UCk_Utils_ProceduralActionPlayer_UE`; each returns an ordinary `FCk_ProceduralActionPlayer_Spec` to pass to `Add`.
+- **Tuning** (`Set_Tuning`) is the only tuning the player's actions play with; each action captures it at creation. Its `Sampling` limits (`MaxEndpointTravelCm`, `MaxSegmentAngularStepDegrees`) also bound every limb return.
+- **Capacity** has two knobs: `MaxConcurrentInstances` (1..64, default 4) and `RecordsPerInstance` (1..4096, default 64). The rest is derived (`Get_MaxRetainedInstances`, `Get_MaxRetainedRecords`, `Get_MaxRetainedPoseTransforms` in `Core/CkProceduralActionReceiptStore.h`): 4 retained streams per concurrent action, at most 256 (16 by default); `RecordsPerInstance` + 2 records per retained stream, at most 1049088 (1056 by default, and always at least 3 x `MaxConcurrentInstances`); 32 pose transforms per ordinary record, at most 1048576 (32768 by default). A receipt carries at most 64 samples, 64 events and 32 windows (`receipt_limits`), and an orphaned finished stream is retained 2 s.
+- **Locomotion** (`Set_Locomotion`) carries `Support` (`FCk_ProceduralLimbControl_Support{Mode, MinimumTrustedContacts}`) and `Return`. Support mode `Disabled` is the default: an action that binds a walking limb finishes at admission with Outcome `Rejected`, Recovery `NotRequired`, reason `SupportUnavailable`, while dedicated limbs and the body channel play as usual. `CountOnly` counts trusted planted contacts, not visually standing legs.
 
-| Function | Result |
-|---|---|
-| `Make_DedicatedPlayerSpec(Tuning)` | Dedicated appendages; walking-limb borrowing stays disabled. |
-| `Make_BorrowingPlayerSpec(FCk_ProceduralActionPlayer_BorrowingSpec{Support, Return, Tuning})` | Walking-limb borrowing with an explicit support policy and return. |
-| `Make_CountOnlySupport(MinimumTrustedContacts)` | A `CountOnly` support that counts trusted planted contacts, not visually standing legs. A value outside 1..64 ensures and is returned unchanged, so `Add` rejects it. |
+No spec guarantees a reachable plant on unknown terrain.
 
-No preset guarantees a reachable plant on unknown terrain. Capacity stays a separate construction group.
+## 12. Subject queries and recovery
 
-## 13. Subject queries and recovery
-
-On `UCk_Utils_ProceduralArticulation_UE`: `Get_IsAnyLimbControlled` (currently action-controlled; a returning limb is not controlled), `Get_IsAnyLimbReturning`, `Get_UnplantedLimbIds` (in `Get_Limbs` order), and `Request_RecoverUnplantedLimbs(Request, OnCompleted)`, which gathers the limbs that are unplanted when the request is processed: an empty set completes `Succeeded` without claims, an incompatible state completes `Failed`. Recover only after usable ground is back. An admitted recovery is not a replanted limb: wait for the limb's control state to return to `Default` with trusted support.
+On `UCk_Utils_ProceduralArticulation_UE`: `Get_IsAnyLimbControlled` (currently action-controlled; a returning limb is not controlled), `Get_IsAnyLimbReturning`, `Get_UnplantedLimbIds` (in `Get_Limbs` order), and `Request_RecoverUnplantedLimbs(Subject, FCk_Request_ProceduralArticulation_RecoverUnplantedLimbs{}, OnCompleted)`, which gathers the limbs that are unplanted when the request is processed and retries them as one set under the player's support and return policy: an empty set completes `Succeeded` without claims, an incompatible state completes `Failed`. Recover only after usable ground is back. An admitted recovery is not a replanted limb: wait for the limb's control state to return to `Default` with trusted support.

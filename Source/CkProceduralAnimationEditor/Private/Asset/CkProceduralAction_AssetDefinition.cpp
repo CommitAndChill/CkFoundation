@@ -2,7 +2,7 @@
 
 #include "CkProceduralAnimation/Action/CkProceduralAction_Data.h"
 
-#include "Toolkit/CkProceduralAction_EditorToolkit.h"
+#include "CkProceduralAnimationEditor/CkProceduralAction_EditorToolkit.h"
 
 #define LOCTEXT_NAMESPACE "CkProceduralActionAssetDefinition"
 

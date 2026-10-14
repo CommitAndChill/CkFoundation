@@ -1,7 +1,97 @@
 #include "CkProceduralAnimationEditor/CkProceduralActionPreview_Config.h"
 
+#include "CkProceduralAnimation/Action/CkProceduralAction_Data.h"
+
+#include "Misc/ConfigCacheIni.h"
+#include "Misc/PackageName.h"
+#include "UObject/Package.h"
+
 namespace ck_procedural_action_preview_config
 {
+    const auto PreviewFloorHalfExtents = FVector{400.0, 400.0, 25.0};
+
+    // The knee of a two-bone chain from InHip to InFoot, swung toward InPole; a foot past reach straightens the knee.
+    auto
+        SolveRestKnee(
+            const FVector& InHip,
+            const FVector& InFoot,
+            const FVector& InPole,
+            double InUpper,
+            double InLower)
+        -> FVector
+    {
+        const auto ToFoot = InFoot - InHip;
+        const auto Distance = FMath::Clamp(ToFoot.Size(), FMath::Abs(InUpper - InLower) + UE_KINDA_SMALL_NUMBER, InUpper + InLower);
+        const auto Along = ToFoot.GetSafeNormal();
+        const auto Forward = (InUpper * InUpper - InLower * InLower + Distance * Distance) / (2.0 * Distance);
+        const auto Rise = FMath::Sqrt(FMath::Max(InUpper * InUpper - Forward * Forward, 0.0));
+        const auto ToPole = InPole - InHip;
+        const auto Bend = (ToPole - Along * FVector::DotProduct(ToPole, Along)).GetSafeNormal();
+        return InHip + Along * Forward + Bend * Rise;
+    }
+
+    auto
+        MakeRestChainBinding(
+            FName InLimbId,
+            const FVector& InHip,
+            const FVector& InFoot,
+            const FVector& InPole,
+            const TArray<float>& InLengths)
+        -> FCk_ProceduralActionPreview_LimbBinding
+    {
+        auto Joints = TArray<FVector>{InHip};
+        if (InLengths.Num() == 2)
+        { Joints.Add(SolveRestKnee(InHip, InFoot, InPole, InLengths[0], InLengths[1])); }
+        else
+        {
+            for (auto Index = 1; Index < InLengths.Num(); ++Index)
+            { Joints.Add(FMath::Lerp(InHip, InFoot, static_cast<double>(Index) / InLengths.Num())); }
+        }
+        Joints.Add(InFoot);
+        auto Frames = TArray<FTransform>{};
+        for (auto Index = 0; Index + 1 < Joints.Num(); ++Index)
+        { Frames.Add(FTransform{FRotationMatrix::MakeFromX(Joints[Index + 1] - Joints[Index]).ToQuat(), Joints[Index]}); }
+        auto Binding = FCk_ProceduralActionPreview_LimbBinding{};
+        Binding.Set_LimbId(InLimbId);
+        Binding.Set_SegmentFrames(Frames);
+        Binding.Set_TerminalFrame(FTransform{InFoot});
+        return Binding;
+    }
+
+    // A rig or gait that lives inside a legacy preview asset goes away with it, so the clip keeps its own copy.
+    template <typename TData>
+    auto
+        OwnedByClip(
+            TData* InData,
+            UCk_ProceduralAction_Data& InClip,
+            const TCHAR* InName)
+        -> TSoftObjectPtr<TData>
+    {
+        if (InData == nullptr)
+        { return {}; }
+        if (InData->IsAsset())
+        { return TSoftObjectPtr<TData>{InData}; }
+        return TSoftObjectPtr<TData>{DuplicateObject<TData>(InData, &InClip, FName{InName})};
+    }
+
+    // The quoted strings of a config line, in order: a TMap<FString, FString> is written as (("Key","Value"),...).
+    auto
+        ReadQuoted(
+            const FString& InLine)
+        -> TArray<FString>
+    {
+        auto Quoted = TArray<FString>{};
+        auto Start = InLine.Find(TEXT("\""));
+        while (Start != INDEX_NONE)
+        {
+            const auto End = InLine.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, Start + 1);
+            if (End == INDEX_NONE)
+            { break; }
+            Quoted.Add(InLine.Mid(Start + 1, End - Start - 1));
+            Start = InLine.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, End + 1);
+        }
+        return Quoted;
+    }
     auto
         IsFiniteRigidBox(
             const FTransform& InFrame,
@@ -164,3 +254,176 @@ auto
     }
     return true;
 }
+
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace ck_procedural_action_preview_config
+{
+    // A preview steps a whole lunge in one frame when asked to, so its sampling allows any limb to cross its whole reach
+    // and turn half a revolution per step; a scenario that cares about the budget authors its own tuning.
+    auto
+        Get_DerivedPreviewTuning(
+            float InLongestReachCm)
+        -> FCk_ProceduralAction_Tuning
+    {
+        auto Tuning = FCk_ProceduralAction_Tuning{};
+        auto Sampling = Tuning.Get_Sampling();
+        Sampling.Set_MaxEndpointTravelCm(FMath::Max(Sampling.Get_MaxEndpointTravelCm(), 2.0f * InLongestReachCm));
+        Sampling.Set_MaxSegmentAngularStepDegrees(180.0f);
+        Tuning.Set_Sampling(Sampling);
+        return Tuning;
+    }
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace ck::procedural_action_editor
+{
+    auto
+        MakeRestLimbBinding(
+            const FCk_ProceduralLeg_Spec& InLeg,
+            const FTransform& InRootFrame)
+        -> FCk_ProceduralActionPreview_LimbBinding
+    {
+        return ck_procedural_action_preview_config::MakeRestChainBinding(InLeg.Get_Id(),
+            InRootFrame.TransformPosition(InLeg.Get_Placement().Get_HipLocal()),
+            InRootFrame.TransformPosition(InLeg.Get_Placement().Get_RestFootLocal()),
+            InRootFrame.TransformPosition(InLeg.Get_Chain().Get_PoleLocal()),
+            InLeg.Get_Chain().Get_SegmentLengths());
+    }
+
+    auto
+        DerivePreviewConfig(
+            const UCk_ProceduralAction_Data& InClip)
+        -> UCk_ProceduralActionPreview_Config*
+    {
+        const auto& Subject = InClip.Get_EditorSubject();
+        if (auto* Scenario = Cast<UCk_ProceduralActionPreview_Config>(Subject.Get_Scenario().LoadSynchronous()))
+        {
+            auto* Copy = DuplicateObject<UCk_ProceduralActionPreview_Config>(Scenario, GetTransientPackage());
+            Copy->ClearFlags(RF_Public | RF_Standalone | RF_Transactional);
+            Copy->SetFlags(RF_Transient);
+            if (NOT Subject.Get_SlotBindings().IsEmpty())
+            { Copy->Set_SlotBindings(Subject.Get_SlotBindings()); }
+            return Copy;
+        }
+
+        auto* Config = NewObject<UCk_ProceduralActionPreview_Config>(GetTransientPackage(), NAME_None, RF_Transient);
+        Config->Set_SlotBindings(Subject.Get_SlotBindings());
+        auto* Rig = Subject.Get_WalkingRig().LoadSynchronous();
+        if (Rig == nullptr)
+        {
+            Config->Set_SubjectMode(ECk_ProceduralActionPreview_SubjectMode::Standalone);
+            Config->Set_Layout(Subject.Get_Layout());
+            auto Bindings = TArray<FCk_ProceduralActionPreview_LimbBinding>{};
+            auto LongestReach = 0.0f;
+            for (const auto& Limb : Subject.Get_Layout().Get_Limbs())
+            {
+                auto Reach = 0.0f;
+                for (const auto Length : Limb.Get_SegmentLengths())
+                { Reach += Length; }
+                LongestReach = FMath::Max(LongestReach, Reach);
+                const auto Hip = Limb.Get_AttachmentLocal().GetTranslation();
+                const auto Foot = (Limb.Get_RestEndpointLocal() * Limb.Get_AttachmentLocal()).GetTranslation();
+                const auto Pole = Hip + Limb.Get_AttachmentLocal().TransformVectorNoScale(Limb.Get_BendLocal());
+                Bindings.Add(ck_procedural_action_preview_config::MakeRestChainBinding(
+                    Limb.Get_Id(), Hip, Foot, Pole, Limb.Get_SegmentLengths()));
+            }
+            Config->Set_LimbBindings(Bindings);
+            Config->Set_ActionTuning(ck_procedural_action_preview_config::Get_DerivedPreviewTuning(LongestReach));
+            return Config;
+        }
+
+        const auto& Legs = Rig->Get_Legs();
+        auto Clearance = 0.0;
+        for (const auto& Leg : Legs)
+        { Clearance = FMath::Max(Clearance, -Leg.Get_Placement().Get_RestFootLocal().Z); }
+        const auto RootFrame = FTransform{FVector{0.0, 0.0, Clearance}};
+        const auto FloorHalfExtents = ck_procedural_action_preview_config::PreviewFloorHalfExtents;
+        Config->Set_SubjectMode(ECk_ProceduralActionPreview_SubjectMode::Walking);
+        Config->Set_WalkingRig(Rig);
+        Config->Set_WalkingGait(Subject.Get_WalkingGait().LoadSynchronous());
+        Config->Set_RootFrame(RootFrame);
+        Config->Set_PresentationFrame(RootFrame);
+        Config->Set_HasStaticFloor(true);
+        Config->Set_StaticFloorFrame(FTransform{FVector{0.0, 0.0, -FloorHalfExtents.Z}});
+        Config->Set_StaticFloorHalfExtents(FloorHalfExtents);
+        auto Bindings = TArray<FCk_ProceduralActionPreview_LimbBinding>{};
+        auto LongestReach = 0.0f;
+        for (const auto& Leg : Legs)
+        {
+            Bindings.Add(MakeRestLimbBinding(Leg, RootFrame));
+            auto Reach = 0.0f;
+            for (const auto Length : Leg.Get_Chain().Get_SegmentLengths())
+            { Reach += Length; }
+            LongestReach = FMath::Max(LongestReach, Reach);
+        }
+        Config->Set_LimbBindings(Bindings);
+        Config->Set_ActionTuning(ck_procedural_action_preview_config::Get_DerivedPreviewTuning(LongestReach));
+        auto Locomotion = FCk_ProceduralLimbControl_Locomotion{};
+        Locomotion.Get_Support().Set_Mode(ECk_ProceduralLimbControl_SupportMode::CountOnly);
+        Locomotion.Get_Support().Set_MinimumTrustedContacts(FMath::Max(1, Legs.Num() - 2));
+        Config->Set_WalkingLocomotion(Locomotion);
+        return Config;
+    }
+
+    auto
+        MakeSubjectFromLegacyPreview(
+            const UCk_ProceduralActionPreview_Config& InPreview,
+            UCk_ProceduralAction_Data& InClip)
+        -> FCk_ProceduralAction_EditorSubject
+    {
+        auto Subject = FCk_ProceduralAction_EditorSubject{};
+        Subject.Set_SlotBindings(InPreview.Get_SlotBindings());
+        if (InPreview.Get_SubjectMode() == ECk_ProceduralActionPreview_SubjectMode::Walking)
+        {
+            Subject.Set_WalkingRig(ck_procedural_action_preview_config::OwnedByClip(
+                InPreview.Get_WalkingRig().Get(), InClip, TEXT("SubjectRig")));
+            Subject.Set_WalkingGait(ck_procedural_action_preview_config::OwnedByClip(
+                InPreview.Get_WalkingGait().Get(), InClip, TEXT("SubjectGait")));
+            return Subject;
+        }
+        Subject.Set_Layout(InPreview.Get_Layout());
+        Subject.Set_Scenario(TSoftObjectPtr<UObject>{const_cast<UCk_ProceduralActionPreview_Config*>(&InPreview)});
+        return Subject;
+    }
+
+    auto
+        Get_PreviewSiblingPackageName(
+            const FString& InClipPackageName)
+        -> FString
+    {
+        auto Name = FPackageName::GetLongPackageAssetName(InClipPackageName);
+        if (Name.EndsWith(TEXT("_DA")))
+        { Name.LeftChopInline(3); }
+        return FPackageName::GetLongPackagePath(InClipPackageName) + TEXT("/") + Name + TEXT("_Preview_DA");
+    }
+
+    auto
+        FindLegacyPreview(
+            const UCk_ProceduralAction_Data& InClip)
+        -> UCk_ProceduralActionPreview_Config*
+    {
+        auto Pairs = FString{};
+        if (GConfig != nullptr && GConfig->GetString(TEXT("/Script/CkProceduralAnimationEditor.Ck_ProceduralActionEditor_UserSettings"),
+            TEXT("_PreviewPathsByClip"), Pairs, GEditorPerProjectIni))
+        {
+            const auto Quoted = ck_procedural_action_preview_config::ReadQuoted(Pairs);
+            for (auto Index = 0; Index + 1 < Quoted.Num(); Index += 2)
+            {
+                if (Quoted[Index] != InClip.GetPathName())
+                { continue; }
+                if (auto* Paired = LoadObject<UCk_ProceduralActionPreview_Config>(nullptr, *Quoted[Index + 1]))
+                { return Paired; }
+            }
+        }
+
+        const auto SiblingPackage = Get_PreviewSiblingPackageName(InClip.GetOutermost()->GetName());
+        if (NOT FPackageName::IsValidLongPackageName(SiblingPackage) || NOT FPackageName::DoesPackageExist(SiblingPackage))
+        { return nullptr; }
+        return LoadObject<UCk_ProceduralActionPreview_Config>(nullptr,
+            *(SiblingPackage + TEXT(".") + FPackageName::GetLongPackageAssetName(SiblingPackage)));
+    }
+}
+
+// --------------------------------------------------------------------------------------------------------------------

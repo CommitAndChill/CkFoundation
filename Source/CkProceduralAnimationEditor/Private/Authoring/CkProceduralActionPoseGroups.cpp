@@ -20,7 +20,7 @@ namespace ck_procedural_action_pose_groups
         -> void
     {
         auto* Entry = InOutTimes.FindByPredicate([InPhaseId, InTime](const FKeyedTime& InEntry)
-            { return InEntry.PhaseId == InPhaseId && InEntry.Time == InTime; });
+            { return InEntry.PhaseId == InPhaseId && ck::procedural_action_editor::IsSamePoseTime(InEntry.Time, InTime); });
         if (Entry == nullptr)
         { Entry = &InOutTimes.Add_GetRef(FKeyedTime{InPhaseId, InTime, {}}); }
         Entry->Channels.AddUnique(InChannel);
@@ -83,6 +83,13 @@ namespace ck_procedural_action_pose_groups
 namespace ck::procedural_action_editor
 {
     auto
+        IsSamePoseTime(
+            double InA,
+            double InB)
+        -> bool
+    { return FMath::IsNearlyEqual(InA, InB, 1.0e-6); }
+
+    auto
         DerivePoseGroups(
             const TArray<FCk_ProceduralAction_Phase>& InPhases,
             const TArray<FCk_ProceduralAction_PoseGroup>& InPersisted,
@@ -93,14 +100,14 @@ namespace ck::procedural_action_editor
         OutGroups.Reset();
         auto Times = CollectKeyedTimes(InPhases);
         auto Claimed = TMap<FString, FGuid>{};
-        const auto ClaimKey = [](FName InPhaseId, double InTime, FName InChannel)
-        { return FString::Printf(TEXT("%s|%.17g|%s"), *InPhaseId.ToString(), InTime, *InChannel.ToString()); };
+        const auto ClaimKey = [&Times](const FKeyedTime* InKeyed, FName InChannel)
+        { return FString::Printf(TEXT("%d|%s"), static_cast<int32>(InKeyed - Times.GetData()), *InChannel.ToString()); };
 
         for (const auto& Group : InPersisted)
         {
             const auto Time = Group.Get_Time().Get_Value();
             const auto* Keyed = Times.FindByPredicate([&Group, Time](const FKeyedTime& InEntry)
-                { return InEntry.PhaseId == Group.Get_PhaseId() && InEntry.Time == Time; });
+                { return InEntry.PhaseId == Group.Get_PhaseId() && IsSamePoseTime(InEntry.Time, Time); });
             auto Broken = FString{};
             if (Group.Get_Channels().IsEmpty())
             { Broken = TEXT("The pose lists no channels."); }
@@ -112,7 +119,7 @@ namespace ck::procedural_action_editor
                         *Group.Get_PhaseId().ToString(), Time);
                     continue;
                 }
-                const auto Key = ClaimKey(Group.Get_PhaseId(), Time, Channel);
+                const auto Key = ClaimKey(Keyed, Channel);
                 if (const auto* Owner = Claimed.Find(Key))
                 {
                     Broken += FString::Printf(TEXT("%s at %s %g is already grouped by pose %s. "), *Channel.ToString(),
@@ -127,7 +134,7 @@ namespace ck::procedural_action_editor
         for (const auto& Entry : Times)
         {
             auto Channels = Entry.Channels.FilterByPredicate([&](FName InChannel)
-                { return NOT Claimed.Contains(ClaimKey(Entry.PhaseId, Entry.Time, InChannel)); });
+                { return NOT Claimed.Contains(ClaimKey(&Entry, InChannel)); });
             if (Channels.IsEmpty())
             { continue; }
             auto Group = FCk_ProceduralAction_PoseGroup{MakeDerivedId(Entry.PhaseId, Entry.Time), Entry.PhaseId,
@@ -177,7 +184,7 @@ namespace ck::procedural_action_editor
             return false;
         }
         const auto Time = InGroup.Get_Time().Get_Value();
-        const auto AtTime = [Time](const auto& InKey) { return InKey.Get_Time().Get_Value() == Time; };
+        const auto AtTime = [Time](const auto& InKey) { return IsSamePoseTime(InKey.Get_Time().Get_Value(), Time); };
         auto Pose = FCk_ProceduralAction_PoseKey{InGroup.Get_Time()};
         auto Limbs = TArray<FCk_ProceduralAction_LimbPoseTarget>{};
         for (const auto Channel : InGroup.Get_Channels())

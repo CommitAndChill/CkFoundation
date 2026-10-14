@@ -49,15 +49,6 @@ namespace ck::procedural_action_editor
             case ECk_ProceduralAction_TrackSpace::RootAtStart:
                 OutFrame = InConfig.Get_RootFrame();
                 break;
-            case ECk_ProceduralAction_TrackSpace::AnchorAtStart:
-            {
-                const auto* Anchor = InConfig.Get_AnchorBindings().FindByPredicate([&InSlot](const auto& InBinding)
-                    { return InBinding.Get_Id() == InSlot.Get_AnchorId(); });
-                if (Anchor == nullptr)
-                { return false; }
-                OutFrame = Anchor->Get_Frame();
-                break;
-            }
             case ECk_ProceduralAction_TrackSpace::LimbRestNormalized:
             {
                 OutPositionScale = 0.0f;
@@ -109,16 +100,13 @@ namespace ck::procedural_action_editor
     }
 
     auto
-        ResolveAuthoredRest(
+        ResolveRestInTrackSpace(
             const UCk_ProceduralActionPreview_Config& InConfig,
             const procedural_action::FCompiledSlot& InSlot,
             FTransform& OutRestInTrackSpace)
         -> bool
     {
         OutRestInTrackSpace = FTransform::Identity;
-        if (InSlot.Get_InitialSource() != ECk_ProceduralAction_InitialSource::AuthoredRest
-            || InSlot.Get_HasExplicitRestTarget())
-        { return false; }
 
         const auto* Binding = InConfig.Get_SlotBindings().FindByPredicate([&InSlot](const auto& InBinding)
             { return InBinding.Get_Slot() == InSlot.Get_Id(); });
@@ -195,3 +183,57 @@ namespace ck::procedural_action_editor
         return InFrame.InverseTransformPosition(InWorldPosition) / InPositionScale;
     }
 }
+
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace ck::procedural_action_editor
+{
+    auto
+        TryGetObservedHip(
+            const FCk_ProceduralArticulation_LimbPose& InLimb,
+            double InFirstSegmentLengthCm,
+            FVector& OutHip)
+        -> bool
+    {
+        if (InLimb.Get_Segments().IsEmpty() || NOT FMath::IsFinite(InFirstSegmentLengthCm) || InFirstSegmentLengthCm <= 0.0)
+        { return false; }
+        const auto& FirstSegment = InLimb.Get_Segments()[0];
+        const auto Rotation = FirstSegment.GetRotation();
+        if (FirstSegment.GetTranslation().ContainsNaN() || NOT Rotation.IsNormalized())
+        { return false; }
+        OutHip = FirstSegment.GetTranslation() - Rotation.RotateVector(FVector::XAxisVector) * (InFirstSegmentLengthCm * 0.5);
+        return NOT OutHip.ContainsNaN();
+    }
+
+    auto
+        Get_LimbReach(
+            const UCk_ProceduralActionPreview_Config& InConfig,
+            FName InLimbId,
+            double& OutReachCm,
+            double& OutFirstLengthCm)
+        -> bool
+    {
+        const auto* Lengths = static_cast<const TArray<float>*>(nullptr);
+        if (InConfig.Get_SubjectMode() == ECk_ProceduralActionPreview_SubjectMode::Walking)
+        {
+            if (const auto* Rig = InConfig.Get_WalkingRig().Get())
+            {
+                if (const auto* Leg = Rig->Get_Legs().FindByPredicate([InLimbId](const FCk_ProceduralLeg_Spec& InLeg)
+                    { return InLeg.Get_Id() == InLimbId; }))
+                { Lengths = &Leg->Get_Chain().Get_SegmentLengths(); }
+            }
+        }
+        else if (const auto* Layout = InConfig.Get_Layout().Get_Limbs().FindByPredicate(
+            [InLimbId](const FCk_ProceduralLimb_Layout& InLayout) { return InLayout.Get_Id() == InLimbId; }))
+        { Lengths = &Layout->Get_SegmentLengths(); }
+        if (Lengths == nullptr || Lengths->IsEmpty())
+        { return false; }
+        OutReachCm = 0.0;
+        for (const auto Length : *Lengths)
+        { OutReachCm += Length; }
+        OutFirstLengthCm = (*Lengths)[0];
+        return true;
+    }
+}
+
+// --------------------------------------------------------------------------------------------------------------------

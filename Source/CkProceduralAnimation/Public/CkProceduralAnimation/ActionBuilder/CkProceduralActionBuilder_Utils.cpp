@@ -142,37 +142,14 @@ namespace ck::procedural_action::builder_detail
         return Count;
     }
 
-    struct FSlotFrame
-    {
-        ECk_ProceduralAction_TrackSpace Space = ECk_ProceduralAction_TrackSpace::BodyLocal;
-        FName AnchorId;
-    };
-
-    // The frame a slot's tracks already use, preferring InPreferred (a phase being edited) over the draft's phases.
     auto
-    Get_SlotFrame(
-        const FCk_ProceduralAction_ClipDraft& InDraft,
-        const FCk_ProceduralAction_Phase* InPreferred,
+    FindSlot(
+        const TArray<FCk_ProceduralAction_Slot>& InSlots,
         FName InSlot)
-        -> FSlotFrame
+        -> int32
     {
-        const auto FrameOf = [InSlot](const FCk_ProceduralAction_Phase& InPhase, FSlotFrame& OutFrame) -> bool
-        {
-            const auto Index = FindTrack(InPhase, InSlot);
-            if (Index == INDEX_NONE)
-            { return false; }
-            OutFrame = FSlotFrame{InPhase.Get_LimbTracks()[Index].Get_Space(), InPhase.Get_LimbTracks()[Index].Get_AnchorId()};
-            return true;
-        };
-        auto Frame = FSlotFrame{};
-        if (InPreferred != nullptr && FrameOf(*InPreferred, Frame))
-        { return Frame; }
-        for (const auto& Phase : InDraft.Get_Phases())
-        {
-            if (FrameOf(Phase, Frame))
-            { return Frame; }
-        }
-        return Frame;
+        return InSlots.IndexOfByPredicate([InSlot](const FCk_ProceduralAction_Slot& InCandidate)
+        { return InCandidate.Get_Id() == InSlot; });
     }
 
     // Index a key at InTime would occupy, or INDEX_NONE when another key already sits at exactly that time.
@@ -287,11 +264,7 @@ namespace ck::procedural_action::builder_detail
                     INDEX_NONE, FString::Printf(TEXT("at most %d"), content_limits::MaxTracksPerPhase), TEXT("one more track"));
                 return;
             }
-            const auto Frame = Get_SlotFrame(InDraft, &InOutPhase, Slot);
-            auto Track = FCk_ProceduralAction_LimbTrack{Slot};
-            Track.Set_Space(Frame.Space);
-            Track.Set_AnchorId(Frame.AnchorId);
-            TrackIndex = Tracks.Add(MoveTemp(Track));
+            TrackIndex = Tracks.Add(FCk_ProceduralAction_LimbTrack{Slot});
         }
         auto& Track = Tracks[TrackIndex];
         const auto Path = TrackPath(InPhaseIndex, TrackIndex);
@@ -491,13 +464,11 @@ namespace ck::procedural_action::builder_detail
     auto
     Make_ReachTrack(
         FName InSlot,
-        ECk_ProceduralAction_TrackSpace InSpace,
         TArray<FCk_ProceduralAction_VectorKey> InKeys)
         -> FCk_ProceduralAction_LimbTrack
     {
         ComputeCatmullRomTangents(InKeys);
         auto Track = FCk_ProceduralAction_LimbTrack{InSlot};
-        Track.Set_Space(InSpace);
         Track.Set_Interpolation(ECk_ProceduralAction_Interpolation::Smooth);
         Track.Set_PositionKeys(InKeys);
         return Track;
@@ -597,7 +568,7 @@ namespace ck::procedural_action::builder_detail
             && InRecipe.Get_Space() != ECk_ProceduralAction_TrackSpace::LimbRestNormalized)
         {
             AddError(OutDiagnostics, TEXT("TrackSpace"), TEXT("Recipe.Space"), {}, {}, INDEX_NONE,
-                TEXT("BodyLocal, RootAtStart or LimbRestNormalized (an anchor needs Set_SlotFrame)"), TEXT("unsupported space"));
+                TEXT("BodyLocal, RootAtStart or LimbRestNormalized"), TEXT("unsupported space"));
         }
     }
 
@@ -660,11 +631,11 @@ namespace ck::procedural_action::builder_detail
                     FCk_ProceduralAction_VectorKey{FCk_FloatRange_0to1{1.0}, InTo}};
             };
             auto Prepare = Make_TwoKeyPhase(TEXT("Prepare"), InRecipe.Get_Prepare(), Easing);
-            Prepare.Set_LimbTracks({Make_ReachTrack(Slot, InRecipe.Get_Space(), MakeKeys(Rest, Rest))});
+            Prepare.Set_LimbTracks({Make_ReachTrack(Slot, MakeKeys(Rest, Rest))});
             auto Execute = Make_TwoKeyPhase(TEXT("Execute"), InRecipe.Get_Execute(), Easing);
-            Execute.Set_LimbTracks({Make_ReachTrack(Slot, InRecipe.Get_Space(), MakeKeys(Rest, Reached))});
+            Execute.Set_LimbTracks({Make_ReachTrack(Slot, MakeKeys(Rest, Reached))});
             auto Recover = Make_TwoKeyPhase(TEXT("Recover"), InRecipe.Get_Recover(), Easing);
-            Recover.Set_LimbTracks({Make_ReachTrack(Slot, InRecipe.Get_Space(), MakeKeys(Reached, Rest))});
+            Recover.Set_LimbTracks({Make_ReachTrack(Slot, MakeKeys(Reached, Rest))});
             Phases = {Prepare, Execute, Recover};
             break;
         }
@@ -676,7 +647,7 @@ namespace ck::procedural_action::builder_detail
             const auto Apex = FVector{-Direction.Y, Direction.X, Direction.Z};
             const auto End = FVector{-Direction.X, -Direction.Y, Direction.Z};
             auto Execute = Make_TwoKeyPhase(TEXT("Execute"), InRecipe.Get_Execute(), Easing);
-            Execute.Set_LimbTracks({Make_ReachTrack(Slot, InRecipe.Get_Space(), TArray<FCk_ProceduralAction_VectorKey>{
+            Execute.Set_LimbTracks({Make_ReachTrack(Slot, TArray<FCk_ProceduralAction_VectorKey>{
                 FCk_ProceduralAction_VectorKey{FCk_FloatRange_0to1{0.0}, Rest + Amplitude * Direction},
                 FCk_ProceduralAction_VectorKey{FCk_FloatRange_0to1{0.5}, Rest + Amplitude * Apex},
                 FCk_ProceduralAction_VectorKey{FCk_FloatRange_0to1{1.0}, Rest + Amplitude * End}})});
@@ -688,7 +659,7 @@ namespace ck::procedural_action::builder_detail
         }
         auto Slots = TArray<FCk_ProceduralAction_Slot>{};
         for (const auto Slot : InRecipe.Get_Slots())
-        { Slots.Emplace(Slot); }
+        { Slots.Add(FCk_ProceduralAction_Slot{Slot}.Set_Space(InRecipe.Get_Space())); }
         Draft.Set_Slots(Slots);
         Draft.Set_Phases(Phases);
         return Draft;
@@ -733,8 +704,7 @@ auto
     Set_SlotFrame(
         FCk_ProceduralAction_ClipDraft& InDraft,
         FName InSlot,
-        ECk_ProceduralAction_TrackSpace InSpace,
-        FName InAnchorId)
+        ECk_ProceduralAction_TrackSpace InSpace)
     -> FCk_ProceduralAction_ValidationReport
 {
     using namespace ck::procedural_action;
@@ -745,79 +715,17 @@ auto
             TEXT("a declared slot"), InSlot.ToString());
     }
     const auto SpaceIsKnown = InSpace == ECk_ProceduralAction_TrackSpace::BodyLocal || InSpace == ECk_ProceduralAction_TrackSpace::RootAtStart
-        || InSpace == ECk_ProceduralAction_TrackSpace::AnchorAtStart || InSpace == ECk_ProceduralAction_TrackSpace::LimbRestNormalized;
-    if (NOT SpaceIsKnown || (InSpace == ECk_ProceduralAction_TrackSpace::AnchorAtStart) == InAnchorId.IsNone())
+        || InSpace == ECk_ProceduralAction_TrackSpace::LimbRestNormalized;
+    if (NOT SpaceIsKnown)
     {
         builder_detail::AddError(Diagnostics, TEXT("TrackSpace"), TEXT("Space"), {}, InSlot, INDEX_NONE,
-            TEXT("supported space with anchor ID iff AnchorAtStart"), TEXT("invalid space/anchor pair"));
-    }
-    auto Phases = InDraft.Get_Phases();
-    auto HasTrack = false;
-    for (const auto& Phase : Phases)
-    { HasTrack |= builder_detail::FindTrack(Phase, InSlot) != INDEX_NONE; }
-    if (NOT HasTrack)
-    {
-        if (Phases.IsEmpty())
-        {
-            builder_detail::AddError(Diagnostics, TEXT("EmptyPhases"), TEXT("Phases"), {}, InSlot, INDEX_NONE,
-                TEXT("a phase to hold the slot frame"), TEXT("empty"));
-        }
-        else if (Phases[0].Get_LimbTracks().Num() >= content_limits::MaxTracksPerPhase)
-        {
-            builder_detail::AddError(Diagnostics, TEXT("ContentLimit"), TEXT("Phases[0].LimbTracks"), Phases[0].Get_Id(), InSlot,
-                INDEX_NONE, FString::Printf(TEXT("at most %d"), content_limits::MaxTracksPerPhase), TEXT("one more track"));
-        }
+            TEXT("BodyLocal, RootAtStart or LimbRestNormalized"), TEXT("unsupported space"));
     }
     if (NOT Diagnostics.IsEmpty())
     { return builder_detail::Reject(Diagnostics); }
 
-    for (auto& Phase : Phases)
-    {
-        auto Tracks = Phase.Get_LimbTracks();
-        for (auto& Track : Tracks)
-        {
-            if (Track.Get_Slot() != InSlot)
-            { continue; }
-            Track.Set_Space(InSpace);
-            Track.Set_AnchorId(InAnchorId);
-        }
-        Phase.Set_LimbTracks(Tracks);
-    }
-    if (NOT HasTrack)
-    {
-        auto Tracks = Phases[0].Get_LimbTracks();
-        auto Track = FCk_ProceduralAction_LimbTrack{InSlot};
-        Track.Set_Space(InSpace);
-        Track.Set_AnchorId(InAnchorId);
-        Tracks.Add(MoveTemp(Track));
-        Phases[0].Set_LimbTracks(Tracks);
-    }
-    InDraft.Set_Phases(Phases);
-    return builder_detail::Accept();
-}
-
-auto
-    UCk_Utils_ProceduralActionBuilder_UE::
-    Set_PhaseProgress(
-        FCk_ProceduralAction_ClipDraft& InDraft,
-        FName InPhaseId,
-        const FCk_ProceduralAction_ProgressCurve& InCurve)
-    -> FCk_ProceduralAction_ValidationReport
-{
-    using namespace ck::procedural_action;
-    auto Diagnostics = TArray<FDiagnostic>{};
-    const auto PhaseIndex = builder_detail::FindPhase(InDraft, InPhaseId);
-    if (PhaseIndex == INDEX_NONE)
-    {
-        builder_detail::AddError(Diagnostics, TEXT("PhaseReference"), TEXT("PhaseId"), InPhaseId, {}, INDEX_NONE,
-            TEXT("declared phase ID"), InPhaseId.ToString());
-        return builder_detail::Reject(Diagnostics);
-    }
-    auto Candidate = InDraft.Get_Phases()[PhaseIndex];
-    Candidate.Set_Progress(InCurve);
-    if (NOT ValidateProgress(Candidate, builder_detail::DraftAssetPath, builder_detail::PhasePath(PhaseIndex), Diagnostics))
-    { return builder_detail::Reject(Diagnostics); }
-    InDraft.Get_Phases()[PhaseIndex] = MoveTemp(Candidate);
+    auto& Slot = InDraft.Get_Slots()[builder_detail::FindSlot(InDraft.Get_Slots(), InSlot)];
+    Slot.Set_Space(InSpace);
     return builder_detail::Accept();
 }
 
@@ -860,7 +768,6 @@ auto
         builder_detail::AddError(Diagnostics, TEXT("ContentLimit"), TEXT("Phases.Keys"), InPhase.Get_Id(), {}, INDEX_NONE,
             FString::Printf(TEXT("at most %lld"), content_limits::MaxKeys), TEXT("more keys"));
     }
-    ValidateProgress(InPhase, builder_detail::DraftAssetPath, Path, Diagnostics);
     if (NOT Diagnostics.IsEmpty())
     { return builder_detail::Reject(Diagnostics); }
     InDraft.Get_Phases().Add(InPhase);
@@ -1230,6 +1137,24 @@ auto
     if (NOT Diagnostics.IsEmpty())
     { return builder_detail::Reject(Diagnostics); }
 
+    const auto SourceSlotIndex = builder_detail::FindSlot(InDraft.Get_Slots(), Source);
+    const auto DestinationSlotIndex = builder_detail::FindSlot(InDraft.Get_Slots(), Destination);
+    const auto& SourceSlot = InDraft.Get_Slots()[SourceSlotIndex];
+    const auto& DestinationSlot = InDraft.Get_Slots()[DestinationSlotIndex];
+    const auto Space = SourceSlot.Get_Space();
+    if (Space != ECk_ProceduralAction_TrackSpace::BodyLocal && Space != ECk_ProceduralAction_TrackSpace::RootAtStart)
+    {
+        builder_detail::AddError(Diagnostics, TEXT("MirrorSpace"), FString::Printf(TEXT("Slots[%d].Space"), SourceSlotIndex),
+            {}, Source, INDEX_NONE, TEXT("BodyLocal or RootAtStart (other frames need the subject)"), TEXT("subject-relative frame"));
+    }
+    const auto DestinationIsKeyed = InDraft.Get_Phases().ContainsByPredicate([Destination](const FCk_ProceduralAction_Phase& InPhase)
+        { return builder_detail::FindTrack(InPhase, Destination) != INDEX_NONE; });
+    if (DestinationIsKeyed && DestinationSlot.Get_Space() != Space)
+    {
+        builder_detail::AddError(Diagnostics, TEXT("MirrorFrame"), FString::Printf(TEXT("Slots[%d].Space"), DestinationSlotIndex),
+            {}, Destination, INDEX_NONE, TEXT("the source slot's frame on a destination that already has tracks"), TEXT("another frame"));
+    }
+
     auto Phases = InDraft.Get_Phases();
     auto MirroredKeys = int64{0};
     auto Written = 0;
@@ -1241,14 +1166,6 @@ auto
         { continue; }
         ++Written;
         const auto& SourceTrack = Phase.Get_LimbTracks()[SourceIndex];
-        const auto Space = SourceTrack.Get_Space();
-        if ((Space != ECk_ProceduralAction_TrackSpace::BodyLocal && Space != ECk_ProceduralAction_TrackSpace::RootAtStart)
-            || NOT SourceTrack.Get_AnchorId().IsNone())
-        {
-            builder_detail::AddError(Diagnostics, TEXT("MirrorSpace"), builder_detail::TrackPath(PhaseIndex, SourceIndex) + TEXT(".Space"),
-                Phase.Get_Id(), Source, INDEX_NONE, TEXT("BodyLocal or RootAtStart (other frames need the subject)"), TEXT("subject-relative frame"));
-            continue;
-        }
         const auto DestinationIndex = builder_detail::FindTrack(Phase, Destination);
         if (DestinationIndex != INDEX_NONE)
         {
@@ -1262,20 +1179,6 @@ auto
                 Phase.Get_Id(), Destination, INDEX_NONE, FString::Printf(TEXT("at most %d"), content_limits::MaxTracksPerPhase),
                 TEXT("one more track"));
             continue;
-        }
-        for (auto OtherIndex = 0; OtherIndex < Phases.Num(); ++OtherIndex)
-        {
-            const auto OtherTrack = builder_detail::FindTrack(Phases[OtherIndex], Destination);
-            if (OtherTrack == INDEX_NONE)
-            { continue; }
-            const auto& Existing = Phases[OtherIndex].Get_LimbTracks()[OtherTrack];
-            if (Existing.Get_Space() != Space || NOT Existing.Get_AnchorId().IsNone())
-            {
-                builder_detail::AddError(Diagnostics, TEXT("SpaceChangesAcrossPhases"),
-                    builder_detail::TrackPath(PhaseIndex, Phase.Get_LimbTracks().Num()) + TEXT(".Space"), Phase.Get_Id(), Destination,
-                    INDEX_NONE, TEXT("the destination slot's existing frame"), TEXT("frame changed"));
-                break;
-            }
         }
         MirroredKeys += static_cast<int64>(SourceTrack.Get_PositionKeys().Num())
             + SourceTrack.Get_OrientationKeys().Num() + SourceTrack.Get_BendKeys().Num();
@@ -1301,10 +1204,8 @@ auto
         auto Tracks = Phase.Get_LimbTracks();
         const auto& SourceTrack = Tracks[SourceIndex];
         auto Mirrored = FCk_ProceduralAction_LimbTrack{Destination};
-        Mirrored.Set_Space(SourceTrack.Get_Space());
         Mirrored.Set_Interpolation(SourceTrack.Get_Interpolation());
         Mirrored.Set_ReachPolicy(SourceTrack.Get_ReachPolicy());
-        Mirrored.Set_ClearanceResponse(SourceTrack.Get_ClearanceResponse());
         Mirrored.Set_PositionKeys(builder_detail::MirrorVectorKeys(SourceTrack.Get_PositionKeys(), Plane));
         Mirrored.Set_BendKeys(builder_detail::MirrorVectorKeys(SourceTrack.Get_BendKeys(), Plane));
         auto Orientations = SourceTrack.Get_OrientationKeys();
@@ -1315,6 +1216,7 @@ auto
         Phase.Set_LimbTracks(Tracks);
     }
     InDraft.Set_Phases(Phases);
+    InDraft.Get_Slots()[DestinationSlotIndex].Set_Space(Space);
     return builder_detail::Accept();
 }
 
@@ -1343,8 +1245,8 @@ auto
     if (MovesALimbFromRest && InRecipe.Get_Space() != ECk_ProceduralAction_TrackSpace::LimbRestNormalized)
     {
         Warnings.Add(FDiagnostic{EDiagnosticSeverity::Warning, TEXT("RecipeRest"), builder_detail::DraftAssetPath,
-            TEXT("Slots[0].ExplicitRestTarget"), {}, InRecipe.Get_Slots()[0], INDEX_NONE,
-            TEXT("an AuthoredRest slot with an ExplicitRestTarget, or LimbRestNormalized space"),
+            TEXT("Slots[0].Space"), {}, InRecipe.Get_Slots()[0], INDEX_NONE,
+            TEXT("LimbRestNormalized space"),
             TEXT("rest taken as the slot frame's origin")});
     }
     OutDraft = MoveTemp(Draft);
@@ -1368,10 +1270,10 @@ auto
             TEXT("valid loaded clip object"), TEXT("null or invalid"));
         return builder_detail::Reject(Diagnostics);
     }
-    if (Pinned->Get_CompatibilityVersion() != 1)
+    if (Pinned->Get_CompatibilityVersion() != UCk_ProceduralAction_Data::CurrentCompatibilityVersion)
     {
         builder_detail::AddError(Diagnostics, TEXT("Version"), TEXT("CompatibilityVersion"), {}, {}, INDEX_NONE,
-            TEXT("1"), FString::FromInt(Pinned->Get_CompatibilityVersion()));
+            FString::FromInt(UCk_ProceduralAction_Data::CurrentCompatibilityVersion), FString::FromInt(Pinned->Get_CompatibilityVersion()));
         return builder_detail::Reject(Diagnostics);
     }
     OutDraft.Set_BodyChannel(Pinned->Get_BodyChannel());
@@ -1398,10 +1300,10 @@ auto
             TEXT("valid clip object"), TEXT("null or invalid"));
         return builder_detail::Reject(Diagnostics);
     }
-    if (Pinned->Get_CompatibilityVersion() != 1)
+    if (Pinned->Get_CompatibilityVersion() != UCk_ProceduralAction_Data::CurrentCompatibilityVersion)
     {
         builder_detail::AddError(Diagnostics, TEXT("Version"), TEXT("Destination.CompatibilityVersion"), {}, {}, INDEX_NONE,
-            TEXT("1"), FString::FromInt(Pinned->Get_CompatibilityVersion()));
+            FString::FromInt(UCk_ProceduralAction_Data::CurrentCompatibilityVersion), FString::FromInt(Pinned->Get_CompatibilityVersion()));
         return builder_detail::Reject(Diagnostics);
     }
     auto Compiled = FCompiledClip{};
@@ -1431,10 +1333,10 @@ auto
             TEXT("valid clip object"), TEXT("null or invalid"));
         return builder_detail::Reject(Diagnostics);
     }
-    if (Pinned->Get_CompatibilityVersion() != 1)
+    if (Pinned->Get_CompatibilityVersion() != UCk_ProceduralAction_Data::CurrentCompatibilityVersion)
     {
         builder_detail::AddError(Diagnostics, TEXT("Version"), TEXT("Destination.CompatibilityVersion"), {}, {}, INDEX_NONE,
-            TEXT("1"), FString::FromInt(Pinned->Get_CompatibilityVersion()));
+            FString::FromInt(UCk_ProceduralAction_Data::CurrentCompatibilityVersion), FString::FromInt(Pinned->Get_CompatibilityVersion()));
         return builder_detail::Reject(Diagnostics);
     }
     Pinned->Set_BodyChannel(InDraft.Get_BodyChannel());

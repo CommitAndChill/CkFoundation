@@ -4,8 +4,12 @@
 #include "CkCore/Math/ValueRange/CkValueRange.h"
 #include "CkCore/Time/CkTime.h"
 #include "CkCore/Types/DataAsset/CkDataAsset.h"
+#include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Fragment_Data.h"
 
 #include "CkProceduralAction_Data.generated.h"
+
+class UCk_ProceduralGait_Data;
+class UCk_ProceduralRig_Data;
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -23,7 +27,6 @@ enum class ECk_ProceduralAction_TrackSpace : uint8
 {
     BodyLocal,
     RootAtStart,
-    AnchorAtStart,
     LimbRestNormalized
 };
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralAction_TrackSpace);
@@ -50,28 +53,12 @@ enum class ECk_ProceduralAction_Easing : uint8
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralAction_Easing);
 
 UENUM(BlueprintType)
-enum class ECk_ProceduralAction_ProgressMode : uint8
-{
-    Preset,
-    CustomCurve
-};
-CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralAction_ProgressMode);
-
-UENUM(BlueprintType)
 enum class ECk_ProceduralAction_ReachPolicy : uint8
 {
     RejectUnreachable,
     ProjectToReach
 };
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralAction_ReachPolicy);
-
-UENUM(BlueprintType)
-enum class ECk_ProceduralAction_ClearanceResponse : uint8
-{
-    AbortOnCrossing,
-    ObserveCrossing
-};
-CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralAction_ClearanceResponse);
 
 UENUM(BlueprintType)
 enum class ECk_ProceduralAction_PoseProvenance : uint8
@@ -176,45 +163,6 @@ public:
 // --------------------------------------------------------------------------------------------------------------------
 
 USTRUCT(BlueprintType)
-struct CKPROCEDURALANIMATION_API FCk_ProceduralAction_ProgressKey
-{
-    GENERATED_BODY()
-public:
-    CK_GENERATED_BODY(FCk_ProceduralAction_ProgressKey);
-private:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
-    FCk_FloatRange_0to1 _Time;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
-    FCk_FloatRange_0to1 _Value;
-public:
-    CK_PROPERTY(_Time);
-    CK_PROPERTY(_Value);
-    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralAction_ProgressKey, _Time, _Value);
-};
-
-/** Remaps a phase's elapsed fraction to motion progress. Preset uses the phase's _Easing and requires no _Keys.
- *  CustomCurve requires _Easing Linear and 2..64 keys with strictly ascending times, nondecreasing values and exact
- *  (0,0) and (1,1) endpoints; it is compiled to a monotone cubic. Markers and windows stay on elapsed time either way. */
-USTRUCT(BlueprintType)
-struct CKPROCEDURALANIMATION_API FCk_ProceduralAction_ProgressCurve
-{
-    GENERATED_BODY()
-public:
-    CK_GENERATED_BODY(FCk_ProceduralAction_ProgressCurve);
-private:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
-    ECk_ProceduralAction_ProgressMode _Mode = ECk_ProceduralAction_ProgressMode::Preset;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true,
-        EditCondition = "_Mode == ECk_ProceduralAction_ProgressMode::CustomCurve"))
-    TArray<FCk_ProceduralAction_ProgressKey> _Keys;
-public:
-    CK_PROPERTY(_Mode);
-    CK_PROPERTY(_Keys);
-};
-
-// --------------------------------------------------------------------------------------------------------------------
-
-USTRUCT(BlueprintType)
 struct CKPROCEDURALANIMATION_API FCk_ProceduralAction_Slot
 {
     GENERATED_BODY()
@@ -225,18 +173,13 @@ private:
     FName _Id;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
     ECk_ProceduralAction_InitialSource _InitialSource = ECk_ProceduralAction_InitialSource::CapturedAcceptedPose;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
-    bool _RequiresTerminalOrientation = false;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
-    bool _HasExplicitRestTarget = false;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
-    FTransform _ExplicitRestTarget = FTransform::Identity;
+    // The frame every track of this slot is keyed in, for the whole clip.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Frame", meta = (AllowPrivateAccess = true))
+    ECk_ProceduralAction_TrackSpace _Space = ECk_ProceduralAction_TrackSpace::BodyLocal;
 public:
     CK_PROPERTY_GET(_Id);
     CK_PROPERTY(_InitialSource);
-    CK_PROPERTY(_RequiresTerminalOrientation);
-    CK_PROPERTY(_HasExplicitRestTarget);
-    CK_PROPERTY(_ExplicitRestTarget);
+    CK_PROPERTY(_Space);
     CK_DEFINE_CONSTRUCTORS(FCk_ProceduralAction_Slot, _Id);
 };
 
@@ -265,16 +208,13 @@ public:
 private:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
     FName _Slot;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
-    ECk_ProceduralAction_TrackSpace _Space = ECk_ProceduralAction_TrackSpace::BodyLocal;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
-    FName _AnchorId;
+    // Loaded from clips saved before the frame moved to the slot; UCk_ProceduralAction_Data::PostLoad moves it there.
+    UPROPERTY()
+    ECk_ProceduralAction_TrackSpace _Space_DEPRECATED = ECk_ProceduralAction_TrackSpace::BodyLocal;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
     ECk_ProceduralAction_Interpolation _Interpolation = ECk_ProceduralAction_Interpolation::Linear;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
     ECk_ProceduralAction_ReachPolicy _ReachPolicy = ECk_ProceduralAction_ReachPolicy::RejectUnreachable;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
-    ECk_ProceduralAction_ClearanceResponse _ClearanceResponse = ECk_ProceduralAction_ClearanceResponse::AbortOnCrossing;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion|Position", meta = (AllowPrivateAccess = true))
     TArray<FCk_ProceduralAction_VectorKey> _PositionKeys;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion|Orientation", meta = (AllowPrivateAccess = true))
@@ -283,15 +223,14 @@ private:
     TArray<FCk_ProceduralAction_VectorKey> _BendKeys;
 public:
     CK_PROPERTY_GET(_Slot);
-    CK_PROPERTY(_Space);
-    CK_PROPERTY(_AnchorId);
     CK_PROPERTY(_Interpolation);
     CK_PROPERTY(_ReachPolicy);
-    CK_PROPERTY(_ClearanceResponse);
     CK_PROPERTY(_PositionKeys);
     CK_PROPERTY(_OrientationKeys);
     CK_PROPERTY(_BendKeys);
     CK_DEFINE_CONSTRUCTORS(FCk_ProceduralAction_LimbTrack, _Slot);
+
+    friend class UCk_ProceduralAction_Data;
 };
 
 USTRUCT(BlueprintType)
@@ -308,8 +247,6 @@ private:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
     ECk_ProceduralAction_Easing _Easing = ECk_ProceduralAction_Easing::Linear;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
-    FCk_ProceduralAction_ProgressCurve _Progress;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Value", meta = (AllowPrivateAccess = true))
     ECk_ProceduralAction_Interpolation _BodyInterpolation = ECk_ProceduralAction_Interpolation::Linear;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion|Body", meta = (AllowPrivateAccess = true))
     TArray<FCk_ProceduralAction_TransformKey> _BodyKeys;
@@ -319,7 +256,6 @@ public:
     CK_PROPERTY_GET(_Id);
     CK_PROPERTY(_Duration);
     CK_PROPERTY(_Easing);
-    CK_PROPERTY(_Progress);
     CK_PROPERTY(_BodyInterpolation);
     CK_PROPERTY(_BodyKeys);
     CK_PROPERTY(_LimbTracks);
@@ -382,6 +318,70 @@ public:
 
 // --------------------------------------------------------------------------------------------------------------------
 
+USTRUCT(BlueprintType)
+struct CKPROCEDURALANIMATION_API FCk_ProceduralAction_SlotBinding
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(FCk_ProceduralAction_SlotBinding);
+
+private:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              Category = "Bindings", meta = (AllowPrivateAccess = true))
+    FName _Slot = NAME_None;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              Category = "Bindings", meta = (AllowPrivateAccess = true))
+    FName _LimbId = NAME_None;
+
+public:
+    CK_PROPERTY_GET(_Slot);
+    CK_PROPERTY_GET(_LimbId);
+
+public:
+    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralAction_SlotBinding, _Slot, _LimbId);
+};
+
+// --------------------------------------------------------------------------------------------------------------------
+
+/** The creature the clip editor previews a clip on. Editor-only: the runtime binds a clip to whatever subject plays it.
+ *  A walking subject names a rig and a gait; otherwise the layout's limbs are dedicated, and an empty layout previews the
+ *  body alone. The editor derives the preview (limb frames at rest, a floor, locomotion) from it; _Scenario, when set, is an
+ *  authored UCk_ProceduralActionPreview_Config whose fields replace the derived ones (obstacles, floor removal, tuning). */
+USTRUCT(BlueprintType)
+struct CKPROCEDURALANIMATION_API FCk_ProceduralAction_EditorSubject
+{
+    GENERATED_BODY()
+public:
+    CK_GENERATED_BODY(FCk_ProceduralAction_EditorSubject);
+private:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Walking", meta = (AllowPrivateAccess = true))
+    TSoftObjectPtr<UCk_ProceduralRig_Data> _WalkingRig;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Walking", meta = (AllowPrivateAccess = true))
+    TSoftObjectPtr<UCk_ProceduralGait_Data> _WalkingGait;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dedicated", meta = (AllowPrivateAccess = true))
+    FCk_ProceduralArticulation_Layout _Layout;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bindings", meta = (AllowPrivateAccess = true))
+    TArray<FCk_ProceduralAction_SlotBinding> _SlotBindings;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scenario", meta = (AllowPrivateAccess = true,
+        AllowedClasses = "/Script/CkProceduralAnimationEditor.Ck_ProceduralActionPreview_Config"))
+    TSoftObjectPtr<UObject> _Scenario;
+public:
+    auto
+        Get_IsEmpty() const
+        -> bool
+    { return _WalkingRig.IsNull() && _Layout.Get_Limbs().IsEmpty() && _Scenario.IsNull(); }
+
+    CK_PROPERTY(_WalkingRig);
+    CK_PROPERTY(_WalkingGait);
+    CK_PROPERTY(_Layout);
+    CK_PROPERTY(_SlotBindings);
+    CK_PROPERTY(_Scenario);
+};
+
+// --------------------------------------------------------------------------------------------------------------------
+
 /** Editor-only label for the keys one whole-pose capture wrote: the phase, time and channels they share. It holds no
  *  transforms; the keys in the phases stay the only motion. The body channel is named Get_BodyChannelName(). */
 USTRUCT()
@@ -433,9 +433,15 @@ protected:
             class FDataValidationContext& InContext) const
         -> EDataValidationResult override;
 #endif
+    auto
+        PostLoad()
+        -> void override;
+public:
+    // 2: the slot holds its tracks' frame; PostLoad moves a frame still found on a track there.
+    static constexpr auto CurrentCompatibilityVersion = int32{2};
 private:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Content", meta = (AllowPrivateAccess = true))
-    int32 _CompatibilityVersion = 1;
+    int32 _CompatibilityVersion = CurrentCompatibilityVersion;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Body", meta = (AllowPrivateAccess = true))
     FCk_ProceduralAction_BodyChannel _BodyChannel;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Slots", meta = (AllowPrivateAccess = true, TitleProperty = "_Id"))
@@ -450,6 +456,8 @@ private:
     // Read by the editor only; Compile never sees it, so cooked motion data and content hashes ignore it.
     UPROPERTY()
     TArray<FCk_ProceduralAction_PoseGroup> _EditorPoseGroups;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Editor", meta = (AllowPrivateAccess = true))
+    FCk_ProceduralAction_EditorSubject _EditorSubject;
 #endif
 public:
     CK_PROPERTY(_CompatibilityVersion);
@@ -469,6 +477,8 @@ public:
             const TArray<FCk_ProceduralAction_PoseGroup>& InGroups)
         -> void
     { _EditorPoseGroups = InGroups; }
+
+    CK_PROPERTY(_EditorSubject);
 #endif
 };
 

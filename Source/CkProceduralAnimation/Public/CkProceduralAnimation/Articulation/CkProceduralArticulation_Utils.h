@@ -121,15 +121,7 @@ public:
     Get_UnplantedLimbIds(
         const FCk_Handle_ProceduralArticulation& InArticulation);
 
-    // Retries a complete set of unplanted walking limbs under the player's authored support and return policy.
-    UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralArticulation",
-        DisplayName = "[Ck][ProceduralArticulation] Request Recover Limbs", meta = (AutoCreateRefTerm = "InDelegate"))
-    static FCk_Handle_ProceduralArticulation
-    Request_RecoverLimbs(
-        UPARAM(ref) FCk_Handle_ProceduralArticulation& InArticulation,
-        const FCk_Request_ProceduralArticulation_RecoverLimbs& InRequest,
-        const FCk_Delegate_Request_OnCompleted& InDelegate);
-
+    // Retries every unplanted walking limb as one set, under the player's authored support and return policy.
     UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralArticulation",
         DisplayName = "[Ck][ProceduralArticulation] Request Recover Unplanted Limbs",
         meta = (AutoCreateRefTerm = "InDelegate"))

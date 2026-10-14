@@ -582,17 +582,5 @@ namespace ck
         }
         InPose._SettledRevision = InPose._IssuedRevision;
         InPose._PendingObservation = false;
-        if (InPose._LegacyWalker && NOT InHandle.Has<FFragment_ProceduralActionPlayer>()
-            && InHandle.Has<FFragment_ProceduralBodyPose_Action>()
-            && InHandle.Has<FFragment_ProceduralArticulation_Bindings>())
-        {
-            if (ck::IsValid(Presentation))
-            {
-                auto& Action = InHandle.Get<FFragment_ProceduralBodyPose_Action>();
-                Action._Sample = FCk_ProceduralBodyPose_ActionSample{
-                    UCk_Utils_Transform_UE::Get_EntityCurrentTransform(Presentation), Action._SampleId,
-                    Action._Sample.Get_PoseRevision() + 1};
-            }
-        }
     }
 }

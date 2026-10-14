@@ -89,9 +89,6 @@ private:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Observation", meta = (AllowPrivateAccess = true))
     int64 _ContentRevision = 0;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Observation", meta = (AllowPrivateAccess = true))
-    int64 _TuningRevision = 0;
-
 public:
     CK_PROPERTY_GET(_Identity);
     CK_PROPERTY_GET(_Generation);
@@ -99,10 +96,9 @@ public:
     CK_PROPERTY_GET(_SubjectPoseRevision);
     CK_PROPERTY_GET(_TopologyRevision);
     CK_PROPERTY_GET(_ContentRevision);
-    CK_PROPERTY_GET(_TuningRevision);
 
 public:
-    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralAction_Stamp, _Identity, _Generation, _SampleSequence, _SubjectPoseRevision, _TopologyRevision, _ContentRevision, _TuningRevision);
+    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralAction_Stamp, _Identity, _Generation, _SampleSequence, _SubjectPoseRevision, _TopologyRevision, _ContentRevision);
 };
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -248,9 +244,6 @@ private:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Observation", meta = (AllowPrivateAccess = true))
     FCk_ProceduralAction_SamplingReport _Sampling;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Observation", meta = (AllowPrivateAccess = true))
-    int64 _CorrelationToken = 0;
-
 public:
     CK_PROPERTY_GET(_HasAcceptedPose);
     CK_PROPERTY_GET(_Stamp);
@@ -259,10 +252,9 @@ public:
     CK_PROPERTY_GET(_CurrentPose);
     CK_PROPERTY_GET(_IntermediateSamples);
     CK_PROPERTY_GET(_Sampling);
-    CK_PROPERTY_GET(_CorrelationToken);
 
 public:
-    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralAction_Receipt, _HasAcceptedPose, _Stamp, _Interval, _PreviousPose, _CurrentPose, _IntermediateSamples, _Sampling, _CorrelationToken);
+    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralAction_Receipt, _HasAcceptedPose, _Stamp, _Interval, _PreviousPose, _CurrentPose, _IntermediateSamples, _Sampling);
 };
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -313,7 +305,7 @@ public:
 
 // --------------------------------------------------------------------------------------------------------------------
 
-// Reading copies a bounded page; only an explicit consume request acknowledges records.
+// Reading copies a bounded page; only a consume request, or the player for an Auto action, acknowledges records.
 // LastStreamSequence is the last returned record, or the input cursor for an empty ordinary page.
 // An empty gap page advances it to the acknowledged high-water sequence.
 // Gap reports the inclusive sequence range already consumed by another reader; it never silently claims success.
@@ -380,36 +372,5 @@ public:
 
 // --------------------------------------------------------------------------------------------------------------------
 
-/** One copied page of a managed stream, delivered to every records listener before it is acknowledged.
- *  _Terminal is true on the page that carries the stream's terminal record. Managed delivery is the stream's only
- *  acknowledging reader, so pages are contiguous; records lost to capacity surface as the producer's outcome. */
-USTRUCT(BlueprintType)
-struct CKPROCEDURALANIMATION_API FCk_ProceduralAction_ManagedPage
-{
-    GENERATED_BODY()
-
-public:
-    CK_GENERATED_BODY(FCk_ProceduralAction_ManagedPage);
-
-private:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Observation", meta = (AllowPrivateAccess = true))
-    FCk_ProceduralAction_Identity _Identity;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Observation", meta = (AllowPrivateAccess = true))
-    TArray<FCk_ProceduralAction_Record> _Records;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Observation", meta = (AllowPrivateAccess = true))
-    bool _Terminal = false;
-
-public:
-    CK_PROPERTY_GET(_Identity);
-    CK_PROPERTY_GET(_Records);
-    CK_PROPERTY_GET(_Terminal);
-
-public:
-    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralAction_ManagedPage, _Identity, _Records, _Terminal);
-};
-
-// --------------------------------------------------------------------------------------------------------------------
 
 

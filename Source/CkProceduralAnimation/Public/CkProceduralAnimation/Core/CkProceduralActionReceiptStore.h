@@ -20,9 +20,28 @@ namespace ck::procedural_action
         constexpr int32 MaxSegmentsPerLimb = 8;
         constexpr int64 MaxRetainedRecords = 1049088;
         constexpr int64 MaxRetainedPoseTransforms = 1048576;
+        constexpr int32 RetainedInstancesPerConcurrent = 4;
+        constexpr int64 PoseTransformsPerRecord = 32;
+        constexpr auto OrphanRetention = FCk_Time{2.0};
     }
 
-    // The same finite budget checks are used at player construction, play admission and tuning updates.
+    // The store's derived budget: see FCk_ProceduralAction_Capacity.
+    CKPROCEDURALANIMATION_API auto
+        Get_MaxRetainedInstances(
+            const FCk_ProceduralAction_Capacity& InCapacity)
+        -> int32;
+
+    CKPROCEDURALANIMATION_API auto
+        Get_MaxRetainedRecords(
+            const FCk_ProceduralAction_Capacity& InCapacity)
+        -> int64;
+
+    CKPROCEDURALANIMATION_API auto
+        Get_MaxRetainedPoseTransforms(
+            const FCk_ProceduralAction_Capacity& InCapacity)
+        -> int64;
+
+    // The finite budget checks a player is added with.
     CKPROCEDURALANIMATION_API auto
         ValidateTuning(
             const FCk_ProceduralAction_Tuning& InTuning,
@@ -32,12 +51,6 @@ namespace ck::procedural_action
     CKPROCEDURALANIMATION_API auto
         ValidateCapacity(
             const FCk_ProceduralAction_Capacity& InCapacity,
-            FName& OutInvalidField)
-        -> bool;
-
-    CKPROCEDURALANIMATION_API auto
-        ValidateControlSpec(
-            const FCk_ProceduralAction_ControlSpec& InSpec,
             FName& OutInvalidField)
         -> bool;
 
@@ -65,7 +78,7 @@ namespace ck::procedural_action
             bool EntityRemoved = false;
             bool WindowsClosed = false;
             bool Terminal = false;
-            bool ManagedDelivery = false;
+            bool AutoDelivered = false;
             int32 PendingOrdinaryCount = 0;
             int64 LastSequence = 0;
             int64 LastSampleSequence = 0;
@@ -116,16 +129,27 @@ namespace ck::procedural_action
                 bool InHasBodyClaim)
             -> EReceiptStoreWrite;
 
-        // Hands the stream's acknowledgement to managed delivery for the rest of its life. Only right after
-        // reservation, before any record is published.
+        // Hands the stream's acknowledgement to the player for the rest of its life. Only right after reservation,
+        // before any record is published.
         auto
-            SealManaged(
+            SealAuto(
                 FCk_ProceduralAction_Identity InIdentity)
             -> bool;
 
-        // True while a sealed stream is retained, including after its managed completion; false once reclaimed.
+        // True while a sealed stream is retained; false once reclaimed.
         auto
-            Get_IsManagedDelivery(
+            Get_IsAutoDelivered(
+                FCk_ProceduralAction_Identity InIdentity) const
+            -> bool;
+
+        // Acknowledges every record published so far on every sealed stream.
+        auto
+            AcknowledgeAutoDelivered()
+            -> void;
+
+        // True once the stream's terminal record is acknowledged; false for a stream that is not retained.
+        auto
+            Get_IsTerminalAcknowledged(
                 FCk_ProceduralAction_Identity InIdentity) const
             -> bool;
 
