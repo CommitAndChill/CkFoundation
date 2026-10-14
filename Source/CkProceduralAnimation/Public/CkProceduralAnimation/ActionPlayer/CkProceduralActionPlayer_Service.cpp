@@ -47,27 +47,12 @@ namespace ck_procedural_action_player_service
         const FCk_Handle_ProceduralArticulation& InSubject,
         const ck::FProceduralActionClipParams& InParams,
         const ck::procedural_action::FCompiledClip& InClip,
-        const FCk_ProceduralAction_Capacity& InCapacity,
-        TArray<FName>& OutLimbIds,
-        TArray<ck::procedural_action::FDiagnostic>* OutDiagnostics)
+        TArray<FName>& OutLimbIds)
         -> bool
     {
-        auto Reject = [&](FName InCode, const FString& InField, FName InSlot,
-            const FString& InExpected, const FString& InActual) -> bool
-        {
-            if (OutDiagnostics != nullptr
-                && OutDiagnostics->Num() < ck::procedural_action::content_limits::MaxDiagnostics)
-            {
-                OutDiagnostics->Add(ck::procedural_action::MakeReportDiagnostic(InCode,
-                    InParams.Get_Clip().ToSoftObjectPath().ToString(), InField, InSlot,
-                    InExpected, InActual));
-            }
-            return false;
-        };
         OutLimbIds.Reset();
         if (InParams.Get_SlotBindings().Num() != InClip.Get_Slots().Num())
-        { return Reject(TEXT("SlotBindingCount"), TEXT("SlotBindings"), {},
-            FString::FromInt(InClip.Get_Slots().Num()), FString::FromInt(InParams.Get_SlotBindings().Num())); }
+        { return false; }
         auto SeenSlots = TSet<FName>{};
         auto SeenLimbs = TSet<FName>{};
         for (const auto& Binding : InParams.Get_SlotBindings())
@@ -75,14 +60,9 @@ namespace ck_procedural_action_player_service
             if (Binding.Get_Slot().IsNone() || Binding.Get_LimbId().IsNone()
                 || SeenSlots.Contains(Binding.Get_Slot()) || SeenLimbs.Contains(Binding.Get_LimbId())
                 || NOT InClip.Get_Slots().ContainsByPredicate([&Binding](const auto& InSlot)
-                    { return InSlot.Get_Id() == Binding.Get_Slot(); }))
-            { return Reject(TEXT("SlotBinding"), TEXT("SlotBindings"), Binding.Get_Slot(),
-                TEXT("unique declared slot and distinct nonempty limb ID"),
-                Binding.Get_LimbId().ToString()); }
-            if (ck::Is_NOT_Valid(UCk_Utils_ProceduralArticulation_UE::Get_Limb(
-                InSubject, Binding.Get_LimbId())))
-            { return Reject(TEXT("MissingLimb"), TEXT("SlotBindings.LimbId"), Binding.Get_Slot(),
-                TEXT("limb on subject"), Binding.Get_LimbId().ToString()); }
+                    { return InSlot.Get_Id() == Binding.Get_Slot(); })
+                || ck::Is_NOT_Valid(UCk_Utils_ProceduralArticulation_UE::Get_Limb(InSubject, Binding.Get_LimbId())))
+            { return false; }
             SeenSlots.Add(Binding.Get_Slot());
             SeenLimbs.Add(Binding.Get_LimbId());
         }
@@ -91,23 +71,8 @@ namespace ck_procedural_action_player_service
             const auto* Binding = InParams.Get_SlotBindings().FindByPredicate([&Slot](const auto& InBinding)
             { return InBinding.Get_Slot() == Slot.Get_Id(); });
             if (Binding == nullptr)
-            { return Reject(TEXT("MissingSlotBinding"), TEXT("SlotBindings"), Slot.Get_Id(),
-                TEXT("binding for compiled slot"), TEXT("missing")); }
+            { return false; }
             OutLimbIds.Add(Binding->Get_LimbId());
-            if (Slot.Get_Space() == ECk_ProceduralAction_TrackSpace::AnchorAtStart
-                && NOT InParams.Get_AnchorBindings().ContainsByPredicate([&Slot](const auto& InAnchor)
-                    { return InAnchor.Get_Id() == Slot.Get_AnchorId() && IsRigid(InAnchor.Get_Frame()); }))
-            { return Reject(TEXT("MissingAnchor"), TEXT("AnchorBindings"), Slot.Get_Id(),
-                TEXT("finite rigid frame for required anchor"), Slot.Get_AnchorId().ToString()); }
-        }
-        auto SeenAnchors = TSet<FName>{};
-        for (const auto& Anchor : InParams.Get_AnchorBindings())
-        {
-            if (Anchor.Get_Id().IsNone() || SeenAnchors.Contains(Anchor.Get_Id())
-                || NOT IsRigid(Anchor.Get_Frame()))
-            { return Reject(TEXT("AnchorBinding"), TEXT("AnchorBindings"), {},
-                TEXT("unique nonempty ID and finite rigid frame"), Anchor.Get_Id().ToString()); }
-            SeenAnchors.Add(Anchor.Get_Id());
         }
         auto ActiveWindows = 0;
         for (auto Index = 0; Index < InClip.Get_Events().Num();)
@@ -119,19 +84,16 @@ namespace ck_procedural_action_player_service
                 const auto Kind = InClip.Get_Events()[Index].Get_Kind();
                 if (Kind == ck::procedural_action::EEventKind::WindowExit) { --ActiveWindows; }
                 else if (Kind == ck::procedural_action::EEventKind::WindowEnter) { ++ActiveWindows; }
-                if (ActiveWindows < 0 || ActiveWindows > InCapacity.Get_MaxWindowsPerReceipt())
-                { return Reject(TEXT("WindowCapacity"), TEXT("Capacity.MaxWindowsPerReceipt"), {},
-                    FString::FromInt(InCapacity.Get_MaxWindowsPerReceipt()), FString::FromInt(ActiveWindows)); }
+                if (ActiveWindows < 0 || ActiveWindows > ck::procedural_action::receipt_limits::MaxWindowsPerReceipt)
+                { return false; }
                 ++Index;
                 ++AtTime;
             }
             while (Index < InClip.Get_Events().Num() && InClip.Get_Events()[Index].Get_Time() == Time);
-            if (AtTime > InCapacity.Get_MaxEventsPerReceipt())
-            { return Reject(TEXT("EventCapacity"), TEXT("Capacity.MaxEventsPerReceipt"), {},
-                FString::FromInt(InCapacity.Get_MaxEventsPerReceipt()), FString::FromInt(AtTime)); }
+            if (AtTime > ck::procedural_action::receipt_limits::MaxEventsPerReceipt)
+            { return false; }
         }
-        return ActiveWindows == 0 || Reject(TEXT("WindowBalance"), TEXT("Windows"), {},
-            TEXT("all authored windows close"), FString::FromInt(ActiveWindows));
+        return ActiveWindows == 0;
     }
 
     auto
@@ -150,103 +112,6 @@ namespace ck_procedural_action_player_service
     {
         return FMath::IsFinite(InValue.X) && FMath::IsFinite(InValue.Y)
             && FMath::IsFinite(InValue.Z) && NOT InValue.IsNearlyZero();
-    }
-
-    auto
-    BuildManualCandidate(
-        const FCk_Handle_ProceduralArticulation& InSubject,
-        const ck::FProceduralActionManualParams& InSpec,
-        const FCk_ProceduralAction_PoseBatch& InBatch,
-        const FCk_ProceduralArticulation_Pose& InEntry,
-        const FCk_ProceduralArticulation_Pose& InDefault,
-        FCk_ArticulationControlToken InToken,
-        uint64 InSequence,
-        FCk_ArticulationTokenCandidate& OutCandidate)
-        -> bool
-    {
-        const auto BodyClaim = InSpec.Get_BodyChannel() == ECk_EnableDisable::Enable;
-        if (InBatch.Get_BodyChannel() != InSpec.Get_BodyChannel()
-            || InBatch.Get_Limbs().Num() != InSpec.Get_LimbIds().Num()
-            || NOT IsRigid(InDefault.Get_RootFrame()))
-        { return false; }
-        auto BodyWorld = InDefault.Get_HasBodyPresentation()
-            ? InDefault.Get_BodyPresentation() : InDefault.Get_RootFrame();
-        auto BodyTarget = TOptional<FTransform>{};
-        if (BodyClaim)
-        {
-            if (NOT InDefault.Get_HasBodyPresentation()
-                || NOT ck::Get_IsProceduralBodyPoseActionAdmissible(InBatch.Get_BodyOffset()))
-            { return false; }
-            const auto BaseLocal = InDefault.Get_BodyPresentation()
-                .GetRelativeTransform(InDefault.Get_RootFrame());
-            const auto Composed = ck::ComposeProceduralBodyPoseAction(BaseLocal, InBatch.Get_BodyOffset());
-            if (NOT Composed.IsSet()) { return false; }
-            BodyWorld = Composed.GetValue() * InDefault.Get_RootFrame();
-            BodyTarget = BodyWorld;
-        }
-        auto Seen = TSet<FName>{};
-        auto Limbs = TArray<FCk_ArticulationLimbTarget>{};
-        Limbs.Reserve(InSpec.Get_LimbIds().Num());
-        for (const auto& Target : InBatch.Get_Limbs())
-        {
-            const auto Id = Target.Get_LimbId();
-            if (Id.IsNone() || Seen.Contains(Id) || NOT InSpec.Get_LimbIds().Contains(Id)
-                || NOT IsRigid(Target.Get_Endpoint())
-                || (Target.Get_HasBend() && NOT IsFiniteDirection(Target.Get_BendDirection())))
-            { return false; }
-            Seen.Add(Id);
-            const auto Limb = UCk_Utils_ProceduralArticulation_UE::Get_Limb(InSubject, Id);
-            if (ck::Is_NOT_Valid(Limb)) { return false; }
-            auto Layout = FCk_ProceduralLimb_Layout{};
-            if (NOT UCk_Utils_ProceduralLimb_UE::Try_GetLayout(Limb, Layout)) { return false; }
-            auto ChainLength = 0.0f;
-            for (const auto Length : Layout.Get_SegmentLengths()) { ChainLength += Length; }
-            if (NOT FMath::IsFinite(ChainLength) || ChainLength <= 0.0f) { return false; }
-            auto SpaceFrame = FTransform::Identity;
-            auto EndpointLocal = Target.Get_Endpoint();
-            switch (Target.Get_Space())
-            {
-                case ECk_ProceduralAction_TrackSpace::BodyLocal:
-                    if (NOT Target.Get_AnchorId().IsNone()) { return false; }
-                    SpaceFrame = InDefault.Get_RootFrame();
-                    break;
-                case ECk_ProceduralAction_TrackSpace::RootAtStart:
-                    if (NOT Target.Get_AnchorId().IsNone()) { return false; }
-                    SpaceFrame = InEntry.Get_RootFrame();
-                    break;
-                case ECk_ProceduralAction_TrackSpace::AnchorAtStart:
-                {
-                    const auto* Anchor = InSpec.Get_AnchorBindings().FindByPredicate(
-                        [&Target](const auto& InAnchor)
-                        { return InAnchor.Get_Id() == Target.Get_AnchorId(); });
-                    if (Anchor == nullptr) { return false; }
-                    SpaceFrame = Anchor->Get_Frame();
-                    break;
-                }
-                case ECk_ProceduralAction_TrackSpace::LimbRestNormalized:
-                    if (NOT Target.Get_AnchorId().IsNone()) { return false; }
-                    SpaceFrame = Layout.Get_RestEndpointLocal() * Layout.Get_AttachmentLocal() * BodyWorld;
-                    EndpointLocal.SetTranslation(EndpointLocal.GetTranslation() * ChainLength);
-                    break;
-                default:
-                    return false;
-            }
-            if (NOT IsRigid(SpaceFrame)) { return false; }
-            const auto EndpointWorld = EndpointLocal * SpaceFrame;
-            if (NOT IsRigid(EndpointWorld)) { return false; }
-            auto PoleWorld = TOptional<FVector>{};
-            if (Target.Get_HasBend())
-            {
-                const auto HipWorld = (Layout.Get_AttachmentLocal() * BodyWorld).GetTranslation();
-                const auto PoleDirection = SpaceFrame.TransformVectorNoScale(Target.Get_BendDirection()).GetSafeNormal();
-                if (NOT IsFiniteDirection(PoleDirection)) { return false; }
-                PoleWorld = HipWorld + PoleDirection * ChainLength;
-            }
-            Limbs.Add(FCk_ArticulationLimbTarget{Id, EndpointWorld, PoleWorld,
-                ECk_ArticulationReachPolicy::RejectUnreachable});
-        }
-        OutCandidate = FCk_ArticulationTokenCandidate{InToken, InSequence, Limbs, BodyTarget};
-        return true;
     }
 
     auto
@@ -281,7 +146,6 @@ namespace ck_procedural_action_player_service
     auto
     ResolveClipFrame(
         const FCk_Handle_ProceduralArticulation& InSubject,
-        const ck::FProceduralActionClipParams& InParams,
         const ck::procedural_action::FCompiledSlot& InSlot,
         FName InLimbId,
         const FCk_ProceduralArticulation_Pose& InEntry,
@@ -308,14 +172,6 @@ namespace ck_procedural_action_player_service
             case ECk_ProceduralAction_TrackSpace::RootAtStart:
                 OutFrame = InEntry.Get_RootFrame();
                 break;
-            case ECk_ProceduralAction_TrackSpace::AnchorAtStart:
-            {
-                const auto* Anchor = InParams.Get_AnchorBindings().FindByPredicate([&InSlot](const auto& InAnchor)
-                { return InAnchor.Get_Id() == InSlot.Get_AnchorId(); });
-                if (Anchor == nullptr) { return false; }
-                OutFrame = Anchor->Get_Frame();
-                break;
-            }
             case ECk_ProceduralAction_TrackSpace::LimbRestNormalized:
                 OutFrame = Layout.Get_RestEndpointLocal() * Layout.Get_AttachmentLocal() * InBodyWorld;
                 break;
@@ -328,7 +184,6 @@ namespace ck_procedural_action_player_service
     auto
     CaptureClipInitial(
         const FCk_Handle_ProceduralArticulation& InSubject,
-        const ck::FProceduralActionClipParams& InParams,
         const ck::FFragment_ProceduralAction_Compiled& InCompiled,
         const FCk_ProceduralArticulation_Pose& InEntry,
         const FCk_ProceduralArticulation_Pose& InDefault,
@@ -365,12 +220,11 @@ namespace ck_procedural_action_player_service
             auto Frame = FTransform::Identity;
             auto ChainLength = 0.0f;
             auto Hip = FVector::ZeroVector;
-            if (NOT ResolveClipFrame(InSubject, InParams, Slot, LimbId, InEntry, InDefault,
+            if (NOT ResolveClipFrame(InSubject, Slot, LimbId, InEntry, InDefault,
                 BodyWorld, Frame, ChainLength, Hip))
             { return false; }
             auto InitialWorld = LimbPose->Get_AcceptedEndpoint();
-            if (Slot.Get_InitialSource() == ECk_ProceduralAction_InitialSource::AuthoredRest
-                && NOT Slot.Get_HasExplicitRestTarget())
+            if (Slot.Get_InitialSource() == ECk_ProceduralAction_InitialSource::AuthoredRest)
             {
                 const auto Limb = UCk_Utils_ProceduralArticulation_UE::Get_Limb(InSubject, LimbId);
                 auto Layout = FCk_ProceduralLimb_Layout{};
@@ -406,7 +260,6 @@ namespace ck_procedural_action_player_service
     auto
     BuildClipCandidate(
         const FCk_Handle_ProceduralArticulation& InSubject,
-        const ck::FProceduralActionClipParams& InParams,
         const ck::FFragment_ProceduralAction_Compiled& InCompiled,
         const ck::procedural_action::FEvaluatedPose& InEvaluated,
         const FCk_ProceduralArticulation_Pose& InEntry,
@@ -446,7 +299,7 @@ namespace ck_procedural_action_player_service
             auto Frame = FTransform::Identity;
             auto ChainLength = 0.0f;
             auto Hip = FVector::ZeroVector;
-            if (NOT ResolveClipFrame(InSubject, InParams, Slot, LimbId, InEntry, InDefault,
+            if (NOT ResolveClipFrame(InSubject, Slot, LimbId, InEntry, InDefault,
                 BodyWorld, Frame, ChainLength, Hip))
             { return false; }
             auto Position = EvaluatedLimb.Get_Position();
@@ -466,7 +319,10 @@ namespace ck_procedural_action_player_service
                 == ECk_ProceduralAction_ReachPolicy::ProjectToReach
                 ? ECk_ArticulationReachPolicy::ProjectToReach
                 : ECk_ArticulationReachPolicy::RejectUnreachable;
-            Limbs.Add(FCk_ArticulationLimbTarget{LimbId, Endpoint, Pole, Reach});
+            auto Target = FCk_ArticulationLimbTarget{LimbId, Endpoint, Pole, Reach};
+            Target.Set_Orientation(EvaluatedLimb.Get_HasOrientation()
+                ? ECk_ArticulationTargetOrientation::Authored : ECk_ArticulationTargetOrientation::RigOwn);
+            Limbs.Add(MoveTemp(Target));
         }
         OutCandidate = FCk_ArticulationTokenCandidate{InToken, InSequence, Limbs, BodyTarget};
         return true;
@@ -566,6 +422,17 @@ namespace ck
 
         InPlayer._Actions.RemoveAll([](const auto& InAction)
         { return ck::Is_NOT_Valid(InAction) || NOT InAction.template Has<FFragment_ProceduralAction>(); });
+        InPlayer._Receipts.AcknowledgeAutoDelivered();
+        for (auto ActionHandle : InPlayer._Actions)
+        {
+            if (ActionHandle.Has<FTag_DestroyEntity_Initiate>()
+                || ActionHandle.Get<FFragment_ProceduralAction>()._State != ECk_ProceduralAction_State::Finished
+                || NOT InPlayer._Receipts.Get_IsTerminalAcknowledged(
+                    ActionHandle.Get<FFragment_ProceduralAction_Params>().Get_Identity()))
+            { continue; }
+            auto Handle = ActionHandle.ConvertToHandle();
+            UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(Handle);
+        }
         const auto ActionSnapshot = InPlayer._Actions;
         for (auto ActionHandle : ActionSnapshot)
         {
@@ -632,20 +499,11 @@ namespace ck
                                 FailureOutcome = ECk_ProceduralAction_Outcome::InvalidContent;
                                 FailureReason = FName{TEXT("InvalidClipContent")};
                             }
-                            else if (NOT ck_procedural_action_player_service::ExpandClipMirrors(Subject,
-                                Params.Get_Clip(), Compiled))
-                            {
-                                Failed = true;
-                                FailureOutcome = ECk_ProceduralAction_Outcome::Rejected;
-                                FailureReason = FName{TEXT("MirrorRejected")};
-                            }
                             else
                             {
                                 auto BoundIds = TArray<FName>{};
-                                const auto& Capacity = InHandle.Get<FFragment_ProceduralActionPlayer_Params>()
-                                    .Get_Capacity();
                                 if (NOT ck_procedural_action_player_service::BindCompiledClip(Subject,
-                                        Params.Get_Clip(), Compiled, Capacity, BoundIds)
+                                        Params.Get_Clip(), Compiled, BoundIds)
                                     || InPlayer._Receipts.BindChannels(Params.Get_Identity(), BoundIds,
                                         Compiled.Get_HasBodyChannel())
                                         != procedural_action::EReceiptStoreWrite::Accepted)
@@ -712,8 +570,7 @@ namespace ck
                         || ActionHandle.Has<FTag_DestroyEntity_Initiate>())
                     { continue; }
                     auto& Action = ActionHandle.Get<FFragment_ProceduralAction>();
-                    if (NOT Action._HasClaim || (Action._State != ECk_ProceduralAction_State::Ready
-                        && Action._State != ECk_ProceduralAction_State::Acquiring
+                    if (NOT Action._HasClaim || (Action._State != ECk_ProceduralAction_State::Acquiring
                         && Action._State != ECk_ProceduralAction_State::Playing))
                     { continue; }
                     const auto& Params = ActionHandle.Get<FFragment_ProceduralAction_Params>();
@@ -723,14 +580,9 @@ namespace ck
                     const auto Reason = FName{TEXT("ReturnReattachmentDiscontinuity")};
                     InPlayer._Receipts.CloseWindows(Identity, Reason);
                     FCk_ProceduralLimbControl_Control::BeginReturn(Subject, Token, Reason);
-                    auto PendingSubmit = MoveTemp(Action._PendingSubmit);
-                    Action._PendingSubmit.Reset();
-                    Action._HasPendingBatch = false;
                     Action._Result = FCk_ProceduralAction_Result{ECk_ProceduralAction_Outcome::SubjectPoseRejected,
                         ECk_ProceduralAction_Recovery::Pending, Reason};
                     Action.CommitState(ActionHandle, Params, ECk_ProceduralAction_State::Cancelling);
-                    if (PendingSubmit.IsSet())
-                    { PendingSubmit->TryFireCompletion(ActionHandle, ECk_Request_OperationResult::Failed_Cancelled); }
                     ClosedActiveWindow = true;
                 }
             }
@@ -766,8 +618,7 @@ namespace ck
             HasUnsettledActionStage |= Action._PendingStageKey.IsSet()
                 || Action._PendingHoldStageKey.IsSet();
 
-            if (Action._HasClaim && (Action._State == ECk_ProceduralAction_State::Ready
-                    || Action._State == ECk_ProceduralAction_State::Acquiring
+            if (Action._HasClaim && (Action._State == ECk_ProceduralAction_State::Acquiring
                     || Action._State == ECk_ProceduralAction_State::Playing))
             {
                 const auto Interruption = FCk_ProceduralLimbControl_Control::Get_InterruptionReason(
@@ -788,69 +639,12 @@ namespace ck
             }
 
             if (Action._State == ECk_ProceduralAction_State::PendingAdmission
-                && Params.Get_Source() == EProceduralActionSource::Manual)
-            {
-                auto Return = FCk_ProceduralLimbControl_Return{};
-                Return.Set_Duration(Params.Get_Tuning().Get_Transition().Get_DedicatedReturn());
-                Return.Set_Timeout(Params.Get_Tuning().Get_Transition().Get_ReturnTimeout());
-                auto Motion = FCk_ProceduralLimbControl_MotionBudget{};
-                Motion.Set_MaxEndpointTravelCm(
-                    Params.Get_Tuning().Get_Sampling().Get_MaxEndpointTravelCm());
-                Motion.Set_MaxSegmentAngularStepDegrees(
-                    Params.Get_Tuning().Get_Sampling().Get_MaxSegmentAngularStepDegrees());
-                Return.Set_Motion(Motion);
-                auto Entry = FCk_ProceduralArticulation_Pose{};
-                const auto Acquired = FCk_ProceduralLimbControl_Control::TryAcquire(Subject, Token,
-                    ActionHandle, FCk_ArticulationChannelSet{Params.Get_Manual().Get_LimbIds(),
-                        Params.Get_Manual().Get_BodyChannel() == ECk_EnableDisable::Enable}, Return, Entry);
-                if (Acquired == ECk_ProceduralLimbControl_AcquireResult::Accepted)
-                {
-                    Action._EntryPose = Entry;
-                    Action._MostRecentObservedPose = Entry;
-                    Action._HasClaim = true;
-                    Action.CommitState(ActionHandle, Params, ECk_ProceduralAction_State::Ready);
-                    Action._InputElapsed = FCk_Time{};
-                }
-                else if (Acquired == ECk_ProceduralLimbControl_AcquireResult::NotReady)
-                {
-                    Action._AdmissionElapsed += InDeltaT;
-                    if (Action._AdmissionElapsed >= Params.Get_Tuning().Get_Watchdogs().Get_AcquisitionTimeout())
-                    {
-                        Action._Result = FCk_ProceduralAction_Result{
-                            ECk_ProceduralAction_Outcome::AcquisitionTimeout,
-                            ECk_ProceduralAction_Recovery::NotRequired, TEXT("AcquisitionTimeout")};
-                        Action.BeginFailureContext(ActionHandle, Params)
-                            .Set_Elapsed(Action._AdmissionElapsed)
-                            .Set_Limit(Params.Get_Tuning().Get_Watchdogs().Get_AcquisitionTimeout());
-                        InPlayer._Receipts.Finish(Identity, Action._Result, Action._Context);
-                        Action.CommitState(ActionHandle, Params, ECk_ProceduralAction_State::Finished);
-                    }
-                }
-                else
-                {
-                    Action._Result = FCk_ProceduralAction_Result{
-                        ECk_ProceduralAction_Outcome::Rejected,
-                        ECk_ProceduralAction_Recovery::NotRequired,
-                        ck_procedural_action_player_service::AcquireFailureReason(Acquired)};
-                    InPlayer._Receipts.Finish(Identity, Action._Result);
-                    Action.CommitState(ActionHandle, Params, ECk_ProceduralAction_State::Finished);
-                }
-            }
-
-            if (Action._State == ECk_ProceduralAction_State::PendingAdmission
-                && Params.Get_Source() == EProceduralActionSource::Clip
                 && ActionHandle.Has<FFragment_ProceduralAction_Compiled>())
             {
                 const auto& Compiled = ActionHandle.Get<FFragment_ProceduralAction_Compiled>();
                 auto Return = FCk_ProceduralLimbControl_Return{};
                 Return.Set_Duration(Params.Get_Tuning().Get_Transition().Get_DedicatedReturn());
                 Return.Set_Timeout(Params.Get_Tuning().Get_Transition().Get_ReturnTimeout());
-                auto Motion = FCk_ProceduralLimbControl_MotionBudget{};
-                Motion.Set_MaxEndpointTravelCm(
-                    Params.Get_Tuning().Get_Sampling().Get_MaxEndpointTravelCm());
-                Motion.Set_MaxSegmentAngularStepDegrees(
-                    Params.Get_Tuning().Get_Sampling().Get_MaxSegmentAngularStepDegrees());
-                Return.Set_Motion(Motion);
                 auto Entry = FCk_ProceduralArticulation_Pose{};
                 const auto Acquired = FCk_ProceduralLimbControl_Control::TryAcquire(Subject, Token,
                     ActionHandle, FCk_ArticulationChannelSet{Compiled.Get_BoundLimbIds(),
@@ -861,7 +655,7 @@ namespace ck
                     Action._MostRecentObservedPose = Entry;
                     Action._HasClaim = true;
                     if (DefaultValid && ck_procedural_action_player_service::CaptureClipInitial(Subject,
-                        Params.Get_Clip(), Compiled, Entry, DefaultPose, Action._InitialPose))
+                        Compiled, Entry, DefaultPose, Action._InitialPose))
                     {
                         Action._EntryBlendAccepted = FCk_Time{};
                         Action.CommitState(ActionHandle, Params,
@@ -936,49 +730,6 @@ namespace ck
                 }
             }
 
-            if (Action._State == ECk_ProceduralAction_State::Ready
-                && NOT Action._HasPendingBatch && NOT Action._PendingStageKey.IsSet())
-            {
-                Action._InputElapsed += InDeltaT;
-                if (Action._InputElapsed >= Params.Get_Manual().Get_InputTimeout())
-                {
-                    Action._Result = FCk_ProceduralAction_Result{
-                        ECk_ProceduralAction_Outcome::InputTimeout,
-                        ECk_ProceduralAction_Recovery::Pending, TEXT("InputTimeout")};
-                    Action.BeginFailureContext(ActionHandle, Params)
-                        .Set_Elapsed(Action._InputElapsed)
-                        .Set_Limit(Params.Get_Manual().Get_InputTimeout());
-                    InPlayer._Receipts.CloseWindows(Identity, TEXT("InputTimeout"));
-                    FCk_ProceduralLimbControl_Control::BeginReturn(Subject, Token, TEXT("InputTimeout"));
-                    Action.CommitState(ActionHandle, Params, ECk_ProceduralAction_State::Cancelling);
-                }
-            }
-
-            if (Action._State == ECk_ProceduralAction_State::Ready
-                && (Action._HasPendingBatch || Action._PendingStageKey.IsSet()))
-            {
-                Action._PublicationElapsed += InDeltaT;
-                if (Action._PublicationElapsed >= Params.Get_Tuning().Get_Watchdogs().Get_PublicationTimeout())
-                {
-                    auto PendingSubmit = MoveTemp(Action._PendingSubmit);
-                    Action._PendingSubmit.Reset();
-                    Action._HasPendingBatch = false;
-                    Action._PendingStageKey.Reset();
-                    Action._Result = FCk_ProceduralAction_Result{
-                        ECk_ProceduralAction_Outcome::PublicationTimeout,
-                        ECk_ProceduralAction_Recovery::Pending, TEXT("PublicationTimeout")};
-                    Action.BeginFailureContext(ActionHandle, Params)
-                        .Set_Elapsed(Action._PublicationElapsed)
-                        .Set_Limit(Params.Get_Tuning().Get_Watchdogs().Get_PublicationTimeout());
-                    InPlayer._Receipts.CloseWindows(Identity, TEXT("PublicationTimeout"));
-                    FCk_ProceduralLimbControl_Control::BeginReturn(Subject, Token, TEXT("PublicationTimeout"));
-                    Action.CommitState(ActionHandle, Params, ECk_ProceduralAction_State::Cancelling);
-                    if (PendingSubmit.IsSet())
-                    { PendingSubmit->TryFireCompletion(ActionHandle, ECk_Request_OperationResult::Failed); }
-                    continue;
-                }
-            }
-
             if (Action._State == ECk_ProceduralAction_State::Acquiring
                 || Action._State == ECk_ProceduralAction_State::Playing)
             {
@@ -996,25 +747,6 @@ namespace ck
                         .Set_Elapsed(Action._PublicationElapsed)
                         .Set_Limit(Params.Get_Tuning().Get_Watchdogs().Get_PublicationTimeout());
                     Action.CommitState(ActionHandle, Params, ECk_ProceduralAction_State::Cancelling);
-                }
-            }
-
-            if (DefaultValid && InDeltaT > FCk_Time{} && Action._State == ECk_ProceduralAction_State::Ready
-                && Action._HasPendingBatch && NOT Action._PendingStageKey.IsSet())
-            {
-                auto Candidate = FCk_ArticulationTokenCandidate{};
-                const auto Valid = ck_procedural_action_player_service::BuildManualCandidate(Subject,
-                    Params.Get_Manual(), Action._PendingBatch, Action._EntryPose, DefaultPose, Token,
-                    static_cast<uint64>(Action._NextSampleSequence), Candidate);
-                if (Valid) { Candidates.Add(MoveTemp(Candidate)); }
-                else
-                {
-                    auto PendingSubmit = MoveTemp(Action._PendingSubmit);
-                    Action._PendingSubmit.Reset();
-                    Action._HasPendingBatch = false;
-                    if (PendingSubmit.IsSet())
-                    { PendingSubmit->TryFireCompletion(ActionHandle, ECk_Request_OperationResult::Failed); }
-                    continue;
                 }
             }
 
@@ -1116,8 +848,7 @@ namespace ck
                     Valid = procedural_action::Evaluate(*Compiled.Get_Clip(), Action._InitialPose,
                         Action._AcceptedTime, Evaluated)
                         && ck_procedural_action_player_service::BuildClipCandidate(Subject,
-                            Params.Get_Clip(), Compiled, Evaluated, Action._EntryPose, DefaultPose,
-                            Token, 0, Hold);
+                            Compiled, Evaluated, Action._EntryPose, DefaultPose, Token, 0, Hold);
                 }
                 if (Valid) { Candidates.Add(MoveTemp(Hold)); }
                 else
@@ -1128,32 +859,6 @@ namespace ck
                     Action._Result = FCk_ProceduralAction_Result{
                         ECk_ProceduralAction_Outcome::SubjectPoseRejected,
                         ECk_ProceduralAction_Recovery::Pending, FName{TEXT("ClipHoldRejected")}};
-                    Action.CommitState(ActionHandle, Params, ECk_ProceduralAction_State::Cancelling);
-                }
-            }
-
-            if (Action._State == ECk_ProceduralAction_State::Ready
-                && NOT Action._HasPendingBatch && NOT Action._PendingStageKey.IsSet()
-                && NOT Action._PendingHoldStageKey.IsSet())
-            {
-                auto Hold = FCk_ArticulationTokenCandidate{};
-                const auto Valid = Action._HasAcceptedBatch
-                    ? DefaultValid && ck_procedural_action_player_service::BuildManualCandidate(Subject,
-                        Params.Get_Manual(), Action._AcceptedBatch, Action._EntryPose, DefaultPose,
-                        Token, 0, Hold)
-                    : ck_procedural_action_player_service::BuildEntryHoldCandidate(
-                        Params.Get_Manual().Get_LimbIds(),
-                        Params.Get_Manual().Get_BodyChannel() == ECk_EnableDisable::Enable,
-                        Action._EntryPose, Token, Hold);
-                if (Valid) { Candidates.Add(MoveTemp(Hold)); }
-                else
-                {
-                    Action._Result = FCk_ProceduralAction_Result{
-                        ECk_ProceduralAction_Outcome::SubjectPoseRejected,
-                        ECk_ProceduralAction_Recovery::Pending, TEXT("HoldCandidateInvalid")};
-                    InPlayer._Receipts.CloseWindows(Identity, TEXT("HoldCandidateInvalid"));
-                    FCk_ProceduralLimbControl_Control::BeginReturn(Subject, Token,
-                        TEXT("HoldCandidateInvalid"));
                     Action.CommitState(ActionHandle, Params, ECk_ProceduralAction_State::Cancelling);
                 }
             }
@@ -1181,7 +886,7 @@ namespace ck
             auto Limit = FOtherStepLimit{};
             if (Index < ReturnCandidateCount)
             {
-                auto Budget = FCk_ProceduralLimbControl_MotionBudget{};
+                auto Budget = FCk_ProceduralAction_Sampling{};
                 if (NOT FCk_ProceduralLimbControl_Control::Get_ReturnMotionBudget(
                         Subject, Candidates[Index].Get_Token(), Budget)
                     || NOT FCk_ProceduralLimbControl_Control::Get_ReturnActualPose(
@@ -1374,23 +1079,6 @@ namespace ck
                             }
                         }
                     }
-                    for (auto ActionHandle : ActionSnapshot)
-                    {
-                        if (ck::Is_NOT_Valid(ActionHandle)
-                            || NOT ActionHandle.Has<FFragment_ProceduralAction>()
-                            || ActionHandle.Has<FTag_DestroyEntity_Initiate>())
-                        { continue; }
-                        auto& Action = ActionHandle.Get<FFragment_ProceduralAction>();
-                        if (Action._State != ECk_ProceduralAction_State::Ready
-                            || NOT Action._HasPendingBatch || Action._PendingStageKey.IsSet())
-                        { continue; }
-                        auto PendingSubmit = MoveTemp(Action._PendingSubmit);
-                        Action._PendingSubmit.Reset();
-                        Action._HasPendingBatch = false;
-                        Action._PublicationElapsed = FCk_Time{};
-                        if (PendingSubmit.IsSet())
-                        { PendingSubmit->TryFireCompletion(ActionHandle, ECk_Request_OperationResult::Failed); }
-                    }
                     return;
                 }
             }
@@ -1399,8 +1087,7 @@ namespace ck
         {
             auto Fractions = TArray<double>{};
             auto MaximumFraction = 1.0;
-            auto MaximumSteps = InHandle.Get<FFragment_ProceduralActionPlayer_Params>()
-                .Get_Capacity().Get_MaxSamplesPerReceipt();
+            auto MaximumSteps = procedural_action::receipt_limits::MaxSamplesPerReceipt;
             for (const auto& Plan : ClipPlans)
             {
                 MaximumFraction = FMath::Min(MaximumFraction, Plan.MaximumFraction);
@@ -1483,7 +1170,7 @@ namespace ck
                             static_cast<uint64>(Action._Generation)};
                         auto Candidate = FCk_ArticulationTokenCandidate{};
                         CanEvaluate = ck_procedural_action_player_service::BuildClipCandidate(Subject,
-                            Params.Get_Clip(), Compiled, Pose, Action._EntryPose, DefaultPose,
+                            Compiled, Pose, Action._EntryPose, DefaultPose,
                             Token, static_cast<uint64>(Action._NextSampleSequence), Candidate);
                         if (NOT CanEvaluate) { break; }
                         StepCandidates.Add(MoveTemp(Candidate));
@@ -1536,14 +1223,11 @@ namespace ck
                                 for (auto LimbIndex = 0; LimbIndex < StepPolicies[PlanIndex].Get_Limbs().Num();
                                     ++LimbIndex)
                                 {
-                                    const auto& Policy = StepPolicies[PlanIndex].Get_Limbs()[LimbIndex];
                                     const auto Id = Plan.Action.Get<FFragment_ProceduralAction_Compiled>()
                                         .Get_BoundLimbIds()[LimbIndex];
                                     const auto* Limb = Predicted.Get_Limbs().FindByPredicate([Id](const auto& InLimb)
                                     { return InLimb.Get_Id() == Id; });
-                                    if (Limb == nullptr || (Policy.Get_ClearanceResponse()
-                                        == ECk_ProceduralAction_ClearanceResponse::AbortOnCrossing
-                                        && Limb->Get_ChainState() == ECk_ProceduralRig_ChainState::Crossing))
+                                    if (Limb == nullptr || Limb->Get_ChainState() == ECk_ProceduralRig_ChainState::Crossing)
                                     { CanEvaluate = false; break; }
                                 }
                                 if (NOT CanEvaluate) { break; }
@@ -1561,8 +1245,7 @@ namespace ck
                                             && Event.Get_Time() <= StepTimes[PlanIndex])
                                         { ++Events; }
                                     }
-                                    if (Events > InHandle.Get<FFragment_ProceduralActionPlayer_Params>()
-                                        .Get_Capacity().Get_MaxEventsPerReceipt())
+                                    if (Events > procedural_action::receipt_limits::MaxEventsPerReceipt)
                                     { CanEvaluate = false; break; }
                                 }
                             }
@@ -1606,24 +1289,6 @@ namespace ck
             }
             if (FinalFraction <= 0.0)
             {
-                auto FailedSubmits = TArray<TPair<FCk_Handle_ProceduralAction,
-                    FCk_Request_ProceduralAction_SubmitPoseBatch>>{};
-                for (auto ActionHandle : ActionSnapshot)
-                {
-                    if (ck::Is_NOT_Valid(ActionHandle) || NOT ActionHandle.Has<FFragment_ProceduralAction>()
-                        || ActionHandle.Has<FTag_DestroyEntity_Initiate>())
-                    { continue; }
-                    auto& Action = ActionHandle.Get<FFragment_ProceduralAction>();
-                    if (Action._State != ECk_ProceduralAction_State::Ready || NOT Action._HasPendingBatch
-                        || Action._PendingStageKey.IsSet())
-                    { continue; }
-                    auto PendingSubmit = MoveTemp(Action._PendingSubmit);
-                    Action._PendingSubmit.Reset();
-                    Action._HasPendingBatch = false;
-                    Action._PublicationElapsed = FCk_Time{};
-                    if (PendingSubmit.IsSet())
-                    { FailedSubmits.Emplace(ActionHandle, MoveTemp(PendingSubmit.GetValue())); }
-                }
                 for (auto& Plan : ClipPlans)
                 {
                     if (ck::Is_NOT_Valid(Plan.Action)
@@ -1643,8 +1308,6 @@ namespace ck
                         ECk_ProceduralAction_Recovery::Pending, FName{TEXT("SubjectPoseRejected")}};
                     Action.CommitState(Plan.Action, Params, ECk_ProceduralAction_State::Cancelling);
                 }
-                for (const auto& Submit : FailedSubmits)
-                { Submit.Value.TryFireCompletion(Submit.Key, ECk_Request_OperationResult::Failed); }
                 return;
             }
             Candidates = MoveTemp(FinalCandidates);
@@ -1720,65 +1383,6 @@ namespace ck
             }
         }
         if (Evaluation.Get_PredictedTokenPoses().Num() != Candidates.Num()) { return; }
-        auto ExceedsLimits = false;
-        auto ExcessTravel = 0.0f;
-        auto ExcessAngular = 0.0f;
-        auto ExcessTravelLimit = 0.0f;
-        auto ExcessAngularLimit = 0.0f;
-        for (auto Index = 0; Index < Candidates.Num(); ++Index)
-        {
-            for (auto ActionHandle : ActionSnapshot)
-            {
-                if (ck::Is_NOT_Valid(ActionHandle) || NOT ActionHandle.Has<FFragment_ProceduralAction>()
-                    || ActionHandle.Has<FTag_DestroyEntity_Initiate>())
-                { continue; }
-                auto& Action = ActionHandle.Get<FFragment_ProceduralAction>();
-                const auto& Params = ActionHandle.Get<FFragment_ProceduralAction_Params>();
-                if (static_cast<uint64>(Params.Get_Identity().Get_Value())
-                    != Candidates[Index].Get_Token().Get_InstanceId())
-                { continue; }
-                if (Action._State != ECk_ProceduralAction_State::Ready) { break; }
-                const auto& Previous = Action._MostRecentObservedPose;
-                auto Travel = 0.0f;
-                auto Angular = 0.0f;
-                const auto& Limits = Params.Get_Tuning().Get_Sampling();
-                procedural_action::MeasureMotion(Previous,
-                    Evaluation.Get_PredictedTokenPoses()[Index], Travel, Angular);
-                if (NOT FMath::IsFinite(Travel) || NOT FMath::IsFinite(Angular)
-                    || Travel > Limits.Get_MaxEndpointTravelCm()
-                    || Angular > Limits.Get_MaxSegmentAngularStepDegrees())
-                {
-                    ExceedsLimits = true;
-                    ExcessTravel = FMath::Max(ExcessTravel, Travel);
-                    ExcessAngular = FMath::Max(ExcessAngular, Angular);
-                    ExcessTravelLimit = Limits.Get_MaxEndpointTravelCm();
-                    ExcessAngularLimit = Limits.Get_MaxSegmentAngularStepDegrees();
-                }
-                break;
-            }
-        }
-        if (ExceedsLimits)
-        {
-            CK_ENSURE_IF_NOT(false,
-                TEXT("ProceduralAction manual batch exceeds sampling limits: travel [{}] cm (max [{}]), angular [{}] deg (max [{}])."),
-                ExcessTravel, ExcessTravelLimit, ExcessAngular,
-                ExcessAngularLimit) { }
-            for (auto ActionHandle : ActionSnapshot)
-            {
-                if (ck::Is_NOT_Valid(ActionHandle) || NOT ActionHandle.Has<FFragment_ProceduralAction>()
-                    || ActionHandle.Has<FTag_DestroyEntity_Initiate>())
-                { continue; }
-                auto& Action = ActionHandle.Get<FFragment_ProceduralAction>();
-                if (NOT Action._HasPendingBatch || Action._PendingStageKey.IsSet()) { continue; }
-                auto PendingSubmit = MoveTemp(Action._PendingSubmit);
-                Action._PendingSubmit.Reset();
-                Action._HasPendingBatch = false;
-                Action._PublicationElapsed = FCk_Time{};
-                if (PendingSubmit.IsSet())
-                { PendingSubmit->TryFireCompletion(ActionHandle, ECk_Request_OperationResult::Failed); }
-            }
-            return;
-        }
         auto Keys = TArray<FCk_ArticulationStageKey>{};
         const auto Staged = FCk_ProceduralArticulation_Control::TryStageCandidateBatch(
             Subject, MoveTemp(Evaluation), Keys);
@@ -1798,15 +1402,12 @@ namespace ck
                 { continue; }
                 if (Key.Get_SampleSequence() == 0)
                 {
-                    if (Action._State == ECk_ProceduralAction_State::Ready
-                        || Action._State == ECk_ProceduralAction_State::Acquiring
+                    if (Action._State == ECk_ProceduralAction_State::Acquiring
                         || Action._State == ECk_ProceduralAction_State::Playing)
                     { Action._PendingHoldStageKey = Key; }
                     break;
                 }
                 Action._PendingStageKey = Key;
-                if (Params.Get_Source() == EProceduralActionSource::Manual)
-                { Action._PendingToTime = Action._ServiceElapsed; }
                 ++Action._NextSampleSequence;
                 break;
             }

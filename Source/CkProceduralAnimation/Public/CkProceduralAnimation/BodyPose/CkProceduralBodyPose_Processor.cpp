@@ -18,9 +18,7 @@
 
 #include <Kismet/KismetMathLibrary.h>
 
-CK_REGISTER_PROCESSOR(ck::FProcessor_ProceduralBodyPose_HandleRequests);
 CK_REGISTER_PROCESSOR(ck::FProcessor_ProceduralBodyPose_Update);
-CK_REGISTER_PROCESSOR(ck::FProcessor_ProceduralBodyPose_CancelPendingRequests);
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -67,50 +65,6 @@ namespace ck_procedural_body_pose_processor
 namespace ck
 {
     auto
-        FProcessor_ProceduralBodyPose_HandleRequests::
-        ForEachEntity(
-            TimeType InDeltaT,
-            HandleType InHandle,
-            FFragment_ProceduralBodyPose_Action& InActionComp,
-            FFragment_ProceduralBodyPose_Requests& InRequestsComp)
-        -> void
-    {
-        auto Requests = MoveTemp(InRequestsComp._Requests);
-        InRequestsComp._Requests.Reset();
-
-        algo::ForEachRequest(Requests, ck::Visitor(
-        [&](const auto& InRequest) -> void
-        {
-            auto Result = ECk_Request_OperationResult::Failed_Cancelled;
-            const auto Guard = MakeCompletionGuard(InRequest, InHandle, Result);
-
-            if (InHandle.Has<FTag_DestroyEntity_Initiate>()
-                || InHandle.Has<FFragment_ProceduralActionPlayer>())
-            { return; }
-
-            DoHandleRequest(InHandle, InActionComp, InRequest);
-            Result = ECk_Request_OperationResult::Succeeded;
-        }), policy::DontResetContainer{});
-
-        if (InRequestsComp._Requests.IsEmpty())
-        { InHandle.Remove<MarkedDirtyBy>(); }
-    }
-
-    auto
-        FProcessor_ProceduralBodyPose_HandleRequests::
-        DoHandleRequest(
-            HandleType InHandle,
-            FFragment_ProceduralBodyPose_Action& InActionComp,
-            const FCk_Request_ProceduralBodyPose_SetActionOffset& InRequest)
-        -> void
-    {
-        InActionComp._Offset = InRequest.Get_Offset();
-        InActionComp._SampleId = InRequest.Get_SampleId();
-    }
-
-    // --------------------------------------------------------------------------------------------------------------------
-
-    auto
         FProcessor_ProceduralBodyPose_Update::
         ForEachEntity(
             TimeType InDeltaT,
@@ -118,7 +72,6 @@ namespace ck
             const FFragment_ProceduralBodyPose_Params& InParams,
             const FFragment_ProceduralBodyPose_SupportLayout& InSupportLayout,
             FFragment_ProceduralBodyPose& InPoseComp,
-            FFragment_ProceduralBodyPose_Action& InActionComp,
             const FFragment_ProceduralGait& InGaitComp,
             const FFragment_Transform& InTransform)
         -> void
@@ -335,38 +288,7 @@ namespace ck
             }
         }
 
-        const auto& BaseAccepted = InPoseComp._BaseOffset;
-        const auto& Action = InActionComp._Offset;
-        if (Action.Equals(FTransform::Identity))
-        { InPoseComp._Offset = BaseAccepted; }
-        else
-        {
-            const auto Desired = ComposeProceduralBodyPoseAction(BaseAccepted, Action);
-            const auto DesiredValid = Desired.IsSet();
-            CK_ENSURE_IF_NOT(DesiredValid,
-                TEXT("Procedural body pose [{}] could not compose its action offset onto its base offset; feature is failed."), InHandle)
-            {
-                InHandle.Add<FFragment_ProceduralBodyPose_Failure>(ECk_ProceduralBodyPose_Failure::MalformedSupport);
-                return;
-            }
-
-            InPoseComp._Offset = *Desired;
-            if (NOT ReachAnchors.IsEmpty())
-            {
-                const auto Projected = ProjectProceduralBodyPoseToReach(Body, BaseAccepted, *Desired,
-                    TArrayView<const FProceduralBodyPoseReachAnchor>{ReachAnchors});
-                const auto ProjectedValid = Projected.IsSet();
-                CK_ENSURE_IF_NOT(ProjectedValid,
-                    TEXT("Procedural body pose [{}] received malformed leg reach for its action offset; feature is failed."), InHandle)
-                {
-                    InHandle.Add<FFragment_ProceduralBodyPose_Failure>(ECk_ProceduralBodyPose_Failure::MalformedSupport);
-                    return;
-                }
-
-                InPoseComp._Offset = Projected->Get_Offset();
-            }
-        }
-
+        InPoseComp._Offset = InPoseComp._BaseOffset;
         const auto Posed = InPoseComp._Offset * Body;
         if (ArticulationPose != nullptr)
         {
@@ -376,25 +298,9 @@ namespace ck
                 Body, Posed, true, TArray<FCk_ProceduralArticulation_LimbPose>{}};
         }
         else
-        {
-            UCk_Utils_Transform_UE::Request_SetTransform(Presentation, FCk_Request_Transform_SetTransform{Posed}, {});
-            InActionComp._Sample = FCk_ProceduralBodyPose_ActionSample{Posed, InActionComp._SampleId,
-                InActionComp._Sample.Get_PoseRevision() + 1};
-        }
+        { UCk_Utils_Transform_UE::Request_SetTransform(Presentation, FCk_Request_Transform_SetTransform{Posed}, {}); }
     }
 
-    // --------------------------------------------------------------------------------------------------------------------
-
-    auto
-        FProcessor_ProceduralBodyPose_CancelPendingRequests::
-        ForEachEntity(
-            TimeType InDeltaT,
-            HandleType InHandle,
-            const FFragment_ProceduralBodyPose_Requests& InRequestsComp)
-        -> void
-    {
-        request::FireCancelledForPending(InHandle, InRequestsComp.Get_Requests());
-    }
 }
 
 // --------------------------------------------------------------------------------------------------------------------

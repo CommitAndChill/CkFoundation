@@ -26,8 +26,7 @@ namespace ck
         friend class FProcessor_ProceduralLimbControl_CancelPendingRequests;
 
     public:
-        using RequestType = std::variant<FCk_Request_ProceduralArticulation_RecoverLimbs,
-            FCk_Request_ProceduralArticulation_RecoverUnplantedLimbs>;
+        using RequestType = std::variant<FCk_Request_ProceduralArticulation_RecoverUnplantedLimbs>;
 
     private:
         TArray<RequestType> _Requests;

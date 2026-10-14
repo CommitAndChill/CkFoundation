@@ -36,7 +36,6 @@ namespace ck
         FProcessor_ProceduralActionPlayer_HandleRequests,
         FCk_Handle_ProceduralActionPlayer,
         TReadWrite<FFragment_ProceduralActionPlayer>,
-        TReadWrite<FFragment_ProceduralActionPlayer_Tunables>,
         TReadWrite<FFragment_ProceduralActionPlayer_Requests>,
         TExclude<FTag_DestroyEntity_Initiate>,
         CK_IGNORE_PENDING_KILL>
@@ -51,7 +50,6 @@ namespace ck
             TimeType InDeltaT,
             HandleType InHandle,
             FFragment_ProceduralActionPlayer& InPlayer,
-            FFragment_ProceduralActionPlayer_Tunables& InTunables,
             FFragment_ProceduralActionPlayer_Requests& InRequests)
             -> void;
     };
@@ -118,60 +116,11 @@ namespace ck
             -> void;
     };
 
-    // Delivers managed streams after Observe so a frame's accepted poses and the terminals written earlier in the
-    // frame are seen together. A terminal written by an action's end of play is delivered one frame later.
-    class CKPROCEDURALANIMATION_API FProcessor_ProceduralActionPlayer_ManagedDispatch : public ck_exp::TProcessor<
-        FProcessor_ProceduralActionPlayer_ManagedDispatch,
+    // An Auto action has no consumer left to release it once its player is gone.
+    class CKPROCEDURALANIMATION_API FProcessor_ProceduralActionPlayer_EndPlay : public ck_exp::TProcessor<
+        FProcessor_ProceduralActionPlayer_EndPlay,
         FCk_Handle_ProceduralActionPlayer,
-        TReadWrite<FFragment_ProceduralActionPlayer>,
-        TReadWrite<FFragment_ProceduralActionPlayer_Managed>,
-        TExclude<FTag_DestroyEntity_Initiate>,
-        CK_IGNORE_PENDING_KILL>
-    {
-    public:
-        using Group = FGroup_Gameplay_Camera;
-        using RunAfter = TDepList<FProcessor_ProceduralActionPlayer_Observe>;
-        using TProcessor::TProcessor;
-
-        static auto
-        ForEachEntity(
-            TimeType InDeltaT,
-            HandleType InHandle,
-            FFragment_ProceduralActionPlayer& InPlayer,
-            FFragment_ProceduralActionPlayer_Managed& InManaged)
-            -> void;
-
-    private:
-        struct FDispatchResult
-        {
-            int32 Delivered = 0;
-            bool Serviced = false;
-            bool Completed = false;
-        };
-
-        static auto
-        DoDispatch(
-            HandleType InHandle,
-            FCk_ProceduralAction_Identity InIdentity,
-            int32 InMaxRecords)
-            -> FDispatchResult;
-
-        static auto
-        DoComplete(
-            HandleType InHandle,
-            const FCk_ProceduralAction_ManagedCompletion& InCompletion)
-            -> void;
-
-        static auto
-        Get_IsDispatchable(
-            const HandleType& InHandle)
-            -> bool;
-    };
-
-    class CKPROCEDURALANIMATION_API FProcessor_ProceduralActionPlayer_ManagedEndPlay : public ck_exp::TProcessor<
-        FProcessor_ProceduralActionPlayer_ManagedEndPlay,
-        FCk_Handle_ProceduralActionPlayer,
-        TReadWrite<FFragment_ProceduralActionPlayer_Managed>,
+        TReadOnly<FFragment_ProceduralActionPlayer>,
         CK_IF_END_PLAY>
     {
     public:
@@ -182,7 +131,7 @@ namespace ck
         ForEachEntity(
             TimeType InDeltaT,
             HandleType InHandle,
-            FFragment_ProceduralActionPlayer_Managed& InManaged)
+            const FFragment_ProceduralActionPlayer& InPlayer)
             -> void;
     };
 }

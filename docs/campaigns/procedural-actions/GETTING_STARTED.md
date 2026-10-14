@@ -1,6 +1,6 @@
 # Procedural action: first consumer
 
-The shortest path is four steps: compose a subject once, play a clip with `Play_Loaded` and a completion, build clips in code with the pose builder when an asset is not the right tool, and drain explicit receipts only where gameplay needs every accepted interval (damage). The public declarations are `Articulation/CkProceduralArticulation_Utils.h`, `ActionPlayer/CkProceduralActionPlayer_Utils.h`, `Action/CkProceduralAction_Utils.h` and `ActionBuilder/CkProceduralActionBuilder_Utils.h` under `Source/CkProceduralAnimation/Public/CkProceduralAnimation`. AngelScript reaches them through `utils_procedural_articulation`, `utils_procedural_action_player`, `utils_procedural_action`, `utils_procedural_action_builder` and the handle mixins. The runnable helpers in `Script/CkProceduralAnimation/Examples/` (`CkProceduralAction_Noncombat.as`, `CkProceduralAction_Builder.as`, `CkProceduralAction_Sweep.as`) are the code the snippets below come from.
+The shortest path is four steps: compose a subject once, play a clip with `Create_FromClip` and Auto delivery, build clips in code with the pose builder when an asset is not the right tool, and use Explicit delivery to drain receipts only where gameplay needs every accepted interval (damage). The public declarations are `Articulation/CkProceduralArticulation_Utils.h`, `ActionPlayer/CkProceduralActionPlayer_Utils.h`, `Action/CkProceduralAction_Utils.h` and `ActionBuilder/CkProceduralActionBuilder_Utils.h` under `Source/CkProceduralAnimation/Public/CkProceduralAnimation`. AngelScript reaches them through `utils_procedural_articulation`, `utils_procedural_action_player`, `utils_procedural_action`, `utils_procedural_action_builder` and the handle mixins. The runnable helpers in `Script/CkProceduralAnimation/Examples/` (`CkProceduralAction_Noncombat.as`, `CkProceduralAction_Builder.as`, `CkProceduralAction_Sweep.as`) are the code the snippets below come from.
 
 ## 1. Compose once
 
@@ -18,39 +18,35 @@ auto SubjectSpec = FCk_ProceduralArticulation_Spec();
 SubjectSpec.Set_Presentation(Presentation);
 auto Subject = utils_procedural_articulation::Add(Root, SubjectSpec);
 // Wait for Subject.Get_SettledRevision() > 0 before playing.
-auto Player = utils_procedural_action_player::Add(Subject,
-    utils_procedural_action_player::Make_DedicatedPlayerSpec(FCk_ProceduralAction_Tuning()));
+auto Player = utils_procedural_action_player::Add(Subject, FCk_ProceduralActionPlayer_Spec());
 ```
 
-Pick the player spec by what the limbs are. `Make_DedicatedPlayerSpec(Tuning)` is for appendages with no gait. `Make_BorrowingPlayerSpec(FCk_ProceduralActionPlayer_BorrowingSpec(Support, Return))` lets an action borrow a walking leg: `Make_CountOnlySupport(N)` keeps N other trusted planted contacts (not visually standing legs) and the Return group bounds how the leg gets back to a plant. Neither preset guarantees ground to return to. A limb clip needs a layout per limb and one bound transform part per segment; see `CkAutoTest_ProceduralAnimation_NoncombatGesture.as` and `..._BuilderSweep.as` in `Plugins/CkTests/Script/CkProceduralAnimation/`.
+Pick the player spec by what the limbs are. The default `FCk_ProceduralActionPlayer_Spec` serves the body channel and appendages with no gait; its `Tuning` is the tuning every action of the player plays with. To let an action borrow a walking leg, set its `Locomotion`: a `CountOnly` support keeps N other trusted planted contacts (not visually standing legs) and the `Return` bounds how the leg gets back to a plant (`ck_procedural_action_sweep::AddBorrowingSweepPlayer`). With the default `Disabled` support, an action that binds a walking leg is rejected at admission with reason `SupportUnavailable`. Neither policy guarantees ground to return to. A limb clip needs a layout per limb and one bound transform part per segment; see `CkAutoTest_ProceduralAnimation_NoncombatManaged.as` and `..._BuilderSweep.as` in `Plugins/CkTests/Script/CkProceduralAnimation/`.
 
-## 2. Play a clip and wait for its completion
+## 2. Play a clip and wait for OnFinished
 
-`Play_Loaded` plays resident content with managed delivery: the framework drains and acknowledges the action's receipt stream, releases the action when it is done, and calls your completion once, on a later frame, never inside the call.
+With `Delivery` `Auto` the player acknowledges the action's receipt stream, the action releases itself once it is done, and `OnFinished` fires once with the outcome.
 
 ```angelscript
 auto Clip = Cast<UCk_ProceduralAction_Data>(LoadObject(this,
     "/CkFoundation/ProceduralAnimation/Examples/Ck_ProceduralAction_BodyPulse_DA.Ck_ProceduralAction_BodyPulse_DA"));
-auto Start = ck_procedural_action_noncombat::PlayManagedGesture(InHandle, Player, Clip,
+auto Action = ck_procedural_action_noncombat::PlayGesture(InHandle, Player, Clip,
     TArray<FCk_ProceduralAction_SlotBinding>(),
-    FCk_Delegate_ProceduralAction_OnManagedCompleted(this, n"OnGestureCompleted"));
-if (Start.Get_Report().Get_Status() != ECk_ProceduralAction_ReportStatus::Valid)
-    return; // Nothing was created; no completion will follow.
+    FCk_Delegate_ProceduralAction_OnFinished(this, n"OnGestureFinished"));
+if (ck::Is_NOT_Valid(Action))
+    return; // Nothing was created; nothing will fire.
 
 UFUNCTION()
-void OnGestureCompleted(FCk_Handle_ProceduralActionPlayer InPlayer, FCk_ProceduralAction_ManagedCompletion InCompletion)
+void OnGestureFinished(FCk_Handle_ProceduralAction InAction, FCk_ProceduralAction_Terminal InTerminal)
 {
-    // InCompletion.Get_Result(): the producer outcome, recovery and reason.
-    // InCompletion.Get_Delivery(): Complete, Expired or PlayerLost.
+    // InTerminal.Get_Result(): the outcome, recovery and reason.
     // utils_procedural_action::Get_ResultText(Result, Context) explains a failure for a log or a debug panel.
 }
 ```
 
-The start report is `Valid` whenever an action was created, including a clip that will be rejected at binding: that rejection arrives as the completion's `Rejected` outcome. It is `Invalid`, with a `StartRejected` diagnostic and no identity, only when nothing could be created (invalid scope or player, malformed spec, no receipt capacity). `Play` takes a soft `FCk_ProceduralAction_PlaySpec` and loads first. From the moment `Play` returns, and for as long as its stream is retained, `Get_IsManagedDelivery(Player, Identity)` is true and `Request_ConsumeReceipts` on that identity is refused: one identity has one delivery owner, chosen at creation. `Read_Receipts` still works as a non-consuming observation. To watch the stream without owning it, bind `BindTo_OnManagedRecords` (copied pages, records in order) or `BindTo_OnManagedAcceptedPose` (accepted poses only), at most 8 listeners of each kind per identity, with no replay of pages delivered before the bind.
+A resident clip is compiled and bound inside `Create_FromClip`. A clip that cannot bind comes back already `Finished` with `Rejected`, and `OnFinished`, bound right after the call with its default `FireIfPayloadInFlightThisFrame` policy, still reports it. An unloaded clip loads first (`PendingLoad`). An invalid handle means nothing could be created (invalid scope or player, malformed spec, no receipt capacity). One identity has one acknowledging reader, chosen at creation: `Request_ConsumeReceipts` on an Auto identity is refused, while `Read_Receipts` still works as a non-consuming observation.
 
-A named limb clip maps each authored slot to a limb ID with `FCk_ProceduralAction_SlotBinding`. The play options can also mirror a slot onto another limb for this play only: `Spec.Set_Mirrors(...)` with `FCk_ProceduralAction_MirrorSpec(SourceSlot, DestinationSlot, Plane)`, plus a binding for the destination slot. The mirror is applied to the play's compiled copy; the clip asset is never changed.
-
-Tuning comes from the player's defaults; `Spec.Set_Tuning(Tuning)` pins an override for one action (it selects `TuningMode::Override`). In Blueprint's Make/Set Members nodes set `TuningMode` to `Override` yourself when supplying custom `Tuning`; a nondefault `Tuning` with `PlayerDefault` is rejected rather than ignored.
+A named limb clip maps each authored slot to a distinct limb ID with `FCk_ProceduralAction_SlotBinding`. To play a slot's motion on the opposite limb, mirror it into its own slot with the builder's `Mirror_Slot` and bind that slot.
 
 ## 3. Build a clip in code
 
@@ -63,19 +59,19 @@ if (Report.Get_Status() == ECk_ProceduralAction_ReportStatus::Valid)
 {
     ck_procedural_action_builder::PlayBuilt(InHandle, Player, Sweep,
         FCk_ProceduralAction_SlotBinding(n"Sweep", n"Arm"),
-        FCk_Delegate_ProceduralAction_OnManagedCompleted(this, n"OnSweepCompleted"));
+        FCk_Delegate_ProceduralAction_OnFinished(this, n"OnSweepFinished"));
 }
 ```
 
-Every builder call takes the draft by reference, validates all of its inputs first and returns a report; an `Invalid` report leaves the draft unchanged and its diagnostics name the field to fix. Build once per input revision, not per play: compilation happens at build and at play, never per frame. The clip object is caller-owned; an Outer alone does not keep it alive. `CkProceduralAction_Sweep.as` adds cancellation (`CancelSweep`, completion `Cancelled`), the walking-leg variant through the borrowing preset, and the recovery of a leg whose return found no ground (`Get_IsWaitingForRecovery`, `RecoverUnplanted`).
+Every builder call takes the draft by reference, validates all of its inputs first and returns a report; an `Invalid` report leaves the draft unchanged and its diagnostics name the field to fix. Build once per input revision, not per play: compilation happens at build and at play, never per frame. The clip object is caller-owned; an Outer alone does not keep it alive. `CkProceduralAction_Sweep.as` adds cancellation (`CancelSweep`, outcome `Cancelled`), the walking-leg player (`AddBorrowingSweepPlayer`), and the recovery of a leg whose return found no ground (`Get_IsWaitingForRecovery`, `RecoverUnplanted`).
 
 ## 4. Explicit receipts, for damage
 
-Managed delivery reports how the motion ended; it is not a damage channel and promises no exactly-once effect. When gameplay must see every accepted interval (hit tests along the swept chain, window-scoped damage with deduplication), create the action with `Create_FromLoadedClip` or `Create_FromClip` and drain its stream yourself:
+Auto delivery reports how the motion ended; it is not a damage channel and promises no exactly-once effect. When gameplay must see every accepted interval (hit tests along the swept chain, window-scoped damage with deduplication), create the action with the default `Explicit` delivery and drain its stream yourself:
 
 ```angelscript
-auto Action = utils_procedural_action::Create_FromLoadedClip(ActionScope, Player,
-    FCk_ProceduralAction_LoadedPlaySpec(Clip));
+auto Action = utils_procedural_action::Create_FromClip(ActionScope, Player,
+    FCk_ProceduralAction_PlaySpec(TSoftObjectPtr<UCk_ProceduralAction_Data>(Clip)));
 auto Identity = Action.Get_Identity(); // Keep it even if the action entity dies.
 
 // Each frame:
@@ -110,16 +106,16 @@ if (Page.Get_Result() == ECk_ProceduralAction_ReadResult::Pending ||
 }
 ```
 
-Use one designated consumer per `Identity` and persist `Cursor` across frames. `StreamSequence` is the consumption cursor, distinct from a pose `SampleSequence`. Only `AcceptedPose` carries accepted motion; `WindowsClosed` and `Terminal` are separate records. `Pending` means the producer has not finished; **it may already hold records to drain**. `Succeeded` means terminal was published. `StreamExpired`, `InvalidCursor` and `InvalidPlayer` are reader errors for that call. `Page.Get_Terminal()` means the producer finished, not that a truncated page is fully drained. An accepted interval is evidence of the settled pose; intermediate samples are evaluated candidates, not rendered or contact-certified frames. The manual AS fixture `CkAutoTest_ProceduralAnimation_ActionManualPublicSurface.as` shows `Read_Receipts` with a completion-checked `Request_ConsumeReceipts`.
+Use one designated consumer per `Identity` and persist `Cursor` across frames. `StreamSequence` is the consumption cursor, distinct from a pose `SampleSequence`. Only `AcceptedPose` carries accepted motion; `WindowsClosed` and `Terminal` are separate records. `Pending` means the producer has not finished; **it may already hold records to drain**. `Succeeded` means terminal was published. `StreamExpired`, `InvalidCursor` and `InvalidPlayer` are reader errors for that call. `Page.Get_Terminal()` means the producer finished, not that a truncated page is fully drained. An accepted interval is evidence of the settled pose; intermediate samples are evaluated candidates, not rendered or contact-certified frames.
 
-After reading and acknowledging closure plus terminal, call `Action.Request_Release(FCk_Request_ProceduralAction_Release())` if the live action still exists (managed delivery does this for you). If `ActionScope` dies while the player survives, keep the player handle and the copied `Identity`, find retained streams with `Player.Get_RetainedReceiptIdentities()` and drain them the same way; an unacknowledged orphan expires after the finite retention timeout and later reads report `StreamExpired`. Player or subject destruction ends all streams.
+Acknowledging the terminal record releases the action: the player destroys it on its next service pass, so read `Get_State`/`Get_Result` before that, or take the result from the `Terminal` record. `Action.Request_Release(FCk_Request_ProceduralAction_Release())` is only for tearing an action down early. If `ActionScope` dies while the player survives, keep the player handle and the copied `Identity`, find retained streams with `Player.Get_RetainedReceiptIdentities()` and drain them the same way; an unacknowledged orphan expires 2 s after its terminal and later reads report `StreamExpired`. Player or subject destruction ends all streams.
 
-## End, cancel and scope loss
+## Cancel and scope loss
 
-Clips finish their own timeline. `Action.Request_Cancel(FCk_Request_ProceduralAction_Cancel(Reason))` interrupts a live clip or manual action; `Action.Request_End(FCk_Request_ProceduralAction_End())` is the normal manual-control exit only. Both close active windows before the limbs return, and the terminal reports the outcome and recovery. A managed completion fires after the terminal record and every page before it were delivered; an action whose scope dies reports `OwnerLost`, and the player still returns its limbs.
+Clips finish their own timeline. `Action.Request_Cancel(FCk_Request_ProceduralAction_Cancel(Reason))` interrupts a live clip; it closes active windows before the limbs return, and the terminal reports the outcome and recovery. An action whose scope dies reports `OwnerLost`, and the player still returns its limbs.
 
 ## Where data lives
 
-Clip assets own phased body/limb keys and events. The player spec owns default tuning, capacity and locomotion policy; a play spec owns bindings, mirrors and an optional tuning override. The separate `_Preview_DA` asset owns editor-only subject topology, surface, visual meshes and Solver-only tuning (see [AUTHORING.md](AUTHORING.md#current-editor-quick-start)). Mesh appearance and scale are not motion parameters.
+Clip assets own phased body/limb keys and events. The player spec owns tuning, capacity and locomotion policy; a play spec owns the clip, its slot bindings and its delivery. The separate `_Preview_DA` asset owns editor-only subject topology, surface, visual meshes and Solver-only tuning (see [AUTHORING.md](AUTHORING.md#current-editor-quick-start)). Mesh appearance and scale are not motion parameters.
 
-In C++ the same calls are on `UCk_Utils_ProceduralArticulation_UE`, `UCk_Utils_ProceduralActionPlayer_UE`, `UCk_Utils_ProceduralAction_UE` and `UCk_Utils_ProceduralActionBuilder_UE`, with the same reflected specs and handles. Blueprint nodes carry the same names (**Play Loaded**, **Create From Loaded Clip**, **Make From Recipe**, **Add Pose Key**, **Build Into**, **Read Receipts**, **Request Consume Receipts**, **Request Cancel**, **Request Release**). The reasons behind every outcome, with their corrective actions, are in [API.md](API.md#9-outcomes-likely-causes-and-corrective-actions).
+In C++ the same calls are on `UCk_Utils_ProceduralArticulation_UE`, `UCk_Utils_ProceduralActionPlayer_UE`, `UCk_Utils_ProceduralAction_UE` and `UCk_Utils_ProceduralActionBuilder_UE`, with the same reflected specs and handles. Blueprint nodes carry the same names (**Create From Clip**, **Bind To OnFinished**, **Make From Recipe**, **Add Pose Key**, **Build Into**, **Read Receipts**, **Request Consume Receipts**, **Request Cancel**, **Request Release**). The reasons behind every outcome, with their corrective actions, are in [API.md](API.md#8-outcomes-likely-causes-and-corrective-actions).

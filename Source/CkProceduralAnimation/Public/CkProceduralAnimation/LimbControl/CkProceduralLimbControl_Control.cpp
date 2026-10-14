@@ -2,6 +2,7 @@
 #include "CkProceduralAnimation/Gait/CkProceduralGaitParticipation_Control.h"
 
 #include "CkProceduralAnimation/LimbControl/CkProceduralLimbControl_Fragment.h"
+#include "CkProceduralAnimation/ActionPlayer/CkProceduralActionPlayer_Fragment.h"
 #include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Utils.h"
 #include "CkProceduralAnimation/Limb/CkProceduralLimb_Utils.h"
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Utils.h"
@@ -32,11 +33,7 @@ namespace ck::procedural_limb_control
             && FMath::IsFinite(InPolicy.Get_Timeout().Get_Seconds()) && InPolicy.Get_Timeout() >= InPolicy.Get_Duration()
             && InPolicy.Get_MaxProbeAttempts() > 0 && InPolicy.Get_MaxProbeAttempts() <= 16
             && FMath::IsFinite(InPolicy.Get_RetryInterval().Get_Seconds()) && InPolicy.Get_RetryInterval() > FCk_Time{}
-            && FMath::IsFinite(InPolicy.Get_ContactToleranceCm()) && InPolicy.Get_ContactToleranceCm() >= 0.0f
-            && FMath::IsFinite(InPolicy.Get_Motion().Get_MaxEndpointTravelCm())
-            && InPolicy.Get_Motion().Get_MaxEndpointTravelCm() > 0.0f
-            && FMath::IsFinite(InPolicy.Get_Motion().Get_MaxSegmentAngularStepDegrees())
-            && InPolicy.Get_Motion().Get_MaxSegmentAngularStepDegrees() > 0.0f;
+            && FMath::IsFinite(InPolicy.Get_ContactToleranceCm()) && InPolicy.Get_ContactToleranceCm() >= 0.0f;
     }
 
     auto
@@ -336,27 +333,20 @@ auto
     Get_ReturnMotionBudget(
         const FCk_Handle_ProceduralArticulation& InSubject,
         FCk_ArticulationControlToken InToken,
-        FCk_ProceduralLimbControl_MotionBudget& OutBudget)
+        FCk_ProceduralAction_Sampling& OutBudget)
     -> bool
 {
     OutBudget = {};
     if (NOT ck::procedural_limb_control::IsLive(InSubject)
-        || NOT InSubject.Has<ck::FFragment_ProceduralLimbControl>())
+        || NOT InSubject.Has<ck::FFragment_ProceduralLimbControl>()
+        || NOT InSubject.Has<ck::FFragment_ProceduralActionPlayer_Params>())
     { return false; }
     const auto* Controller = InSubject.Get<ck::FFragment_ProceduralLimbControl>().Get_Controllers()
         .FindByPredicate([InToken](const auto& InEntry)
         { return InEntry.Get_Token() == InToken; });
     if (Controller == nullptr || Controller->Get_ReturnState() != ECk_ProceduralLimbControl_ReturnState::Returning)
     { return false; }
-    OutBudget = Controller->_ReturnPolicy.Get_Motion();
-    if (NOT Controller->Get_LocomotorIds().IsEmpty())
-    {
-        const auto& Locomotion = Controller->_LocomotionReturnPolicy.Get_Motion();
-        OutBudget.Set_MaxEndpointTravelCm(FMath::Min(OutBudget.Get_MaxEndpointTravelCm(),
-            Locomotion.Get_MaxEndpointTravelCm()));
-        OutBudget.Set_MaxSegmentAngularStepDegrees(FMath::Min(OutBudget.Get_MaxSegmentAngularStepDegrees(),
-            Locomotion.Get_MaxSegmentAngularStepDegrees()));
-    }
+    OutBudget = InSubject.Get<ck::FFragment_ProceduralActionPlayer_Params>().Get_Tuning().Get_Sampling();
     return true;
 }
 

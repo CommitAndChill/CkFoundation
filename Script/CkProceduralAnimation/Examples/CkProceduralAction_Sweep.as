@@ -5,12 +5,11 @@
 // and what that does; these helpers only start, cancel and diagnose the motion.
 namespace ck_procedural_action_sweep
 {
-    // A dedicated appendage has no gait to borrow from, so its player needs only playback tuning.
+    // A dedicated appendage has no gait to borrow from, so the default player spec is all it needs.
     FCk_Handle_ProceduralActionPlayer AddDedicatedSweepPlayer(FCk_Handle_ProceduralArticulation InSubject)
     {
         auto Subject = InSubject;
-        return utils_procedural_action_player::Add(Subject,
-            utils_procedural_action_player::Make_DedicatedPlayerSpec(FCk_ProceduralAction_Tuning()));
+        return utils_procedural_action_player::Add(Subject, FCk_ProceduralActionPlayer_Spec());
     }
 
     // A walking leg leaves the gait only while InMinimumTrustedContacts other feet stay planted on trusted ground, and
@@ -21,37 +20,42 @@ namespace ck_procedural_action_sweep
         FCk_ProceduralLimbControl_Return InReturn)
     {
         auto Subject = InSubject;
-        const auto Support = utils_procedural_action_player::Make_CountOnlySupport(InMinimumTrustedContacts);
-        return utils_procedural_action_player::Add(Subject, utils_procedural_action_player::Make_BorrowingPlayerSpec(
-            FCk_ProceduralActionPlayer_BorrowingSpec(Support, InReturn)));
+        auto Locomotion = FCk_ProceduralLimbControl_Locomotion();
+        Locomotion.Set_Support(FCk_ProceduralLimbControl_Support(ECk_ProceduralLimbControl_SupportMode::CountOnly,
+            InMinimumTrustedContacts));
+        Locomotion.Set_Return(InReturn);
+        auto Spec = FCk_ProceduralActionPlayer_Spec();
+        Spec.Set_Locomotion(Locomotion);
+        return utils_procedural_action_player::Add(Subject, Spec);
     }
 
-    // Two ways to be rejected. An Invalid start report is synchronous: no action exists and no completion follows. A
-    // Valid start whose clip cannot bind (an unknown limb, a busy channel, missing support) completes with Outcome
-    // Rejected on a later frame, like any other outcome.
-    FCk_ProceduralAction_ManagedStart StartSweep(
+    // Two ways to be rejected. An invalid handle is synchronous: no action exists and nothing fires. A sweep whose clip
+    // cannot run (an unknown limb, a busy channel, missing support) finishes with Outcome Rejected through InOnFinished,
+    // like any other outcome.
+    FCk_Handle_ProceduralAction StartSweep(
         FCk_Handle InScope,
         FCk_Handle_ProceduralActionPlayer InPlayer,
         UCk_ProceduralAction_Data InSweep,
         FCk_ProceduralAction_SlotBinding InBinding,
-        const FCk_Delegate_ProceduralAction_OnManagedCompleted& InOnCompleted)
+        const FCk_Delegate_ProceduralAction_OnFinished& InOnFinished)
     {
-        return ck_procedural_action_builder::PlayBuilt(InScope, InPlayer, InSweep, InBinding, InOnCompleted);
+        return ck_procedural_action_builder::PlayBuilt(InScope, InPlayer, InSweep, InBinding, InOnFinished);
     }
 
-    // The limb returns through the player's return policy and the completion reports Cancelled. Cancelling an action
-    // that already finished changes nothing.
-    void CancelSweep(FCk_ProceduralAction_ManagedStart InStart)
+    // The limb returns through the player's return policy and the action finishes Cancelled. Cancelling an action that
+    // already finished, or was released, changes nothing.
+    void CancelSweep(FCk_Handle_ProceduralAction InAction)
     {
-        if (ck::Is_NOT_Valid(InStart.Get_Action()))
+        if (ck::Is_NOT_Valid(InAction) || utils_procedural_action::Get_State(InAction) == ECk_ProceduralAction_State::Finished)
         { return; }
-        utils_procedural_action::Request_Cancel(InStart.Get_Action(), FCk_Request_ProceduralAction_Cancel(n"SweepCancelled"));
+        auto Action = InAction;
+        utils_procedural_action::Request_Cancel(Action, FCk_Request_ProceduralAction_Cancel(n"SweepCancelled"));
     }
 
-    // For logs and debug text, never for branching: branch on the completion's Result, Delivery and Context fields.
-    FString DescribeOutcome(FCk_ProceduralAction_ManagedCompletion InCompletion)
+    // For logs and debug text, never for branching: branch on the terminal's Result and Context fields.
+    FString DescribeOutcome(FCk_ProceduralAction_Terminal InTerminal)
     {
-        return utils_procedural_action::Get_ResultText(InCompletion.Get_Result(), InCompletion.Get_Context()).ToString();
+        return utils_procedural_action::Get_ResultText(InTerminal.Get_Result(), InTerminal.Get_Context()).ToString();
     }
 
     // A walking leg whose return found no ground stays unplanted, and no action can borrow it, until it is recovered.

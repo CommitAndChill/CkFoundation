@@ -25,19 +25,6 @@ namespace ck
     class FProcessor_ProceduralActionPlayer_Observe;
     class FProcessor_ProceduralActionPlayer_ReconcileOwnerLoss;
 
-    enum class EProceduralActionSource : uint8
-    {
-        Clip,
-        Manual
-    };
-
-    // Selected at creation and immutable: who acknowledges the action's receipt stream.
-    enum class EProceduralActionDelivery : uint8
-    {
-        Explicit,
-        Managed
-    };
-
     struct CKPROCEDURALANIMATION_API FProceduralActionClipParams
     {
         CK_GENERATED_BODY(FProceduralActionClipParams);
@@ -45,34 +32,11 @@ namespace ck
     private:
         TSoftObjectPtr<UCk_ProceduralAction_Data> _Clip;
         TArray<FCk_ProceduralAction_SlotBinding> _SlotBindings;
-        TArray<FCk_ProceduralAction_AnchorBinding> _AnchorBindings;
-        TArray<FCk_ProceduralAction_MirrorSpec> _Mirrors;
 
     public:
         CK_PROPERTY_GET(_Clip);
         CK_PROPERTY_GET(_SlotBindings);
-        CK_PROPERTY_GET(_AnchorBindings);
-        CK_PROPERTY(_Mirrors);
-        CK_DEFINE_CONSTRUCTORS(FProceduralActionClipParams, _Clip, _SlotBindings, _AnchorBindings);
-    };
-
-    struct CKPROCEDURALANIMATION_API FProceduralActionManualParams
-    {
-        CK_GENERATED_BODY(FProceduralActionManualParams);
-
-    private:
-        TArray<FName> _LimbIds;
-        TArray<FCk_ProceduralAction_AnchorBinding> _AnchorBindings;
-        ECk_EnableDisable _BodyChannel = ECk_EnableDisable::Disable;
-        FCk_Time _InputTimeout;
-
-    public:
-        CK_PROPERTY_GET(_LimbIds);
-        CK_PROPERTY_GET(_AnchorBindings);
-        CK_PROPERTY_GET(_BodyChannel);
-        CK_PROPERTY_GET(_InputTimeout);
-        CK_DEFINE_CONSTRUCTORS(FProceduralActionManualParams, _LimbIds, _AnchorBindings,
-            _BodyChannel, _InputTimeout);
+        CK_DEFINE_CONSTRUCTORS(FProceduralActionClipParams, _Clip, _SlotBindings);
     };
 
     struct CKPROCEDURALANIMATION_API FFragment_ProceduralAction_Params
@@ -82,23 +46,16 @@ namespace ck
     private:
         FCk_Handle_ProceduralActionPlayer _Player;
         FCk_ProceduralAction_Identity _Identity;
-        EProceduralActionSource _Source = EProceduralActionSource::Manual;
         FProceduralActionClipParams _Clip;
-        FProceduralActionManualParams _Manual;
         FCk_ProceduralAction_Tuning _Tuning;
-        int64 _TuningRevision = 1;
 
     public:
         CK_PROPERTY_GET(_Player);
         CK_PROPERTY_GET(_Identity);
-        CK_PROPERTY_GET(_Source);
         CK_PROPERTY_GET(_Clip);
-        CK_PROPERTY_GET(_Manual);
         CK_PROPERTY_GET(_Tuning);
-        CK_PROPERTY_GET(_TuningRevision);
 
-        CK_DEFINE_CONSTRUCTORS(FFragment_ProceduralAction_Params,
-            _Player, _Identity, _Source, _Clip, _Manual, _Tuning, _TuningRevision);
+        CK_DEFINE_CONSTRUCTORS(FFragment_ProceduralAction_Params, _Player, _Identity, _Clip, _Tuning);
     };
 
     // Exists only until the rooted load, validation and binding transaction completes.
@@ -158,16 +115,10 @@ namespace ck
         bool _ReleaseWhenFinished = false;
         bool _HasClaim = false;
         bool _OwnerLossReconciled = false;
-        bool _HasPendingBatch = false;
-        FCk_ProceduralAction_PoseBatch _PendingBatch;
-        bool _HasAcceptedBatch = false;
-        FCk_ProceduralAction_PoseBatch _AcceptedBatch;
-        TOptional<FCk_Request_ProceduralAction_SubmitPoseBatch> _PendingSubmit;
         TOptional<FCk_ArticulationStageKey> _PendingStageKey;
         TOptional<FCk_ArticulationStageKey> _PendingHoldStageKey;
         FCk_Time _AdmissionElapsed;
         FCk_Time _PublicationElapsed;
-        FCk_Time _InputElapsed;
         FCk_Time _ServiceElapsed;
         FCk_Time _AcceptedTime;
         FCk_Time _PendingToTime;
@@ -182,7 +133,6 @@ namespace ck
         FCk_ProceduralAction_SamplingReport _PendingClipSampling;
         FCk_ProceduralArticulation_Pose _PendingPredictedPose;
         int64 _NextSampleSequence = 1;
-        int64 _PendingCorrelationToken = 0;
 
         auto
             CommitState(
@@ -214,9 +164,7 @@ namespace ck
         friend class FProcessor_ProceduralAction_EndPlay;
 
     public:
-        using RequestType = std::variant<FCk_Request_ProceduralAction_SubmitPoseBatch,
-            FCk_Request_ProceduralAction_Cancel, FCk_Request_ProceduralAction_End,
-            FCk_Request_ProceduralAction_Release>;
+        using RequestType = std::variant<FCk_Request_ProceduralAction_Cancel, FCk_Request_ProceduralAction_Release>;
 
     private:
         TArray<RequestType> _Requests;

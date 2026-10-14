@@ -8,12 +8,14 @@
 #include "CkCore/Algorithms/CkAlgorithms.h"
 #include "CkCore/TypeTraits/CkTypeTraits.h"
 
+#include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
 #include "CkEcs/Request/CkRequest_Completion.h"
 #include "CkEcs/Scheduler/CkProcessorRegistration.h"
 
 CK_REGISTER_PROCESSOR(ck::FProcessor_ProceduralActionPlayer_HandleRequests);
 CK_REGISTER_PROCESSOR(ck::FProcessor_ProceduralActionPlayer_CancelPendingRequests);
 CK_REGISTER_PROCESSOR(ck::FProcessor_ProceduralActionPlayer_ReconcileOwnerLoss);
+CK_REGISTER_PROCESSOR(ck::FProcessor_ProceduralActionPlayer_EndPlay);
 
 namespace ck
 {
@@ -51,9 +53,6 @@ namespace ck
                 static_cast<uint64>(Identity.Get_Value()), static_cast<uint64>(Action._Generation)};
             Action._OwnerLossReconciled = true;
             Action._Context = {};
-            auto PendingSubmit = MoveTemp(Action._PendingSubmit);
-            Action._PendingSubmit.Reset();
-            Action._HasPendingBatch = false;
             Action._PendingStageKey.Reset();
             Action._PendingHoldStageKey.Reset();
             if (Action._HasClaim)
@@ -74,8 +73,6 @@ namespace ck
                 InPlayer._Receipts.Finish(Identity, Action._Result);
                 Action.CommitState(ActionHandle, Params, ECk_ProceduralAction_State::Finished);
             }
-            if (PendingSubmit.IsSet())
-            { PendingSubmit->TryFireCompletion(ActionHandle, ECk_Request_OperationResult::Failed_Cancelled); }
         }
     }
 
@@ -85,7 +82,6 @@ namespace ck
         TimeType InDeltaT,
         HandleType InHandle,
         FFragment_ProceduralActionPlayer& InPlayer,
-        FFragment_ProceduralActionPlayer_Tunables& InTunables,
         FFragment_ProceduralActionPlayer_Requests& InRequests)
         -> void
     {
@@ -99,22 +95,28 @@ namespace ck
             if (InPlayer._Receipts.Consume(InRequest.Get_ActionIdentity(),
                 InRequest.Get_ThroughStreamSequence()) == ECk_ProceduralAction_ReadResult::Succeeded)
             { Result = ECk_Request_OperationResult::Succeeded; }
-        },
-        [&](const FCk_Request_ProceduralActionPlayer_UpdateTuning& InRequest) -> void
-        {
-            auto Result = ECk_Request_OperationResult::Failed;
-            const auto Guard = MakeCompletionGuard(InRequest, InHandle, Result);
-            auto InvalidField = FName{};
-            if (NOT procedural_action::ValidateTuning(InRequest.Get_Tuning(), InvalidField)) { return; }
-            if (InRequest.Get_Tuning().Get_Sampling().Get_MaxSamples()
-                > InHandle.Get<FFragment_ProceduralActionPlayer_Params>()
-                    .Get_Capacity().Get_MaxSamplesPerReceipt())
-            { return; }
-            InTunables._Tuning = InRequest.Get_Tuning();
-            ++InTunables._Revision;
-            Result = ECk_Request_OperationResult::Succeeded;
         }}), policy::DontResetContainer{});
         if (InRequests._Requests.IsEmpty()) { InHandle.Remove<MarkedDirtyBy>(); }
+    }
+
+    auto
+    FProcessor_ProceduralActionPlayer_EndPlay::
+    ForEachEntity(
+        TimeType InDeltaT,
+        HandleType InHandle,
+        const FFragment_ProceduralActionPlayer& InPlayer)
+        -> void
+    {
+        for (const auto& Action : InPlayer._Actions)
+        {
+            if (ck::IsValid(Action) && NOT Action.Has<FTag_DestroyEntity_Initiate>()
+                && Action.Has<FFragment_ProceduralAction_Params>()
+                && InPlayer._Receipts.Get_IsAutoDelivered(Action.Get<FFragment_ProceduralAction_Params>().Get_Identity()))
+            {
+                auto Handle = Action.ConvertToHandle();
+                UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(Handle);
+            }
+        }
     }
 
     auto

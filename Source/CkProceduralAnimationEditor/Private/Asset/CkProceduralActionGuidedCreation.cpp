@@ -1,13 +1,5 @@
 #include "CkProceduralAnimationEditor/CkProceduralActionGuidedCreation.h"
 
-#include "CkProceduralAnimationEditor/CkProceduralActionAuthoringCommands.h"
-#include "CkProceduralAnimationEditor/CkProceduralActionEditor_UserSettings.h"
-#include "CkProceduralAnimationEditor/CkProceduralActionPreview_Config.h"
-
-#include "CkProceduralAnimation/Action/CkProceduralAction_Data.h"
-#include "CkProceduralAnimation/ActionBuilder/CkProceduralActionBuilder_Utils.h"
-
-#include "AssetRegistry/AssetRegistryModule.h"
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/FileManager.h"
 #include "IStructureDetailsView.h"
@@ -28,70 +20,23 @@
 
 // --------------------------------------------------------------------------------------------------------------------
 
-namespace ck_procedural_action_guided_creation
-{
-    auto
-        IsPackageFree(
-            const FString& InPackageName)
-        -> bool
-    {
-        const auto AssetName = FPackageName::GetLongPackageAssetName(InPackageName);
-        const auto ObjectPath = FSoftObjectPath{InPackageName + TEXT(".") + AssetName};
-        auto& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
-        auto Filename = FString{};
-        const auto HasFile = FPackageName::TryConvertLongPackageNameToFilename(InPackageName, Filename,
-                FPackageName::GetAssetPackageExtension())
-            && IFileManager::Get().FileExists(*Filename);
-        return ObjectPath.ResolveObject() == nullptr && NOT Registry.GetAssetByObjectPath(ObjectPath).IsValid() && NOT HasFile;
-    }
-
-    auto
-        ToSubjectMode(
-            ECk_ProceduralActionCreation_Subject InSubject)
-        -> ECk_ProceduralActionPreview_SubjectMode
-    {
-        return InSubject == ECk_ProceduralActionCreation_Subject::NewWalker
-            ? ECk_ProceduralActionPreview_SubjectMode::Walking : ECk_ProceduralActionPreview_SubjectMode::Standalone;
-    }
-}
-
-// --------------------------------------------------------------------------------------------------------------------
-
 namespace ck::procedural_action_editor
 {
-    auto
-        Get_PreviewSiblingPackageName(
-            const FString& InClipPackageName)
-        -> FString
-    {
-        auto Name = FPackageName::GetLongPackageAssetName(InClipPackageName);
-        if (Name.EndsWith(TEXT("_DA")))
-        { Name.LeftChopInline(3); }
-        return FPackageName::GetLongPackagePath(InClipPackageName) + TEXT("/") + Name + TEXT("_Preview_DA");
-    }
-
     auto
         ValidateCreationChoice(
             const FCk_ProceduralActionCreation_Choice& InChoice,
             FString& OutError)
         -> bool
     {
-        if (InChoice.Get_Subject() == ECk_ProceduralActionCreation_Subject::UseExisting
-            && InChoice.Get_ExistingPreview().IsNull())
+        const auto& Subject = InChoice.Get_Subject();
+        if (Subject.Get_WalkingRig().IsNull() != Subject.Get_WalkingGait().IsNull())
         {
-            OutError = TEXT("Choose the existing preview config to reuse, or create a new subject.");
+            OutError = TEXT("A walking subject needs both its rig and its gait.");
             return false;
         }
-        auto Draft = FCk_ProceduralAction_ClipDraft{};
-        const auto Report = UCk_Utils_ProceduralActionBuilder_UE::Make_FromRecipe(InChoice.Get_Recipe(), Draft);
-        if (Report.Get_Status() != ECk_ProceduralAction_ReportStatus::Valid)
+        if (NOT Subject.Get_WalkingRig().IsNull() && NOT Subject.Get_Layout().Get_Limbs().IsEmpty())
         {
-            OutError = TEXT("The recipe cannot build a clip:");
-            for (const auto& Diagnostic : Report.Get_Diagnostics())
-            {
-                OutError += FString::Printf(TEXT(" %s [%s]: expected %s; got %s."), *Diagnostic.Get_FieldPath(),
-                    *Diagnostic.Get_Code().ToString(), *Diagnostic.Get_Expected(), *Diagnostic.Get_Actual());
-            }
+            OutError = TEXT("Choose a walking subject (rig and gait) or a dedicated layout, not both.");
             return false;
         }
         return true;
@@ -113,50 +58,8 @@ namespace ck::procedural_action_editor
         }
         if (NOT ValidateCreationChoice(InChoice, OutError))
         { return nullptr; }
-
-        const auto CreatesSubject = InChoice.Get_Subject() != ECk_ProceduralActionCreation_Subject::UseExisting;
-        const auto ClipPackageName = InParent->GetOutermost()->GetName();
-        const auto PreviewPackageName = Get_PreviewSiblingPackageName(ClipPackageName);
-        auto* ExistingPreview = CreatesSubject ? nullptr : InChoice.Get_ExistingPreview().LoadSynchronous();
-        if (NOT CreatesSubject && ExistingPreview == nullptr)
-        {
-            OutError = FString::Printf(TEXT("The preview config %s could not be loaded."),
-                *InChoice.Get_ExistingPreview().ToString());
-            return nullptr;
-        }
-        if (CreatesSubject && NOT ck_procedural_action_guided_creation::IsPackageFree(PreviewPackageName))
-        {
-            OutError = FString::Printf(TEXT("An asset already exists at %s; reuse it as the subject or rename the clip."),
-                *PreviewPackageName);
-            return nullptr;
-        }
-
         auto* Clip = NewObject<UCk_ProceduralAction_Data>(InParent, InName, InFlags | RF_Transactional);
-        auto RecipeError = FString{};
-        const auto RecipeApplied = FCk_ProceduralActionAuthoringCommands{Clip}.CreateFromRecipe(InChoice.Get_Recipe(), RecipeError);
-        CK_ENSURE_IF_NOT(RecipeApplied, TEXT("A validated recipe was refused while creating clip [{}]: {}"), Clip->GetPathName(),
-            RecipeError)
-        {
-            OutError = RecipeError;
-            Clip->ClearFlags(RF_Public | RF_Standalone);
-            Clip->MarkAsGarbage();
-            return nullptr;
-        }
-
-        auto* Preview = ExistingPreview;
-        if (CreatesSubject)
-        {
-            auto* Package = CreatePackage(*PreviewPackageName);
-            Preview = NewObject<UCk_ProceduralActionPreview_Config>(Package,
-                FName{*FPackageName::GetLongPackageAssetName(PreviewPackageName)}, RF_Public | RF_Standalone | RF_Transactional);
-            Preview->Set_SubjectMode(ck_procedural_action_guided_creation::ToSubjectMode(InChoice.Get_Subject()));
-            FAssetRegistryModule::AssetCreated(Preview);
-            Package->MarkPackageDirty();
-        }
-
-        auto* Settings = GetMutableDefault<UCk_ProceduralActionEditor_UserSettings>();
-        if (Settings->SetPreviewPath(Clip->GetPathName(), Preview->GetPathName()))
-        { Settings->SaveConfig(); }
+        Clip->Set_EditorSubject(InChoice.Get_Subject());
         return Clip;
     }
 
@@ -245,7 +148,7 @@ namespace ck::procedural_action_editor
             SNew(SVerticalBox)
             + SVerticalBox::Slot().AutoHeight().Padding(8.0f)
             [SNew(STextBlock).AutoWrapText(true).Text(LOCTEXT("Explain",
-                "Choose the subject the motion is authored on and the motion to start from. Nothing is created until you press Create; the name and folder come next."))]
+                "Choose the subject the motion is authored on: a rig and a gait for a walking creature, a layout for dedicated limbs, or nothing to preview the body alone. Nothing is created until you press Create; the name and folder come next, and the starting motion is applied in the editor."))]
             + SVerticalBox::Slot().FillHeight(1.0f).Padding(8.0f)
             [Details->GetWidget().ToSharedRef()]
             + SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right).Padding(8.0f)

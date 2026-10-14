@@ -31,11 +31,6 @@ namespace ck
         -> FCk_ProceduralAction_FailureContext&
     {
         _Context = {};
-        if (InParams.Get_Source() == EProceduralActionSource::Manual)
-        {
-            _Context.Set_LimbIds(InParams.Get_Manual().Get_LimbIds());
-            return _Context;
-        }
         if (NOT InHandle.Has<FFragment_ProceduralAction_Compiled>())
         { return _Context; }
 

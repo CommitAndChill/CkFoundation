@@ -17,25 +17,9 @@ namespace ck
     class FProcessor_ProceduralActionPlayer_Service;
     class FProcessor_ProceduralActionPlayer_Observe;
     class FProcessor_ProceduralActionPlayer_ReconcileOwnerLoss;
-    class FProcessor_ProceduralActionPlayer_ManagedDispatch;
-    class FProcessor_ProceduralActionPlayer_ManagedEndPlay;
+    class FProcessor_ProceduralActionPlayer_EndPlay;
     class FProcessor_ProceduralAction_EndPlay;
     class FProcessor_ProceduralAction_HandleRequests;
-
-    struct CKPROCEDURALANIMATION_API FFragment_ProceduralActionPlayer_Tunables
-    {
-        CK_GENERATED_BODY(FFragment_ProceduralActionPlayer_Tunables);
-        friend class FProcessor_ProceduralActionPlayer_HandleRequests;
-
-    private:
-        FCk_ProceduralAction_Tuning _Tuning;
-        int64 _Revision = 1;
-
-    public:
-        CK_PROPERTY_GET(_Tuning);
-        CK_PROPERTY_GET(_Revision);
-        CK_DEFINE_CONSTRUCTORS(FFragment_ProceduralActionPlayer_Tunables, _Tuning);
-    };
 
     struct CKPROCEDURALANIMATION_API FProceduralActionPendingRecovery
     {
@@ -61,10 +45,12 @@ namespace ck
 
     private:
         FCk_ProceduralAction_Capacity _Capacity;
+        FCk_ProceduralAction_Tuning _Tuning;
 
     public:
         CK_PROPERTY_GET(_Capacity);
-        CK_DEFINE_CONSTRUCTORS(FFragment_ProceduralActionPlayer_Params, _Capacity);
+        CK_PROPERTY_GET(_Tuning);
+        CK_DEFINE_CONSTRUCTORS(FFragment_ProceduralActionPlayer_Params, _Capacity, _Tuning);
     };
 
     struct CKPROCEDURALANIMATION_API FFragment_ProceduralActionPlayer
@@ -76,7 +62,7 @@ namespace ck
         friend class FProcessor_ProceduralActionPlayer_Service;
         friend class FProcessor_ProceduralActionPlayer_Observe;
         friend class FProcessor_ProceduralActionPlayer_ReconcileOwnerLoss;
-        friend class FProcessor_ProceduralActionPlayer_ManagedDispatch;
+        friend class FProcessor_ProceduralActionPlayer_EndPlay;
         friend class FProcessor_ProceduralAction_EndPlay;
         friend class FProcessor_ProceduralAction_HandleRequests;
 
@@ -89,52 +75,6 @@ namespace ck
         CK_PROPERTY_GET(_Receipts);
     };
 
-    // The recipients of one managed identity (the map key). Recipients are dynamic delegates, so a destroyed owner is
-    // skipped rather than kept alive. The cursor and the delivery seal live on the receipt store's stream.
-    struct CKPROCEDURALANIMATION_API FProceduralActionManagedDelivery
-    {
-        CK_GENERATED_BODY(FProceduralActionManagedDelivery);
-        friend class ::UCk_Utils_ProceduralActionPlayer_UE;
-        friend class ::UCk_Utils_ProceduralAction_UE;
-        friend class FProcessor_ProceduralActionPlayer_ManagedDispatch;
-        friend class FProcessor_ProceduralActionPlayer_ManagedEndPlay;
-
-    public:
-        static constexpr auto MaxListeners = 8;
-
-    private:
-        FCk_Handle_ProceduralAction _Action;
-        FCk_Delegate_ProceduralAction_OnManagedCompleted _Completion;
-        TArray<FCk_Delegate_ProceduralAction_OnManagedRecords> _RecordListeners;
-        TArray<FCk_Delegate_ProceduralAction_OnManagedAcceptedPose> _PoseListeners;
-        bool _Completed = false;
-
-    public:
-        CK_PROPERTY_GET(_Action);
-        CK_PROPERTY_GET(_Completion);
-        CK_PROPERTY_GET(_RecordListeners);
-        CK_PROPERTY_GET(_PoseListeners);
-        CK_PROPERTY_GET(_Completed);
-        CK_DEFINE_CONSTRUCTORS(FProceduralActionManagedDelivery, _Completion);
-    };
-
-    struct CKPROCEDURALANIMATION_API FFragment_ProceduralActionPlayer_Managed
-    {
-        CK_GENERATED_BODY(FFragment_ProceduralActionPlayer_Managed);
-        friend class ::UCk_Utils_ProceduralActionPlayer_UE;
-        friend class ::UCk_Utils_ProceduralAction_UE;
-        friend class FProcessor_ProceduralActionPlayer_ManagedDispatch;
-        friend class FProcessor_ProceduralActionPlayer_ManagedEndPlay;
-
-    private:
-        TMap<int64, FProceduralActionManagedDelivery> _Entries;
-        int32 _NextDispatchIndex = 0;
-
-    public:
-        CK_PROPERTY_GET(_Entries);
-        CK_PROPERTY_GET(_NextDispatchIndex);
-    };
-
     struct CKPROCEDURALANIMATION_API FFragment_ProceduralActionPlayer_Requests
     {
         CK_GENERATED_BODY(FFragment_ProceduralActionPlayer_Requests);
@@ -143,8 +83,7 @@ namespace ck
         friend class FProcessor_ProceduralActionPlayer_CancelPendingRequests;
 
     public:
-        using RequestType = std::variant<FCk_Request_ProceduralActionPlayer_ConsumeReceipts,
-            FCk_Request_ProceduralActionPlayer_UpdateTuning>;
+        using RequestType = std::variant<FCk_Request_ProceduralActionPlayer_ConsumeReceipts>;
 
     private:
         TArray<RequestType> _Requests;

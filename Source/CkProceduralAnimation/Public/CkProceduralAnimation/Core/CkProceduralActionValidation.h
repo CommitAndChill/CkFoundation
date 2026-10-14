@@ -4,9 +4,6 @@
 #include "CkProceduralAnimation/Core/CkProceduralActionProgress.h"
 
 struct FCk_ProceduralAction_ClipDraft;
-struct FCk_ProceduralAction_MirrorSpec;
-struct FCk_ProceduralAction_SlotBinding;
-struct FCk_Handle_ProceduralArticulation;
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -103,21 +100,12 @@ namespace ck::procedural_action
     private:
         FName _Id;
         ECk_ProceduralAction_InitialSource _InitialSource = ECk_ProceduralAction_InitialSource::CapturedAcceptedPose;
-        bool _RequiresTerminalOrientation = false;
-        bool _HasExplicitRestTarget = false;
-        FTransform _ExplicitRestTarget = FTransform::Identity;
         ECk_ProceduralAction_TrackSpace _Space = ECk_ProceduralAction_TrackSpace::BodyLocal;
-        FName _AnchorId;
     public:
         CK_PROPERTY_GET(_Id);
         CK_PROPERTY_GET(_InitialSource);
-        CK_PROPERTY_GET(_RequiresTerminalOrientation);
-        CK_PROPERTY_GET(_HasExplicitRestTarget);
-        CK_PROPERTY_GET(_ExplicitRestTarget);
-        CK_PROPERTY(_Space);
-        CK_PROPERTY(_AnchorId);
-        CK_DEFINE_CONSTRUCTORS(FCompiledSlot, _Id, _InitialSource, _RequiresTerminalOrientation,
-            _HasExplicitRestTarget, _ExplicitRestTarget, _Space, _AnchorId);
+        CK_PROPERTY_GET(_Space);
+        CK_DEFINE_CONSTRUCTORS(FCompiledSlot, _Id, _InitialSource, _Space);
     };
 
     struct CKPROCEDURALANIMATION_API FCompiledLimbTrack
@@ -125,26 +113,20 @@ namespace ck::procedural_action
         CK_GENERATED_BODY(FCompiledLimbTrack);
     private:
         FName _Slot;
-        ECk_ProceduralAction_TrackSpace _Space = ECk_ProceduralAction_TrackSpace::BodyLocal;
-        FName _AnchorId;
         ECk_ProceduralAction_Interpolation _Interpolation = ECk_ProceduralAction_Interpolation::Linear;
         ECk_ProceduralAction_ReachPolicy _ReachPolicy = ECk_ProceduralAction_ReachPolicy::RejectUnreachable;
-        ECk_ProceduralAction_ClearanceResponse _ClearanceResponse = ECk_ProceduralAction_ClearanceResponse::AbortOnCrossing;
         TArray<FVectorKey> _PositionKeys;
         TArray<FOrientationKey> _OrientationKeys;
         TArray<FVectorKey> _BendKeys;
     public:
         CK_PROPERTY(_Slot);
-        CK_PROPERTY(_Space);
-        CK_PROPERTY(_AnchorId);
         CK_PROPERTY(_Interpolation);
         CK_PROPERTY(_ReachPolicy);
-        CK_PROPERTY(_ClearanceResponse);
         CK_PROPERTY(_PositionKeys);
         CK_PROPERTY(_OrientationKeys);
         CK_PROPERTY(_BendKeys);
-        CK_DEFINE_CONSTRUCTORS(FCompiledLimbTrack, _Slot, _Space, _AnchorId, _Interpolation,
-            _ReachPolicy, _ClearanceResponse, _PositionKeys, _OrientationKeys, _BendKeys);
+        CK_DEFINE_CONSTRUCTORS(FCompiledLimbTrack, _Slot, _Interpolation,
+            _ReachPolicy, _PositionKeys, _OrientationKeys, _BendKeys);
     };
 
     struct CKPROCEDURALANIMATION_API FCompiledPhase
@@ -159,7 +141,6 @@ namespace ck::procedural_action
         TArray<FTransformKey> _BodyKeys;
         TArray<FCompiledLimbTrack> _LimbTracks;
         TArray<FCk_Time> _CriticalTimes;
-        FCompiledProgressCurve _Progress;
     public:
         CK_PROPERTY(_Id);
         CK_PROPERTY(_Start);
@@ -169,7 +150,6 @@ namespace ck::procedural_action
         CK_PROPERTY(_BodyKeys);
         CK_PROPERTY(_LimbTracks);
         CK_PROPERTY(_CriticalTimes);
-        CK_PROPERTY(_Progress);
         CK_DEFINE_CONSTRUCTORS(FCompiledPhase, _Id, _Start, _Duration, _Easing,
             _BodyInterpolation, _BodyKeys, _LimbTracks);
     };
@@ -198,7 +178,7 @@ namespace ck::procedural_action
     // one, so there is a single compiler. The viewed arrays must outlive the Compile call.
     struct CKPROCEDURALANIMATION_API FClipSource
     {
-        int32 CompatibilityVersion = 1;
+        int32 CompatibilityVersion = UCk_ProceduralAction_Data::CurrentCompatibilityVersion;
         const FCk_ProceduralAction_BodyChannel* BodyChannel = nullptr;
         const TArray<FCk_ProceduralAction_Slot>* Slots = nullptr;
         const TArray<FCk_ProceduralAction_Phase>* Phases = nullptr;
@@ -231,42 +211,11 @@ namespace ck::procedural_action
         TArray<FDiagnostic>& OutDiagnostics)
         -> bool;
 
-    // Appends the compiler's diagnostics for InPhase's progress curve (InPhasePath like "Phases[2]"); true when it is valid.
-    CKPROCEDURALANIMATION_API auto
-    ValidateProgress(
-        const FCk_ProceduralAction_Phase& InPhase,
-        const FString& InAssetPath,
-        const FString& InPhasePath,
-        TArray<FDiagnostic>& OutDiagnostics)
-        -> bool;
-
-    /** Writes into OutClip a copy of InSource with every mirror's destination slot added, its tracks reflected from the
-     *  source slot's across the mirror plane in the body frame. Rest-normalized tracks are converted through the bound
-     *  limbs' rest frames on InSubject (the frames the clip's initial capture uses), so the destination stays
-     *  rest-normalized in its own limb's frame; body-local and root-relative tracks reflect as declared. Rejects an
-     *  occupied or repeated destination, a source the clip does not declare or never tracks, an anchor-relative source,
-     *  a destination without a binding to a limb of InSubject other than the source's, and content beyond the compiler
-     *  ceilings. Body motion and events are copied unchanged. On rejection OutClip is reset. InSource is never changed. */
-    CKPROCEDURALANIMATION_API auto
-    ExpandMirrors(
-        const FCompiledClip& InSource,
-        const TArray<FCk_ProceduralAction_MirrorSpec>& InMirrors,
-        const TArray<FCk_ProceduralAction_SlotBinding>& InSlotBindings,
-        const FCk_Handle_ProceduralArticulation& InSubject,
-        FCompiledClip& OutClip,
-        TArray<FDiagnostic>& OutDiagnostics)
-        -> bool;
-
     // Detached compiled revision. Consumers retain a const shared copy; authored assets are not sampled per frame.
     struct CKPROCEDURALANIMATION_API FCompiledClip
     {
         CK_GENERATED_BODY(FCompiledClip);
         friend CKPROCEDURALANIMATION_API auto Compile(const FClipSource& InSource, FCompiledClip& OutClip,
-            TArray<FDiagnostic>& OutDiagnostics) -> bool;
-        friend CKPROCEDURALANIMATION_API auto ExpandMirrors(const FCompiledClip& InSource,
-            const TArray<FCk_ProceduralAction_MirrorSpec>& InMirrors,
-            const TArray<FCk_ProceduralAction_SlotBinding>& InSlotBindings,
-            const FCk_Handle_ProceduralArticulation& InSubject, FCompiledClip& OutClip,
             TArray<FDiagnostic>& OutDiagnostics) -> bool;
     private:
         int32 _CompatibilityVersion = 1;

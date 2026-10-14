@@ -69,7 +69,6 @@ namespace ck::procedural_action
         {
             return InValue == ECk_ProceduralAction_TrackSpace::BodyLocal
                 || InValue == ECk_ProceduralAction_TrackSpace::RootAtStart
-                || InValue == ECk_ProceduralAction_TrackSpace::AnchorAtStart
                 || InValue == ECk_ProceduralAction_TrackSpace::LimbRestNormalized;
         }
 
@@ -78,18 +77,6 @@ namespace ck::procedural_action
             ECk_ProceduralAction_ReachPolicy InValue)
             -> bool
         { return InValue == ECk_ProceduralAction_ReachPolicy::RejectUnreachable || InValue == ECk_ProceduralAction_ReachPolicy::ProjectToReach; }
-
-        auto
-        IsAllowed(
-            ECk_ProceduralAction_ClearanceResponse InValue)
-            -> bool
-        { return InValue == ECk_ProceduralAction_ClearanceResponse::AbortOnCrossing || InValue == ECk_ProceduralAction_ClearanceResponse::ObserveCrossing; }
-
-        auto
-        IsAllowed(
-            ECk_ProceduralAction_ProgressMode InValue)
-            -> bool
-        { return InValue == ECk_ProceduralAction_ProgressMode::Preset || InValue == ECk_ProceduralAction_ProgressMode::CustomCurve; }
 
         auto
         HashVector(
@@ -170,7 +157,7 @@ namespace ck::procedural_action
         const FCk_ProceduralAction_ClipDraft& InDraft)
         -> FClipSource
     {
-        return FClipSource{1, &InDraft.Get_BodyChannel(), &InDraft.Get_Slots(), &InDraft.Get_Phases(),
+        return FClipSource{UCk_ProceduralAction_Data::CurrentCompatibilityVersion, &InDraft.Get_BodyChannel(), &InDraft.Get_Slots(), &InDraft.Get_Phases(),
             &InDraft.Get_Markers(), &InDraft.Get_Windows(), TEXT("<draft>")};
     }
 
@@ -181,73 +168,6 @@ namespace ck::procedural_action
         TArray<FDiagnostic>& OutDiagnostics)
         -> bool
     { return Compile(MakeClipSource(InAsset), OutClip, OutDiagnostics); }
-
-    auto
-    ValidateProgress(
-        const FCk_ProceduralAction_Phase& InPhase,
-        const FString& InAssetPath,
-        const FString& InPhasePath,
-        TArray<FDiagnostic>& OutDiagnostics)
-        -> bool
-    {
-        auto Valid = true;
-        auto AddError = [&](FName InCode, const FString& InField, int32 InKey, const FString& InExpected, const FString& InActual) -> void
-        {
-            Valid = false;
-            if (OutDiagnostics.Num() >= content_limits::MaxDiagnostics)
-            { return; }
-            OutDiagnostics.Add(FDiagnostic{EDiagnosticSeverity::Error, InCode, InAssetPath, InField,
-                InPhase.Get_Id(), {}, InKey, InExpected, InActual});
-        };
-        const auto& Curve = InPhase.Get_Progress();
-        const auto ProgressPath = InPhasePath + TEXT(".Progress");
-        if (NOT validation_detail::IsAllowed(Curve.Get_Mode()))
-        {
-            AddError(TEXT("ProgressMode"), ProgressPath + TEXT(".Mode"), INDEX_NONE, TEXT("Preset or CustomCurve"), TEXT("unsupported mode"));
-            return false;
-        }
-        if (Curve.Get_Mode() == ECk_ProceduralAction_ProgressMode::Preset)
-        {
-            if (NOT Curve.Get_Keys().IsEmpty())
-            {
-                AddError(TEXT("ProgressKeysInactive"), ProgressPath + TEXT(".Keys"), INDEX_NONE,
-                    TEXT("no keys while Progress.Mode is Preset"), FString::FromInt(Curve.Get_Keys().Num()));
-            }
-            return Valid;
-        }
-        if (InPhase.Get_Easing() != ECk_ProceduralAction_Easing::Linear)
-        {
-            AddError(TEXT("ProgressEasing"), InPhasePath + TEXT(".Easing"), INDEX_NONE,
-                TEXT("Linear when Progress.Mode is CustomCurve"), TEXT("preset easing"));
-        }
-        const auto& Keys = Curve.Get_Keys();
-        const auto KeysPath = ProgressPath + TEXT(".Keys");
-        if (Keys.Num() < 2 || Keys.Num() > 64)
-        {
-            AddError(TEXT("ProgressKeyCount"), KeysPath, INDEX_NONE, TEXT("2 to 64 keys"), FString::FromInt(Keys.Num()));
-            return false;
-        }
-        auto PreviousTime = -1.0;
-        auto PreviousValue = 0.0;
-        for (auto KeyIndex = 0; KeyIndex < Keys.Num(); ++KeyIndex)
-        {
-            const auto KeyPath = FString::Printf(TEXT("%s[%d]"), *KeysPath, KeyIndex);
-            const auto Time = Keys[KeyIndex].Get_Time().Get_Value();
-            const auto Value = Keys[KeyIndex].Get_Value().Get_Value();
-            if (NOT FMath::IsFinite(Time) || Time < 0.0 || Time > 1.0 || Time <= PreviousTime)
-            { AddError(TEXT("ProgressKeyTime"), KeyPath + TEXT(".Time"), KeyIndex, TEXT("finite strictly increasing [0,1]"), FString::SanitizeFloat(Time)); }
-            if (NOT FMath::IsFinite(Value) || Value < 0.0 || Value > 1.0 || (KeyIndex > 0 && Value < PreviousValue))
-            { AddError(TEXT("ProgressKeyValue"), KeyPath + TEXT(".Value"), KeyIndex, TEXT("finite nondecreasing [0,1]"), FString::SanitizeFloat(Value)); }
-            if (FMath::IsFinite(Time))
-            { PreviousTime = Time; }
-            if (FMath::IsFinite(Value))
-            { PreviousValue = Value; }
-        }
-        if (Keys[0].Get_Time().Get_Value() != 0.0 || Keys[0].Get_Value().Get_Value() != 0.0
-            || Keys.Last().Get_Time().Get_Value() != 1.0 || Keys.Last().Get_Value().Get_Value() != 1.0)
-        { AddError(TEXT("ProgressEndpoints"), KeysPath, INDEX_NONE, TEXT("first key exactly (0,0) and last exactly (1,1)"), TEXT("inexact endpoint")); }
-        return Valid;
-    }
 
     auto
     Compile(
@@ -314,8 +234,11 @@ namespace ck::procedural_action
             { return false; }
         }
 
-        if (Candidate._CompatibilityVersion != 1)
-        { AddError(TEXT("Version"), TEXT("CompatibilityVersion"), {}, {}, INDEX_NONE, TEXT("1"), FString::FromInt(Candidate._CompatibilityVersion)); }
+        if (Candidate._CompatibilityVersion != UCk_ProceduralAction_Data::CurrentCompatibilityVersion)
+        {
+            AddError(TEXT("Version"), TEXT("CompatibilityVersion"), {}, {}, INDEX_NONE,
+                FString::FromInt(UCk_ProceduralAction_Data::CurrentCompatibilityVersion), FString::FromInt(Candidate._CompatibilityVersion));
+        }
         if (Candidate._HasBodyChannel && Candidate._BodyInitialSource != ECk_ProceduralAction_InitialSource::CapturedAcceptedPose
             && Candidate._BodyInitialSource != ECk_ProceduralAction_InitialSource::IdentityOffset)
         { AddError(TEXT("InitialSource"), TEXT("BodyChannel.InitialSource"), {}, {}, INDEX_NONE, TEXT("CapturedAcceptedPose or IdentityOffset"), TEXT("unsupported source")); }
@@ -335,13 +258,11 @@ namespace ck::procedural_action
             if (Slot.Get_InitialSource() != ECk_ProceduralAction_InitialSource::CapturedAcceptedPose
                 && Slot.Get_InitialSource() != ECk_ProceduralAction_InitialSource::AuthoredRest)
             { AddError(TEXT("InitialSource"), Path + TEXT(".InitialSource"), {}, Slot.Get_Id(), INDEX_NONE, TEXT("CapturedAcceptedPose or AuthoredRest"), TEXT("unsupported source")); }
-            if (Slot.Get_HasExplicitRestTarget() && NOT validation_detail::IsRigid(Slot.Get_ExplicitRestTarget()))
-            { AddError(TEXT("RestTarget"), Path + TEXT(".ExplicitRestTarget"), {}, Slot.Get_Id(), INDEX_NONE, TEXT("finite unit-scale rigid transform"), TEXT("malformed transform")); }
-            Candidate._Slots.Add(FCompiledSlot{Slot.Get_Id(), Slot.Get_InitialSource(), Slot.Get_RequiresTerminalOrientation(),
-                Slot.Get_HasExplicitRestTarget(), Slot.Get_ExplicitRestTarget(), ECk_ProceduralAction_TrackSpace::BodyLocal, {}});
+            if (NOT validation_detail::IsAllowed(Slot.Get_Space()))
+            { AddError(TEXT("TrackSpace"), Path + TEXT(".Space"), {}, Slot.Get_Id(), INDEX_NONE, TEXT("BodyLocal, RootAtStart or LimbRestNormalized"), TEXT("unsupported space")); }
+            Candidate._Slots.Add(FCompiledSlot{Slot.Get_Id(), Slot.Get_InitialSource(), Slot.Get_Space()});
         }
 
-        auto FramedSlots = TSet<FName>{};
         auto PhaseIds = TSet<FName>{};
         auto PhaseStart = TMap<FName, double>{};
         auto PhaseDuration = TMap<FName, double>{};
@@ -353,9 +274,7 @@ namespace ck::procedural_action
         {
             Hash = HashCombineFast(Hash, GetTypeHash(Slot.Get_Id()));
             Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Slot.Get_InitialSource())));
-            Hash = HashCombineFast(Hash, GetTypeHash(Slot.Get_RequiresTerminalOrientation()));
-            Hash = HashCombineFast(Hash, GetTypeHash(Slot.Get_HasExplicitRestTarget()));
-            Hash = validation_detail::HashQuat(validation_detail::HashVector(Hash, Slot.Get_ExplicitRestTarget().GetTranslation()), Slot.Get_ExplicitRestTarget().GetRotation());
+            Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Slot.Get_Space())));
         }
         for (auto PhaseIndex = 0; PhaseIndex < SourcePhases.Num(); ++PhaseIndex)
         {
@@ -385,28 +304,6 @@ namespace ck::procedural_action
             Hash = HashCombineFast(Hash, GetTypeHash(Duration));
             Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Phase.Get_Easing())));
             Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Phase.Get_BodyInterpolation())));
-            auto ProgressDiagnostics = TArray<FDiagnostic>{};
-            const auto ProgressIsValid = ValidateProgress(Phase, AssetPath, Path, ProgressDiagnostics);
-            for (const auto& Diagnostic : ProgressDiagnostics)
-            {
-                AddError(Diagnostic.Get_Code(), Diagnostic.Get_FieldPath(), Phase.Get_Id(), {}, Diagnostic.Get_KeyIndex(),
-                    Diagnostic.Get_Expected(), Diagnostic.Get_Actual());
-            }
-            // Progress joins the content hash only in CustomCurve mode, so every Preset clip keeps its revision.
-            if (ProgressIsValid && Phase.Get_Progress().Get_Mode() == ECk_ProceduralAction_ProgressMode::CustomCurve)
-            {
-                Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Phase.Get_Progress().Get_Mode())));
-                for (const auto& Key : Phase.Get_Progress().Get_Keys())
-                {
-                    Hash = HashCombineFast(Hash, GetTypeHash(Key.Get_Time().Get_Value()));
-                    Hash = HashCombineFast(Hash, GetTypeHash(Key.Get_Value().Get_Value()));
-                }
-                if (NOT BuildMonotoneProgress(Phase.Get_Progress().Get_Keys(), CompiledPhase.Get_Progress()))
-                {
-                    AddError(TEXT("ProgressKeys"), Path + TEXT(".Progress.Keys"), Phase.Get_Id(), {}, INDEX_NONE,
-                        TEXT("finite monotone tangents"), TEXT("curve build failed"));
-                }
-            }
 
             auto CriticalProgress = TArray<double>{};
             auto LastTime = -1.0;
@@ -443,44 +340,17 @@ namespace ck::procedural_action
                 if (Track.Get_Slot().IsNone() || NOT SlotIds.Contains(Track.Get_Slot()) || TrackSlots.Contains(Track.Get_Slot()))
                 { AddError(TEXT("TrackSlot"), TrackPath + TEXT(".Slot"), Phase.Get_Id(), Track.Get_Slot(), INDEX_NONE, TEXT("unique declared slot"), Track.Get_Slot().ToString()); }
                 TrackSlots.Add(Track.Get_Slot());
-                const auto NeedsAnchor = Track.Get_Space() == ECk_ProceduralAction_TrackSpace::AnchorAtStart;
-                const auto HasAnchor = NOT Track.Get_AnchorId().IsNone();
-                if (NOT validation_detail::IsAllowed(Track.Get_Space()) || NeedsAnchor != HasAnchor)
-                { AddError(TEXT("TrackSpace"), TrackPath + TEXT(".Space"), Phase.Get_Id(), Track.Get_Slot(), INDEX_NONE, TEXT("supported space with anchor ID iff AnchorAtStart"), TEXT("invalid space/anchor pair")); }
-                if (auto* CanonicalSlot = Candidate._Slots.FindByPredicate([&Track](const FCompiledSlot& InSlot)
-                    { return InSlot.Get_Id() == Track.Get_Slot(); }))
-                {
-                    if (FramedSlots.Contains(Track.Get_Slot()))
-                    {
-                        if (CanonicalSlot->Get_Space() != Track.Get_Space()
-                            || CanonicalSlot->Get_AnchorId() != Track.Get_AnchorId())
-                        { AddError(TEXT("SpaceChangesAcrossPhases"), TrackPath + TEXT(".Space"), Phase.Get_Id(), Track.Get_Slot(), INDEX_NONE,
-                            TEXT("same Space and AnchorId for every track of this slot"), TEXT("frame changed")); }
-                    }
-                    else
-                    {
-                        CanonicalSlot->Get_Space() = Track.Get_Space();
-                        CanonicalSlot->Get_AnchorId() = Track.Get_AnchorId();
-                        FramedSlots.Add(Track.Get_Slot());
-                    }
-                }
                 if (NOT validation_detail::IsAllowed(Track.Get_Interpolation()))
                 { AddError(TEXT("Interpolation"), TrackPath + TEXT(".Interpolation"), Phase.Get_Id(), Track.Get_Slot(), INDEX_NONE, TEXT("Linear or Smooth"), TEXT("unsupported interpolation")); }
-                if (NOT validation_detail::IsAllowed(Track.Get_ReachPolicy()) || NOT validation_detail::IsAllowed(Track.Get_ClearanceResponse()))
-                { AddError(TEXT("TrackPolicy"), TrackPath, Phase.Get_Id(), Track.Get_Slot(), INDEX_NONE, TEXT("supported reach and clearance policies"), TEXT("unsupported policy")); }
+                if (NOT validation_detail::IsAllowed(Track.Get_ReachPolicy()))
+                { AddError(TEXT("TrackPolicy"), TrackPath, Phase.Get_Id(), Track.Get_Slot(), INDEX_NONE, TEXT("supported reach policy"), TEXT("unsupported policy")); }
                 auto CompiledTrack = FCompiledLimbTrack{};
                 CompiledTrack.Get_Slot() = Track.Get_Slot();
-                CompiledTrack.Get_Space() = Track.Get_Space();
-                CompiledTrack.Get_AnchorId() = Track.Get_AnchorId();
                 CompiledTrack.Get_Interpolation() = Track.Get_Interpolation();
                 CompiledTrack.Get_ReachPolicy() = Track.Get_ReachPolicy();
-                CompiledTrack.Get_ClearanceResponse() = Track.Get_ClearanceResponse();
                 Hash = HashCombineFast(Hash, GetTypeHash(Track.Get_Slot()));
-                Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Track.Get_Space())));
-                Hash = HashCombineFast(Hash, GetTypeHash(Track.Get_AnchorId()));
                 Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Track.Get_Interpolation())));
                 Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Track.Get_ReachPolicy())));
-                Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Track.Get_ClearanceResponse())));
                 auto ValidateVectorKeys = [&](const TArray<FCk_ProceduralAction_VectorKey>& InKeys,
                     TArray<FVectorKey>& OutKeys, const TCHAR* InName, bool InDirection) -> void
                 {
@@ -560,7 +430,7 @@ namespace ck::procedural_action
                 AddTrackExtrema(Track.Get_BendKeys());
             }
             CriticalProgress.Sort();
-            if (FMath::IsFinite(Duration) && Duration > 0.0 && validation_detail::IsAllowed(Phase.Get_Easing()) && ProgressIsValid)
+            if (FMath::IsFinite(Duration) && Duration > 0.0 && validation_detail::IsAllowed(Phase.Get_Easing()))
             {
                 for (const auto Progress : CriticalProgress)
                 {

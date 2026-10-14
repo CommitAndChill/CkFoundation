@@ -46,25 +46,6 @@ namespace ck
         };
 
         algo::ForEachRequest(Pending, ck::Visitor(ck::algo::Overload{
-        [&](const FCk_Request_ProceduralAction_SubmitPoseBatch& InRequest) -> void
-        {
-            if (NOT IsStillLive())
-            {
-                InRequest.TryFireCompletion(InHandle, ECk_Request_OperationResult::Failed_Cancelled);
-                return;
-            }
-            if (NOT PlayerValid || InParams.Get_Source() != EProceduralActionSource::Manual
-                || InAction._State != ECk_ProceduralAction_State::Ready
-                || InAction._HasPendingBatch || InAction._PendingStageKey.IsSet())
-            {
-                InRequest.TryFireCompletion(InHandle, ECk_Request_OperationResult::Failed);
-                return;
-            }
-            InAction._PendingBatch = InRequest.Get_Batch();
-            InAction._PendingCorrelationToken = InRequest.Get_CorrelationToken();
-            InAction._PendingSubmit = InRequest;
-            InAction._HasPendingBatch = true;
-        },
         [&](const FCk_Request_ProceduralAction_Cancel& InRequest) -> void
         {
             auto Result = ECk_Request_OperationResult::Failed;
@@ -78,9 +59,6 @@ namespace ck
                 || InAction._State == ECk_ProceduralAction_State::Cancelling
                 || InAction._State == ECk_ProceduralAction_State::Returning)
             { return; }
-            auto PendingSubmit = MoveTemp(InAction._PendingSubmit);
-            InAction._PendingSubmit.Reset();
-            InAction._HasPendingBatch = false;
             InAction._PendingStageKey.Reset();
             InAction._PendingHoldStageKey.Reset();
             InAction._Result = FCk_ProceduralAction_Result{
@@ -105,35 +83,6 @@ namespace ck
                 InAction.CommitState(InHandle, InParams, ECk_ProceduralAction_State::Finished);
             }
             Result = ECk_Request_OperationResult::Succeeded;
-            if (PendingSubmit.IsSet())
-            { PendingSubmit->TryFireCompletion(InHandle, ECk_Request_OperationResult::Failed_Cancelled); }
-        },
-        [&](const FCk_Request_ProceduralAction_End& InRequest) -> void
-        {
-            auto Result = ECk_Request_OperationResult::Failed;
-            const auto Guard = MakeCompletionGuard(InRequest, InHandle, Result);
-            if (NOT IsStillLive())
-            {
-                Result = ECk_Request_OperationResult::Failed_Cancelled;
-                return;
-            }
-            if (NOT PlayerValid || InParams.Get_Source() != EProceduralActionSource::Manual
-                || InAction._State != ECk_ProceduralAction_State::Ready)
-            { return; }
-            auto PendingSubmit = MoveTemp(InAction._PendingSubmit);
-            InAction._PendingSubmit.Reset();
-            InAction._HasPendingBatch = false;
-            InAction._PendingStageKey.Reset();
-            InAction._PendingHoldStageKey.Reset();
-            Player.Get<FFragment_ProceduralActionPlayer>()._Receipts.CloseWindows(
-                InParams.Get_Identity(), NAME_None);
-            FCk_ProceduralLimbControl_Control::BeginReturn(Subject, Token, NAME_None);
-            InAction._Result = FCk_ProceduralAction_Result{
-                ECk_ProceduralAction_Outcome::Completed, ECk_ProceduralAction_Recovery::Pending, NAME_None};
-            InAction.CommitState(InHandle, InParams, ECk_ProceduralAction_State::Returning);
-            Result = ECk_Request_OperationResult::Succeeded;
-            if (PendingSubmit.IsSet())
-            { PendingSubmit->TryFireCompletion(InHandle, ECk_Request_OperationResult::Failed_Cancelled); }
         },
         [&](const FCk_Request_ProceduralAction_Release& InRequest) -> void
         {
@@ -146,9 +95,6 @@ namespace ck
             }
             if (NOT PlayerValid || InAction._ReleaseWhenFinished) { return; }
             InAction._ReleaseWhenFinished = true;
-            auto PendingSubmit = MoveTemp(InAction._PendingSubmit);
-            InAction._PendingSubmit.Reset();
-            InAction._HasPendingBatch = false;
             InAction._PendingStageKey.Reset();
             InAction._PendingHoldStageKey.Reset();
             if (InAction._State == ECk_ProceduralAction_State::Finished)
@@ -184,8 +130,6 @@ namespace ck
                 }
             }
             Result = ECk_Request_OperationResult::Succeeded;
-            if (PendingSubmit.IsSet())
-            { PendingSubmit->TryFireCompletion(InHandle, ECk_Request_OperationResult::Failed_Cancelled); }
         }}), policy::DontResetContainer{});
         if (InRequests._Requests.IsEmpty()) { InHandle.Remove<MarkedDirtyBy>(); }
     }
@@ -202,7 +146,6 @@ namespace ck
         const auto PendingRequests = InHandle.Has<FFragment_ProceduralAction_Requests>()
             ? InHandle.Get<FFragment_ProceduralAction_Requests>().Get_Requests()
             : TArray<FFragment_ProceduralAction_Requests::RequestType>{};
-        const auto PendingSubmit = InAction._PendingSubmit;
         auto Player = InParams.Get_Player();
         if (ck::IsValid(Player) && Player.Has<FFragment_ProceduralActionPlayer>())
         {
@@ -230,7 +173,5 @@ namespace ck
             PlayerFragment._Receipts.MarkEntityRemoved(Identity);
         }
         request::FireCancelledForPending(InHandle, PendingRequests);
-        if (PendingSubmit.IsSet())
-        { PendingSubmit->TryFireCompletion(InHandle, ECk_Request_OperationResult::Failed_Cancelled); }
     }
 }

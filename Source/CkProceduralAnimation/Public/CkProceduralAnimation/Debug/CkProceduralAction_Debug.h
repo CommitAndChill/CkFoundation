@@ -76,9 +76,6 @@ private:
     int64 _ContentRevision = 0;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Diagnostics", meta = (AllowPrivateAccess = true))
-    int64 _TuningRevision = 0;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Diagnostics", meta = (AllowPrivateAccess = true))
     int64 _NextSampleSequence = 0;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Diagnostics", meta = (AllowPrivateAccess = true))
@@ -96,7 +93,6 @@ public:
     CK_PROPERTY_GET(_AcceptedTime);
     CK_PROPERTY_GET(_PlaybackBacklog);
     CK_PROPERTY_GET(_ContentRevision);
-    CK_PROPERTY_GET(_TuningRevision);
     CK_PROPERTY_GET(_NextSampleSequence);
     CK_PROPERTY_GET(_PublicationPending);
     CK_PROPERTY_GET(_Watchdogs);

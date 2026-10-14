@@ -30,7 +30,6 @@ namespace ck::procedural_action
         bool _HasOrientation = false;
         bool _HasBend = false;
         ECk_ProceduralAction_ReachPolicy _ReachPolicy = ECk_ProceduralAction_ReachPolicy::RejectUnreachable;
-        ECk_ProceduralAction_ClearanceResponse _ClearanceResponse = ECk_ProceduralAction_ClearanceResponse::AbortOnCrossing;
     public:
         CK_PROPERTY(_Slot);
         CK_PROPERTY(_Position);
@@ -39,7 +38,6 @@ namespace ck::procedural_action
         CK_PROPERTY(_HasOrientation);
         CK_PROPERTY(_HasBend);
         CK_PROPERTY(_ReachPolicy);
-        CK_PROPERTY(_ClearanceResponse);
     };
 
     struct CKPROCEDURALANIMATION_API FEvaluatedPose

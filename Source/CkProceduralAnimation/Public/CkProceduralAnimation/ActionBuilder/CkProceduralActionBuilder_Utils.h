@@ -32,24 +32,14 @@ public:
         UPARAM(ref) FCk_ProceduralAction_ClipDraft& InDraft,
         const FCk_ProceduralAction_BodyChannel& InChannel);
 
-    /** Applies the frame to every existing track of the slot and to every track a later key materializes. A slot with
-     *  no track yet records its frame as an empty track in the first phase. */
+    /** Sets the frame every track of the slot is keyed in, for the whole clip. */
     UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralActionBuilder",
         DisplayName = "[Ck][ProceduralActionBuilder] Set Slot Frame")
     static FCk_ProceduralAction_ValidationReport
     Set_SlotFrame(
         UPARAM(ref) FCk_ProceduralAction_ClipDraft& InDraft,
         FName InSlot,
-        ECk_ProceduralAction_TrackSpace InSpace,
-        FName InAnchorId);
-
-    UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralActionBuilder",
-        DisplayName = "[Ck][ProceduralActionBuilder] Set Phase Progress")
-    static FCk_ProceduralAction_ValidationReport
-    Set_PhaseProgress(
-        UPARAM(ref) FCk_ProceduralAction_ClipDraft& InDraft,
-        FName InPhaseId,
-        const FCk_ProceduralAction_ProgressCurve& InCurve);
+        ECk_ProceduralAction_TrackSpace InSpace);
 
     UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralActionBuilder",
         DisplayName = "[Ck][ProceduralActionBuilder] Add Phase")
@@ -114,9 +104,10 @@ public:
         UPARAM(ref) FCk_ProceduralAction_ClipDraft& InDraft,
         const FCk_ProceduralAction_Window& InWindow);
 
-    /** Writes a reflected copy of every source track into the destination slot, in the source track's frame. Rejects
-     *  rest-normalized and anchor-relative sources (their frame needs subject topology), an existing destination track
-     *  in any written phase, and a destination already framed differently. Body motion and events are never mirrored. */
+    /** Writes a reflected copy of every source track into the destination slot and gives the destination the source
+     *  slot's frame. Rejects rest-normalized sources (their frame needs subject topology), an existing
+     *  destination track in any written phase, and a destination that already has tracks in another frame. Body motion and
+     *  events are never mirrored. */
     UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralActionBuilder",
         DisplayName = "[Ck][ProceduralActionBuilder] Mirror Slot")
     static FCk_ProceduralAction_ValidationReport
@@ -150,8 +141,8 @@ public:
 
     /** The incremental authoring path: replaces the destination's five authored fields without compiling the draft, so
      *  an author can save a clip that is still missing keys or references. It rejects only a null destination or an
-     *  unknown CompatibilityVersion. Nothing about playback changes: Play, the Create_* functions and Build_Into still
-     *  compile and refuse such a clip with the compiler's diagnostics. */
+     *  unknown CompatibilityVersion. Nothing about playback changes: Create_FromClip and Build_Into still compile and
+     *  refuse such a clip with the compiler's diagnostics. */
     UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralActionBuilder",
         DisplayName = "[Ck][ProceduralActionBuilder] Write Into")
     static FCk_ProceduralAction_ValidationReport

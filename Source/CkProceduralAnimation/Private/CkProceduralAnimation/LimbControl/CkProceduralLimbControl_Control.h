@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Control.h"
+#include "CkProceduralAnimation/Action/CkProceduralAction_Data.h"
 #include "CkProceduralAnimation/LimbControl/CkProceduralLimbControl_Fragment_Data.h"
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -80,12 +81,12 @@ public:
             const FCk_Handle_ProceduralArticulation& InSubject)
         -> bool;
 
-    // Read-only pinned geometry limits and the last actually settled return pose. No action entity is required.
+    // The player's sampling limits, for a return in progress. No action entity is required.
     static auto
         Get_ReturnMotionBudget(
             const FCk_Handle_ProceduralArticulation& InSubject,
             FCk_ArticulationControlToken InToken,
-            FCk_ProceduralLimbControl_MotionBudget& OutBudget)
+            FCk_ProceduralAction_Sampling& OutBudget)
         -> bool;
 
     // The deadline a failed return missed and how long it had run then; false unless a deadline failed the return.

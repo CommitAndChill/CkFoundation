@@ -105,38 +105,6 @@ public:
     Get_Presentation(
         const FCk_Handle_ProceduralBodyPose& InBodyPose);
 
-public:
-    /** Replaces the body pose's action offset (see FCk_Request_ProceduralBodyPose_SetActionOffset). Requests apply in
-        enqueue order and the last one wins. Completion reports that the input was processed, not that a pose includes it:
-        Get_ActionSample carries the request's SampleId once a successful update has posed with it. A rejected request
-        completes Failed_NotEnqueued and leaves the previous input in place. */
-    UFUNCTION(BlueprintCallable,
-              Category = "Ck|Utils|ProceduralBodyPose",
-              DisplayName="[Ck][ProceduralBodyPose] Request Set Action Offset",
-              meta = (AutoCreateRefTerm = "InDelegate"))
-    static FCk_Handle_ProceduralBodyPose
-    Request_SetActionOffset(
-        UPARAM(ref) FCk_Handle_ProceduralBodyPose& InBodyPose,
-        const FCk_Request_ProceduralBodyPose_SetActionOffset& InRequest,
-        const FCk_Delegate_Request_OnCompleted& InDelegate);
-
-    /** Body-local, in the simulation body's axes; the last action offset the body pose processed. Identity unless the body
-        pose is Ready. */
-    UFUNCTION(BlueprintPure,
-              Category = "Ck|Utils|ProceduralBodyPose",
-              DisplayName="[Ck][ProceduralBodyPose] Get Action Offset")
-    static FTransform
-    Get_ActionOffset(
-        const FCk_Handle_ProceduralBodyPose& InBodyPose);
-
-    /** The pose the last successful update submitted to the presentation, with the action token it included and its
-        revision. Default unless the body pose is Ready. */
-    UFUNCTION(BlueprintPure,
-              Category = "Ck|Utils|ProceduralBodyPose",
-              DisplayName="[Ck][ProceduralBodyPose] Get Action Sample")
-    static FCk_ProceduralBodyPose_ActionSample
-    Get_ActionSample(
-        const FCk_Handle_ProceduralBodyPose& InBodyPose);
 };
 
 // --------------------------------------------------------------------------------------------------------------------

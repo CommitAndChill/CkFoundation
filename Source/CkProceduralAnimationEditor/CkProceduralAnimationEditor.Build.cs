@@ -18,17 +18,22 @@ public class CkProceduralAnimationEditor : CkModuleRules
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
+            "AdvancedPreviewScene",
             "AssetDefinition",
             "AssetRegistry",
             "AssetTools",
             "CurveEditor",
             "EditorFramework",
+            "EditorWidgets",
             "InputCore",
+            "KismetWidgets",
             "PropertyEditor",
             "Slate",
             "SlateCore",
             "ToolMenus",
+            "ToolWidgets",
             "UnrealEd",
+            "CkEditorTools",
             "CkTween",
         });
     }

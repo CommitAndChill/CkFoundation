@@ -187,8 +187,36 @@ namespace ck::procedural_action
             return FCk_ProceduralAction_Receipt{true, InReceipt.Get_Stamp(), InReceipt.Get_Interval(),
                 FilterPose(InReceipt.Get_PreviousPose(), InClaimed, InHasBodyClaim),
                 FilterPose(InReceipt.Get_CurrentPose(), InClaimed, InHasBodyClaim),
-                MoveTemp(Samples), InReceipt.Get_Sampling(), InReceipt.Get_CorrelationToken()};
+                MoveTemp(Samples), InReceipt.Get_Sampling()};
         }
+    }
+
+    auto
+    Get_MaxRetainedInstances(
+        const FCk_ProceduralAction_Capacity& InCapacity)
+        -> int32
+    {
+        return FMath::Min(InCapacity.Get_MaxConcurrentInstances() * receipt_limits::RetainedInstancesPerConcurrent,
+            receipt_limits::MaxRetainedInstances);
+    }
+
+    auto
+    Get_MaxRetainedRecords(
+        const FCk_ProceduralAction_Capacity& InCapacity)
+        -> int64
+    {
+        return FMath::Min(static_cast<int64>(Get_MaxRetainedInstances(InCapacity))
+            * (static_cast<int64>(InCapacity.Get_RecordsPerInstance()) + 2), receipt_limits::MaxRetainedRecords);
+    }
+
+    auto
+    Get_MaxRetainedPoseTransforms(
+        const FCk_ProceduralAction_Capacity& InCapacity)
+        -> int64
+    {
+        return FMath::Min(static_cast<int64>(Get_MaxRetainedInstances(InCapacity))
+            * InCapacity.Get_RecordsPerInstance() * receipt_limits::PoseTransformsPerRecord,
+            receipt_limits::MaxRetainedPoseTransforms);
     }
 
     auto
@@ -235,69 +263,9 @@ namespace ck::procedural_action
         if (InCapacity.Get_MaxConcurrentInstances() <= 0
             || InCapacity.Get_MaxConcurrentInstances() > receipt_limits::MaxConcurrentInstances)
         { OutInvalidField = TEXT("Capacity.MaxConcurrentInstances"); return false; }
-        if (InCapacity.Get_MaxRetainedInstances() < InCapacity.Get_MaxConcurrentInstances()
-            || InCapacity.Get_MaxRetainedInstances() > receipt_limits::MaxRetainedInstances)
-        { OutInvalidField = TEXT("Capacity.MaxRetainedInstances"); return false; }
         if (InCapacity.Get_RecordsPerInstance() <= 0
             || InCapacity.Get_RecordsPerInstance() > receipt_limits::MaxOrdinaryRecordsPerInstance)
         { OutInvalidField = TEXT("Capacity.RecordsPerInstance"); return false; }
-        if (InCapacity.Get_MaxRetainedRecords()
-                < static_cast<int64>(InCapacity.Get_MaxConcurrentInstances()) * 3
-            || InCapacity.Get_MaxRetainedRecords() > receipt_limits::MaxRetainedRecords)
-        { OutInvalidField = TEXT("Capacity.MaxRetainedRecords"); return false; }
-        if (InCapacity.Get_MaxRetainedPoseTransforms() <= 0
-            || InCapacity.Get_MaxRetainedPoseTransforms() > receipt_limits::MaxRetainedPoseTransforms)
-        { OutInvalidField = TEXT("Capacity.MaxRetainedPoseTransforms"); return false; }
-        if (InCapacity.Get_MaxSamplesPerReceipt() <= 0
-            || InCapacity.Get_MaxSamplesPerReceipt() > receipt_limits::MaxSamplesPerReceipt)
-        { OutInvalidField = TEXT("Capacity.MaxSamplesPerReceipt"); return false; }
-        if (InCapacity.Get_MaxEventsPerReceipt() <= 0
-            || InCapacity.Get_MaxEventsPerReceipt() > receipt_limits::MaxEventsPerReceipt)
-        { OutInvalidField = TEXT("Capacity.MaxEventsPerReceipt"); return false; }
-        if (InCapacity.Get_MaxWindowsPerReceipt() <= 0
-            || InCapacity.Get_MaxWindowsPerReceipt() > receipt_limits::MaxWindowsPerReceipt)
-        { OutInvalidField = TEXT("Capacity.MaxWindowsPerReceipt"); return false; }
-        if (NOT receipt_store_detail::PositiveFinite(InCapacity.Get_OrphanRetentionTimeout()))
-        { OutInvalidField = TEXT("Capacity.OrphanRetentionTimeout"); return false; }
-        if (InCapacity.Get_ManagedRecordsPerTick() <= 0
-            || InCapacity.Get_ManagedRecordsPerTick() > receipt_limits::MaxOrdinaryRecordsPerInstance + 2)
-        { OutInvalidField = TEXT("Capacity.ManagedRecordsPerTick"); return false; }
-        return true;
-    }
-
-    auto
-    ValidateControlSpec(
-        const FCk_ProceduralAction_ControlSpec& InSpec,
-        FName& OutInvalidField)
-        -> bool
-    {
-        OutInvalidField = NAME_None;
-        if (NOT receipt_store_detail::PositiveFinite(InSpec.Get_InputTimeout()))
-        { OutInvalidField = TEXT("Control.InputTimeout"); return false; }
-        if (InSpec.Get_LimbIds().IsEmpty() && InSpec.Get_BodyChannel() != ECk_EnableDisable::Enable)
-        { OutInvalidField = TEXT("Control.Resources"); return false; }
-        if (InSpec.Get_BodyChannel() != ECk_EnableDisable::Enable
-            && InSpec.Get_BodyChannel() != ECk_EnableDisable::Disable)
-        { OutInvalidField = TEXT("Control.BodyChannel"); return false; }
-        if (InSpec.Get_LimbIds().Num() > receipt_limits::MaxClaimedLimbs)
-        { OutInvalidField = TEXT("Control.LimbIds"); return false; }
-        if (InSpec.Get_AnchorBindings().Num() > receipt_limits::MaxClaimedLimbs)
-        { OutInvalidField = TEXT("Control.AnchorBindings"); return false; }
-        auto Ids = TSet<FName>{};
-        for (const auto Id : InSpec.Get_LimbIds())
-        {
-            if (Id.IsNone() || Ids.Contains(Id))
-            { OutInvalidField = TEXT("Control.LimbIds"); return false; }
-            Ids.Add(Id);
-        }
-        auto Anchors = TSet<FName>{};
-        for (const auto& Anchor : InSpec.Get_AnchorBindings())
-        {
-            if (Anchor.Get_Id().IsNone() || Anchors.Contains(Anchor.Get_Id())
-                || NOT receipt_store_detail::IsRigid(Anchor.Get_Frame()))
-            { OutInvalidField = TEXT("Control.AnchorBindings"); return false; }
-            Anchors.Add(Anchor.Get_Id());
-        }
         return true;
     }
 
@@ -353,8 +321,8 @@ namespace ck::procedural_action
         -> EReceiptStoreWrite
     {
         OutIdentity = {};
-        if (NOT _Configured || _Streams.Num() >= _Capacity.Get_MaxRetainedInstances()
-            || _RetainedRecordSlots > _Capacity.Get_MaxRetainedRecords() - 2
+        if (NOT _Configured || _Streams.Num() >= Get_MaxRetainedInstances(_Capacity)
+            || _RetainedRecordSlots > Get_MaxRetainedRecords(_Capacity) - 2
             || _IdentityHighWater == std::numeric_limits<int64>::max())
         { return EReceiptStoreWrite::CapacityExceeded; }
         auto Active = 0;
@@ -396,7 +364,7 @@ namespace ck::procedural_action
     }
 
     auto
-    FReceiptStore::SealManaged(
+    FReceiptStore::SealAuto(
         FCk_ProceduralAction_Identity InIdentity)
         -> bool
     {
@@ -404,17 +372,40 @@ namespace ck::procedural_action
         if (Stream == nullptr || Stream->LastSequence != 0)
         { return false; }
 
-        Stream->ManagedDelivery = true;
+        Stream->AutoDelivered = true;
         return true;
     }
 
     auto
-    FReceiptStore::Get_IsManagedDelivery(
+    FReceiptStore::Get_IsAutoDelivered(
         FCk_ProceduralAction_Identity InIdentity) const
         -> bool
     {
         const auto* Stream = _Streams.Find(InIdentity.Get_Value());
-        return Stream != nullptr && Stream->ManagedDelivery;
+        return Stream != nullptr && Stream->AutoDelivered;
+    }
+
+    auto
+    FReceiptStore::AcknowledgeAutoDelivered()
+        -> void
+    {
+        auto Pending = TArray<TPair<int64, int64>>{};
+        for (const auto& Entry : _Streams)
+        {
+            if (Entry.Value.AutoDelivered && Entry.Value.AcknowledgedThrough < Entry.Value.LastSequence)
+            { Pending.Emplace(Entry.Key, Entry.Value.LastSequence); }
+        }
+        for (const auto& Through : Pending)
+        { Consume(FCk_ProceduralAction_Identity{Through.Key}, Through.Value); }
+    }
+
+    auto
+    FReceiptStore::Get_IsTerminalAcknowledged(
+        FCk_ProceduralAction_Identity InIdentity) const
+        -> bool
+    {
+        const auto* Stream = _Streams.Find(InIdentity.Get_Value());
+        return Stream != nullptr && Stream->Terminal && Stream->AcknowledgedThrough == Stream->LastSequence;
     }
 
     auto
@@ -455,7 +446,7 @@ namespace ck::procedural_action
             || (Stream->Generation != 0 && Stamp.Get_Generation() != Stream->Generation)
             || Stamp.Get_SampleSequence() <= Stream->LastSampleSequence
             || Stamp.Get_SubjectPoseRevision() <= 0 || Stamp.Get_TopologyRevision() <= 0
-            || Stamp.Get_ContentRevision() < 0 || Stamp.Get_TuningRevision() < 0
+            || Stamp.Get_ContentRevision() < 0
             || NOT FMath::IsFinite(From) || NOT FMath::IsFinite(To) || From < 0.0 || To < From
             || NOT ValidContinuity
             || (Stream->LastSampleSequence != 0
@@ -467,9 +458,9 @@ namespace ck::procedural_action
             || NOT FMath::IsFinite(Sampling.Get_MaxSegmentAngularStepDegrees())
             || Sampling.Get_MaxSegmentAngularStepDegrees() < 0.0f
             || NOT receipt_store_detail::NonnegativeFinite(Sampling.Get_Backlog())
-            || InReceipt.Get_IntermediateSamples().Num() > _Capacity.Get_MaxSamplesPerReceipt()
-            || InReceipt.Get_Interval().Get_Events().Num() > _Capacity.Get_MaxEventsPerReceipt()
-            || InReceipt.Get_Interval().Get_Windows().Num() > _Capacity.Get_MaxWindowsPerReceipt()
+            || InReceipt.Get_IntermediateSamples().Num() > receipt_limits::MaxSamplesPerReceipt
+            || InReceipt.Get_Interval().Get_Events().Num() > receipt_limits::MaxEventsPerReceipt
+            || InReceipt.Get_Interval().Get_Windows().Num() > receipt_limits::MaxWindowsPerReceipt
             || NOT receipt_store_detail::ValidPose(InReceipt.Get_CurrentPose(), Stream->ClaimedLimbIds, Stream->HasBodyClaim))
         { return EReceiptStoreWrite::InvalidRecord; }
         if (InReceipt.Get_Interval().Get_Continuity() != ECk_ProceduralAction_Continuity::FirstSample
@@ -515,7 +506,7 @@ namespace ck::procedural_action
                 && NOT NextActiveWindows.Contains(Event.Get_Id()))
             { NextActiveWindows.Add(Event.Get_Id()); }
         }
-        if (NextActiveWindows.Num() > _Capacity.Get_MaxWindowsPerReceipt())
+        if (NextActiveWindows.Num() > receipt_limits::MaxWindowsPerReceipt)
         { return EReceiptStoreWrite::InvalidRecord; }
         if (Stream->PendingOrdinaryCount >= _Capacity.Get_RecordsPerInstance())
         {
@@ -525,8 +516,8 @@ namespace ck::procedural_action
         const auto Transforms = receipt_store_detail::CountFilteredReceiptTransforms(
             InReceipt, Stream->ClaimedLimbIds, Stream->HasBodyClaim);
         const auto UsedWithoutOldLatest = _RetainedPoseTransforms - Stream->LastConsumedTransforms;
-        if (_RetainedRecordSlots >= _Capacity.Get_MaxRetainedRecords()
-            || Transforms > _Capacity.Get_MaxRetainedPoseTransforms() - UsedWithoutOldLatest)
+        if (_RetainedRecordSlots >= Get_MaxRetainedRecords(_Capacity)
+            || Transforms > Get_MaxRetainedPoseTransforms(_Capacity) - UsedWithoutOldLatest)
         {
             CloseWindows(InIdentity, TEXT("ReceiptOverflow"));
             return EReceiptStoreWrite::Overflow;
@@ -725,7 +716,7 @@ namespace ck::procedural_action
         {
             const auto& Stream = Entry.Value;
             if (Stream.EntityRemoved && Stream.Terminal
-                && _ServiceTime - Stream.TerminalServiceTime >= _Capacity.Get_OrphanRetentionTimeout())
+                && _ServiceTime - Stream.TerminalServiceTime >= receipt_limits::OrphanRetention)
             { Expired.Add(Entry.Key); }
         }
         for (const auto Id : Expired) { RemoveStream(Id); }

@@ -4,7 +4,7 @@
 #include "CkProceduralAnimation/ActionPlayer/CkProceduralActionPlayer_Utils.h"
 #include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Utils.h"
 #include "CkProceduralAnimationEditor/CkProceduralActionPreview_Config.h"
-#include "CkProceduralAnimationEditor/CkProceduralActionRecordedStore.h"
+#include "CkProceduralAnimation/Action/CkProceduralAction_RecordedStore.h"
 #include "CkJolt/Body/CkJoltBody_Fragment_Data.h"
 
 #include "UObject/StrongObjectPtr.h"
@@ -36,26 +36,11 @@ public:
         -> FCk_ProceduralActionSolverWorld& = delete;
 
     auto
-        StartManual(
-            UCk_ProceduralActionPreview_Config* InConfig,
-            const FCk_ProceduralAction_ControlSpec& InControl,
-            uint64 InPreviewRevision)
-        -> bool;
-    auto
         StartClip(
             UCk_ProceduralActionPreview_Config* InConfig,
             UCk_ProceduralAction_Data* InClip,
             const TArray<FCk_ProceduralAction_SlotBinding>& InSlotBindings,
             uint64 InPreviewRevision)
-        -> bool;
-    auto
-        QueuePoseAtStep(
-            int64 InStep,
-            const FCk_ProceduralAction_PoseBatch& InBatch)
-        -> bool;
-    auto
-        QueueEndAtStep(
-            int64 InStep)
         -> bool;
     auto
         SeekToStep(
@@ -155,13 +140,6 @@ public:
     }
 
 private:
-    struct FScheduledInput
-    {
-        int64 Step = 0;
-        FCk_ProceduralAction_PoseBatch Batch;
-        bool End = false;
-    };
-
     auto
         BuildWorld()
         -> bool;
@@ -178,9 +156,6 @@ private:
         OnPrePieEnded(
             bool InSimulating)
         -> void;
-    auto
-        ApplyScheduledInput()
-        -> bool;
     auto
         ApplyScenarioEvent()
         -> bool;
@@ -200,10 +175,8 @@ private:
 
     TStrongObjectPtr<UCk_ProceduralActionPreview_Config> _Config;
     TStrongObjectPtr<UCk_ProceduralAction_Data> _Clip;
-    FCk_ProceduralAction_ControlSpec _Control;
     FCk_ProceduralAction_PlaySpec _PlaySpec;
     FCk_ProceduralActionRecordedStore _Recording;
-    TArray<FScheduledInput> _Inputs;
     UWorld* _World = nullptr;
     UGameInstance* _GameInstance = nullptr;
     FCk_Handle_ProceduralArticulation _Subject;
@@ -221,11 +194,9 @@ private:
     int64 _Step = 0;
     int32 _PreparingTicks = 0;
     int64 _SeekTarget = INDEX_NONE;
-    int32 _NextInput = 0;
     int32 _NextScenarioEvent = 0;
     int64 _ObservationHorizonStep = 0;
     uint64 _PreviewRevision = 0;
-    bool _UseClip = false;
     bool _ExpectedFloorPresent = false;
     uint64 _LastTickFrame = MAX_uint64;
     EStatus _Status = EStatus::Idle;

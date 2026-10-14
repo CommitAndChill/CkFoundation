@@ -125,10 +125,8 @@ auto
     Snapshot._Result = Action._Result;
     Snapshot._AcceptedTime = Action._AcceptedTime;
     Snapshot._PlaybackBacklog = Action._PlaybackBacklog;
-    Snapshot._TuningRevision = Params.Get_TuningRevision();
     Snapshot._NextSampleSequence = Action._NextSampleSequence;
-    Snapshot._PublicationPending = Action._HasPendingBatch || Action._PendingStageKey.IsSet()
-        || Action._PendingHoldStageKey.IsSet();
+    Snapshot._PublicationPending = Action._PendingStageKey.IsSet() || Action._PendingHoldStageKey.IsSet();
     if (InAction.Has<ck::FFragment_ProceduralAction_Compiled>())
     {
         const auto& Clip = InAction.Get<ck::FFragment_ProceduralAction_Compiled>().Get_Clip();
@@ -151,11 +149,7 @@ auto
         Deadlines.Add(MakeDeadline(TEXT("Acquisition"), Action._AdmissionElapsed,
             Watchdogs.Get_AcquisitionTimeout()));
     }
-    const auto Ready = Action._State == ECk_ProceduralAction_State::Ready;
-    const auto ManualPending = Action._HasPendingBatch || Action._PendingStageKey.IsSet();
-    if (Ready && NOT ManualPending)
-    { Deadlines.Add(MakeDeadline(TEXT("Input"), Action._InputElapsed, Params.Get_Manual().Get_InputTimeout())); }
-    if ((Ready && ManualPending) || Action._State == ECk_ProceduralAction_State::Acquiring
+    if (Action._State == ECk_ProceduralAction_State::Acquiring
         || Action._State == ECk_ProceduralAction_State::Playing)
     {
         Deadlines.Add(MakeDeadline(TEXT("Publication"), Action._PublicationElapsed,

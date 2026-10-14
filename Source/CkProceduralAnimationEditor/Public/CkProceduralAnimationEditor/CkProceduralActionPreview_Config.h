@@ -114,8 +114,6 @@ private:
     TArray<FCk_ProceduralActionPreview_LimbBinding> _LimbBindings;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subject|Bindings", meta = (AllowPrivateAccess = true))
     TArray<FCk_ProceduralAction_SlotBinding> _SlotBindings;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subject|Bindings", meta = (AllowPrivateAccess = true))
-    TArray<FCk_ProceduralAction_AnchorBinding> _AnchorBindings;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subject|Walking", meta = (AllowPrivateAccess = true))
     TObjectPtr<UCk_ProceduralRig_Data> _WalkingRig;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subject|Walking", meta = (AllowPrivateAccess = true))
@@ -171,7 +169,6 @@ public:
     CK_PROPERTY(_StandaloneClearanceSettings);
     CK_PROPERTY(_LimbBindings);
     CK_PROPERTY(_SlotBindings);
-    CK_PROPERTY(_AnchorBindings);
     CK_PROPERTY(_WalkingRig);
     CK_PROPERTY(_WalkingGait);
     CK_PROPERTY(_WalkingLocomotion);
@@ -189,3 +186,50 @@ public:
     CK_PROPERTY(_BodyPreviewMesh);
     CK_PROPERTY(_BodyPreviewMeshScale);
 };
+
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace ck::procedural_action_editor
+{
+    /** The preview a clip's editor subject describes, as a new transient object in the transient package; the caller roots
+     *  it. With a scenario the scenario is copied whole and the subject's slot bindings, when it has any, replace the
+     *  scenario's. Otherwise a walking subject stands its rig at rest on a static floor whose top is at Z 0, with the root
+     *  at the rig's clearance, a limb binding per leg and count-only support of max(1, legs - 2); a dedicated subject holds
+     *  its layout at the origin with a limb binding per limb; an empty subject previews the body alone. Without a scenario
+     *  the sampling budget lets a limb travel twice the longest chain reach and turn 180 degrees per step. */
+    CKPROCEDURALANIMATIONEDITOR_API auto
+        DerivePreviewConfig(
+            const UCk_ProceduralAction_Data& InClip)
+        -> UCk_ProceduralActionPreview_Config*;
+
+    // A rig leg at its rest pose under InRootFrame: a frame at the start of each segment, +X along it, the terminal at the
+    // rest foot; a two-segment knee bends toward the leg's pole.
+    CKPROCEDURALANIMATIONEDITOR_API auto
+        MakeRestLimbBinding(
+            const FCk_ProceduralLeg_Spec& InLeg,
+            const FTransform& InRootFrame)
+        -> FCk_ProceduralActionPreview_LimbBinding;
+
+    /** The editor subject equivalent to a preview config picked for a clip before the clip remembered its subject. A walking
+     *  preview gives its rig and gait (copied into InClip's package when they live inside the preview) and its slot bindings;
+     *  a standalone preview gives its layout and slot bindings and stays the scenario, so its meshes and initial pose survive. */
+    CKPROCEDURALANIMATIONEDITOR_API auto
+        MakeSubjectFromLegacyPreview(
+            const UCk_ProceduralActionPreview_Config& InPreview,
+            UCk_ProceduralAction_Data& InClip)
+        -> FCk_ProceduralAction_EditorSubject;
+
+    // The package of the preview config beside a clip: "<Clip>_Preview_DA" for "<Clip>_DA", "<Clip>_Preview_DA" otherwise.
+    CKPROCEDURALANIMATIONEDITOR_API auto
+        Get_PreviewSiblingPackageName(
+            const FString& InClipPackageName)
+        -> FString;
+
+    // The preview config a clip used before it remembered its subject: the per-user pairing, else the one beside it.
+    CKPROCEDURALANIMATIONEDITOR_API auto
+        FindLegacyPreview(
+            const UCk_ProceduralAction_Data& InClip)
+        -> UCk_ProceduralActionPreview_Config*;
+}
+
+// --------------------------------------------------------------------------------------------------------------------

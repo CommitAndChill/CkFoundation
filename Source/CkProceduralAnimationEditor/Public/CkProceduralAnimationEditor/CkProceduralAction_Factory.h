@@ -6,8 +6,8 @@
 
 #include "CkProceduralAction_Factory.generated.h"
 
-// The Content Browser asks for the subject and the starting motion before it asks for a name, and creates nothing when
-// the author cancels. A factory used from code without that dialog keeps creating a bare clip.
+// The Content Browser asks for the subject before it asks for a name, and creates nothing when the author cancels. A
+// factory used from code without that dialog keeps creating a bare clip.
 UCLASS()
 class CKPROCEDURALANIMATIONEDITOR_API UCk_ProceduralAction_Factory : public UFactory
 {
