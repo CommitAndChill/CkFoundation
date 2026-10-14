@@ -22,7 +22,7 @@ namespace ck_procedural_action_channels
             FName InChannel)
         -> FString
     {
-        return InChannel == FCk_ProceduralAction_PoseGroup::Get_BodyChannelName() ? FString{TEXT("Body")} : InChannel.ToString();
+        return InChannel == ck::procedural_action_editor::Get_BodyChannelName() ? FString{TEXT("Body")} : InChannel.ToString();
     }
 
     auto
@@ -78,7 +78,7 @@ auto
     -> FName
 {
     const auto Session = _Session.Pin();
-    const auto* Config = Session.IsValid() ? Session->GetPreviewConfig() : nullptr;
+    const auto* Config = Session.IsValid() ? Session->Get_PreviewConfig() : nullptr;
     const auto* Binding = Config == nullptr ? nullptr : Config->Get_SlotBindings().FindByPredicate(
         [InSlot](const FCk_ProceduralAction_SlotBinding& InBinding) { return InBinding.Get_Slot() == InSlot; });
     return Binding == nullptr ? NAME_None : Binding->Get_LimbId();
@@ -91,8 +91,8 @@ auto
 {
     using EKind = FItem::EKind;
     const auto Session = _Session.Pin();
-    const auto* Clip = Session.IsValid() ? Session->GetClip() : nullptr;
-    const auto* Config = Session.IsValid() ? Session->GetPreviewConfig() : nullptr;
+    const auto* Clip = Session.IsValid() ? Session->Get_Clip() : nullptr;
+    const auto* Config = Session.IsValid() ? Session->Get_PreviewConfig() : nullptr;
     auto Wanted = TArray<FItemPtr>{};
     const auto Add = [this, &Wanted](EKind InKind, FName InId, const FText& InLabel)
     {
@@ -108,7 +108,7 @@ auto
     if (Clip != nullptr)
     {
         if (Clip->Get_BodyChannel().Get_Enabled())
-        { Add(EKind::Body, FCk_ProceduralAction_PoseGroup::Get_BodyChannelName(), LOCTEXT("Body", "Body")); }
+        { Add(EKind::Body, ck::procedural_action_editor::Get_BodyChannelName(), LOCTEXT("Body", "Body")); }
         auto Bound = TArray<FName>{};
         for (const auto& Slot : Clip->Get_Slots())
         {
@@ -126,7 +126,7 @@ auto
                         FText::FromName(Limb)));
                 }
             }
-            const auto& Subject = Clip->Get_EditorSubject();
+            const auto& Subject = ck::procedural_action_editor::Get_Subject(*Clip);
             Add(EKind::Summary, NAME_None, FText::Format(LOCTEXT("Summary", "Rig: {0}   Gait: {1}   Floor: {2}"),
                 FText::FromString(Subject.Get_WalkingRig().IsNull() ? FString{TEXT("dedicated layout")} : Subject.Get_WalkingRig().GetAssetName()),
                 FText::FromString(Subject.Get_WalkingGait().IsNull() ? FString{TEXT("none")} : Subject.Get_WalkingGait().GetAssetName()),
@@ -262,7 +262,7 @@ auto
 {
     auto Menu = FMenuBuilder{true, nullptr};
     const auto Session = _Session.Pin();
-    const auto* Config = Session.IsValid() ? Session->GetPreviewConfig() : nullptr;
+    const auto* Config = Session.IsValid() ? Session->Get_PreviewConfig() : nullptr;
     if (Config == nullptr)
     { return Menu.MakeWidget(); }
     const auto WeakChannels = TWeakPtr<SCkProceduralAction_Channels>{SharedThis(this)};
@@ -276,9 +276,7 @@ auto
             if (NOT Session.IsValid() || NOT Model.IsValid())
             { return; }
             auto Error = FString{};
-            const auto Bound = FCk_ProceduralActionAuthoringCommands{Session->GetClip()}.RetargetSlot(Session->GetPreviewConfig(), InSlot, Limb, Error);
-            if (Bound)
-            { Model->NotifyContentChanged(); }
+            const auto Bound = FCk_ProceduralActionAuthoringCommands{Session->Get_Clip()}.RetargetSlot(Session->Get_PreviewConfig(), InSlot, Limb, Error);
             if (Channels->_OnResult)
             { Channels->_OnResult(Bound, Bound ? FString::Printf(TEXT("Bound %s to %s."), *InSlot.ToString(), *Limb.ToString()) : Error); }
         })});
@@ -293,7 +291,7 @@ auto
 {
     const auto Selected = _Tree->GetSelectedItems();
     const auto Session = _Session.Pin();
-    const auto* Clip = Session.IsValid() ? Session->GetClip() : nullptr;
+    const auto* Clip = Session.IsValid() ? Session->Get_Clip() : nullptr;
     if (Selected.IsEmpty() || Selected[0]->Kind != FItem::EKind::Slot || Clip == nullptr)
     { return nullptr; }
     const auto Source = Selected[0]->Id;
@@ -317,16 +315,83 @@ auto
                 if (NOT Session.IsValid() || NOT Model.IsValid())
                 { return; }
                 auto Error = FString{};
-                const auto Mirrored = FCk_ProceduralActionAuthoringCommands{Session->GetClip()}.MirrorSlot(Source, Destination, Normal, Error);
-                if (Mirrored)
-                { Model->NotifyContentChanged(); }
+                const auto Mirrored = FCk_ProceduralActionAuthoringCommands{Session->Get_Clip()}.MirrorSlot(Source, Destination, Normal, Error);
                 if (Channels->_OnResult)
                 { Channels->_OnResult(Mirrored, Mirrored ? FString::Printf(TEXT("Mirrored %s onto %s."), *Source.ToString(), *Destination.ToString()) : Error); }
             })});
         }
     }
     Menu.EndSection();
+    Menu.BeginSection(NAME_None, LOCTEXT("SpaceSection", "Track space"));
+    for (const auto Space : {ECk_ProceduralAction_TrackSpace::BodyLocal, ECk_ProceduralAction_TrackSpace::RootAtStart,
+        ECk_ProceduralAction_TrackSpace::LimbRestNormalized})
+    {
+        const auto* Slot = Clip->Get_Slots().FindByPredicate([Source](const FCk_ProceduralAction_Slot& InSlot) { return InSlot.Get_Id() == Source; });
+        const auto Current = Slot != nullptr && Slot->Get_Space() == Space;
+        Menu.AddMenuEntry(StaticEnum<ECk_ProceduralAction_TrackSpace>()->GetDisplayNameTextByValue(static_cast<int64>(Space)), FText::GetEmpty(),
+            FSlateIcon{}, FUIAction{FExecuteAction::CreateLambda([WeakChannels, Source, Space]()
+            {
+                if (const auto Channels = WeakChannels.Pin())
+                {
+                    Channels->EditSlot([Source, Space](FCk_ProceduralActionAuthoringCommands& InCommands, FString& OutError)
+                        { return InCommands.SetSlotSpace(Source, Space, OutError); },
+                        FString::Printf(TEXT("%s keys its track in %s."), *Source.ToString(), *UEnum::GetValueAsString(Space)));
+                }
+            }), FCanExecuteAction{}, FIsActionChecked::CreateLambda([Current]() { return Current; })}, NAME_None,
+            EUserInterfaceActionType::RadioButton);
+    }
+    Menu.EndSection();
+    Menu.AddMenuEntry(LOCTEXT("DeleteSlot", "Delete slot"), FText::GetEmpty(), FSlateIcon{}, FUIAction{FExecuteAction::CreateLambda([WeakChannels, Source]()
+    {
+        if (const auto Channels = WeakChannels.Pin())
+        {
+            Channels->EditSlot([Source](FCk_ProceduralActionAuthoringCommands& InCommands, FString& OutError)
+                { return InCommands.RemoveSlot(Source, OutError); }, FString::Printf(TEXT("Deleted %s."), *Source.ToString()));
+        }
+    })});
     return Menu.MakeWidget();
+}
+
+auto
+    SCkProceduralAction_Channels::
+    OnKeyDown(
+        const FGeometry& InGeometry,
+        const FKeyEvent& InKeyEvent)
+    -> FReply
+{
+    const auto Slot = Get_SelectedSlot();
+    if (InKeyEvent.GetKey() != EKeys::Delete || Slot.IsNone())
+    { return SCompoundWidget::OnKeyDown(InGeometry, InKeyEvent); }
+    EditSlot([Slot](FCk_ProceduralActionAuthoringCommands& InCommands, FString& OutError)
+        { return InCommands.RemoveSlot(Slot, OutError); }, FString::Printf(TEXT("Deleted %s."), *Slot.ToString()));
+    return FReply::Handled();
+}
+
+auto
+    SCkProceduralAction_Channels::
+    Get_SelectedSlot() const
+    -> FName
+{
+    const auto Selected = _Tree->GetSelectedItems();
+    return Selected.IsEmpty() || Selected[0]->Kind != FItem::EKind::Slot ? NAME_None : Selected[0]->Id;
+}
+
+auto
+    SCkProceduralAction_Channels::
+    EditSlot(
+        TFunctionRef<bool(FCk_ProceduralActionAuthoringCommands&, FString&)> InEdit,
+        const FString& InSuccess)
+    -> bool
+{
+    const auto Session = _Session.Pin();
+    if (NOT Session.IsValid() || Session->Get_Clip() == nullptr)
+    { return false; }
+    auto Commands = FCk_ProceduralActionAuthoringCommands{Session->Get_Clip()};
+    auto Error = FString{};
+    const auto Done = InEdit(Commands, Error);
+    if (_OnResult)
+    { _OnResult(Done, Done ? InSuccess : Error); }
+    return Done;
 }
 
 #undef LOCTEXT_NAMESPACE

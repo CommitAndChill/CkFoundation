@@ -40,11 +40,6 @@ namespace ck_procedural_action_recorded_store
                 || NOT TryCountPoseTransforms(InReceipt.Get_CurrentPose(), InBudget, InOutCount))
             { return false; }
         }
-        for (const auto& Sample : InReceipt.Get_IntermediateSamples())
-        {
-            if (NOT TryCountPoseTransforms(Sample.Get_Pose(), InBudget, InOutCount))
-            { return false; }
-        }
         return true;
     }
 }

@@ -2,6 +2,7 @@
 
 #include "CkProceduralAnimation/Action/CkProceduralAction_Data.h"
 #include "CkProceduralAnimation/ActionBuilder/CkProceduralActionBuilder_Data.h"
+#include "CkProceduralAnimationEditor/CkProceduralActionEditorData.h"
 
 #include "UObject/Object.h"
 
@@ -55,8 +56,8 @@ public:
 
     UPROPERTY(VisibleAnywhere, Category = "Key")
     FName _Channel;
-    UPROPERTY(VisibleAnywhere, Category = "Key", meta = (Units = "s"))
-    float _KeyTime = 0.0f;
+    UPROPERTY(VisibleAnywhere, Category = "Key")
+    FCk_Time _KeyTime;
     UPROPERTY(EditAnywhere, Category = "Key", meta = (Units = "cm"))
     FVector _Position = FVector::ZeroVector;
     UPROPERTY(EditAnywhere, Category = "Key")
@@ -76,17 +77,17 @@ public:
 
     UPROPERTY(EditAnywhere, Category = "Section")
     FName _SectionName;
-    UPROPERTY(EditAnywhere, Category = "Section", meta = (Units = "s", ClampMin = "0.01"))
-    float _Duration = 0.0f;
+    UPROPERTY(EditAnywhere, Category = "Section")
+    FCk_Time _Duration;
     UPROPERTY(EditAnywhere, Category = "Section")
     ECk_ProceduralAction_Easing _Easing = ECk_ProceduralAction_Easing::Linear;
     UPROPERTY(VisibleAnywhere, Category = "Section")
     bool _StartsFromCurrentPose = true;
 
     UPROPERTY(EditAnywhere, Category = "Clip")
-    FCk_ProceduralAction_EditorSubject _Subject;
-    UPROPERTY(VisibleAnywhere, Category = "Clip", meta = (Units = "s"))
-    float _Length = 0.0f;
+    FCk_ProceduralActionEditor_Subject _Subject;
+    UPROPERTY(VisibleAnywhere, Category = "Clip")
+    FCk_Time _Length;
     UPROPERTY(VisibleAnywhere, Category = "Clip")
     TArray<FCk_ProceduralAction_Marker> _Markers;
     UPROPERTY(VisibleAnywhere, Category = "Clip")
@@ -96,8 +97,8 @@ public:
     FName _EventName;
     UPROPERTY(VisibleAnywhere, Category = "Event")
     FName _EventSection;
-    UPROPERTY(VisibleAnywhere, Category = "Event", meta = (Units = "s"))
-    float _EventTime = 0.0f;
+    UPROPERTY(VisibleAnywhere, Category = "Event")
+    FCk_Time _EventTime;
 };
 
 // --------------------------------------------------------------------------------------------------------------------

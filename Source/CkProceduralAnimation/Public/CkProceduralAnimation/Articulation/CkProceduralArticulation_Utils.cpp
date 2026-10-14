@@ -1,4 +1,5 @@
 #include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Utils.h"
+#include "CkProceduralAnimation/Core/CkProceduralRigidTransform.h"
 #include "CkProceduralAnimation/LimbControl/CkProceduralLimbControl_Control.h"
 #include "CkProceduralAnimation/LimbControl/CkProceduralLimbControl_Fragment.h"
 
@@ -48,16 +49,6 @@ namespace ck_procedural_articulation_utils
             { LimbIds.Add(Binding.Get_LimbId()); }
         }
         return LimbIds;
-    }
-
-    auto
-        Get_IsRigid(
-        const FTransform& InTransform)
-        -> bool
-    {
-        return NOT InTransform.ContainsNaN()
-            && InTransform.GetScale3D().Equals(FVector::OneVector, 1.0e-6)
-            && FMath::Abs(InTransform.GetRotation().SizeSquared() - 1.0) <= 1.0e-4;
     }
 
     auto
@@ -128,7 +119,8 @@ namespace ck_procedural_articulation_utils
         auto NeedsClearanceWorld = false;
         const auto HasPresentation = InSpec.Get_Presentation() != FCk_Handle_Transform{};
         if (HasPresentation && (NOT Get_IsPartAdmissible(InSpec.Get_Presentation(), InRoot, Parts)
-            || NOT Get_IsRigid(UCk_Utils_Transform_UE::Get_EntityCurrentTransform(InSpec.Get_Presentation()))))
+            || NOT ck::procedural_animation::IsRigid(
+                UCk_Utils_Transform_UE::Get_EntityCurrentTransform(InSpec.Get_Presentation()), ck::procedural_animation::AuthoredRotationTolerance)))
         { return false; }
 
         for (auto Index = 0; Index < Limbs.Num(); ++Index)
@@ -139,7 +131,8 @@ namespace ck_procedural_articulation_utils
             const auto& Radii = Limb.Get_SegmentClearanceRadii();
             if (Limb.Get_Id().IsNone() || Ids.Contains(Limb.Get_Id()) || Binding.Get_LimbId() != Limb.Get_Id()
                 || Limb.Get_Role() != ECk_ProceduralLimb_Role::Dedicated
-                || NOT Get_IsRigid(Limb.Get_AttachmentLocal()) || NOT Get_IsRigid(Limb.Get_RestEndpointLocal())
+                || NOT ck::procedural_animation::IsRigid(Limb.Get_AttachmentLocal(), ck::procedural_animation::AuthoredRotationTolerance)
+                || NOT ck::procedural_animation::IsRigid(Limb.Get_RestEndpointLocal(), ck::procedural_animation::AuthoredRotationTolerance)
                 || Limb.Get_BendLocal().ContainsNaN() || Limb.Get_BendLocal().IsNearlyZero()
                 || Limb.Get_BendLocal().GetSafeNormal().IsNearlyZero()
                 || Lengths.Num() < 1 || Lengths.Num() > 8 || Binding.Get_Segments().Num() != Lengths.Num()
@@ -203,8 +196,8 @@ auto
         && NOT UCk_Utils_ProceduralGait_UE::Has(InRoot)
         && NOT UCk_Utils_ProceduralBodyPose_UE::Has(InRoot)
         && UCk_Utils_ProceduralLeg_UE::Get_Legs(InRoot).IsEmpty()
-        && ck_procedural_articulation_utils::Get_IsRigid(
-            UCk_Utils_Transform_UE::Get_EntityCurrentTransform(InRoot));
+        && ck::procedural_animation::IsRigid(
+            UCk_Utils_Transform_UE::Get_EntityCurrentTransform(InRoot), ck::procedural_animation::AuthoredRotationTolerance);
     const auto Valid = RootValid && ck_procedural_articulation_utils::Get_IsLayoutAdmissible(InSpec, InRoot);
     CK_ENSURE_IF_NOT(Valid,
         TEXT("Procedural articulation Add rejected root [{}]: require a live rigid root/presentation, sealed 0..64 dedicated limb layout, "
@@ -240,6 +233,8 @@ auto
     InRoot.Add<ck::FFragment_ProceduralArticulation_Params>(InSpec.Get_Layout(), InSpec.Get_ClearanceSettings());
     InRoot.Add<ck::FFragment_ProceduralArticulation_Bindings>(InSpec.Get_Bindings(), Created, InSpec.Get_Presentation());
     InRoot.Add<ck::FFragment_ProceduralArticulation_Pose>();
+    InRoot.Add<ck::FFragment_ProceduralArticulation_LegacyCandidate>();
+    InRoot.Add<ck::FFragment_ProceduralArticulation_ControlCandidate>();
     auto EmptyClaims = TArray<FCk_ArticulationControlToken>{};
     EmptyClaims.SetNum(Layouts.Num());
     InRoot.Add<ck::FFragment_ProceduralArticulation_Claims>(MoveTemp(EmptyClaims));

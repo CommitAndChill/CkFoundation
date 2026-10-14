@@ -30,11 +30,16 @@ auto
         && NOT InSubject.Has<ck::FTag_DestroyEntity_Initiate>()
         && NOT Has(InSubject)
         && ck::procedural_action::ValidateTuning(InSpec.Get_Tuning(), InvalidField)
-        && ck::procedural_action::ValidateCapacity(InSpec.Get_Capacity(), InvalidField);
+        && ck::procedural_action::ValidateCapacity(InSpec.Get_Capacity(), InvalidField)
+        && FCk_ProceduralLimbControl_Control::Get_IsLocomotionValid(InSpec.Get_Locomotion());
     CK_ENSURE_IF_NOT(Valid,
-        TEXT("ProceduralActionPlayer Add rejected subject [{}], invalid field [{}]."), InSubject, InvalidField)
+        TEXT("ProceduralActionPlayer Add rejected subject [{}], invalid field [{}] (or an invalid locomotion support or "
+            "return policy)."), InSubject, InvalidField)
     { return {}; }
-    if (NOT FCk_ProceduralLimbControl_Control::Attach(InSubject, InSpec.Get_Locomotion()))
+    const auto Attached = FCk_ProceduralLimbControl_Control::Attach(InSubject, InSpec.Get_Locomotion());
+    CK_ENSURE_IF_NOT(Attached,
+        TEXT("ProceduralActionPlayer Add rejected subject [{}]: limb control could not attach (a walking support policy "
+            "needs a gait, and the subject must not already carry limb control)."), InSubject)
     { return {}; }
 
     InSubject.Add<ck::FFragment_ProceduralActionPlayer_Params>(InSpec.Get_Capacity(), InSpec.Get_Tuning());

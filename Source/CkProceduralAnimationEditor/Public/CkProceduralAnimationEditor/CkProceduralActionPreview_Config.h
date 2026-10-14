@@ -7,6 +7,7 @@
 #include "CkProceduralAnimation/Rig/CkProceduralRig_Fragment_Data.h"
 
 #include "CkCore/Types/DataAsset/CkDataAsset.h"
+#include "CkProceduralAnimationEditor/CkProceduralActionEditorData.h"
 
 #include "CkProceduralActionPreview_Config.generated.h"
 
@@ -209,27 +210,6 @@ namespace ck::procedural_action_editor
             const FCk_ProceduralLeg_Spec& InLeg,
             const FTransform& InRootFrame)
         -> FCk_ProceduralActionPreview_LimbBinding;
-
-    /** The editor subject equivalent to a preview config picked for a clip before the clip remembered its subject. A walking
-     *  preview gives its rig and gait (copied into InClip's package when they live inside the preview) and its slot bindings;
-     *  a standalone preview gives its layout and slot bindings and stays the scenario, so its meshes and initial pose survive. */
-    CKPROCEDURALANIMATIONEDITOR_API auto
-        MakeSubjectFromLegacyPreview(
-            const UCk_ProceduralActionPreview_Config& InPreview,
-            UCk_ProceduralAction_Data& InClip)
-        -> FCk_ProceduralAction_EditorSubject;
-
-    // The package of the preview config beside a clip: "<Clip>_Preview_DA" for "<Clip>_DA", "<Clip>_Preview_DA" otherwise.
-    CKPROCEDURALANIMATIONEDITOR_API auto
-        Get_PreviewSiblingPackageName(
-            const FString& InClipPackageName)
-        -> FString;
-
-    // The preview config a clip used before it remembered its subject: the per-user pairing, else the one beside it.
-    CKPROCEDURALANIMATIONEDITOR_API auto
-        FindLegacyPreview(
-            const UCk_ProceduralAction_Data& InClip)
-        -> UCk_ProceduralActionPreview_Config*;
 }
 
 // --------------------------------------------------------------------------------------------------------------------

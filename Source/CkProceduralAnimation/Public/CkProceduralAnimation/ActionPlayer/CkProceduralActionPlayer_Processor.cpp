@@ -49,8 +49,7 @@ namespace ck
             { continue; }
             const auto& Params = ActionHandle.Get<FFragment_ProceduralAction_Params>();
             const auto Identity = Params.Get_Identity();
-            const auto Token = FCk_ArticulationControlToken{
-                static_cast<uint64>(Identity.Get_Value()), static_cast<uint64>(Action._Generation)};
+            const auto Token = Action.Get_Token(Params);
             Action._OwnerLossReconciled = true;
             Action._Context = {};
             Action._PendingStageKey.Reset();

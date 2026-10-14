@@ -10,7 +10,7 @@ class FCk_ProceduralActionEditorModel;
 
 /** The Channels panel: the body, each clip slot with the subject limb it is bound to, the subject's other limbs (under the
  *  gait, or unbound), and a subject summary. The tick on a channel is what Record covers; clicking a channel selects its
- *  key at the playhead. */
+ *  key at the playhead. A slot's context menu mirrors it, sets its track space or deletes it; Delete deletes it too. */
 class SCkProceduralAction_Channels : public SCompoundWidget
 {
 public:
@@ -40,6 +40,15 @@ public:
     auto
         SyncSelection()
         -> void;
+    auto
+        SupportsKeyboardFocus() const
+        -> bool override
+    { return true; }
+    auto
+        OnKeyDown(
+            const FGeometry& InGeometry,
+            const FKeyEvent& InKeyEvent)
+        -> FReply override;
 
 private:
     auto
@@ -62,6 +71,15 @@ private:
     auto
         Get_BoundLimb(
             FName InSlot) const
+        -> FName;
+    // Runs one slot command and reports it; InEdit returns whether the clip changed.
+    auto
+        EditSlot(
+            TFunctionRef<bool(class FCk_ProceduralActionAuthoringCommands&, FString&)> InEdit,
+            const FString& InSuccess)
+        -> bool;
+    auto
+        Get_SelectedSlot() const
         -> FName;
 
     TWeakPtr<FCk_ProceduralActionAuthoringSession> _Session;

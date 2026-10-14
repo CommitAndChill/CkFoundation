@@ -10,6 +10,8 @@
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Fragment.h"
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
 
+#include "CkEcsExt/Transform/CkTransform_Utils.h"
+
 // --------------------------------------------------------------------------------------------------------------------
 
 namespace ck_procedural_gait_utils
@@ -91,10 +93,20 @@ CK_DEFINE_HAS_CAST_CONV_HANDLE_TYPESAFE(UCk_Utils_ProceduralGait_UE, FCk_Handle_
 auto
     UCk_Utils_ProceduralGait_UE::
     Add(
-        FCk_Handle_Transform& InBody,
+        const TArray<FCk_Handle_ProceduralLeg>& InLegs,
         const UCk_ProceduralGait_Data* InData)
     -> FCk_Handle_ProceduralGait
 {
+    const auto Owner = InLegs.IsEmpty() || ck::Is_NOT_Valid(InLegs[0])
+        ? FCk_Handle{} : UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InLegs[0]);
+    const auto ShareOwner = ck::IsValid(Owner) && ck::algo::AllOf(InLegs, [&](const FCk_Handle_ProceduralLeg& InLeg) -> bool
+    { return ck::IsValid(InLeg) && UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InLeg) == Owner; });
+    CK_ENSURE_IF_NOT(ShareOwner,
+        TEXT("Procedural gait Add rejected legs [{}]: pass the body's legs, every one a valid leg of the same body."),
+        InLegs.Num())
+    { return {}; }
+
+    auto InBody = UCk_Utils_Transform_UE::Cast(Owner);
     const auto BodyValid = ck::IsValid(InBody)
         && NOT InBody.Has<ck::FTag_DestroyEntity_Initiate>()
         && UCk_Utils_EntityLifetime_UE::Get_CanCreateEntity(InBody)
@@ -114,6 +126,13 @@ auto
     { return {}; }
 
     const auto Legs = UCk_Utils_ProceduralLeg_UE::Get_Legs(InBody);
+    const auto PassedEveryLeg = Legs.Num() == InLegs.Num()
+        && ck::algo::AllOf(Legs, [&](const FCk_Handle_ProceduralLeg& InLeg) -> bool { return InLegs.Contains(InLeg); });
+    CK_ENSURE_IF_NOT(PassedEveryLeg,
+        TEXT("Procedural gait Add rejected body [{}]: pass every one of its [{}] legs, each once (got [{}])."),
+        InBody, Legs.Num(), InLegs.Num())
+    { return {}; }
+
     const auto LegsValid = Legs.Num() >= 2 && Legs.Num() <= 64
         && InData->Get_Timing().Get_MaxSimultaneousSwings() <= Legs.Num();
     CK_ENSURE_IF_NOT(LegsValid,

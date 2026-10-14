@@ -6,6 +6,8 @@
 #include "CkCore/Types/DataAsset/CkDataAsset.h"
 #include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Fragment_Data.h"
 
+#include "Interfaces/Interface_AssetUserData.h"
+
 #include "CkProceduralAction_Data.generated.h"
 
 class UCk_ProceduralGait_Data;
@@ -60,7 +62,8 @@ enum class ECk_ProceduralAction_ReachPolicy : uint8
 };
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralAction_ReachPolicy);
 
-UENUM(BlueprintType)
+// Load-only: read by the legacy pose groups below until their clips are migrated.
+UENUM()
 enum class ECk_ProceduralAction_PoseProvenance : uint8
 {
     Requested,
@@ -345,45 +348,45 @@ public:
 
 // --------------------------------------------------------------------------------------------------------------------
 
-/** The creature the clip editor previews a clip on. Editor-only: the runtime binds a clip to whatever subject plays it.
- *  A walking subject names a rig and a gait; otherwise the layout's limbs are dedicated, and an empty layout previews the
- *  body alone. The editor derives the preview (limb frames at rest, a floor, locomotion) from it; _Scenario, when set, is an
- *  authored UCk_ProceduralActionPreview_Config whose fields replace the derived ones (obstacles, floor removal, tuning). */
-USTRUCT(BlueprintType)
+/** Load-only: the preview subject clips saved before the editor kept its data in the clip's editor-only asset user data.
+ *  UCk_ProceduralAction_Data::PostLoad hands it to the editor's migration and clears it. */
+USTRUCT()
 struct CKPROCEDURALANIMATION_API FCk_ProceduralAction_EditorSubject
 {
     GENERATED_BODY()
 public:
     CK_GENERATED_BODY(FCk_ProceduralAction_EditorSubject);
 private:
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Walking", meta = (AllowPrivateAccess = true))
+    UPROPERTY()
     TSoftObjectPtr<UCk_ProceduralRig_Data> _WalkingRig;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Walking", meta = (AllowPrivateAccess = true))
+    UPROPERTY()
     TSoftObjectPtr<UCk_ProceduralGait_Data> _WalkingGait;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dedicated", meta = (AllowPrivateAccess = true))
+    UPROPERTY()
     FCk_ProceduralArticulation_Layout _Layout;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bindings", meta = (AllowPrivateAccess = true))
+    UPROPERTY()
     TArray<FCk_ProceduralAction_SlotBinding> _SlotBindings;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scenario", meta = (AllowPrivateAccess = true,
-        AllowedClasses = "/Script/CkProceduralAnimationEditor.Ck_ProceduralActionPreview_Config"))
+    UPROPERTY()
     TSoftObjectPtr<UObject> _Scenario;
 public:
     auto
         Get_IsEmpty() const
         -> bool
-    { return _WalkingRig.IsNull() && _Layout.Get_Limbs().IsEmpty() && _Scenario.IsNull(); }
+    {
+        return _WalkingRig.IsNull() && _WalkingGait.IsNull() && _Layout.Get_Limbs().IsEmpty() && _SlotBindings.IsEmpty()
+            && _Scenario.IsNull();
+    }
 
-    CK_PROPERTY(_WalkingRig);
-    CK_PROPERTY(_WalkingGait);
-    CK_PROPERTY(_Layout);
-    CK_PROPERTY(_SlotBindings);
-    CK_PROPERTY(_Scenario);
+    CK_PROPERTY_GET(_WalkingRig);
+    CK_PROPERTY_GET(_WalkingGait);
+    CK_PROPERTY_GET(_Layout);
+    CK_PROPERTY_GET(_SlotBindings);
+    CK_PROPERTY_GET(_Scenario);
 };
 
 // --------------------------------------------------------------------------------------------------------------------
 
-/** Editor-only label for the keys one whole-pose capture wrote: the phase, time and channels they share. It holds no
- *  transforms; the keys in the phases stay the only motion. The body channel is named Get_BodyChannelName(). */
+/** Load-only: a pose group clips saved before the editor kept its pose labels in the clip's editor-only asset user data.
+ *  The editor's migration turns each one into a label at its phase and time. */
 USTRUCT()
 struct CKPROCEDURALANIMATION_API FCk_ProceduralAction_PoseGroup
 {
@@ -404,24 +407,15 @@ private:
     UPROPERTY()
     ECk_ProceduralAction_PoseProvenance _Provenance = ECk_ProceduralAction_PoseProvenance::Requested;
 public:
-    static auto
-        Get_BodyChannelName()
-        -> FName
-    { return FName{TEXT("(Body)")}; }
-
-    CK_PROPERTY_GET(_Id);
-    CK_PROPERTY(_Label);
-    CK_PROPERTY(_PhaseId);
-    CK_PROPERTY(_Time);
-    CK_PROPERTY(_Channels);
-    CK_PROPERTY(_Provenance);
-    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralAction_PoseGroup, _Id, _PhaseId, _Time, _Channels);
+    CK_PROPERTY_GET(_Label);
+    CK_PROPERTY_GET(_PhaseId);
+    CK_PROPERTY_GET(_Time);
 };
 
 // --------------------------------------------------------------------------------------------------------------------
 
 UCLASS(BlueprintType)
-class CKPROCEDURALANIMATION_API UCk_ProceduralAction_Data : public UCk_DataAsset_PDA
+class CKPROCEDURALANIMATION_API UCk_ProceduralAction_Data : public UCk_DataAsset_PDA, public IInterface_AssetUserData
 {
     GENERATED_BODY()
 public:
@@ -438,9 +432,31 @@ protected:
         -> void override;
 public:
     // 2: the slot holds its tracks' frame; PostLoad moves a frame still found on a track there.
-    static constexpr auto CurrentCompatibilityVersion = int32{2};
+    // 3: the editor's subject and pose labels live in the editor-only asset user data; PostLoad migrates the old fields.
+    static constexpr auto CurrentCompatibilityVersion = int32{3};
+
+    auto
+        AddAssetUserData(
+            UAssetUserData* InUserData)
+        -> void override;
+    auto
+        RemoveUserDataOfClass(
+            TSubclassOf<UAssetUserData> InUserDataClass)
+        -> void override;
+    auto
+        GetAssetUserDataOfClass(
+            TSubclassOf<UAssetUserData> InUserDataClass)
+        -> UAssetUserData* override;
+    auto
+        GetAssetUserDataArray() const
+        -> const TArray<UAssetUserData*>* override;
+
+#if WITH_EDITORONLY_DATA
+    /** Bound by the editor module, which owns the editor data's type: moves the legacy editor fields into it. */
+    static TDelegate<void(UCk_ProceduralAction_Data&)> OnMigrateEditorOnlyData;
+#endif
 private:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Content", meta = (AllowPrivateAccess = true))
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Content", meta = (AllowPrivateAccess = true))
     int32 _CompatibilityVersion = CurrentCompatibilityVersion;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Body", meta = (AllowPrivateAccess = true))
     FCk_ProceduralAction_BodyChannel _BodyChannel;
@@ -453,14 +469,16 @@ private:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Windows", meta = (AllowPrivateAccess = true, TitleProperty = "_Id"))
     TArray<FCk_ProceduralAction_Window> _Windows;
 #if WITH_EDITORONLY_DATA
-    // Read by the editor only; Compile never sees it, so cooked motion data and content hashes ignore it.
+    // The clip editor's data. Compile never sees it, so cooked motion data and content hashes ignore it.
+    UPROPERTY(EditAnywhere, AdvancedDisplay, Instanced, Category = "Editor", meta = (AllowPrivateAccess = true))
+    TArray<TObjectPtr<UAssetUserData>> _AssetUserDataEditorOnly;
     UPROPERTY()
-    TArray<FCk_ProceduralAction_PoseGroup> _EditorPoseGroups;
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Editor", meta = (AllowPrivateAccess = true))
-    FCk_ProceduralAction_EditorSubject _EditorSubject;
+    TArray<FCk_ProceduralAction_PoseGroup> _EditorPoseGroups_DEPRECATED;
+    UPROPERTY()
+    FCk_ProceduralAction_EditorSubject _EditorSubject_DEPRECATED;
 #endif
 public:
-    CK_PROPERTY(_CompatibilityVersion);
+    CK_PROPERTY_GET(_CompatibilityVersion);
     CK_PROPERTY(_BodyChannel);
     CK_PROPERTY(_Slots);
     CK_PROPERTY(_Phases);
@@ -468,17 +486,27 @@ public:
     CK_PROPERTY(_Windows);
 #if WITH_EDITORONLY_DATA
     auto
-        Get_EditorPoseGroups() const
-        -> const TArray<FCk_ProceduralAction_PoseGroup>&
-    { return _EditorPoseGroups; }
+        Get_HasLegacyEditorData() const
+        -> bool
+    { return NOT _EditorPoseGroups_DEPRECATED.IsEmpty() || NOT _EditorSubject_DEPRECATED.Get_IsEmpty(); }
 
     auto
-        Set_EditorPoseGroups(
-            const TArray<FCk_ProceduralAction_PoseGroup>& InGroups)
-        -> void
-    { _EditorPoseGroups = InGroups; }
+        Get_LegacyEditorSubject() const
+        -> const FCk_ProceduralAction_EditorSubject&
+    { return _EditorSubject_DEPRECATED; }
 
-    CK_PROPERTY(_EditorSubject);
+    auto
+        Get_LegacyEditorPoseGroups() const
+        -> const TArray<FCk_ProceduralAction_PoseGroup>&
+    { return _EditorPoseGroups_DEPRECATED; }
+
+    auto
+        Clear_LegacyEditorData()
+        -> void
+    {
+        _EditorPoseGroups_DEPRECATED.Reset();
+        _EditorSubject_DEPRECATED = {};
+    }
 #endif
 };
 

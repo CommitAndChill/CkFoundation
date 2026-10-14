@@ -2,8 +2,6 @@
 
 #include "CkProceduralAnimation/Action/CkProceduralAction_Data.h"
 
-#include "Misc/ConfigCacheIni.h"
-#include "Misc/PackageName.h"
 #include "UObject/Package.h"
 
 namespace ck_procedural_action_preview_config
@@ -58,40 +56,6 @@ namespace ck_procedural_action_preview_config
         return Binding;
     }
 
-    // A rig or gait that lives inside a legacy preview asset goes away with it, so the clip keeps its own copy.
-    template <typename TData>
-    auto
-        OwnedByClip(
-            TData* InData,
-            UCk_ProceduralAction_Data& InClip,
-            const TCHAR* InName)
-        -> TSoftObjectPtr<TData>
-    {
-        if (InData == nullptr)
-        { return {}; }
-        if (InData->IsAsset())
-        { return TSoftObjectPtr<TData>{InData}; }
-        return TSoftObjectPtr<TData>{DuplicateObject<TData>(InData, &InClip, FName{InName})};
-    }
-
-    // The quoted strings of a config line, in order: a TMap<FString, FString> is written as (("Key","Value"),...).
-    auto
-        ReadQuoted(
-            const FString& InLine)
-        -> TArray<FString>
-    {
-        auto Quoted = TArray<FString>{};
-        auto Start = InLine.Find(TEXT("\""));
-        while (Start != INDEX_NONE)
-        {
-            const auto End = InLine.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, Start + 1);
-            if (End == INDEX_NONE)
-            { break; }
-            Quoted.Add(InLine.Mid(Start + 1, End - Start - 1));
-            Start = InLine.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, End + 1);
-        }
-        return Quoted;
-    }
     auto
         IsFiniteRigidBox(
             const FTransform& InFrame,
@@ -297,8 +261,8 @@ namespace ck::procedural_action_editor
             const UCk_ProceduralAction_Data& InClip)
         -> UCk_ProceduralActionPreview_Config*
     {
-        const auto& Subject = InClip.Get_EditorSubject();
-        if (auto* Scenario = Cast<UCk_ProceduralActionPreview_Config>(Subject.Get_Scenario().LoadSynchronous()))
+        const auto& Subject = ck::procedural_action_editor::Get_Subject(InClip);
+        if (auto* Scenario = Subject.Get_Scenario().LoadSynchronous())
         {
             auto* Copy = DuplicateObject<UCk_ProceduralActionPreview_Config>(Scenario, GetTransientPackage());
             Copy->ClearFlags(RF_Public | RF_Standalone | RF_Transactional);
@@ -365,64 +329,6 @@ namespace ck::procedural_action_editor
         Locomotion.Get_Support().Set_MinimumTrustedContacts(FMath::Max(1, Legs.Num() - 2));
         Config->Set_WalkingLocomotion(Locomotion);
         return Config;
-    }
-
-    auto
-        MakeSubjectFromLegacyPreview(
-            const UCk_ProceduralActionPreview_Config& InPreview,
-            UCk_ProceduralAction_Data& InClip)
-        -> FCk_ProceduralAction_EditorSubject
-    {
-        auto Subject = FCk_ProceduralAction_EditorSubject{};
-        Subject.Set_SlotBindings(InPreview.Get_SlotBindings());
-        if (InPreview.Get_SubjectMode() == ECk_ProceduralActionPreview_SubjectMode::Walking)
-        {
-            Subject.Set_WalkingRig(ck_procedural_action_preview_config::OwnedByClip(
-                InPreview.Get_WalkingRig().Get(), InClip, TEXT("SubjectRig")));
-            Subject.Set_WalkingGait(ck_procedural_action_preview_config::OwnedByClip(
-                InPreview.Get_WalkingGait().Get(), InClip, TEXT("SubjectGait")));
-            return Subject;
-        }
-        Subject.Set_Layout(InPreview.Get_Layout());
-        Subject.Set_Scenario(TSoftObjectPtr<UObject>{const_cast<UCk_ProceduralActionPreview_Config*>(&InPreview)});
-        return Subject;
-    }
-
-    auto
-        Get_PreviewSiblingPackageName(
-            const FString& InClipPackageName)
-        -> FString
-    {
-        auto Name = FPackageName::GetLongPackageAssetName(InClipPackageName);
-        if (Name.EndsWith(TEXT("_DA")))
-        { Name.LeftChopInline(3); }
-        return FPackageName::GetLongPackagePath(InClipPackageName) + TEXT("/") + Name + TEXT("_Preview_DA");
-    }
-
-    auto
-        FindLegacyPreview(
-            const UCk_ProceduralAction_Data& InClip)
-        -> UCk_ProceduralActionPreview_Config*
-    {
-        auto Pairs = FString{};
-        if (GConfig != nullptr && GConfig->GetString(TEXT("/Script/CkProceduralAnimationEditor.Ck_ProceduralActionEditor_UserSettings"),
-            TEXT("_PreviewPathsByClip"), Pairs, GEditorPerProjectIni))
-        {
-            const auto Quoted = ck_procedural_action_preview_config::ReadQuoted(Pairs);
-            for (auto Index = 0; Index + 1 < Quoted.Num(); Index += 2)
-            {
-                if (Quoted[Index] != InClip.GetPathName())
-                { continue; }
-                if (auto* Paired = LoadObject<UCk_ProceduralActionPreview_Config>(nullptr, *Quoted[Index + 1]))
-                { return Paired; }
-            }
-        }
-
-        const auto SiblingPackage = Get_PreviewSiblingPackageName(InClip.GetOutermost()->GetName());
-        if (NOT FPackageName::IsValidLongPackageName(SiblingPackage) || NOT FPackageName::DoesPackageExist(SiblingPackage))
-        { return nullptr; }
-        return LoadObject<UCk_ProceduralActionPreview_Config>(nullptr,
-            *(SiblingPackage + TEXT(".") + FPackageName::GetLongPackageAssetName(SiblingPackage)));
     }
 }
 

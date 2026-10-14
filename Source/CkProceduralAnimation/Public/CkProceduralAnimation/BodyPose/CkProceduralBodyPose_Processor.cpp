@@ -78,8 +78,10 @@ namespace ck
     {
         auto* ArticulationPose = InHandle.Has<FFragment_ProceduralArticulation_Pose>()
             ? &InHandle.Get<FFragment_ProceduralArticulation_Pose>() : nullptr;
-        if (ArticulationPose != nullptr)
-        { ArticulationPose->_HasLegacyPresentation = false; }
+        auto* LegacyCandidate = ArticulationPose != nullptr
+            ? &InHandle.Get<FFragment_ProceduralArticulation_LegacyCandidate>() : nullptr;
+        if (LegacyCandidate != nullptr)
+        { LegacyCandidate->_HasLegacyPresentation = false; }
         const auto DeltaSeconds = static_cast<float>(InDeltaT.Get_Seconds());
         if (NOT FMath::IsFinite(DeltaSeconds) || DeltaSeconds <= 0.0f)
         { return; }
@@ -292,8 +294,8 @@ namespace ck
         const auto Posed = InPoseComp._Offset * Body;
         if (ArticulationPose != nullptr)
         {
-            ArticulationPose->_LegacyPresentation = Posed;
-            ArticulationPose->_HasLegacyPresentation = true;
+            LegacyCandidate->_LegacyPresentation = Posed;
+            LegacyCandidate->_HasLegacyPresentation = true;
             ArticulationPose->_PredictedSubjectPose = FCk_ProceduralArticulation_Pose{
                 Body, Posed, true, TArray<FCk_ProceduralArticulation_LimbPose>{}};
         }

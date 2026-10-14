@@ -138,8 +138,8 @@ auto
     { return SetError(FString::Printf(TEXT("Preview Action Tuning has invalid %s."),
         *InvalidTuningField.ToString())); }
     const auto Walking = Config.Get_SubjectMode() == ECk_ProceduralActionPreview_SubjectMode::Walking;
-    const auto* Rig = Config.Get_WalkingRig().Get();
-    const auto* Gait = Config.Get_WalkingGait().Get();
+    auto* Rig = Config.Get_WalkingRig().Get();
+    auto* Gait = Config.Get_WalkingGait().Get();
     if (Walking && (Rig == nullptr || Gait == nullptr || NOT Config.Get_HasStaticFloor()))
     { return SetError(TEXT("Walking preview requires a canonical rig, gait preset, and static Jolt floor.")); }
     if (NOT Walking && Layouts.Num() != PreviewBindings.Num())
@@ -256,7 +256,7 @@ auto
     }
     if (Walking)
     {
-        const auto Walker = UCk_Utils_ProceduralAnimation_UE::Add_Walker(RootTransform, Rig, Gait, Chains);
+        const auto Walker = UCk_Utils_ProceduralAnimation_UE::Add_Walker(RootTransform, FCk_ProceduralWalker_Spec{Rig, Gait}.Set_Chains(Chains));
         _Gait = Walker.Get_Gait();
         _Subject = UCk_Utils_ProceduralArticulation_UE::Cast(_Root);
         // A walker's body presentation rides a body pose on its gait, as a game walker composes it; a clip's body
@@ -364,11 +364,11 @@ auto
 
 auto
     FCk_ProceduralActionSolverWorld::
-    IsWalkingPrepared() const
+    Get_IsWalkingPrepared() const
     -> bool
 {
-    if (NOT _Config.IsValid() || ck::Is_NOT_Valid(_Gait) || NOT GetIsFloorReady()
-        || NOT GetAreObstaclesReady())
+    if (NOT _Config.IsValid() || ck::Is_NOT_Valid(_Gait) || NOT Get_IsFloorReady()
+        || NOT Get_AreObstaclesReady())
     { return false; }
     return UCk_Utils_ProceduralArticulation_UE::Get_SettledRevision(_Subject) > 0
         && UCk_Utils_ProceduralGait_UE::Get_PlantedCount(_Gait) == _Config->Get_WalkingRig()->Get_Legs().Num()
@@ -431,7 +431,7 @@ auto
 
 auto
     FCk_ProceduralActionSolverWorld::
-    GetIsFloorReady() const
+    Get_IsFloorReady() const
     -> bool
 {
     return _Config.IsValid() && _Config->Get_HasStaticFloor()
@@ -440,7 +440,7 @@ auto
 
 auto
     FCk_ProceduralActionSolverWorld::
-    GetAreObstaclesReady() const
+    Get_AreObstaclesReady() const
     -> bool
 {
     if (NOT _Config.IsValid() || _ObstacleBodies.Num() != _Config->Get_StaticObstacles().Num())
@@ -465,7 +465,7 @@ auto
     switch (Event.Get_Kind())
     {
     case ECk_ProceduralActionPreview_ScenarioEventKind::RemoveFloor:
-        if (ck::Is_NOT_Valid(_FloorEntity) || NOT GetIsFloorReady())
+        if (ck::Is_NOT_Valid(_FloorEntity) || NOT Get_IsFloorReady())
         { return SetError(TEXT("Scenario RemoveFloor reached its step before the owned Jolt floor was ready.")); }
         UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(_FloorEntity);
         _FloorEntity = {};
@@ -478,7 +478,7 @@ auto
         _ExpectedFloorPresent = true;
         break;
     case ECk_ProceduralActionPreview_ScenarioEventKind::RecoverLimbs:
-        if (ck::Is_NOT_Valid(_Subject) || NOT GetIsFloorReady())
+        if (ck::Is_NOT_Valid(_Subject) || NOT Get_IsFloorReady())
         { return SetError(TEXT("Scenario RecoverLimbs needs the restored, settled Jolt floor and a live walking subject.")); }
         for (const auto Id : Event.Get_LimbIds())
         {
@@ -529,7 +529,7 @@ auto
     });
     if (_ObservationHorizonStep > 0 && _Step >= _ObservationHorizonStep)
     {
-        if (_ExpectedFloorPresent && NOT GetIsFloorReady())
+        if (_ExpectedFloorPresent && NOT Get_IsFloorReady())
         { return SetError(TEXT("Scenario restored floor did not become a production Jolt body before ObservationHorizonStep.")); }
         if (NOT _PendingRecoveryIds.IsEmpty())
         {
@@ -581,10 +581,10 @@ auto
             { _Status = _ObservationHorizonStep > _Step ? EStatus::Ready : EStatus::Finished; }
         }
         else if ((_Config->Get_SubjectMode() == ECk_ProceduralActionPreview_SubjectMode::Walking
-                && IsWalkingPrepared())
+                && Get_IsWalkingPrepared())
             || (_Config->Get_SubjectMode() == ECk_ProceduralActionPreview_SubjectMode::Standalone
-                && (NOT _Config->Get_HasStaticFloor() || GetIsFloorReady())
-                && GetAreObstaclesReady()))
+                && (NOT _Config->Get_HasStaticFloor() || Get_IsFloorReady())
+                && Get_AreObstaclesReady()))
         {
             if (NOT CreateAction())
             { return false; }
@@ -679,7 +679,12 @@ auto
     _Scope = {};
     _Root = {};
     if (_World == nullptr)
-    { _GameInstance = nullptr; return; }
+    {
+        if (_GameInstance != nullptr)
+        { _GameInstance->Shutdown(); }
+        _GameInstance = nullptr;
+        return;
+    }
     auto* World = _World;
     _World = nullptr;
     if (World->HasBegunPlay())
@@ -690,7 +695,8 @@ auto
     World->RemoveFromRoot();
     if (_GameInstance != nullptr)
     { _GameInstance->Shutdown(); }
-    GEngine->DestroyWorldContext(World);
+    if (GEngine != nullptr)
+    { GEngine->DestroyWorldContext(World); }
     World->DestroyWorld(false);
     _GameInstance = nullptr;
 }

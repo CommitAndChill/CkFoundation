@@ -37,18 +37,17 @@ namespace ck_procedural_action_curve
  *  section's keys, in seconds of the clip. The clip stays the source of truth: the curves are rebuilt from it, and an
  *  accepted edit is written back through SetBodyKeys / SetPositionKeys, never into the clip directly. In an eased section
  *  the drawn segments between keys approximate the motion; the keys sit where the timeline shows them. */
-class CKPROCEDURALANIMATIONEDITOR_API FCkProceduralAction_CurveAdapter : public TSharedFromThis<FCkProceduralAction_CurveAdapter>
+class CKPROCEDURALANIMATIONEDITOR_API FCk_ProceduralAction_CurveAdapter : public TSharedFromThis<FCk_ProceduralAction_CurveAdapter>
 {
 public:
-    FCkProceduralAction_CurveAdapter() = default;
-    UE_NONCOPYABLE(FCkProceduralAction_CurveAdapter);
-    ~FCkProceduralAction_CurveAdapter();
+    FCk_ProceduralAction_CurveAdapter() = default;
+    UE_NONCOPYABLE(FCk_ProceduralAction_CurveAdapter);
+    ~FCk_ProceduralAction_CurveAdapter();
 
     auto
         Init(
             TSharedPtr<FCk_ProceduralActionAuthoringSession> InSession,
-            TSharedPtr<FCk_ProceduralActionEditorModel> InModel,
-            FSimpleDelegate InOnChanged)
+            TSharedPtr<FCk_ProceduralActionEditorModel> InModel)
         -> TSharedRef<SWidget>;
     // Rebuilds from the clip and the selected section; deferred to the next tick while the curve editor is calling back.
     auto
@@ -98,7 +97,6 @@ private:
 
     TWeakPtr<FCk_ProceduralActionAuthoringSession> _Session;
     TWeakPtr<FCk_ProceduralActionEditorModel> _Model;
-    FSimpleDelegate _OnChanged;
     TSharedPtr<FCurveEditor> _Editor;
     TStrongObjectPtr<UObject> _ProxyOwner;
     TArray<TUniquePtr<ck_procedural_action_curve::FChannelCurves>> _Channels;

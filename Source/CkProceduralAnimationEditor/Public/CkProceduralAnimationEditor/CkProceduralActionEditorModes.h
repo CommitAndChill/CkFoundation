@@ -11,7 +11,7 @@ class FCk_ProceduralActionAuthoringSession;
 // cache and never rebuild the world; it simulates only as far as the requested time needs. Times are clip times: the
 // action's entry blend precedes time zero, and frames after the clip's end show the subject returning to its gait. The
 // editor model polls it; it holds no selection.
-class CKPROCEDURALANIMATIONEDITOR_API FCkProceduralActionEditorModes
+class CKPROCEDURALANIMATIONEDITOR_API FCk_ProceduralActionEditorModes
 {
 public:
     enum class EMode : uint8 { Authored, Solver };
@@ -22,7 +22,7 @@ public:
         FCk_ProceduralActionSolvedSnapshot Capture;
     };
 
-    explicit FCkProceduralActionEditorModes(
+    explicit FCk_ProceduralActionEditorModes(
         TWeakPtr<FCk_ProceduralActionAuthoringSession> InSession);
 
     // The 60 Hz Solver step nearest InTime; false when the time cannot be represented as a step.
@@ -56,40 +56,40 @@ public:
         -> void;
 
     auto
-        GetMode() const
+        Get_Mode() const
         -> EMode
     {
         return _Mode;
     }
     auto
-        GetStatusText() const
+        Get_StatusText() const
         -> FText;
     // The time of the displayed solved frame.
     auto
-        GetTime() const
+        Get_Time() const
         -> FCk_Time;
     auto
-        GetDuration() const
+        Get_Duration() const
         -> FCk_Time;
     // The clip time of the last solved frame; past the clip's duration once the action has ended.
     auto
-        GetSolvedTime() const
+        Get_SolvedTime() const
         -> FCk_Time;
     // No frame will be added: the Solver finished, failed or was released.
     auto
-        GetIsComplete() const
+        Get_IsComplete() const
         -> bool;
     auto
-        GetFrameCount() const
+        Get_FrameCount() const
         -> int32
     {
         return _Frames.Num();
     }
     auto
-        GetDisplayedFrame() const
+        Get_DisplayedFrame() const
         -> const FSolvedFrame*;
     auto
-        GetSolver() const
+        Get_Solver() const
         -> const FCk_ProceduralActionSolverWorld*
     {
         return _Solver.Get();

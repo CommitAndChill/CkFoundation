@@ -173,14 +173,14 @@ auto
         Diagnostics.Add(ck::procedural_action::MakeReportDiagnostic(TEXT("NullData"), {},
             TEXT("Data"), {}, TEXT("valid loaded clip object"), TEXT("null or invalid")));
         return ck::procedural_action::MakePublicReport(
-            ECk_ProceduralAction_ReportStatus::Invalid, false, Diagnostics);
+            ECk_ProceduralAction_ReportStatus::Invalid, Diagnostics);
     }
     auto Compiled = ck::procedural_action::FCompiledClip{};
     const auto Valid = ck::procedural_action::Compile(*Pinned, Compiled, Diagnostics);
     return ck::procedural_action::MakePublicReport(
         Valid ? ECk_ProceduralAction_ReportStatus::Valid
             : ECk_ProceduralAction_ReportStatus::Invalid,
-        false, Diagnostics);
+        Diagnostics);
 }
 
 auto
@@ -253,14 +253,18 @@ auto
         { LimbIds.Add(Id.ToString()); }
         Text += ck::Format_UE(TEXT("; Limbs: {}"), FString::Join(LimbIds, TEXT(", ")));
     }
-    if (InContext.Get_Elapsed() != FCk_Time{})
-    { Text += ck::Format_UE(TEXT("; Elapsed: {:.3f} s"), InContext.Get_Elapsed().Get_Seconds()); }
-    if (InContext.Get_Limit() != FCk_Time{})
-    { Text += ck::Format_UE(TEXT("; Limit: {:.3f} s"), InContext.Get_Limit().Get_Seconds()); }
-    if (InContext.Get_Observed() != 0)
-    { Text += ck::Format_UE(TEXT("; Observed: {} {}"), InContext.Get_Observed(), InContext.Get_BudgetUnit()); }
-    if (InContext.Get_Budget() != 0)
-    { Text += ck::Format_UE(TEXT("; Budget: {} {}"), InContext.Get_Budget(), InContext.Get_BudgetUnit()); }
+    if (InContext.Get_Measurement() == ECk_ProceduralAction_FailureMeasurement::Deadline)
+    {
+        Text += ck::Format_UE(TEXT("; Elapsed: {:.3f} s; Limit: {:.3f} s"),
+            InContext.Get_Elapsed().Get_Seconds(), InContext.Get_Limit().Get_Seconds());
+    }
+    if (InContext.Get_Measurement() == ECk_ProceduralAction_FailureMeasurement::Budget)
+    {
+        Text += ck::Format_UE(TEXT("; Observed: {} {}; Budget: {} {}"), InContext.Get_Observed(),
+            InContext.Get_BudgetUnit(), InContext.Get_Budget(), InContext.Get_BudgetUnit());
+    }
+    if (NOT InContext.Get_StallReason().IsNone())
+    { Text += ck::Format_UE(TEXT("; Stalled on: {}"), InContext.Get_StallReason()); }
     return FText::FromString(Text);
 }
 

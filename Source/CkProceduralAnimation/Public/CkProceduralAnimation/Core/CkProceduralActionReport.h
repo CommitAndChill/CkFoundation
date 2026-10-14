@@ -8,7 +8,6 @@ namespace ck::procedural_action
     inline auto
     MakePublicReport(
         ECk_ProceduralAction_ReportStatus InStatus,
-        bool InAdvisory,
         const TArray<FDiagnostic>& InDiagnostics)
         -> FCk_ProceduralAction_ValidationReport
     {
@@ -27,7 +26,7 @@ namespace ck::procedural_action
                 Diagnostic.Get_Expected(), Diagnostic.Get_Actual());
         }
         return FCk_ProceduralAction_ValidationReport{
-            InStatus, InAdvisory, MoveTemp(PublicDiagnostics)};
+            InStatus, MoveTemp(PublicDiagnostics)};
     }
 
     inline auto

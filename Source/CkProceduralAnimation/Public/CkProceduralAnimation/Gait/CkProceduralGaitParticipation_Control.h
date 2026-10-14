@@ -47,12 +47,6 @@ public:
         int32 InLegIndex,
         const FCk_ProceduralGaitParticipation_Snapshot& InSnapshot)
         -> bool;
-    static auto
-    RequestInterrupt(
-        const FCk_Handle_ProceduralGait& InGait,
-        FCk_ArticulationControlToken InToken,
-        FName InReason)
-        -> bool;
     // Stops support protection, but retains the token's lease and recovery identity until a terminal operation.
     static auto
     AbortProtection(

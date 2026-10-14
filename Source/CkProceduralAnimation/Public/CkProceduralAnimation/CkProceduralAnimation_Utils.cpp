@@ -1,6 +1,11 @@
 #include "CkProceduralAnimation/CkProceduralAnimation_Utils.h"
 
+#include "CkProceduralAnimation/ActionPlayer/CkProceduralActionPlayer_Utils.h"
 #include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Fragment.h"
+#include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Utils.h"
+#include "CkProceduralAnimation/BodyPose/CkProceduralBodyPose_Utils.h"
+#include "CkProceduralAnimation/Core/CkProceduralActionReceiptStore.h"
+#include "CkProceduralAnimation/LimbControl/CkProceduralLimbControl_Control.h"
 #include "CkProceduralAnimation/Limb/CkProceduralLimb_Fragment.h"
 #include "CkProceduralAnimation/Limb/CkProceduralLimb_Utils.h"
 
@@ -112,6 +117,38 @@ namespace ck_procedural_animation_utils
 
         return true;
     }
+
+    auto
+        Get_IsBodyPoseAdmissible(
+            const FCk_Handle_Transform& InBody,
+            const FCk_ProceduralBodyPose_Spec& InSpec,
+            const TArray<FCk_ProceduralWalker_LegChain>& InChains)
+        -> bool
+    {
+        const auto& Presentation = InSpec.Get_Presentation();
+        const auto IsRigPart = ck::algo::AnyOf(InChains, [&](const FCk_ProceduralWalker_LegChain& InChain) -> bool
+        {
+            return InChain.Get_Rig().Get_Segments().Contains(Presentation) || InChain.Get_Rig().Get_Foot() == Presentation;
+        });
+
+        return ck::IsValid(InSpec)
+            && ck::IsValid(Presentation)
+            && NOT Presentation.Has<ck::FTag_DestroyEntity_Initiate>()
+            && Presentation != InBody
+            && UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Presentation) == InBody.ConvertToHandle()
+            && NOT IsRigPart;
+    }
+
+    auto
+        Get_IsActionPlayerAdmissible(
+            const FCk_ProceduralActionPlayer_Spec& InSpec)
+        -> bool
+    {
+        auto InvalidField = FName{};
+        return ck::procedural_action::ValidateTuning(InSpec.Get_Tuning(), InvalidField)
+            && ck::procedural_action::ValidateCapacity(InSpec.Get_Capacity(), InvalidField)
+            && FCk_ProceduralLimbControl_Control::Get_IsLocomotionValid(InSpec.Get_Locomotion());
+    }
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -120,46 +157,57 @@ auto
     UCk_Utils_ProceduralAnimation_UE::
     Add_Walker(
         FCk_Handle_Transform& InBody,
-        const UCk_ProceduralRig_Data* InRig,
-        const UCk_ProceduralGait_Data* InGait,
-        const TArray<FCk_ProceduralWalker_LegChain>& InChains)
+        const FCk_ProceduralWalker_Spec& InSpec)
     -> FCk_ProceduralWalker
 {
+    const auto* RigData = InSpec.Get_Rig().Get();
+    const auto* GaitData = InSpec.Get_Gait().Get();
+    const auto& Chains = InSpec.Get_Chains();
+    const auto WithBodyPose = InSpec.Get_BodyPose() == ECk_EnableDisable::Enable;
+    const auto WithActionPlayer = InSpec.Get_ActionPlayer() == ECk_EnableDisable::Enable;
     const auto Valid = ck_procedural_animation_utils::Get_IsBodyAdmissible(InBody)
-        && ck_procedural_animation_utils::Get_AreAssetsAdmissible(InRig, InGait)
-        && ck_procedural_animation_utils::Get_AreChainsAdmissible(InBody, *InRig, InChains);
+        && ck_procedural_animation_utils::Get_AreAssetsAdmissible(RigData, GaitData)
+        && ck_procedural_animation_utils::Get_AreChainsAdmissible(InBody, *RigData, Chains)
+        && (NOT WithBodyPose
+            || ck_procedural_animation_utils::Get_IsBodyPoseAdmissible(InBody, InSpec.Get_BodyPoseSpec(), Chains))
+        && (NOT WithActionPlayer
+            || ck_procedural_animation_utils::Get_IsActionPlayerAdmissible(InSpec.Get_ActionPlayerSpec()));
     CK_ENSURE_IF_NOT(Valid,
         TEXT("Procedural animation Add_Walker rejected body [{}]. It needs a live transform body that can own children with "
              "no gait and no legs; a rig layout of 2..64 valid legs with unique Ids; a gait preset with valid timing, step, "
              "probe and foothold settings whose MaxSimultaneousSwings fits the leg count and whose TargetReachFraction of "
-             "each leg's chain length reaches its rest foot; and chains that each name a distinct rig leg, match its segment "
-             "count and bind unique live transform parts that are direct lifetime children of the body."),
+             "each leg's chain length reaches its rest foot; chains that each name a distinct rig leg, match its segment "
+             "count and bind unique live transform parts that are direct lifetime children of the body; when enabled, a "
+             "valid body pose spec whose presentation is a live direct child of the body and not a rig part, and an action "
+             "player spec with valid tuning, capacity and locomotion."),
         InBody)
     { return {}; }
 
-    const auto Legs = ck::algo::Transform<TArray<FCk_Handle_ProceduralLeg>>(InRig->Get_Legs(),
+    const auto Legs = ck::algo::Transform<TArray<FCk_Handle_ProceduralLeg>>(RigData->Get_Legs(),
     [&](const FCk_ProceduralLeg_Spec& InLegParams)
     {
         return UCk_Utils_ProceduralLeg_UE::Create(InBody, InLegParams);
     });
 
-    const auto Gait = UCk_Utils_ProceduralGait_UE::Add(InBody, InGait);
+    auto Gait = UCk_Utils_ProceduralGait_UE::Add(Legs, GaitData);
 
-    for (const auto& Chain : InChains)
+    auto Rigs = TArray<FCk_Handle_ProceduralRig>{};
+    Rigs.Reserve(Chains.Num());
+    for (const auto& Chain : Chains)
     {
         auto Leg = UCk_Utils_ProceduralLeg_UE::TryGet_Leg(InBody, Chain.Get_LegId());
-        UCk_Utils_ProceduralRig_UE::Add(Leg, Chain.Get_Rig());
+        Rigs.Add(UCk_Utils_ProceduralRig_UE::Add(Leg, Chain.Get_Rig()));
     }
 
     // A legacy walker may have fewer visual chains than gait legs, including none. Only rigged legs have controllable
     // articulation parts. Legacy geometry remains owned by Leg/Rig Params; the binding map never mirrors chain lengths.
     auto Bindings = TArray<FCk_ProceduralLimb_Binding>{};
     auto Limbs = TArray<FCk_Handle_ProceduralLimb>{};
-    Bindings.Reserve(InChains.Num());
-    Limbs.Reserve(InChains.Num());
-    for (auto Index = 0; Index < InRig->Get_Legs().Num(); ++Index)
+    Bindings.Reserve(Chains.Num());
+    Limbs.Reserve(Chains.Num());
+    for (auto Index = 0; Index < RigData->Get_Legs().Num(); ++Index)
     {
-        const auto Id = InRig->Get_Legs()[Index].Get_Id();
+        const auto Id = RigData->Get_Legs()[Index].Get_Id();
         auto Leg = UCk_Utils_ProceduralLeg_UE::TryGet_Leg(InBody, Id);
         if (NOT Leg.Has<ck::FFragment_ProceduralRig_Params>())
         { continue; }
@@ -178,11 +226,20 @@ auto
     InBody.Add<ck::FFragment_ProceduralArticulation_Bindings>(MoveTemp(Bindings), MoveTemp(Limbs),
         FCk_Handle_Transform{});
     InBody.Add<ck::FFragment_ProceduralArticulation_Claims>(MoveTemp(EmptyClaims));
-    auto& ArticulationPose = InBody.Add<ck::FFragment_ProceduralArticulation_Pose>();
-    ArticulationPose._LegacyWalker = true;
+    InBody.Add<ck::FFragment_ProceduralArticulation_Pose>();
+    InBody.Add<ck::FFragment_ProceduralArticulation_LegacyCandidate>()._LegacyWalker = true;
+    InBody.Add<ck::FFragment_ProceduralArticulation_ControlCandidate>();
     InBody.Add<ck::FFragment_ProceduralArticulation_Health>();
+    auto Articulation = UCk_Utils_ProceduralArticulation_UE::CastChecked(InBody);
 
-    return FCk_ProceduralWalker{Gait, Legs};
+    auto Walker = FCk_ProceduralWalker{Gait, Legs, Articulation};
+    Walker.Set_Rigs(MoveTemp(Rigs));
+    if (WithBodyPose)
+    { Walker.Set_BodyPose(UCk_Utils_ProceduralBodyPose_UE::Add(Gait, InSpec.Get_BodyPoseSpec())); }
+    if (WithActionPlayer)
+    { Walker.Set_ActionPlayer(UCk_Utils_ProceduralActionPlayer_UE::Add(Articulation, InSpec.Get_ActionPlayerSpec())); }
+
+    return Walker;
 }
 
 // --------------------------------------------------------------------------------------------------------------------

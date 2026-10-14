@@ -45,7 +45,7 @@ auto
     _Issues.Reset();
     if (const auto Session = _Session.Pin())
     {
-        for (const auto& Diagnostic : Session->GetDiagnostics())
+        for (const auto& Diagnostic : Session->Get_Diagnostics())
         {
             _Issues.Add(MakeShared<FIssue>(FIssue{Diagnostic.Get_PhaseId(), Diagnostic.Get_Slot(),
                 ck::procedural_action_editor::Describe(Diagnostic),

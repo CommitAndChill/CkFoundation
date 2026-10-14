@@ -55,23 +55,6 @@ public:
         UPARAM(ref) FCk_ProceduralAction_ClipDraft& InDraft,
         const FCk_ProceduralAction_Slot& InSlot);
 
-    UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralActionBuilder",
-        DisplayName = "[Ck][ProceduralActionBuilder] Add Body Key")
-    static FCk_ProceduralAction_ValidationReport
-    Add_BodyKey(
-        UPARAM(ref) FCk_ProceduralAction_ClipDraft& InDraft,
-        FName InPhaseId,
-        const FCk_ProceduralAction_TransformKey& InKey);
-
-    UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralActionBuilder",
-        DisplayName = "[Ck][ProceduralActionBuilder] Add Limb Key")
-    static FCk_ProceduralAction_ValidationReport
-    Add_LimbKey(
-        UPARAM(ref) FCk_ProceduralAction_ClipDraft& InDraft,
-        FName InPhaseId,
-        FCk_FloatRange_0to1 InTime,
-        const FCk_ProceduralAction_LimbPoseTarget& InTarget);
-
     /** Atomic over the body and every listed limb: one rejected channel writes nothing. Writes zero tangents. */
     UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralActionBuilder",
         DisplayName = "[Ck][ProceduralActionBuilder] Add Pose Key")
@@ -89,13 +72,6 @@ public:
         UPARAM(ref) FCk_ProceduralAction_ClipDraft& InDraft,
         FName InPhaseId,
         const FCk_ProceduralAction_PoseKey& InPose);
-
-    UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralActionBuilder",
-        DisplayName = "[Ck][ProceduralActionBuilder] Add Marker")
-    static FCk_ProceduralAction_ValidationReport
-    Add_Marker(
-        UPARAM(ref) FCk_ProceduralAction_ClipDraft& InDraft,
-        const FCk_ProceduralAction_Marker& InMarker);
 
     UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralActionBuilder",
         DisplayName = "[Ck][ProceduralActionBuilder] Add Window")
@@ -170,7 +146,7 @@ namespace ck::procedural_action
 
     // Interior keys get the finite-difference (Catmull-Rom) tangent of their neighbours, arrive equal to leave; the first
     // and last keys get zero tangents, so consecutive phases meet at rest.
-    CKPROCEDURALANIMATION_API auto
+    auto
         ComputeCatmullRomTangents(
             TArray<FCk_ProceduralAction_VectorKey>& InOutKeys)
         -> void;

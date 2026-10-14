@@ -86,6 +86,8 @@ namespace ck
         const FFragment_ProceduralArticulation_Params& InParams,
         const FFragment_ProceduralArticulation_Bindings& InBindings,
         FFragment_ProceduralArticulation_Pose& InPose,
+        FFragment_ProceduralArticulation_LegacyCandidate& InLegacy,
+        FFragment_ProceduralArticulation_ControlCandidate& InControl,
         FFragment_ProceduralArticulation_Health& InHealth)
         -> void
     {
@@ -175,16 +177,16 @@ namespace ck
             return true;
         };
 
-        if (InPose._HasControlCandidate)
+        if (InControl._HasControlCandidate)
         {
             const auto Root = InHandle.ConvertToHandle();
-            if (InPose._ControlHandles.Num() != InPose._ControlPoses.Num())
+            if (InControl._ControlHandles.Num() != InControl._ControlPoses.Num())
             {
                 InHealth._State = ECk_ProceduralArticulation_Health::Faulted;
                 InHealth._Fault = ECk_ProceduralArticulation_Fault::InvalidBinding;
                 return;
             }
-            for (const auto& Part : InPose._ControlHandles)
+            for (const auto& Part : InControl._ControlHandles)
             {
                 if (NOT ck_procedural_articulation_processor::Get_IsBoundPartLive(Part, Root))
                 {
@@ -195,12 +197,12 @@ namespace ck
             }
             if (InDeltaT <= FCk_Time{} || InPose._PendingObservation)
             { return; }
-            InPose._ExpectedHandles = InPose._ControlHandles;
-            InPose._ExpectedParts = InPose._ControlPoses;
+            InPose._ExpectedHandles = InControl._ControlHandles;
+            InPose._ExpectedParts = InControl._ControlPoses;
             for (auto Index = 0; Index < InPose._ExpectedHandles.Num(); ++Index)
             {
                 auto Part = InPose._ExpectedHandles[Index];
-                if (InPose._LegacyWalker && Part != InBindings.Get_Presentation())
+                if (InLegacy._LegacyWalker && Part != InBindings.Get_Presentation())
                 {
                     InPose._ExpectedParts[Index].SetScale3D(
                         UCk_Utils_Transform_UE::Get_EntityCurrentTransform(Part).GetScale3D());
@@ -217,13 +219,13 @@ namespace ck
             }
             ++InPose._IssuedRevision;
             InPose._PendingObservation = true;
-            InPose._HasControlCandidate = false;
-            InPose._HasLegacyCandidate = false;
-            InPose._HasLegacyPresentation = false;
+            InControl._HasControlCandidate = false;
+            InLegacy._HasLegacyCandidate = false;
+            InLegacy._HasLegacyPresentation = false;
             return;
         }
 
-        if (InPose._LegacyWalker)
+        if (InLegacy._LegacyWalker)
         {
             const auto Root = InHandle.ConvertToHandle();
             if (InBindings.Get_Bindings().Num() != InBindings.Get_Limbs().Num())
@@ -264,10 +266,10 @@ namespace ck
                 InHealth._Fault = ECk_ProceduralArticulation_Fault::InvalidBinding;
                 return;
             }
-            if ((NOT InPose._HasLegacyCandidate && NOT InPose._HasLegacyPresentation)
+            if ((NOT InLegacy._HasLegacyCandidate && NOT InLegacy._HasLegacyPresentation)
                 || InPose._PendingObservation)
             { return; }
-            for (const auto& Part : InPose._LegacyHandles)
+            for (const auto& Part : InLegacy._LegacyHandles)
             {
                 if (NOT ck_procedural_articulation_processor::Get_IsBoundPartLive(Part, Root))
                 {
@@ -276,7 +278,7 @@ namespace ck
                     return;
                 }
             }
-            if (InPose._HasLegacyPresentation
+            if (InLegacy._HasLegacyPresentation
                 && NOT ck_procedural_articulation_processor::Get_IsBoundPartLive(InBindings.Get_Presentation(), Root))
             {
                 InHealth._State = ECk_ProceduralArticulation_Health::Faulted;
@@ -286,12 +288,12 @@ namespace ck
             if (InDeltaT <= FCk_Time{})
             { return; }
 
-            InPose._ExpectedHandles = InPose._LegacyHandles;
-            InPose._ExpectedParts = InPose._LegacyPoses;
-            if (InPose._HasLegacyPresentation)
+            InPose._ExpectedHandles = InLegacy._LegacyHandles;
+            InPose._ExpectedParts = InLegacy._LegacyPoses;
+            if (InLegacy._HasLegacyPresentation)
             {
                 InPose._ExpectedHandles.Add(InBindings.Get_Presentation());
-                InPose._ExpectedParts.Add(InPose._LegacyPresentation);
+                InPose._ExpectedParts.Add(InLegacy._LegacyPresentation);
             }
             if (NOT HoldClaimedChannels(InPose._ExpectedHandles, InPose._ExpectedParts))
             {
@@ -299,16 +301,16 @@ namespace ck
                 InHealth._Fault = ECk_ProceduralArticulation_Fault::InvalidBinding;
                 return;
             }
-            for (auto Index = 0; Index < InPose._LegacyHandles.Num(); ++Index)
+            for (auto Index = 0; Index < InLegacy._LegacyHandles.Num(); ++Index)
             {
-                auto Part = InPose._LegacyHandles[Index];
+                auto Part = InLegacy._LegacyHandles[Index];
                 InPose._ExpectedParts[Index].SetScale3D(
                     UCk_Utils_Transform_UE::Get_EntityCurrentTransform(Part).GetScale3D());
                 UCk_Utils_Transform_UE::Request_SetLocationAndRotation(Part,
                     FCk_Request_Transform_SetLocationAndRotation{
                         InPose._ExpectedParts[Index].GetLocation(), InPose._ExpectedParts[Index].GetRotation().Rotator()}, {});
             }
-            if (InPose._ExpectedHandles.Num() > InPose._LegacyHandles.Num())
+            if (InPose._ExpectedHandles.Num() > InLegacy._LegacyHandles.Num())
             {
                 auto Presentation = InBindings.Get_Presentation();
                 UCk_Utils_Transform_UE::Request_SetTransform(Presentation,
@@ -316,8 +318,8 @@ namespace ck
             }
             ++InPose._IssuedRevision;
             InPose._PendingObservation = true;
-            InPose._HasLegacyCandidate = false;
-            InPose._HasLegacyPresentation = false;
+            InLegacy._HasLegacyCandidate = false;
+            InLegacy._HasLegacyPresentation = false;
             return;
         }
 
@@ -506,6 +508,7 @@ namespace ck
         HandleType InHandle,
         const FFragment_ProceduralArticulation_Params& InParams,
         FFragment_ProceduralArticulation_Pose& InPose,
+        const FFragment_ProceduralArticulation_LegacyCandidate& InLegacy,
         FFragment_ProceduralArticulation_Health& InHealth)
         -> void
     {
@@ -558,7 +561,7 @@ namespace ck
             else if (NOT Segments.IsEmpty())
             {
                 auto LastLength = 0.0f;
-                if (InPose._LegacyWalker && Bindings.Get_Limbs().IsValidIndex(BindingIndex))
+                if (InLegacy._LegacyWalker && Bindings.Get_Limbs().IsValidIndex(BindingIndex))
                 {
                     const auto Leg = UCk_Utils_ProceduralLeg_UE::Cast(
                         Bindings.Get_Limbs()[BindingIndex].ConvertToHandle());

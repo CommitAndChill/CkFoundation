@@ -191,7 +191,7 @@ but **deps must never point to a higher band**. Editor/UncookedOnly modules are 
 | CkActorRelay | Core,Ecs,EcsExt,Label,Log,Settings (channel entities stamp `FFragment_SaveKey`, which lives in CkEcs — no Snapshot dep) |
 | CkAggro | Core,Ecs,EcsExt,Label,Log,Record,Settings |
 | CkAnimation | Core,Ecs,EcsExt,Label,Log,Provider,Record,ResourceLoader |
-| CkProceduralAnimation | Core,Ecs,EcsExt,Jolt,Label,Log,Record (pure gait core plus independent surface motion and rigid presentation) |
+| CkProceduralAnimation | Core,Ecs,EcsExt,Jolt,Label,Log,Record,ResourceLoader,Tween (pure gait core plus independent surface motion, rigid presentation and procedural actions) |
 | CkAttribute | Core,Ecs,EcsExt,Label,Log,Provider,Record |
 | CkAudio | ActorRelay,Core,Cue,Ecs,EcsExt,Label,Log,Provider,Record,Settings,Timer |
 | CkCamera | Attribute,Core,Ecs,EcsExt,Label,Log,Provider,Record,Settings |
@@ -268,9 +268,9 @@ but **deps must never point to a higher band**. Editor/UncookedOnly modules are 
 | CkWatermark | Core,Ecs,Jolt,Log,Memory,Settings,UICore (UI→UICore 2026-08-14) |
 | CkWorldSpaceWidget | Core,Ecs,EcsExt,Log,Settings,ThirdParty,UICore (extracted from CkUI 2026-08-08; hosts `UCk_WidgetComponent_UE`; UI→UICore 2026-08-14) |
 
-### T5 — editor modules (25 UncookedOnly + 3 Editor; runtime code must NEVER depend on these)
+### T5 — editor modules (27 UncookedOnly + 8 Editor, counted 2026-10-14; runtime code must NEVER depend on these)
 
-Full reference: [EDITOR_MODULES.md](EDITOR_MODULES.md). 18 are `Ck<Feature>Editor` twins. The
+Full reference: [EDITOR_MODULES.md](EDITOR_MODULES.md). 25 are `Ck<Feature>Editor` twins. The
 standalone ones: `CkEditorGraph` (graph/schema base), `CkEditorStyle` (shared style, PreDefault),
 `CkEditorToolbar`, `CkK2Nodes` (BP node customizations), `CkDataViewer` (entity state overlay),
 `CkInsightsAnalyzer` (UI-free Insights trace analysis, reports, and commandlet; Slate UI lives in

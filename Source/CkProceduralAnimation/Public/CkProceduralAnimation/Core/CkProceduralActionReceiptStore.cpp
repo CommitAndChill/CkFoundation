@@ -1,4 +1,5 @@
 #include "CkProceduralAnimation/Core/CkProceduralActionReceiptStore.h"
+#include "CkProceduralAnimation/Core/CkProceduralRigidTransform.h"
 #include "CkProceduralAnimation/Core/CkProceduralActionMotion.h"
 #include "CkProceduralAnimation/CkProceduralAnimation_Log.h"
 
@@ -27,10 +28,7 @@ namespace ck::procedural_action
             auto Bytes = Get_PoseAllocatedSize(InReceipt.Get_PreviousPose())
                 + Get_PoseAllocatedSize(InReceipt.Get_CurrentPose())
                 + InReceipt.Get_Interval().Get_Windows().GetAllocatedSize()
-                + InReceipt.Get_Interval().Get_Events().GetAllocatedSize()
-                + InReceipt.Get_IntermediateSamples().GetAllocatedSize();
-            for (const auto& Sample : InReceipt.Get_IntermediateSamples())
-            { Bytes += Get_PoseAllocatedSize(Sample.Get_Pose()); }
+                + InReceipt.Get_Interval().Get_Events().GetAllocatedSize();
             return Bytes;
         }
 
@@ -59,11 +57,8 @@ namespace ck::procedural_action
             bool InHasBodyClaim)
             -> int64
         {
-            auto Count = CountFilteredPoseTransforms(InReceipt.Get_PreviousPose(), InClaimed, InHasBodyClaim)
+            return CountFilteredPoseTransforms(InReceipt.Get_PreviousPose(), InClaimed, InHasBodyClaim)
                 + CountFilteredPoseTransforms(InReceipt.Get_CurrentPose(), InClaimed, InHasBodyClaim);
-            for (const auto& Sample : InReceipt.Get_IntermediateSamples())
-            { Count += CountFilteredPoseTransforms(Sample.Get_Pose(), InClaimed, InHasBodyClaim); }
-            return Count;
         }
 
         auto
@@ -77,26 +72,7 @@ namespace ck::procedural_action
                 { Count += 2 + Limb.Get_Segments().Num(); }
                 return Count;
             };
-            auto Count = CountPose(InReceipt.Get_PreviousPose()) + CountPose(InReceipt.Get_CurrentPose());
-            for (const auto& Sample : InReceipt.Get_IntermediateSamples())
-            { Count += CountPose(Sample.Get_Pose()); }
-            return Count;
-        }
-
-        auto
-        IsRigid(
-            const FTransform& InValue)
-            -> bool
-        {
-            const auto& Position = InValue.GetTranslation();
-            const auto& Rotation = InValue.GetRotation();
-            const auto& Scale = InValue.GetScale3D();
-            return FMath::IsFinite(Position.X) && FMath::IsFinite(Position.Y) && FMath::IsFinite(Position.Z)
-                && FMath::IsFinite(Rotation.X) && FMath::IsFinite(Rotation.Y)
-                && FMath::IsFinite(Rotation.Z) && FMath::IsFinite(Rotation.W)
-                && FMath::Abs(Rotation.SizeSquared() - 1.0) <= 1.0e-4
-                && FMath::IsFinite(Scale.X) && FMath::IsFinite(Scale.Y) && FMath::IsFinite(Scale.Z)
-                && Scale.Equals(FVector::OneVector, 1.0e-6);
+            return CountPose(InReceipt.Get_PreviousPose()) + CountPose(InReceipt.Get_CurrentPose());
         }
 
         auto
@@ -120,8 +96,9 @@ namespace ck::procedural_action
         {
             if (InHasBodyClaim && NOT InPose.Get_HasBodyPresentation())
             { return false; }
-            if (NOT IsRigid(InPose.Get_RootFrame())
-                || (InHasBodyClaim && NOT IsRigid(InPose.Get_BodyPresentation())))
+            if (NOT procedural_animation::IsRigid(InPose.Get_RootFrame(), procedural_animation::AuthoredRotationTolerance)
+                || (InHasBodyClaim
+                    && NOT procedural_animation::IsRigid(InPose.Get_BodyPresentation(), procedural_animation::AuthoredRotationTolerance)))
             { return false; }
             auto Claimed = TSet<FName>{};
             for (const auto Id : InClaimed) { Claimed.Add(Id); }
@@ -137,8 +114,8 @@ namespace ck::procedural_action
                 if (NOT Claimed.Contains(Limb.Get_Id()))
                 { continue; }
                 if (Limb.Get_Segments().IsEmpty()
-                    || NOT IsRigid(Limb.Get_RequestedEndpoint())
-                    || NOT IsRigid(Limb.Get_AcceptedEndpoint())
+                    || NOT procedural_animation::IsRigid(Limb.Get_RequestedEndpoint(), procedural_animation::AuthoredRotationTolerance)
+                    || NOT procedural_animation::IsRigid(Limb.Get_AcceptedEndpoint(), procedural_animation::AuthoredRotationTolerance)
                     || NOT FMath::IsFinite(Limb.Get_EndpointErrorCm())
                     || Limb.Get_EndpointErrorCm() < 0.0f
                     || (Limb.Get_ChainState() != ECk_ProceduralRig_ChainState::Clear
@@ -183,17 +160,10 @@ namespace ck::procedural_action
             bool InHasBodyClaim)
             -> FCk_ProceduralAction_Receipt
         {
-            auto Samples = TArray<FCk_ProceduralAction_Sample>{};
-            Samples.Reserve(InReceipt.Get_IntermediateSamples().Num());
-            for (const auto& Sample : InReceipt.Get_IntermediateSamples())
-            {
-                Samples.Add(FCk_ProceduralAction_Sample{Sample.Get_Time(),
-                    FilterPose(Sample.Get_Pose(), InClaimed, InHasBodyClaim), Sample.Get_Evidence()});
-            }
             return FCk_ProceduralAction_Receipt{true, InReceipt.Get_Stamp(), InReceipt.Get_Interval(),
                 FilterPose(InReceipt.Get_PreviousPose(), InClaimed, InHasBodyClaim),
                 FilterPose(InReceipt.Get_CurrentPose(), InClaimed, InHasBodyClaim),
-                MoveTemp(Samples), InReceipt.Get_Sampling()};
+                InReceipt.Get_Sampling()};
         }
     }
 
@@ -250,14 +220,13 @@ namespace ck::procedural_action
             && Check(receipt_store_detail::PositiveFinite(Watchdogs.Get_LoadTimeout()), TEXT("Watchdogs.LoadTimeout"))
             && Check(receipt_store_detail::PositiveFinite(Watchdogs.Get_AcquisitionTimeout()), TEXT("Watchdogs.AcquisitionTimeout"))
             && Check(receipt_store_detail::PositiveFinite(Watchdogs.Get_PublicationTimeout()), TEXT("Watchdogs.PublicationTimeout"))
-            && Check(receipt_store_detail::PositiveFinite(Watchdogs.Get_MaxTimeBacklog()), TEXT("Watchdogs.MaxTimeBacklog"))
             && Check(receipt_store_detail::PositiveFinite(Sampling.Get_MaxAdvance()), TEXT("Sampling.MaxAdvance"))
             && Check(FMath::IsFinite(Sampling.Get_MaxEndpointTravelCm())
                 && Sampling.Get_MaxEndpointTravelCm() > 0.0f, TEXT("Sampling.MaxEndpointTravelCm"))
             && Check(FMath::IsFinite(Sampling.Get_MaxSegmentAngularStepDegrees())
                 && Sampling.Get_MaxSegmentAngularStepDegrees() > 0.0f, TEXT("Sampling.MaxSegmentAngularStepDegrees"))
             && Check(Sampling.Get_MaxSamples() > 0
-                && Sampling.Get_MaxSamples() <= receipt_limits::MaxSamplesPerReceipt, TEXT("Sampling.MaxSamples"));
+                && Sampling.Get_MaxSamples() <= receipt_limits::MaxSamplingSteps, TEXT("Sampling.MaxSamples"));
     }
 
     auto
@@ -469,14 +438,13 @@ namespace ck::procedural_action
             || NOT ValidContinuity
             || (Stream->LastSampleSequence != 0
                 && Interval.Get_Continuity() == ECk_ProceduralAction_Continuity::FirstSample)
-            || Sampling.Get_EvaluatedSamples() < InReceipt.Get_IntermediateSamples().Num() + 1
+            || Sampling.Get_EvaluatedSamples() < 1
             || Sampling.Get_AcceptedSamples() != 1
             || NOT FMath::IsFinite(Sampling.Get_MaxEndpointTravelCm())
             || Sampling.Get_MaxEndpointTravelCm() < 0.0f
             || NOT FMath::IsFinite(Sampling.Get_MaxSegmentAngularStepDegrees())
             || Sampling.Get_MaxSegmentAngularStepDegrees() < 0.0f
             || NOT receipt_store_detail::NonnegativeFinite(Sampling.Get_Backlog())
-            || InReceipt.Get_IntermediateSamples().Num() > receipt_limits::MaxSamplesPerReceipt
             || InReceipt.Get_Interval().Get_Events().Num() > receipt_limits::MaxEventsPerReceipt
             || InReceipt.Get_Interval().Get_Windows().Num() > receipt_limits::MaxWindowsPerReceipt
             || NOT receipt_store_detail::ValidPose(InReceipt.Get_CurrentPose(), Stream->ClaimedLimbIds, Stream->HasBodyClaim))
@@ -484,16 +452,6 @@ namespace ck::procedural_action
         if (InReceipt.Get_Interval().Get_Continuity() != ECk_ProceduralAction_Continuity::FirstSample
             && NOT receipt_store_detail::ValidPose(InReceipt.Get_PreviousPose(), Stream->ClaimedLimbIds, Stream->HasBodyClaim))
         { return EReceiptStoreWrite::InvalidRecord; }
-        auto LastSampleTime = From;
-        for (const auto& Sample : InReceipt.Get_IntermediateSamples())
-        {
-            const auto Time = Sample.Get_Time().Get_Seconds();
-            if (NOT FMath::IsFinite(Time) || Time < LastSampleTime || Time > To
-                || Sample.Get_Evidence() != ECk_ProceduralAction_SampleEvidence::Evaluated
-                || NOT receipt_store_detail::ValidPose(Sample.Get_Pose(), Stream->ClaimedLimbIds, Stream->HasBodyClaim))
-            { return EReceiptStoreWrite::InvalidRecord; }
-            LastSampleTime = Time;
-        }
         auto WindowIds = TSet<FName>{};
         for (const auto Id : Interval.Get_Windows())
         {

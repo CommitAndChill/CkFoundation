@@ -5,7 +5,6 @@
 #include "CkCore/Time/CkTime.h"
 
 #include "Delegates/Delegate.h"
-#include "Misc/Guid.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -28,8 +27,8 @@ enum class ECk_ProceduralActionEditor_PreviewMode : uint8
 
 // --------------------------------------------------------------------------------------------------------------------
 
-/** What the author is working on. _Kind names the item last chosen; the section, channel and pose stay set as the context
- *  every view shares (a channel is shown in the selected section, a key is the selected channel's key in that section). */
+/** What the author is working on. _Kind names the item last chosen; the section and channel stay set as the context every
+ *  view shares (a channel is shown in the selected section, a key is the selected channel's key in that section). */
 class CKPROCEDURALANIMATIONEDITOR_API FCk_ProceduralActionEditorSelection
 {
     CK_GENERATED_BODY(FCk_ProceduralActionEditorSelection);
@@ -40,7 +39,6 @@ private:
     FName _Channel;
     FCk_FloatRange_0to1 _KeyTime;
     FName _EventId;
-    FGuid _PoseId;
 
 public:
     CK_PROPERTY(_Kind);
@@ -48,7 +46,6 @@ public:
     CK_PROPERTY(_Channel);
     CK_PROPERTY(_KeyTime);
     CK_PROPERTY(_EventId);
-    CK_PROPERTY(_PoseId);
 };
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -71,10 +68,6 @@ public:
         Get_SelectedChannel() const
         -> FName
     { return _Selection.Get_Channel(); }
-    auto
-        Get_SelectedPose() const
-        -> const FGuid&
-    { return _Selection.Get_PoseId(); }
     // The selected channel as a limb slot: none when nothing or the body is selected.
     auto
         Get_SelectedSlot() const
@@ -105,14 +98,6 @@ public:
     auto
         SelectEvent(
             FName InEventId)
-        -> void;
-    auto
-        SelectPose(
-            const FGuid& InPoseId,
-            FName InPhaseId)
-        -> void;
-    auto
-        ClearPose()
         -> void;
     // Follows a section the clip renamed, keeping the rest of the selection.
     auto

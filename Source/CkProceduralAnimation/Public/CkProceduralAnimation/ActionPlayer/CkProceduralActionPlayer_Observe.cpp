@@ -26,16 +26,16 @@ namespace ck_procedural_action_player_observe
     {
         if (FMath::IsFinite(InTravelCm) && InTravelCm > InLimits.Get_MaxEndpointTravelCm())
         {
-            InOutContext.Set_BudgetUnit(FName{TEXT("EndpointTravelMicrometres")})
-                .Set_Observed(FMath::RoundToInt64(InTravelCm * MicrometresPerCentimetre))
-                .Set_Budget(FMath::RoundToInt64(InLimits.Get_MaxEndpointTravelCm() * MicrometresPerCentimetre));
+            InOutContext.Set_BudgetExcess(FName{TEXT("EndpointTravelMicrometres")},
+                FMath::RoundToInt64(InTravelCm * MicrometresPerCentimetre),
+                FMath::RoundToInt64(InLimits.Get_MaxEndpointTravelCm() * MicrometresPerCentimetre));
             return true;
         }
         if (FMath::IsFinite(InAngularDegrees) && InAngularDegrees > InLimits.Get_MaxSegmentAngularStepDegrees())
         {
-            InOutContext.Set_BudgetUnit(FName{TEXT("SegmentAngleMillidegrees")})
-                .Set_Observed(FMath::RoundToInt64(InAngularDegrees * MillidegreesPerDegree))
-                .Set_Budget(FMath::RoundToInt64(InLimits.Get_MaxSegmentAngularStepDegrees() * MillidegreesPerDegree));
+            InOutContext.Set_BudgetExcess(FName{TEXT("SegmentAngleMillidegrees")},
+                FMath::RoundToInt64(InAngularDegrees * MillidegreesPerDegree),
+                FMath::RoundToInt64(InLimits.Get_MaxSegmentAngularStepDegrees() * MillidegreesPerDegree));
             return true;
         }
         return false;
@@ -62,8 +62,7 @@ namespace ck
             auto& Action = ActionHandle.Get<FFragment_ProceduralAction>();
             const auto& Params = ActionHandle.Get<FFragment_ProceduralAction_Params>();
             const auto Identity = Params.Get_Identity();
-            const auto Token = FCk_ArticulationControlToken{
-                static_cast<uint64>(Identity.Get_Value()), static_cast<uint64>(Action._Generation)};
+            const auto Token = Action.Get_Token(Params);
             if ((Action._State == ECk_ProceduralAction_State::Acquiring
                     || Action._State == ECk_ProceduralAction_State::Playing)
                 && Action._PendingHoldStageKey.IsSet())
@@ -107,8 +106,8 @@ namespace ck
                     const auto Previous = Action._MostRecentObservedPose;
                     auto Travel = 0.0f;
                     auto Angular = 0.0f;
-                    const auto& LastAcceptedCandidate = NOT Action._PendingIntermediateSamples.IsEmpty()
-                        ? Action._PendingIntermediateSamples.Last().Get_Pose() : Previous;
+                    const auto& LastAcceptedCandidate = Action._PendingLastIntermediatePose.IsSet()
+                        ? Action._PendingLastIntermediatePose.GetValue() : Previous;
                     procedural_action::MeasureMotion(LastAcceptedCandidate, Actual, Travel, Angular);
                     auto PredictionTravel = 0.0f;
                     auto PredictionAngular = 0.0f;
@@ -159,7 +158,7 @@ namespace ck
                         FCk_ProceduralAction_Stamp{Identity, Action._Generation,
                             static_cast<int64>(Action._PendingStageKey->Get_SampleSequence()),
                             static_cast<int64>(Revision), 1, ContentRevision},
-                        Action._PendingClipInterval, Previous, Actual, Action._PendingIntermediateSamples, Sampling};
+                        Action._PendingClipInterval, Previous, Actual, Sampling};
                     const auto Published = InPlayer._Receipts.PublishAccepted(Identity, Receipt);
                     if (Published == procedural_action::EReceiptStoreWrite::Accepted)
                     {
@@ -170,6 +169,7 @@ namespace ck
                         Action._HasHoldSinceLastReceipt = false;
                         Action._AcceptedTime = Action._PendingToTime;
                         Action._PublicationElapsed = FCk_Time{};
+                        Action._LastStall = NAME_None;
                         const auto EnterPlaying = Action._PendingIsEntryBlend
                             && Action._EntryBlendAccepted >= Params.Get_Tuning().Get_Transition().Get_EntryBlend();
                         const auto ClipCompleted = NOT Action._PendingIsEntryBlend
@@ -185,7 +185,7 @@ namespace ck
                                 FName{TEXT("ClipCompleted")});
                         }
                         Action._PendingStageKey.Reset();
-                        Action._PendingIntermediateSamples.Reset();
+                        Action._PendingLastIntermediatePose.Reset();
                         if (EnterPlaying)
                         { Action.CommitState(ActionHandle, Params, ECk_ProceduralAction_State::Playing); }
                         else if (ClipCompleted)
@@ -206,15 +206,14 @@ namespace ck
                             const auto PendingRecords = InPlayer._Receipts.Get_PendingRecordCount(Identity);
                             if (PendingRecords >= RecordsPerInstance)
                             {
-                                Context.Set_BudgetUnit(FName{TEXT("PendingReceiptRecords")})
-                                    .Set_Observed(PendingRecords)
-                                    .Set_Budget(RecordsPerInstance);
+                                Context.Set_BudgetExcess(FName{TEXT("PendingReceiptRecords")}, PendingRecords,
+                                    RecordsPerInstance);
                             }
                         }
                         InPlayer._Receipts.CloseWindows(Identity, TEXT("ReceiptRejected"));
                         FCk_ProceduralLimbControl_Control::BeginReturn(Subject, Token, TEXT("ReceiptRejected"));
                         Action._PendingStageKey.Reset();
-                        Action._PendingIntermediateSamples.Reset();
+                        Action._PendingLastIntermediatePose.Reset();
                         Action.CommitState(ActionHandle, Params, ECk_ProceduralAction_State::Cancelling);
                     }
                 }

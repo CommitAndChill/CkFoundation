@@ -141,6 +141,11 @@ detector configuration, package saving, and deciding whether zero generated ribb
 authored ribbons exactly, removes only generated unprojectable prefixes and suffixes, drops generated
 ribbons reduced below two points, and fails atomically if any remaining generated point is unprojectable.
 
+### `CkProceduralAnimationEditor`
+**Runtime twin:** `CkProceduralAnimation`. **Depends on:** `CkCore`, `CkEcs`, `CkEcsExt`, `CkJolt`, `CkProceduralAnimation`, `CkEditorTools`, `CkTween` (+ UnrealEd, Slate). Type: UncookedOnly.
+
+The procedural action clip editor: an asset toolkit for `UCk_ProceduralAction_Data` with a preview viewport (gizmo posing), a timeline (sections, key lanes, events), channels, details and curves panels. Every clip edit goes through the authoring commands on a builder draft in one transaction; the Solver mode plays the clip in a production preview world (`Mark_ProductionPreviewWorld`, see `CkEcs/Claude.md`) and caches each solved frame. The editor's own data (the preview subject and pose labels, a label being a name at a phase and key time) is `UCk_ProceduralActionEditorData`, kept in the clip's editor-only asset user data and reached through `UCk_Utils_ProceduralActionEditor_UE::Get_EditorData`; it saves with the clip and never cooks. Clips saved with the older editor fields on the asset migrate on load (`UCk_ProceduralAction_Data::OnMigrateEditorOnlyData`, bound by this module).
+
 ### `CkResourceLoaderEditor`
 **Runtime twin:** `CkResourceLoader`. **Depends on:** `CkCore`, `CkEcs`, `CkLog`, `CkResourceLoader`, `CkSettings`.
 

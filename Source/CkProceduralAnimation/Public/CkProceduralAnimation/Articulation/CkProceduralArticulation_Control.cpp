@@ -1,5 +1,6 @@
 #include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Control.h"
 
+#include "CkProceduralAnimation/Core/CkProceduralRigidTransform.h"
 #include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Fragment.h"
 #include "CkProceduralAnimation/BodyPose/CkProceduralBodyPose_Utils.h"
 #include "CkProceduralAnimation/BodyPose/CkProceduralBodyPose_Fragment.h"
@@ -32,15 +33,6 @@ namespace ck_procedural_articulation_control
     { return InToken.Get_InstanceId() != 0 && InToken.Get_Generation() != 0; }
 
     auto
-        Get_IsRigid(
-            const FTransform& InPose)
-        -> bool
-    {
-        return NOT InPose.ContainsNaN() && InPose.GetRotation().IsNormalized()
-            && InPose.GetScale3D().Equals(FVector::OneVector);
-    }
-
-    auto
         Get_IsSubjectLive(
             const FCk_Handle_ProceduralArticulation& InSubject)
         -> bool
@@ -50,6 +42,8 @@ namespace ck_procedural_articulation_control
             && InSubject.Has<ck::FFragment_ProceduralArticulation_Bindings>()
             && InSubject.Has<ck::FFragment_ProceduralArticulation_Claims>()
             && InSubject.Has<ck::FFragment_ProceduralArticulation_Pose>()
+            && InSubject.Has<ck::FFragment_ProceduralArticulation_LegacyCandidate>()
+            && InSubject.Has<ck::FFragment_ProceduralArticulation_ControlCandidate>()
             && InSubject.Has<ck::FFragment_ProceduralArticulation_Health>();
     }
 
@@ -172,11 +166,13 @@ namespace ck_procedural_articulation_control
         const auto Root = InSubject.ConvertToHandle();
         const auto RootFrame = UCk_Utils_Transform_UE::Get_EntityCurrentTransform(
             UCk_Utils_Transform_UE::CastChecked(Root));
-        if (NOT Get_IsRigid(RootFrame))
+        if (NOT ck::procedural_animation::IsRigid(RootFrame,
+            ck::procedural_animation::ComposedRotationTolerance, UE_KINDA_SMALL_NUMBER))
         { return false; }
         const auto BodyFrame = InBodyOverride.IsSet()
             ? *InBodyOverride : Get_DefaultBodyFrame(InSubject, RootFrame);
-        if (NOT Get_IsRigid(BodyFrame))
+        if (NOT ck::procedural_animation::IsRigid(BodyFrame,
+            ck::procedural_animation::ComposedRotationTolerance, UE_KINDA_SMALL_NUMBER))
         { return false; }
         const auto& Params = InSubject.Get<ck::FFragment_ProceduralArticulation_Params>();
         const auto& Bindings = InSubject.Get<ck::FFragment_ProceduralArticulation_Bindings>();
@@ -184,7 +180,7 @@ namespace ck_procedural_articulation_control
         OutEvaluation.Parts.Reset();
         OutEvaluation.PartPoses.Reset();
 
-        if (InSubject.Get<ck::FFragment_ProceduralArticulation_Pose>().Get_LegacyWalker())
+        if (InSubject.Get<ck::FFragment_ProceduralArticulation_LegacyCandidate>().Get_LegacyWalker())
         {
             const auto Gait = UCk_Utils_ProceduralGait_UE::Cast(Root);
             if (ck::Is_NOT_Valid(Gait))
@@ -359,7 +355,8 @@ auto
     }
 
     const auto& Pose = InSubject.Get<ck::FFragment_ProceduralArticulation_Pose>();
-    if (Pose.Get_PendingObservation() || Pose._HasControlCandidate
+    if (Pose.Get_PendingObservation()
+        || InSubject.Get<ck::FFragment_ProceduralArticulation_ControlCandidate>()._HasControlCandidate
         || Pose.Get_IssuedRevision() != Pose.Get_SettledRevision())
     { return ECk_ArticulationControlResult::Busy; }
     for (const auto Index : Indices)
@@ -386,27 +383,6 @@ auto
     { return Claims._BodyOwner; }
     const auto Index = Get_LimbIndex(InSubject, InLimbId);
     return Claims._LimbOwners.IsValidIndex(Index) ? Claims._LimbOwners[Index] : FCk_ArticulationControlToken{};
-}
-
-auto
-    FCk_ProceduralArticulation_Control::
-    GetControlState(
-        const FCk_Handle_ProceduralArticulation& InSubject,
-        FCk_ArticulationControlToken InToken)
-    -> FCk_ArticulationControlState
-{
-    auto Result = FCk_ArticulationControlState{};
-    if (NOT ck_procedural_articulation_control::Get_IsSubjectLive(InSubject)
-        || NOT ck_procedural_articulation_control::Get_IsTokenValid(InToken))
-    { return Result; }
-    const auto& Claims = InSubject.Get<ck::FFragment_ProceduralArticulation_Claims>();
-    const auto& Pose = InSubject.Get<ck::FFragment_ProceduralArticulation_Pose>();
-    Result._HasClaims = Claims._BodyOwner == InToken || Claims._LimbOwners.Contains(InToken);
-    Result._HasPendingSample = Claims._BatchPublicationPending && Claims._Tickets.ContainsByPredicate(
-        [&](const FCk_ArticulationStageKey& InKey) { return InKey.Get_Token() == InToken; });
-    Result._LastIssuedRevision = Pose.Get_IssuedRevision();
-    Result._LastSettledRevision = Pose.Get_SettledRevision();
-    return Result;
 }
 
 auto
@@ -497,7 +473,8 @@ auto
         if (Candidate.Get_BodyPresentationWorld().IsSet())
         {
             if (Claims._BodyOwner != Token || BodyOverride.IsSet()
-                || NOT Get_IsRigid(*Candidate.Get_BodyPresentationWorld()))
+                || NOT ck::procedural_animation::IsRigid(*Candidate.Get_BodyPresentationWorld(),
+                    ck::procedural_animation::ComposedRotationTolerance, UE_KINDA_SMALL_NUMBER))
             { return ECk_ArticulationControlResult::InvalidCandidate; }
             BodyOverride = Candidate.Get_BodyPresentationWorld();
         }
@@ -509,7 +486,8 @@ auto
             const auto Policy = Target.Get_ReachPolicy();
             if (Target.Get_Id().IsNone() || SeenIds.Contains(Target.Get_Id())
                 || NOT Claims._LimbOwners.IsValidIndex(Index) || Claims._LimbOwners[Index] != Token
-                || NOT Get_IsRigid(Target.Get_RequestedEndpointWorld())
+                || NOT ck::procedural_animation::IsRigid(Target.Get_RequestedEndpointWorld(),
+                    ck::procedural_animation::ComposedRotationTolerance, UE_KINDA_SMALL_NUMBER)
                 || (Target.Get_PoleWorld().IsSet() && Target.Get_PoleWorld()->ContainsNaN())
                 || (Policy != ECk_ArticulationReachPolicy::RejectUnreachable
                     && Policy != ECk_ArticulationReachPolicy::ProjectToReach))
@@ -630,64 +608,13 @@ auto
         Claims._TokenPoses.AddDefaulted();
         Claims._TicketRevisions.Add(0);
     }
-    Pose._ControlHandles = MoveTemp(InEvaluation._BoundParts);
-    Pose._ControlPoses = MoveTemp(InEvaluation._PartPoses);
+    auto& Control = Subject.Get<ck::FFragment_ProceduralArticulation_ControlCandidate>();
+    Control._ControlHandles = MoveTemp(InEvaluation._BoundParts);
+    Control._ControlPoses = MoveTemp(InEvaluation._PartPoses);
     Pose._PredictedSubjectPose = MoveTemp(InEvaluation._PredictedSubjectPose);
-    Pose._HasControlCandidate = true;
+    Control._HasControlCandidate = true;
     for (const auto& Candidate : InEvaluation._Candidates)
     { OutKeys.Emplace(Candidate.Get_Token(), Candidate.Get_SampleSequence(), Nonce); }
-    return ECk_ArticulationControlResult::Accepted;
-}
-
-auto
-    FCk_ProceduralArticulation_Control::
-    TryTransferClaims(
-        const FCk_Handle_ProceduralArticulation& InSubject,
-        FCk_ArticulationControlToken InFrom,
-        FCk_ArticulationControlToken InTo,
-        const FCk_ArticulationChannelSet& InChannels)
-    -> ECk_ArticulationControlResult
-{
-    using namespace ck_procedural_articulation_control;
-    if (NOT Get_IsSubjectLive(InSubject))
-    { return ECk_ArticulationControlResult::InvalidSubject; }
-    if (Get_IsFaulted(InSubject))
-    { return ECk_ArticulationControlResult::Faulted; }
-    if (NOT Get_IsTokenValid(InFrom) || NOT Get_IsTokenValid(InTo) || InFrom == InTo
-        || (InChannels.Get_LimbIds().IsEmpty() && NOT InChannels.Get_Body()))
-    { return ECk_ArticulationControlResult::InvalidChannels; }
-    auto Subject = InSubject;
-    auto& Claims = Subject.Get<ck::FFragment_ProceduralArticulation_Claims>();
-    const auto& Pose = InSubject.Get<ck::FFragment_ProceduralArticulation_Pose>();
-    if (Pose.Get_PendingObservation() || Pose.Get_IssuedRevision() != Pose.Get_SettledRevision()
-        || Pose._HasControlCandidate)
-    { return ECk_ArticulationControlResult::Busy; }
-    auto Indices = TArray<int32>{};
-    auto Seen = TSet<FName>{};
-    for (const auto& Id : InChannels.Get_LimbIds())
-    {
-        const auto Index = Get_LimbIndex(InSubject, Id);
-        if (Id.IsNone() || Seen.Contains(Id) || NOT Claims._LimbOwners.IsValidIndex(Index)
-            || Claims._LimbOwners[Index] != InFrom)
-        { return ECk_ArticulationControlResult::ClaimLost; }
-        Seen.Add(Id);
-        Indices.Add(Index);
-    }
-    if (InChannels.Get_Body() && Claims._BodyOwner != InFrom)
-    { return ECk_ArticulationControlResult::ClaimLost; }
-    if ((Claims._BodyOwner == InFrom) != InChannels.Get_Body())
-    { return ECk_ArticulationControlResult::InvalidChannels; }
-    for (auto Index = 0; Index < Claims._LimbOwners.Num(); ++Index)
-    {
-        if (Claims._LimbOwners[Index] == InFrom && NOT Indices.Contains(Index))
-        { return ECk_ArticulationControlResult::InvalidChannels; }
-    }
-
-    for (const auto Index : Indices)
-    { Claims._LimbOwners[Index] = InTo; }
-    if (InChannels.Get_Body())
-    { Claims._BodyOwner = InTo; }
-    ++Claims._Revision;
     return ECk_ArticulationControlResult::Accepted;
 }
 
@@ -709,7 +636,7 @@ auto
     const auto& Pose = InSubject.Get<ck::FFragment_ProceduralArticulation_Pose>();
     if (NOT Get_IsFaulted(InSubject)
         && (Pose.Get_PendingObservation() || Pose.Get_IssuedRevision() != Pose.Get_SettledRevision()
-            || Pose._HasControlCandidate))
+            || InSubject.Get<ck::FFragment_ProceduralArticulation_ControlCandidate>()._HasControlCandidate))
     { return ECk_ArticulationControlResult::Busy; }
     // A lost token's dead limbs were released when they died; the rest of its channels still release normally.
     const auto Lost = Claims._LostLimbOwners.Contains(InToken);
@@ -787,10 +714,11 @@ auto
     auto Subject = InSubject;
     auto& Claims = Subject.Get<ck::FFragment_ProceduralArticulation_Claims>();
     auto& Pose = Subject.Get<ck::FFragment_ProceduralArticulation_Pose>();
+    auto& Control = Subject.Get<ck::FFragment_ProceduralArticulation_ControlCandidate>();
     const auto OwnsChannel = Claims._BodyOwner == InToken || Claims._LimbOwners.Contains(InToken);
     // A default gait/rest publication can issue while a token owns channels. Its observer can stall just as a staged
     // action publication can, so the return deadline must be able to fault either pending path before releasing claims.
-    const auto PublicationPending = Pose._HasControlCandidate || Pose._PendingObservation
+    const auto PublicationPending = Control._HasControlCandidate || Pose._PendingObservation
         || Pose._IssuedRevision != Pose._SettledRevision;
     if (NOT OwnsChannel || NOT PublicationPending)
     { return false; }
@@ -798,7 +726,7 @@ auto
     auto& Health = Subject.Get<ck::FFragment_ProceduralArticulation_Health>();
     Health._FaultObservedHandles.Reset();
     Health._FaultObservedPoses.Reset();
-    const auto& Handles = Pose._HasControlCandidate ? Pose._ControlHandles : Pose._ExpectedHandles;
+    const auto& Handles = Control._HasControlCandidate ? Control._ControlHandles : Pose._ExpectedHandles;
     for (const auto& Part : Handles)
     {
         if (NOT Get_IsBoundPartLive(Part, InSubject.ConvertToHandle()))
@@ -810,7 +738,7 @@ auto
     { Health._ObservedPart = Health._FaultObservedPoses[0]; }
     Health._State = ECk_ProceduralArticulation_Health::Faulted;
     Health._Fault = ECk_ProceduralArticulation_Fault::SettlementTimeout;
-    Pose._HasControlCandidate = false;
+    Control._HasControlCandidate = false;
     Claims._BatchPublicationPending = false;
     return true;
 }

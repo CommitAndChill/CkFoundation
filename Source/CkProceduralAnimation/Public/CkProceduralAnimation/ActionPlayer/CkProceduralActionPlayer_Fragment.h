@@ -18,6 +18,7 @@ namespace ck
     class FProcessor_ProceduralActionPlayer_Observe;
     class FProcessor_ProceduralActionPlayer_ReconcileOwnerLoss;
     class FProcessor_ProceduralActionPlayer_EndPlay;
+    struct FTechnique_ProceduralActionPlayer_Service;
     class FProcessor_ProceduralAction_EndPlay;
     class FProcessor_ProceduralAction_HandleRequests;
 
@@ -60,6 +61,7 @@ namespace ck
         friend class ::UCk_Utils_ProceduralAction_UE;
         friend class FProcessor_ProceduralActionPlayer_HandleRequests;
         friend class FProcessor_ProceduralActionPlayer_Service;
+        friend struct FTechnique_ProceduralActionPlayer_Service;
         friend class FProcessor_ProceduralActionPlayer_Observe;
         friend class FProcessor_ProceduralActionPlayer_ReconcileOwnerLoss;
         friend class FProcessor_ProceduralActionPlayer_EndPlay;

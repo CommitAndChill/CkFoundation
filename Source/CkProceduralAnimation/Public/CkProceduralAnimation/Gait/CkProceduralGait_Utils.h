@@ -76,9 +76,11 @@ public:
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Utils|ProceduralGait",
               DisplayName="[Ck][ProceduralGait] Add")
+    /** Adds the gait to the body that owns InLegs. InLegs must be every leg that body has (2..64, all attached, one
+     *  lifetime owner); the gait captures them in the body's record order, which is the solver's leg index. */
     static FCk_Handle_ProceduralGait
     Add(
-        UPARAM(ref) FCk_Handle_Transform& InBody,
+        const TArray<FCk_Handle_ProceduralLeg>& InLegs,
         const UCk_ProceduralGait_Data* InData);
 
 public:

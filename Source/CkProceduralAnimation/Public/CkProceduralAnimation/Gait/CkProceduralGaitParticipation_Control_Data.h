@@ -20,17 +20,6 @@ enum class ECk_ProceduralGaitParticipation_Result : uint8
 };
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralGaitParticipation_Result);
 
-enum class ECk_ProceduralGaitParticipation_State : uint8
-{
-    None,
-    Protected,
-    Interrupted,
-    Recovering,
-    ReadyForHandoff,
-    Unplanted
-};
-CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralGaitParticipation_State);
-
 // --------------------------------------------------------------------------------------------------------------------
 
 struct CKPROCEDURALANIMATION_API FCk_ProceduralGaitParticipation_Snapshot
@@ -54,7 +43,6 @@ struct CKPROCEDURALANIMATION_API FCk_ProceduralGaitParticipation_Observation
     CK_GENERATED_BODY(FCk_ProceduralGaitParticipation_Observation);
 
 private:
-    ECk_ProceduralGaitParticipation_State _State = ECk_ProceduralGaitParticipation_State::None;
     bool _ProtectionActive = false;
     bool _TrustedSupport = false;
     bool _Interrupted = false;
@@ -64,7 +52,6 @@ private:
     FCk_Time _AcceptedElapsed;
 
 public:
-    CK_PROPERTY_GET(_State);
     CK_PROPERTY_GET(_ProtectionActive);
     CK_PROPERTY_GET(_TrustedSupport);
     CK_PROPERTY_GET(_Interrupted);
@@ -72,7 +59,7 @@ public:
     CK_PROPERTY_GET(_RecoveryGeneration);
     CK_PROPERTY_GET(_SolveSequence);
     CK_PROPERTY_GET(_AcceptedElapsed);
-    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralGaitParticipation_Observation, _State, _ProtectionActive,
+    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralGaitParticipation_Observation, _ProtectionActive,
         _TrustedSupport, _Interrupted, _Reason, _RecoveryGeneration, _SolveSequence, _AcceptedElapsed);
 };
 
