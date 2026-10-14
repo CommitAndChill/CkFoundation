@@ -1,6 +1,7 @@
 #include "CkRuntimeMesh/Internal/CkRuntimeMesh_Geometry.h"
 
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
+#include "DynamicMesh/DynamicMeshAABBTree3.h"
 #include "DynamicMesh/Operations/MergeCoincidentMeshEdges.h"
 #include "Intersection/IntrTriangle3Triangle3.h"
 #include "MeshQueries.h"
@@ -8,6 +9,8 @@
 #include "StaticMeshLODResourcesToDynamicMesh.h"
 #include "StaticMeshResources.h"
 #include "Engine/StaticMesh.h"
+
+#include <limits>
 
 namespace ck::runtimemesh::geometry
 {
@@ -411,50 +414,96 @@ namespace ck::runtimemesh::geometry
                 const FImportOptions& InOptions)
             -> bool
         {
-            TArray<int32> Triangles;
-            TArray<FAxisAlignedBox3d> Bounds;
-            Triangles.Reserve(InMesh.TriangleCount());
-            Bounds.Reserve(InMesh.TriangleCount());
-            for (const auto TriangleID : InMesh.TriangleIndicesItr())
-            {
-                Triangles.Add(TriangleID);
-                Bounds.Add(InMesh.GetTriBounds(TriangleID));
-            }
             const auto ToleranceSquared = FMath::Square(InOptions.Get_IntersectionToleranceCm());
-            for (int32 FirstIndex = 0; FirstIndex < Triangles.Num(); ++FirstIndex)
+            const auto HasUnexpectedPairIntersection = [&](int32 InFirstTriangleID, int32 InSecondTriangleID) -> bool
             {
-                for (int32 SecondIndex = FirstIndex + 1; SecondIndex < Triangles.Num(); ++SecondIndex)
+                FVector3d A0, A1, A2, B0, B1, B2;
+                InMesh.GetTriVertices(InFirstTriangleID, A0, A1, A2);
+                InMesh.GetTriVertices(InSecondTriangleID, B0, B1, B2);
+                auto Intersection = FIntrTriangle3Triangle3d{
+                    FTriangle3d{A0, A1, A2}, FTriangle3d{B0, B1, B2}};
+                Intersection.SetReportCoplanarIntersection(true);
+                Intersection.SetTolerance(InOptions.Get_IntersectionToleranceCm());
+                if (NOT Intersection.Find())
+                { return false; }
+
+                if (Intersection.Quantity <= 0)
+                { return true; }
+                for (int32 PointIndex = 0; PointIndex < Intersection.Quantity; ++PointIndex)
                 {
-                    // Intersects excludes touching and zero-thickness coplanar bounds.
-                    if (Bounds[FirstIndex].DistanceSquared(Bounds[SecondIndex]) > ToleranceSquared)
-                    {
-                        continue;
-                    }
-                    FVector3d A0, A1, A2, B0, B1, B2;
-                    InMesh.GetTriVertices(Triangles[FirstIndex], A0, A1, A2);
-                    InMesh.GetTriVertices(Triangles[SecondIndex], B0, B1, B2);
-                    auto Intersection = FIntrTriangle3Triangle3d{
-                        FTriangle3d{A0, A1, A2}, FTriangle3d{B0, B1, B2}};
-                    Intersection.SetReportCoplanarIntersection(true);
-                    Intersection.SetTolerance(InOptions.Get_IntersectionToleranceCm());
-                    if (NOT Intersection.Find())
-                    {
-                        continue;
-                    }
-                    if (Intersection.Quantity <= 0)
+                    if (NOT IsExpectedSharedContact(
+                        InMesh, InFirstTriangleID, InSecondTriangleID, Intersection.Points[PointIndex], ToleranceSquared))
                     {
                         return true;
                     }
-                    for (int32 PointIndex = 0; PointIndex < Intersection.Quantity; ++PointIndex)
+                }
+                return false;
+            };
+
+            // Measured small-mesh cuts are faster without tree construction/traversal callbacks.
+            // This is an algorithm crossover, not an admission limit or gameplay tuner.
+            constexpr auto MaxAllPairsTriangles = 768;
+            if (InMesh.TriangleCount() <= MaxAllPairsTriangles)
+            {
+                auto Triangles = TArray<int32>{};
+                auto Bounds = TArray<FAxisAlignedBox3d>{};
+                Triangles.Reserve(InMesh.TriangleCount());
+                Bounds.Reserve(InMesh.TriangleCount());
+                for (const auto TriangleID : InMesh.TriangleIndicesItr())
+                {
+                    Triangles.Add(TriangleID);
+                    Bounds.Add(InMesh.GetTriBounds(TriangleID));
+                }
+                for (int32 FirstIndex = 0; FirstIndex < Triangles.Num(); ++FirstIndex)
+                {
+                    for (int32 SecondIndex = FirstIndex + 1; SecondIndex < Triangles.Num(); ++SecondIndex)
                     {
-                        if (NOT IsExpectedSharedContact(
-                            InMesh, Triangles[FirstIndex], Triangles[SecondIndex],
-                            Intersection.Points[PointIndex], ToleranceSquared))
-                        {
-                            return true;
-                        }
+                        // Keep the hot bounds loop independent of the narrowphase call.
+                        // Intersects excludes touching and zero-thickness coplanar bounds.
+                        if (Bounds[FirstIndex].DistanceSquared(Bounds[SecondIndex]) > ToleranceSquared)
+                        { continue; }
+                        if (HasUnexpectedPairIntersection(Triangles[FirstIndex], Triangles[SecondIndex]))
+                        { return true; }
                     }
                 }
+                return false;
+            }
+
+            auto Bounds = TArray<FAxisAlignedBox3d>{};
+            Bounds.SetNum(InMesh.MaxTriangleID());
+            for (const auto TriangleID : InMesh.TriangleIndicesItr())
+            {
+                Bounds[TriangleID] = InMesh.GetTriBounds(TriangleID);
+            }
+            const auto Spatial = FDynamicMeshAABBTree3{&InMesh};
+            const auto MeshBounds = InMesh.GetBounds();
+            const auto BoundsMagnitude = FMath::Max3(1.0, MeshBounds.Min.GetAbsMax(), MeshBounds.Max.GetAbsMax());
+            // Tree boxes round-trip through centre/extents. Pad only node pruning; the exact pair test above keeps
+            // the admission tolerance unchanged, including when it is smaller than that roundoff.
+            const auto NodeToleranceSquared = FMath::Square(InOptions.Get_IntersectionToleranceCm()
+                + 8.0 * std::numeric_limits<double>::epsilon() * BoundsMagnitude);
+            auto FirstTriangleID = int32{INDEX_NONE};
+            auto HasIntersection = false;
+            auto Traversal = FDynamicMeshAABBTree3::FTreeTraversal{};
+            Traversal.NextBoxF = [&](const FAxisAlignedBox3d& InBounds, int32)
+            {
+                return NOT HasIntersection && Bounds[FirstTriangleID].DistanceSquared(InBounds) <= NodeToleranceSquared;
+            };
+            Traversal.NextTriangleF = [&](int32 InSecondTriangleID)
+            {
+                if (NOT HasIntersection && InSecondTriangleID > FirstTriangleID
+                    && Bounds[FirstTriangleID].DistanceSquared(Bounds[InSecondTriangleID]) <= ToleranceSquared)
+                {
+                    HasIntersection = HasUnexpectedPairIntersection(FirstTriangleID, InSecondTriangleID);
+                }
+            };
+
+            for (const auto TriangleID : InMesh.TriangleIndicesItr())
+            {
+                FirstTriangleID = TriangleID;
+                Spatial.DoTraversal(Traversal);
+                if (HasIntersection)
+                { return true; }
             }
             return false;
         }
