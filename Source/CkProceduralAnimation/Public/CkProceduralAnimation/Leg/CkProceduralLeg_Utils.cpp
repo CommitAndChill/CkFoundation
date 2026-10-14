@@ -1,6 +1,7 @@
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Utils.h"
 
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Utils.h"
+#include "CkProceduralAnimation/Gait/CkProceduralGaitParticipation_Control.h"
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Fragment.h"
 #include "CkProceduralAnimation/CkProceduralAnimation_Log.h"
 
@@ -29,11 +30,30 @@ namespace ck::procedural_leg
     }
 
     auto
-        Get_IsSupporting(
+        Get_IsStructurallyEnabled(
             const FCk_Handle_ProceduralLeg& InLeg)
         -> bool
     {
         return Get_IsLive(InLeg) && NOT InLeg.Has<FTag_ProceduralLeg_Disabled>();
+    }
+
+    auto
+        Get_IsSupporting(
+            const FCk_Handle_ProceduralLeg& InLeg)
+        -> bool
+    {
+        if (NOT Get_IsStructurallyEnabled(InLeg))
+        { return false; }
+        const auto Owner = UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InLeg);
+        if (NOT ck::IsValid(Owner) || NOT UCk_Utils_ProceduralGait_UE::Has(Owner))
+        { return true; }
+        if (Owner.Has<FTag_ProceduralGait_NeedsSetup>())
+        { return true; }
+        if (Owner.Has<FFragment_ProceduralGait_Failure>())
+        { return false; }
+        const auto Observation = FCk_ProceduralGaitParticipation_Control::GetLimbObservation(
+            UCk_Utils_ProceduralGait_UE::Cast(Owner), InLeg.Get<FFragment_ProceduralLeg_Params>().Get_Id());
+        return Observation.Get_Exists() && Observation.Get_Participating();
     }
 }
 

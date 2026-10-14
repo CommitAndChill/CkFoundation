@@ -347,6 +347,8 @@ namespace ck
         bool _TargetValid = true;
         float _ClearanceGroundZ = -FLT_MAX;
         bool _Enabled = true;
+        // Administrative gait ownership. Structural _Enabled remains the damage/MinLegsToWalk input.
+        bool _Participating = true;
         FVector _Hip = FVector::ZeroVector;
         TOptional<FVector> _PosedHip;
         float _Reach = 0.0f;
@@ -368,6 +370,7 @@ namespace ck
         CK_PROPERTY(_TargetValid);
         CK_PROPERTY(_ClearanceGroundZ);
         CK_PROPERTY(_Enabled);
+        CK_PROPERTY(_Participating);
         CK_PROPERTY(_Hip);
         CK_PROPERTY(_PosedHip);
         CK_PROPERTY(_Reach);
@@ -555,6 +558,7 @@ namespace ck
         FProceduralGaitLegPendingStep _PendingStep;
         FProceduralGaitLegPose _Emitted;
         bool _Enabled = true;
+        bool _Participating = true;
 
     public:
         CK_PROPERTY(_Plant);
@@ -562,6 +566,39 @@ namespace ck
         CK_PROPERTY(_PendingStep);
         CK_PROPERTY_GET(_Emitted);
         CK_PROPERTY_GET(_Enabled);
+        CK_PROPERTY_GET(_Participating);
+    };
+
+    struct CKPROCEDURALANIMATION_API FProceduralGaitDeniedTakeoff
+    {
+        CK_GENERATED_BODY(FProceduralGaitDeniedTakeoff);
+
+    private:
+        int32 _LegIndex = INDEX_NONE;
+        bool _Emergency = false;
+
+    public:
+        CK_PROPERTY_GET(_LegIndex);
+        CK_PROPERTY_GET(_Emergency);
+        CK_DEFINE_CONSTRUCTORS(FProceduralGaitDeniedTakeoff, _LegIndex, _Emergency);
+    };
+
+    struct CKPROCEDURALANIMATION_API FProceduralGaitTrustedReplant
+    {
+        CK_GENERATED_BODY(FProceduralGaitTrustedReplant);
+
+    private:
+        int32 _LegIndex = INDEX_NONE;
+        FVector _Position = FVector::ZeroVector;
+        FQuat _Rotation = FQuat::Identity;
+        FVector _Normal = FVector::UpVector;
+
+    public:
+        CK_PROPERTY_GET(_LegIndex);
+        CK_PROPERTY_GET(_Position);
+        CK_PROPERTY_GET(_Rotation);
+        CK_PROPERTY_GET(_Normal);
+        CK_DEFINE_CONSTRUCTORS(FProceduralGaitTrustedReplant, _LegIndex, _Position, _Rotation, _Normal);
     };
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -647,9 +684,21 @@ namespace ck
             TArrayView<const FProceduralGaitLegInput> InInputs,
             TArrayView<FProceduralGaitLegOutput> OutOutputs, bool InAirborne = false,
             TOptional<float> InCadenceDriveSpeed = {}) -> bool;
+        // The guard sees the evolving solver, including takeoffs accepted earlier in this Step. Denials are bounded
+        // to one per leg and published only after valid input has been accepted. It never owns the callback.
+        auto StepWithTakeoffGuard(FCk_Time InDeltaTime, float InBodyPlanarSpeed, const FVector& InBodyPlanarVelocity,
+            TArrayView<const FProceduralGaitLegInput> InInputs,
+            TArrayView<FProceduralGaitLegOutput> OutOutputs, bool InAirborne,
+            TOptional<float> InCadenceDriveSpeed,
+            TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs) -> bool;
         auto NumLegs() const -> int32 { return _LegStates.Num(); }
         auto IsLegEnabled(int32 InLegIndex) const -> bool;
+        auto IsLegParticipating(int32 InLegIndex) const -> bool;
         auto NumEnabledLegs() const -> int32;
+        auto NumParticipatingLegs() const -> int32;
+        // Validates the entire returned set before mutating any leg.
+        auto AdmitTrustedReplants(TArrayView<const FProceduralGaitTrustedReplant> InReplants) -> bool;
         auto GetGaitClock() const -> float { return _GaitClock; }
         auto IsWindowOpen(float InPhaseOffset) const -> bool;
         auto GetLegState(int32 InLegIndex) const -> const FProceduralGaitLegState& { return _LegStates[InLegIndex]; }
@@ -677,6 +726,10 @@ namespace ck
         // Keeps InTarget within InMaxDistance of InHip: the planar (X, Y) offset shrinks and the height is kept; a height
         // alone beyond the limit clamps in 3D. A non-positive limit leaves the target unchanged.
         static auto ClampToReach(const FVector& InHip, const FVector& InTarget, float InMaxDistance) -> FVector;
+        // Read-only production midflight pose, after the caller has resolved retarget/freeze, landing ground and lift.
+        // All vectors use the solver's support frame; InCadenceScale is the accepted gait cadence multiplier.
+        auto SamplePreparedSwingPose(const FProceduralGaitLegState& InState, const FProceduralGaitLegInput& InInput,
+            float InCadenceScale, FProceduralGaitLegOutput& OutOutput) const -> bool;
         // Raibert placement: InNeutral moved by InLinearLead, then turned about InPivot, around InUp, through the angle a body
         // turning at InYawRate (radians per second) covers in InLeadTime, so a moving, turning body's feet land ahead of it.
         // The result leads InNeutral by at most InMaxLead, whatever the mix of travel and turn.
@@ -687,11 +740,14 @@ namespace ck
         auto DoStep(FCk_Time InDeltaTime, float InBodyPlanarSpeed, float InCadenceDriveSpeed,
             const FVector& InBodyPlanarVelocity,
             TArrayView<const FProceduralGaitLegInput> InInputs, TArrayView<FProceduralGaitLegOutput> OutOutputs,
-            bool InAirborne) -> bool;
+            bool InAirborne, TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs) -> bool;
         auto UpdatePatternSelection(FCk_Time InDeltaTime, float InBodyPlanarSpeed,
             TArrayView<const FProceduralGaitLegInput> InInputs, bool InAdvance) -> void;
         auto DoSelectPattern(float InBodyPlanarSpeed, bool InAdvance) -> void;
-        auto DoReconcileEnabled(FProceduralGaitLegState& InOutState, const FProceduralGaitLegInput& InInput) const -> bool;
+        auto DoReconcileEnabled(FProceduralGaitLegState& InOutState, const FProceduralGaitLegInput& InInput,
+            int32 InLegIndex, TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs) const -> bool;
         auto DoClampToReach(const FProceduralGaitLegInput& InInput, const FVector& InTarget) const -> FVector;
         auto DoClampTarget(const FProceduralGaitLegInput& InInput, const FVector& InTarget, bool InTrusted) const -> FVector;
         auto DoGet_DisplacedTarget(const FProceduralGaitLegInput& InInput, const FVector& InTarget, const FVector& InDisplacement,
@@ -709,6 +765,11 @@ namespace ck
         auto DoRedistributeOffsets() -> void;
         auto DoClearRedistribution() -> void;
         auto DoGet_SwingEase(float InPhase) const -> float;
+        auto DoGet_CurrentLandingTarget(const FProceduralGaitLegState& InState,
+            const FProceduralGaitLegInput& InInput) const -> FVector;
+        auto DoSamplePreparedSwingPose(const FProceduralGaitLegSwing& InSwing,
+            const FProceduralGaitLegInput& InInput, const FVector& InLandingTarget, float InCadenceScale,
+            const FQuat& InLandingRotation, FProceduralGaitLegOutput& OutOutput) const -> void;
         auto DoGet_FrozenTarget(const FProceduralGaitLegState& InState, const FProceduralGaitLegInput& InInput,
             const FVector& InBodyPlanarVelocity, FCk_Time InRemainingTime) const -> FVector;
         auto DoGet_LandingPoint(const FProceduralGaitLegState& InState, const FProceduralGaitLegInput& InInput,

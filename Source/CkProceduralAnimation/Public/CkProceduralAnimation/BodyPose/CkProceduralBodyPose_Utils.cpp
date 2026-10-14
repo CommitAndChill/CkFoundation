@@ -1,4 +1,6 @@
 #include "CkProceduralAnimation/BodyPose/CkProceduralBodyPose_Utils.h"
+#include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Fragment.h"
+#include "CkProceduralAnimation/ActionPlayer/CkProceduralActionPlayer_Fragment.h"
 
 #include "CkProceduralAnimation/BodyPose/CkProceduralBodyPose_Fragment.h"
 #include "CkProceduralAnimation/Core/CkProceduralBodySupport.h"
@@ -92,6 +94,10 @@ auto
     InGait.Add<ck::FFragment_ProceduralBodyPose_SupportLayout>(MoveTemp(HipLocals));
     InGait.Add<ck::FFragment_ProceduralBodyPose>(BodyRotation);
     InGait.Add<ck::FFragment_ProceduralBodyPose_Action>();
+    if (InGait.Has<ck::FFragment_ProceduralArticulation_Bindings>())
+    {
+        InGait.Get<ck::FFragment_ProceduralArticulation_Bindings>()._Presentation = InParams.Get_Presentation();
+    }
 
     const auto& Conform = InParams.Get_Conform();
     if (Conform.Get_Mode() == ECk_ProceduralBodyPose_ConformMode::PlantedFeet)
@@ -180,13 +186,16 @@ auto
         && Has(InBodyPose)
         && NOT InBodyPose.Has<ck::FTag_DestroyEntity_Initiate>()
         && NOT InBodyPose.Has<ck::FFragment_ProceduralBodyPose_Failure>()
+        && NOT InBodyPose.Has<ck::FFragment_ProceduralActionPlayer>()
         && ck::Get_IsProceduralBodyPoseActionAdmissible(InRequest.Get_Offset())
         && InRequest.Get_SampleId() > 0;
     CK_ENSURE_IF_NOT(RequestValid,
         TEXT("Procedural body pose Request_SetActionOffset rejected body pose [{}] with sample id [{}]: the body pose must be live, "
-             "not pending destruction and not failed; the offset must be finite with unit scale and a normalized rotation, and "
+             "not pending destruction, failed, or controlled by ActionPlayer; the offset must be finite with unit scale and a normalized rotation, and "
              "the sample id positive."),
         InBodyPose, InRequest.Get_SampleId())
+    {}
+    if (NOT RequestValid)
     {
         Request.TryFireCompletion(InBodyPose, ECk_Request_OperationResult::Failed_NotEnqueued);
         return InBodyPose;

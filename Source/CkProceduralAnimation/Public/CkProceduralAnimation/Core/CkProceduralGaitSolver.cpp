@@ -254,6 +254,15 @@ namespace ck
         return _LegStates.IsValidIndex(InLegIndex) && _LegStates[InLegIndex]._Enabled;
     }
 
+    auto
+        FProceduralGaitSolver::
+        IsLegParticipating(
+            int32 InLegIndex) const
+        -> bool
+    {
+        return IsLegEnabled(InLegIndex) && _LegStates[InLegIndex]._Participating;
+    }
+
     // --------------------------------------------------------------------------------------------------------------------
 
     auto
@@ -264,6 +273,17 @@ namespace ck
         return algo::CountIf(_LegStates, [](const FProceduralGaitLegState& InState) -> bool
         {
             return InState.Get_Enabled();
+        });
+    }
+
+    auto
+        FProceduralGaitSolver::
+        NumParticipatingLegs() const
+        -> int32
+    {
+        return algo::CountIf(_LegStates, [](const FProceduralGaitLegState& InState) -> bool
+        {
+            return InState.Get_Enabled() && InState.Get_Participating();
         });
     }
 
@@ -317,6 +337,52 @@ namespace ck
 
     auto
         FProceduralGaitSolver::
+        AdmitTrustedReplants(
+            TArrayView<const FProceduralGaitTrustedReplant> InReplants)
+        -> bool
+    {
+        if (InReplants.IsEmpty() || InReplants.Num() > _LegStates.Num())
+        { return false; }
+        auto Seen = uint64{0};
+        for (const auto& Replant : InReplants)
+        {
+            const auto Index = Replant.Get_LegIndex();
+            if (NOT _LegStates.IsValidIndex(Index) || Index >= 64 || (Seen & (uint64{1} << Index)) != 0
+                || NOT _LegStates[Index]._Enabled || _LegStates[Index]._Participating
+                || Replant.Get_Position().ContainsNaN() || Replant.Get_Rotation().ContainsNaN()
+                || NOT Replant.Get_Rotation().IsNormalized() || Replant.Get_Normal().ContainsNaN()
+                || NOT Replant.Get_Normal().IsNormalized())
+            { return false; }
+            Seen |= uint64{1} << Index;
+        }
+        for (const auto& Replant : InReplants)
+        {
+            auto& State = _LegStates[Replant.Get_LegIndex()];
+            State._Participating = true;
+            State._Swing = {};
+            State._PendingStep = {};
+            State._Plant._Position = Replant.Get_Position();
+            State._Plant._Rotation = Replant.Get_Rotation();
+            State._Plant._Normal = Replant.Get_Normal();
+            State._Plant._Trusted = true;
+            State._Emitted._Position = Replant.Get_Position();
+            State._Emitted._Rotation = Replant.Get_Rotation();
+            State._Emitted._AirPosition = Replant.Get_Position();
+        }
+        if (_Settings._Pattern._LegLossPolicy == EProceduralGaitLegLossPolicy::RedistributeOffsets)
+        {
+            if (NumParticipatingLegs() == NumLegs())
+            { DoClearRedistribution(); }
+            else
+            { DoRedistributeOffsets(); }
+        }
+        return true;
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProceduralGaitSolver::
         SetPlantedPose(
             int32 InLegIndex,
             const FVector& InPosition,
@@ -326,7 +392,7 @@ namespace ck
     {
         if (InPosition.ContainsNaN() || InNormal.ContainsNaN() || NOT InNormal.IsNormalized())
         { return; }
-        if (IsLegEnabled(InLegIndex) && NOT _LegStates[InLegIndex]._Swing._Active)
+        if (IsLegParticipating(InLegIndex) && NOT _LegStates[InLegIndex]._Swing._Active)
         {
             auto& State = _LegStates[InLegIndex];
 
@@ -381,7 +447,7 @@ namespace ck
             const FVector& InTarget)
         -> bool
     {
-        if (NOT IsLegEnabled(InLegIndex) || InTarget.ContainsNaN() || NOT ValidateSettings(_Settings))
+        if (NOT IsLegParticipating(InLegIndex) || InTarget.ContainsNaN() || NOT ValidateSettings(_Settings))
         {
             return false;
         }
@@ -479,7 +545,7 @@ namespace ck
         const auto Alpha = FMath::SmoothStep(0.0f, 1.0f, _PatternBlend._Alpha);
         for (auto LegIndex = 0; LegIndex < NumInputs; ++LegIndex)
         {
-            if (_PatternBlend._HasRedistributedOffsets && NOT _LegStates[LegIndex]._Enabled)
+            if (_PatternBlend._HasRedistributedOffsets && NOT IsLegParticipating(LegIndex))
             { continue; }
 
             const auto AuthoredOffset = HasPatterns && Pattern->_PhaseOffsets.IsValidIndex(LegIndex)
@@ -657,6 +723,26 @@ namespace ck
             TOptional<float> InCadenceDriveSpeed)
         -> bool
     {
+        auto Denied = TArray<FProceduralGaitDeniedTakeoff>{};
+        return StepWithTakeoffGuard(InDeltaTime, InBodyPlanarSpeed, InBodyPlanarVelocity, InInputs, OutOutputs,
+            InAirborne, InCadenceDriveSpeed,
+            [](const FProceduralGaitSolver&, int32, bool) { return true; }, Denied);
+    }
+
+    auto
+        FProceduralGaitSolver::
+        StepWithTakeoffGuard(
+            FCk_Time InDeltaTime,
+            float InBodyPlanarSpeed,
+            const FVector& InBodyPlanarVelocity,
+            TArrayView<const FProceduralGaitLegInput> InInputs,
+            TArrayView<FProceduralGaitLegOutput> OutOutputs,
+            bool InAirborne,
+            TOptional<float> InCadenceDriveSpeed,
+            TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs)
+        -> bool
+    {
         if (InInputs.Num() != OutOutputs.Num() || InInputs.Num() != _LegStates.Num()
             || NOT FMath::IsFinite(InDeltaTime.Get_Seconds()) || NOT FMath::IsFinite(InBodyPlanarSpeed)
             || InBodyPlanarSpeed < 0.0f || InBodyPlanarVelocity.ContainsNaN() || NOT ValidateSettings(_Settings)
@@ -687,15 +773,19 @@ namespace ck
         { EffectiveInputs.Add(DoGet_EffectiveInput(Input)); }
         const auto CadenceDriveSpeed = InCadenceDriveSpeed.IsSet()
             ? FMath::Max(InBodyPlanarSpeed, InCadenceDriveSpeed.GetValue()) : InBodyPlanarSpeed;
+        auto Denied = TArray<FProceduralGaitDeniedTakeoff>{};
 
         if (InDeltaTime <= FCk_Time{})
         {
             auto ReadOnlySolver = *this;
-            return ReadOnlySolver.DoStep(InDeltaTime, InBodyPlanarSpeed, CadenceDriveSpeed, InBodyPlanarVelocity,
-                EffectiveInputs, OutOutputs, InAirborne);
+            const auto Evaluated = ReadOnlySolver.DoStep(InDeltaTime, InBodyPlanarSpeed, CadenceDriveSpeed,
+                InBodyPlanarVelocity, EffectiveInputs, OutOutputs, InAirborne, InCanTakeoff, Denied);
+            if (Evaluated)
+            { OutDeniedTakeoffs.Reset(); }
+            return Evaluated;
         }
         const auto Advanced = DoStep(InDeltaTime, InBodyPlanarSpeed, CadenceDriveSpeed, InBodyPlanarVelocity,
-            EffectiveInputs, OutOutputs, InAirborne);
+            EffectiveInputs, OutOutputs, InAirborne, InCanTakeoff, Denied);
         if (Advanced)
         {
             for (auto LegIndex = 0; LegIndex < OutOutputs.Num(); ++LegIndex)
@@ -703,6 +793,7 @@ namespace ck
                 _LegStates[LegIndex]._Emitted._Position = OutOutputs[LegIndex]._Position;
                 _LegStates[LegIndex]._Emitted._Rotation = OutOutputs[LegIndex]._Rotation;
             }
+            OutDeniedTakeoffs = MoveTemp(Denied);
         }
         return Advanced;
     }
@@ -718,7 +809,9 @@ namespace ck
             const FVector& InBodyPlanarVelocity,
             TArrayView<const FProceduralGaitLegInput> InInputs,
             TArrayView<FProceduralGaitLegOutput> OutOutputs,
-            bool InAirborne)
+            bool InAirborne,
+            TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs)
         -> bool
     {
         const auto Advance = InDeltaTime > FCk_Time{};
@@ -727,14 +820,24 @@ namespace ck
         for (auto LegIndex = 0; LegIndex < InInputs.Num(); ++LegIndex)
         {
             auto ReconciledInput = InInputs[LegIndex];
+            auto& State = _LegStates[LegIndex];
+            if (State._Participating != ReconciledInput._Participating)
+            {
+                State._Participating = ReconciledInput._Participating;
+                State._Swing._Active = false;
+                State._PendingStep._Time = FCk_Time{};
+                State._Plant._Position = State._Emitted._Position;
+                State._Plant._Rotation = State._Emitted._Rotation;
+                State._Plant._Trusted = false;
+                EnabledSetChanged = true;
+            }
             if (NOT _LegStates[LegIndex]._Enabled && ReconciledInput._Enabled
                 && NOT DoGet_IsContactAvailable(LegIndex,
                     DoClampTarget(ReconciledInput, ReconciledInput._IdealTarget, ReconciledInput._TargetTrusted), InInputs))
             { ReconciledInput._TargetValid = false; }
-            if (DoReconcileEnabled(_LegStates[LegIndex], ReconciledInput))
+            if (DoReconcileEnabled(State, ReconciledInput, LegIndex, InCanTakeoff, OutDeniedTakeoffs))
             {
                 EnabledSetChanged = true;
-                auto& State = _LegStates[LegIndex];
                 if (State._Swing._Active)
                 {
                     State._Swing._TargetTrusted &= DoGet_IsContactAvailable(LegIndex, State._Swing._Target, InInputs);
@@ -746,7 +849,7 @@ namespace ck
 
         if (EnabledSetChanged && _Settings._Pattern._LegLossPolicy == EProceduralGaitLegLossPolicy::RedistributeOffsets)
         {
-            if (NumEnabledLegs() == NumLegs())
+            if (NumParticipatingLegs() == NumLegs())
             { DoClearRedistribution(); }
             else
             { DoRedistributeOffsets(); }
@@ -798,7 +901,7 @@ namespace ck
             for (auto LegIndex = 0; LegIndex < _LegStates.Num(); ++LegIndex)
             {
                 auto& State = _LegStates[LegIndex];
-                if (NOT State._Enabled)
+                if (NOT State._Enabled || NOT State._Participating)
                 { continue; }
 
                 State._Emitted._AirPosition = State._Emitted._Position;
@@ -819,10 +922,20 @@ namespace ck
             for (auto LegIndex = 0; LegIndex < _LegStates.Num(); ++LegIndex)
             {
                 auto& State = _LegStates[LegIndex];
-                if (NOT State._Enabled)
+                if (NOT State._Enabled || NOT State._Participating)
                 { continue; }
 
                 const auto& In = InInputs[LegIndex];
+                if (NOT InCanTakeoff(*this, LegIndex, false))
+                {
+                    State._Plant._Position = State._Emitted._AirPosition;
+                    State._Plant._Trusted = false;
+                    if (NOT OutDeniedTakeoffs.ContainsByPredicate(
+                        [LegIndex](const FProceduralGaitDeniedTakeoff& InDenied)
+                        { return InDenied.Get_LegIndex() == LegIndex; }))
+                    { OutDeniedTakeoffs.Emplace(LegIndex, false); }
+                    continue;
+                }
                 State._Swing._Active = true;
                 State._Swing._Phase = 0.0f;
                 State._Swing._StartPosition = State._Emitted._AirPosition;
@@ -860,9 +973,11 @@ namespace ck
                 auto& State = _LegStates[LegIndex];
                 auto& Out = OutOutputs[LegIndex];
 
-                if (NOT State._Enabled)
+                if (NOT State._Enabled || NOT State._Participating)
                 {
                     DoWriteDisabledOutput(State, Out);
+                    if (State._Enabled && NOT State._Participating)
+                    { Out._Planted = false; }
                     continue;
                 }
 
@@ -952,7 +1067,8 @@ namespace ck
                 const auto& State = _LegStates[LegIndex];
                 const auto Offset = _PatternBlend._EffectiveOffsets[LegIndex];
 
-                if (NOT State._Enabled || State._Swing._Active || NOT In._TargetValid || IsWindowOpen(Offset))
+                if (NOT State._Enabled || NOT State._Participating || State._Swing._Active
+                    || NOT In._TargetValid || IsWindowOpen(Offset))
                 {
                     continue;
                 }
@@ -990,7 +1106,8 @@ namespace ck
             const auto& In = InInputs[LegIndex];
             const auto& State = _LegStates[LegIndex];
             const auto Offset = _PatternBlend._EffectiveOffsets[LegIndex];
-            if (NOT State._Enabled || State._Swing._Active || State._PendingStep._Time > FCk_Time{}
+            if (NOT State._Enabled || NOT State._Participating || State._Swing._Active
+                || State._PendingStep._Time > FCk_Time{}
                 || HasSwingInGroup(Offset) || NOT DoGet_IsReachPaceRelief(State, In)
                 || (NOT BeyondScheduleOffsets.IsEmpty() && NOT ContainsGroup(BeyondScheduleOffsets, Offset))
                 || NOT DoGet_IsContactAvailable(LegIndex, In._IdealTarget, InInputs))
@@ -1023,7 +1140,8 @@ namespace ck
             const auto& State = _LegStates[LegIndex];
             const auto Offset = _PatternBlend._EffectiveOffsets[LegIndex];
 
-            if (ReachPacePhaseOffset.IsSet() || NOT State._Enabled || State._Swing._Active || NOT In._TargetValid || HasSwingInGroup(Offset)
+            if (ReachPacePhaseOffset.IsSet() || NOT State._Enabled || NOT State._Participating
+                || State._Swing._Active || NOT In._TargetValid || HasSwingInGroup(Offset)
                 || NOT DoGet_IsEmergency(State, In))
             { continue; }
 
@@ -1046,9 +1164,11 @@ namespace ck
             auto& Out = OutOutputs[LegIndex];
             const auto LegPhaseOffset = _PatternBlend._EffectiveOffsets[LegIndex];
 
-            if (NOT State._Enabled)
+            if (NOT State._Enabled || NOT State._Participating)
             {
                 DoWriteDisabledOutput(State, Out);
+                if (State._Enabled && NOT State._Participating)
+                { Out._Planted = false; }
                 continue;
             }
 
@@ -1117,16 +1237,7 @@ namespace ck
 
                 // After the freeze the swing's target carries the push, and the target the freeze took before it is the
                 // validated one; before, the target carries no displacement yet.
-                const auto UndisplacedTarget = State._Swing._TargetFrozen ? State._Swing._ValidatedTarget : State._Swing._Target;
-                auto Target = DoGet_LandingPoint(State, In, UndisplacedTarget, State._Swing._Target);
-                if (State._Swing._PullBackStartAlpha >= 0.0f)
-                {
-                    const auto PullBackStart = State._Swing._PullBackStartAlpha;
-                    const auto PullBackShare = PullBackStart < 1.0f - KINDA_SMALL_NUMBER
-                        ? FMath::Clamp((DoGet_SwingEase(State._Swing._Phase) - PullBackStart) / (1.0f - PullBackStart), 0.0f, 1.0f)
-                        : 1.0f;
-                    Target = FMath::Lerp(State._Swing._PullBackFrom, State._Swing._ValidatedTarget, static_cast<double>(PullBackShare));
-                }
+                auto Target = DoGet_CurrentLandingTarget(State, In);
                 // Before the freeze the damped target trails the moving ideal and the freeze snaps it forward, so the point
                 // reported for probing is the one the freeze will produce: a swing too short to lift after the snap still
                 // learns the ground it lands on in time. The report reaches the solver a frame later, when the ideal has moved
@@ -1206,53 +1317,7 @@ namespace ck
                 }
                 else
                 {
-                    const auto Alpha = DoGet_SwingEase(State._Swing._Phase);
-                    const auto RotationAlpha = FMath::Clamp(Alpha, 0.0f, 1.0f);
-                    auto Position = FMath::Lerp(State._Swing._StartPosition, Target, Alpha);
-                    if (State._Swing._LandingLiftStartAlpha >= 0.0f)
-                    {
-                        const auto LiftStart = State._Swing._LandingLiftStartAlpha;
-                        const auto LiftShare = LiftStart < 1.0f - KINDA_SMALL_NUMBER
-                            ? FMath::Clamp((Alpha - LiftStart) / (1.0f - LiftStart), 0.0f, 1.0f)
-                            : 1.0f;
-                        Position.Z += FMath::Max(State._Swing._LiftedLandingPoint.Z - Target.Z, 0.0) * LiftShare;
-                    }
-
-                    const auto ArcAlpha = _Settings._Swing._Profile.IsArcValid()
-                        ? _Settings._Swing._Profile.SampleArc(State._Swing._Phase)
-                        : procedural_gait_swing::ParametricArc(
-                            State._Swing._Phase, _Settings._Swing._ApexPhase, _Settings._Swing._ApexSharpness);
-
-                    auto HeightScale = 1.0f;
-                    if (_Settings._Cadence._MaxCadenceScale > 1.0f + KINDA_SMALL_NUMBER)
-                    {
-                        const auto SprintBlend = (CadenceScale - 1.0f) / (_Settings._Cadence._MaxCadenceScale - 1.0f);
-                        HeightScale = FMath::Lerp(1.0f, _Settings._Swing._SprintApexHeightScale, FMath::Clamp(SprintBlend, 0.0f, 1.0f));
-                    }
-                    Position.Z += ArcAlpha * _Settings._Swing._Height * HeightScale;
-
-                    if (_Settings._Swing._ObstacleClearance > 0.0f && In._ClearanceGroundZ > -FLT_MAX * 0.5f)
-                    {
-                        const auto Deficit = (In._ClearanceGroundZ + _Settings._Swing._ObstacleClearance) - Position.Z;
-                        if (Deficit > 0.0f)
-                        {
-                            Position.Z += Deficit * FMath::Sin(State._Swing._Phase * PI);
-                        }
-                    }
-
-                    auto Rotation = FQuat::Slerp(State._Swing._StartRotation, LandingRotation, RotationAlpha);
-                    if (NOT FMath::IsNearlyZero(_Settings._Swing._ToePitchDegrees))
-                    {
-                        const auto RightAxis = Rotation.GetAxisY();
-                        Rotation = FQuat{RightAxis,
-                            FMath::DegreesToRadians(_Settings._Swing._ToePitchDegrees) * ArcAlpha} * Rotation;
-                    }
-
-                    Out._Position = Position;
-                    Out._Normal = State._Swing._TargetNormal;
-                    Out._Rotation = Rotation;
-                    Out._SwingAlpha = State._Swing._Phase;
-                    Out._Planted = false;
+                    DoSamplePreparedSwingPose(State._Swing, In, Target, CadenceScale, LandingRotation, Out);
                 }
             }
             else
@@ -1310,7 +1375,11 @@ namespace ck
                     ? DoClampToReach(In, State._PendingStep._Target)
                     : DoClampTarget(In, In._TargetValid ? In._IdealTarget : State._Plant._Position, TargetTrusted);
                 const auto ContactAvailable = DoGet_IsContactAvailable(LegIndex, SwingTarget, InInputs);
-                if (Advance && (OnSchedule || BeyondSchedule) && ContactAvailable)
+                const auto AlreadyDenied = OutDeniedTakeoffs.ContainsByPredicate(
+                    [LegIndex](const FProceduralGaitDeniedTakeoff& InDenied)
+                    { return InDenied.Get_LegIndex() == LegIndex; });
+                if (Advance && (OnSchedule || BeyondSchedule) && ContactAvailable && NOT AlreadyDenied
+                    && InCanTakeoff(*this, LegIndex, Emergency))
                 {
                     DoBeginSwing(State, State._Plant._Position, State._Plant._Rotation, SwingTarget, TargetTrusted,
                         In._TargetValid ? In._GroundNormal : State._Plant._Normal);
@@ -1339,6 +1408,8 @@ namespace ck
                 }
                 else
                 {
+                    if (Advance && (OnSchedule || BeyondSchedule) && ContactAvailable && NOT AlreadyDenied)
+                    { OutDeniedTakeoffs.Emplace(LegIndex, Emergency); }
                     Out._Position = State._Plant._Position;
                     Out._Normal = State._Plant._Normal;
                     Out._Rotation = State._Plant._Rotation;
@@ -1358,7 +1429,10 @@ namespace ck
         FProceduralGaitSolver::
         DoReconcileEnabled(
             FProceduralGaitLegState& InOutState,
-            const FProceduralGaitLegInput& InInput) const
+            const FProceduralGaitLegInput& InInput,
+            int32 InLegIndex,
+            TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs) const
         -> bool
     {
         if (InOutState._Enabled == InInput._Enabled)
@@ -1387,11 +1461,15 @@ namespace ck
         const auto TargetIsAway = InInput._TargetValid
             && FVector::DistSquared(InOutState._Emitted._Position, Target) > KINDA_SMALL_NUMBER;
 
-        if (TargetIsAway)
+        if (TargetIsAway && InOutState._Participating)
         {
-            DoBeginSwing(InOutState, InOutState._Emitted._Position, InOutState._Emitted._Rotation, Target, InInput._TargetTrusted,
-                InInput._GroundNormal);
-            return true;
+            if (InCanTakeoff(*this, InLegIndex, false))
+            {
+                DoBeginSwing(InOutState, InOutState._Emitted._Position, InOutState._Emitted._Rotation, Target,
+                    InInput._TargetTrusted, InInput._GroundNormal);
+                return true;
+            }
+            OutDeniedTakeoffs.Emplace(InLegIndex, false);
         }
 
         InOutState._Plant._Position = InOutState._Emitted._Position;
@@ -1405,13 +1483,13 @@ namespace ck
         DoRedistributeOffsets()
         -> void
     {
-        const auto EnabledCount = NumEnabledLegs();
+        const auto EnabledCount = NumParticipatingLegs();
         _PatternBlend._RedistributedOffsets.SetNum(_LegStates.Num());
 
         auto Rank = 0;
         for (auto LegIndex = 0; LegIndex < _LegStates.Num(); ++LegIndex)
         {
-            if (NOT _LegStates[LegIndex]._Enabled)
+            if (NOT IsLegParticipating(LegIndex))
             { continue; }
 
             _PatternBlend._RedistributedOffsets[LegIndex] = static_cast<float>(Rank) / static_cast<float>(EnabledCount);
@@ -1482,6 +1560,128 @@ namespace ck
         return _Settings._Swing._Profile.IsEaseValid()
             ? _Settings._Swing._Profile.SampleEase(InPhase)
             : FMath::SmoothStep(0.0f, 1.0f, InPhase);
+    }
+
+    auto
+        FProceduralGaitSolver::
+        DoGet_CurrentLandingTarget(
+            const FProceduralGaitLegState& InState,
+            const FProceduralGaitLegInput& InInput) const
+        -> FVector
+    {
+        const auto& Swing = InState.Get_Swing();
+        const auto UndisplacedTarget = Swing.Get_TargetFrozen() ? Swing.Get_ValidatedTarget() : Swing.Get_Target();
+        auto Target = DoGet_LandingPoint(InState, InInput, UndisplacedTarget, Swing.Get_Target());
+        if (Swing.Get_PullBackStartAlpha() >= 0.0f)
+        {
+            const auto PullBackStart = Swing.Get_PullBackStartAlpha();
+            const auto PullBackShare = PullBackStart < 1.0f - KINDA_SMALL_NUMBER
+                ? FMath::Clamp((DoGet_SwingEase(Swing.Get_Phase()) - PullBackStart) / (1.0f - PullBackStart), 0.0f, 1.0f)
+                : 1.0f;
+            Target = FMath::Lerp(Swing.Get_PullBackFrom(), Swing.Get_ValidatedTarget(), static_cast<double>(PullBackShare));
+        }
+        return Target;
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProceduralGaitSolver::
+        SamplePreparedSwingPose(
+            const FProceduralGaitLegState& InState,
+            const FProceduralGaitLegInput& InInput,
+            float InCadenceScale,
+            FProceduralGaitLegOutput& OutOutput) const
+        -> bool
+    {
+        const auto& InSwing = InState.Get_Swing();
+        if (NOT ValidateSettings(_Settings) || NOT InSwing.Get_Active()
+            || NOT FMath::IsFinite(InSwing.Get_Phase()) || InSwing.Get_Phase() < 0.0f
+            || InSwing.Get_Phase() > 1.0f || NOT FMath::IsFinite(InCadenceScale)
+            || InCadenceScale <= 0.0f || InSwing.Get_StartPosition().ContainsNaN()
+            || InSwing.Get_StartRotation().ContainsNaN() || NOT InSwing.Get_StartRotation().IsNormalized()
+            || InSwing.Get_TargetNormal().ContainsNaN() || NOT InSwing.Get_TargetNormal().IsNormalized()
+            || InSwing.Get_LiftedLandingPoint().ContainsNaN()
+            || NOT FMath::IsFinite(InSwing.Get_LandingLiftStartAlpha())
+            || InSwing.Get_LandingLiftStartAlpha() > 1.0f
+            || InInput.Get_FacingDirection().ContainsNaN()
+            || NOT FMath::IsFinite(InInput.Get_ClearanceGroundZ())
+            || NOT FMath::IsFinite(InInput.Get_Reach()) || InInput.Get_Reach() < 0.0f
+            || InInput.Get_Hip().ContainsNaN())
+        { return false; }
+
+        const auto EffectiveInput = DoGet_EffectiveInput(InInput);
+        auto Sample = FProceduralGaitLegOutput{};
+        const auto LandingTarget = DoGet_CurrentLandingTarget(InState, EffectiveInput);
+        if (LandingTarget.ContainsNaN())
+        { return false; }
+        const auto LandingRotation = MakeFootRotation(EffectiveInput.Get_FacingDirection(), InSwing.Get_TargetNormal());
+        DoSamplePreparedSwingPose(InSwing, EffectiveInput, LandingTarget, InCadenceScale, LandingRotation, Sample);
+        if (EffectiveInput.Get_Reach() > 0.0f)
+        {
+            Sample.Set_Position(procedural_gait_solver::Get_ReachableFlightPosition(
+                EffectiveInput.Get_Hip(), Sample.Get_Position(), EffectiveInput.Get_Reach()));
+        }
+        OutOutput = Sample;
+        return true;
+    }
+
+    auto
+        FProceduralGaitSolver::
+        DoSamplePreparedSwingPose(
+            const FProceduralGaitLegSwing& InSwing,
+            const FProceduralGaitLegInput& InInput,
+            const FVector& InLandingTarget,
+            float InCadenceScale,
+            const FQuat& InLandingRotation,
+            FProceduralGaitLegOutput& OutOutput) const
+        -> void
+    {
+        const auto Alpha = DoGet_SwingEase(InSwing.Get_Phase());
+        const auto RotationAlpha = FMath::Clamp(Alpha, 0.0f, 1.0f);
+        auto Position = FMath::Lerp(InSwing.Get_StartPosition(), InLandingTarget, Alpha);
+        if (InSwing.Get_LandingLiftStartAlpha() >= 0.0f)
+        {
+            const auto LiftStart = InSwing.Get_LandingLiftStartAlpha();
+            const auto LiftShare = LiftStart < 1.0f - KINDA_SMALL_NUMBER
+                ? FMath::Clamp((Alpha - LiftStart) / (1.0f - LiftStart), 0.0f, 1.0f)
+                : 1.0f;
+            Position.Z += FMath::Max(InSwing.Get_LiftedLandingPoint().Z - InLandingTarget.Z, 0.0) * LiftShare;
+        }
+
+        const auto ArcAlpha = _Settings._Swing._Profile.IsArcValid()
+            ? _Settings._Swing._Profile.SampleArc(InSwing.Get_Phase())
+            : procedural_gait_swing::ParametricArc(
+                InSwing.Get_Phase(), _Settings._Swing._ApexPhase, _Settings._Swing._ApexSharpness);
+
+        auto HeightScale = 1.0f;
+        if (_Settings._Cadence._MaxCadenceScale > 1.0f + KINDA_SMALL_NUMBER)
+        {
+            const auto SprintBlend = (InCadenceScale - 1.0f) / (_Settings._Cadence._MaxCadenceScale - 1.0f);
+            HeightScale = FMath::Lerp(1.0f, _Settings._Swing._SprintApexHeightScale, FMath::Clamp(SprintBlend, 0.0f, 1.0f));
+        }
+        Position.Z += ArcAlpha * _Settings._Swing._Height * HeightScale;
+
+        if (_Settings._Swing._ObstacleClearance > 0.0f && InInput.Get_ClearanceGroundZ() > -FLT_MAX * 0.5f)
+        {
+            const auto Deficit = (InInput.Get_ClearanceGroundZ() + _Settings._Swing._ObstacleClearance) - Position.Z;
+            if (Deficit > 0.0f)
+            { Position.Z += Deficit * FMath::Sin(InSwing.Get_Phase() * PI); }
+        }
+
+        auto Rotation = FQuat::Slerp(InSwing.Get_StartRotation(), InLandingRotation, RotationAlpha);
+        if (NOT FMath::IsNearlyZero(_Settings._Swing._ToePitchDegrees))
+        {
+            const auto RightAxis = Rotation.GetAxisY();
+            Rotation = FQuat{RightAxis,
+                FMath::DegreesToRadians(_Settings._Swing._ToePitchDegrees) * ArcAlpha} * Rotation;
+        }
+
+        OutOutput.Set_Position(Position);
+        OutOutput.Set_Normal(InSwing.Get_TargetNormal());
+        OutOutput.Set_Rotation(Rotation);
+        OutOutput.Set_SwingAlpha(InSwing.Get_Phase());
+        OutOutput.Set_Planted(false);
     }
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -1664,7 +1864,8 @@ namespace ck
         for (auto Other = 0; Other < _LegStates.Num(); ++Other)
         {
             const auto& State = _LegStates[Other];
-            if (Other == InLegIndex || NOT State._Enabled || NOT InInputs[Other]._Enabled
+            if (Other == InLegIndex || NOT State._Enabled || NOT State._Participating
+                || NOT InInputs[Other]._Enabled || NOT InInputs[Other]._Participating
                 || InInputs[Other]._FootContactRadius == 0.0f)
             { continue; }
             if (State._Swing._Active ? NOT State._Swing._TargetTrusted : NOT State._Plant._Trusted)

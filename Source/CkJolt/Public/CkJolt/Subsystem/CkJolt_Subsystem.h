@@ -40,6 +40,8 @@ public:
     CK_GENERATED_BODY(UCk_Jolt_Subsystem);
 
 public:
+    auto ShouldCreateSubsystem(UObject* InOuter) const -> bool override;
+
     auto
     Initialize(
         FSubsystemCollectionBase& InCollection) -> void override;

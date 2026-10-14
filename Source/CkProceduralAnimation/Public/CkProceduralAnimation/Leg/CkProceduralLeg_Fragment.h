@@ -44,7 +44,13 @@ namespace ck
                 const FCk_Handle_ProceduralLeg& InLeg)
             -> bool;
 
-        // A live leg that is also enabled: it may plant, reserve, support the body and anchor the reach pace.
+        // Structural enablement, independent of an action withdrawing this limb from gait participation.
+        CKPROCEDURALANIMATION_API auto
+            Get_IsStructurallyEnabled(
+                const FCk_Handle_ProceduralLeg& InLeg)
+            -> bool;
+
+        // A structurally enabled leg which still participates in its owner's gait.
         CKPROCEDURALANIMATION_API auto
             Get_IsSupporting(
                 const FCk_Handle_ProceduralLeg& InLeg)

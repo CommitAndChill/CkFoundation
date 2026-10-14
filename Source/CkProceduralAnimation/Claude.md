@@ -1,5 +1,7 @@
 # CkProceduralAnimation
 
+For scoped body/limb actions, standalone appendages, locomotor borrowing and the authoring editor, see [PROCEDURAL_ACTIONS.md](PROCEDURAL_ACTIONS.md). Actions are played through `UCk_Utils_ProceduralAction_UE` (`utils_procedural_action`; `Play`/`Play_Loaded` for managed delivery, `Create_*` for explicit receipts), `UCk_Utils_ProceduralActionPlayer_UE` (`utils_procedural_action_player`, including the `Make_*PlayerSpec` presets) and `UCk_Utils_ProceduralArticulation_UE` (`utils_procedural_articulation`); clips can be built in code with `UCk_Utils_ProceduralActionBuilder_UE` (`utils_procedural_action_builder`). Current implementation verification is tracked in [PROGRESS](../../docs/campaigns/procedural-actions/PROGRESS.md).
+
 Procedural N-leg locomotion with independent surface motion and rigid N-joint leg presentation. The public ECS entry points are `UCk_Utils_ProceduralLeg_UE`, `UCk_Utils_ProceduralGait_UE`, `UCk_Utils_ProceduralRig_UE`, `UCk_Utils_ProceduralBodyPose_UE`, `UCk_Utils_SurfaceMotion_UE` and the one-call accelerant `UCk_Utils_ProceduralAnimation_UE::Add_Walker`; their generated AngelScript namespaces are `utils_procedural_leg`, `utils_procedural_gait`, `utils_procedural_rig`, `utils_procedural_body_pose`, `utils_surface_motion` and `utils_procedural_animation`.
 
 ## Composition

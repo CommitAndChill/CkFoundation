@@ -1,8 +1,13 @@
 #include "CkProceduralAnimation/CkProceduralAnimation_Utils.h"
 
+#include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Fragment.h"
+#include "CkProceduralAnimation/Limb/CkProceduralLimb_Fragment.h"
+#include "CkProceduralAnimation/Limb/CkProceduralLimb_Utils.h"
+
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Utils.h"
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Utils.h"
 #include "CkProceduralAnimation/Rig/CkProceduralRig_Utils.h"
+#include "CkProceduralAnimation/Rig/CkProceduralRig_Fragment.h"
 
 #include "CkCore/Algorithms/CkAlgorithms.h"
 #include "CkCore/Ensure/CkEnsure.h"
@@ -24,6 +29,7 @@ namespace ck_procedural_animation_utils
         return ck::IsValid(InBody)
             && NOT InBody.Has<ck::FTag_DestroyEntity_Initiate>()
             && UCk_Utils_EntityLifetime_UE::Get_CanCreateEntity(InBody)
+            && NOT InBody.Has<ck::FFragment_ProceduralArticulation_Params>()
             && NOT UCk_Utils_ProceduralGait_UE::Has(InBody)
             && UCk_Utils_ProceduralLeg_UE::Get_Legs(InBody).IsEmpty();
     }
@@ -144,6 +150,37 @@ auto
         auto Leg = UCk_Utils_ProceduralLeg_UE::TryGet_Leg(InBody, Chain.Get_LegId());
         UCk_Utils_ProceduralRig_UE::Add(Leg, Chain.Get_Rig());
     }
+
+    // A legacy walker may have fewer visual chains than gait legs, including none. Only rigged legs have controllable
+    // articulation parts. Legacy geometry remains owned by Leg/Rig Params; the binding map never mirrors chain lengths.
+    auto Bindings = TArray<FCk_ProceduralLimb_Binding>{};
+    auto Limbs = TArray<FCk_Handle_ProceduralLimb>{};
+    Bindings.Reserve(InChains.Num());
+    Limbs.Reserve(InChains.Num());
+    for (auto Index = 0; Index < InRig->Get_Legs().Num(); ++Index)
+    {
+        const auto Id = InRig->Get_Legs()[Index].Get_Id();
+        auto Leg = UCk_Utils_ProceduralLeg_UE::TryGet_Leg(InBody, Id);
+        if (NOT Leg.Has<ck::FFragment_ProceduralRig_Params>())
+        { continue; }
+        const auto& Rig = Leg.Get<ck::FFragment_ProceduralRig_Params>();
+        Leg.Add<ck::FFragment_ProceduralLimb>(Id, Bindings.Num());
+        Limbs.Add(UCk_Utils_ProceduralLimb_UE::CastChecked(Leg));
+        auto Binding = FCk_ProceduralLimb_Binding{Id, Rig.Get_Segments()};
+        Binding.Set_Terminal(Rig.Get_Foot());
+        Bindings.Add(MoveTemp(Binding));
+    }
+    auto EmptyClaims = TArray<FCk_ArticulationControlToken>{};
+    EmptyClaims.SetNum(Limbs.Num());
+    InBody.Add<ck::FFragment_ProceduralArticulation_Params>(
+        FCk_ProceduralArticulation_Layout{TArray<FCk_ProceduralLimb_Layout>{}},
+        FCk_ProceduralArticulation_ClearanceSettings{});
+    InBody.Add<ck::FFragment_ProceduralArticulation_Bindings>(MoveTemp(Bindings), MoveTemp(Limbs),
+        FCk_Handle_Transform{});
+    InBody.Add<ck::FFragment_ProceduralArticulation_Claims>(MoveTemp(EmptyClaims));
+    auto& ArticulationPose = InBody.Add<ck::FFragment_ProceduralArticulation_Pose>();
+    ArticulationPose._LegacyWalker = true;
+    InBody.Add<ck::FFragment_ProceduralArticulation_Health>();
 
     return FCk_ProceduralWalker{Gait, Legs};
 }

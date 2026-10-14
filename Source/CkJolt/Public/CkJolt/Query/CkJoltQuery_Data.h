@@ -62,6 +62,17 @@ public:
 
 // --------------------------------------------------------------------------------------------------------------------
 
+UENUM(BlueprintType)
+enum class ECk_Jolt_QueryBodySelection : uint8
+{
+    Any,
+    StaticNonSensor
+};
+
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_Jolt_QueryBodySelection);
+
+// --------------------------------------------------------------------------------------------------------------------
+
 /// UE-channel-equivalent query filtering: a body is considered when its authored response to
 /// _Channel is at least _MinResponse (Block = trace semantics, Overlap = overlap semantics).
 USTRUCT(BlueprintType)
@@ -79,9 +90,17 @@ private:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
     ECk_Jolt_PairInteraction _MinResponse = ECk_Jolt_PairInteraction::Block;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+    ECk_Jolt_QueryBodySelection _BodySelection = ECk_Jolt_QueryBodySelection::Any;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+    bool _CollideWithBackFacesConvex = false;
+
 public:
     CK_PROPERTY(_Channel);
     CK_PROPERTY(_MinResponse);
+    CK_PROPERTY(_BodySelection);
+    CK_PROPERTY(_CollideWithBackFacesConvex);
 };
 
 // --------------------------------------------------------------------------------------------------------------------

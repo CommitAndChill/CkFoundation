@@ -1,4 +1,6 @@
 #include "CkProceduralAnimation/Debug/CkProceduralAnimation_Debug.h"
+#include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Fragment.h"
+#include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Utils.h"
 
 #include "CkProceduralAnimation/BodyPose/CkProceduralBodyPose_Fragment.h"
 #include "CkProceduralAnimation/BodyPose/CkProceduralBodyPose_Utils.h"
@@ -258,6 +260,41 @@ auto
         { Entities.Add(Handle); }
     });
 
+    return Entities;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    UCk_Utils_ProceduralAnimation_Debug_UE::
+    Get_Articulations(
+        UWorld* InWorld)
+    -> TArray<FCk_Handle>
+{
+    auto Entities = TArray<FCk_Handle>{};
+    CK_ENSURE_IF_NOT(IsInGameThread(), TEXT("Procedural articulation discovery must run on the game thread."))
+    { return Entities; }
+
+    if (ck::Is_NOT_Valid(InWorld) || NOT InWorld->HasBegunPlay())
+    { return Entities; }
+
+    auto* Subsystem = InWorld->GetSubsystem<UCk_EcsWorld_Subsystem_UE>();
+    if (ck::Is_NOT_Valid(Subsystem))
+    { return Entities; }
+
+    const auto TransientEntity = Subsystem->Get_TransientEntity();
+    if (ck::Is_NOT_Valid(TransientEntity))
+    { return Entities; }
+
+    auto Registry = Subsystem->Get_Registry();
+    Registry.View<ck::FFragment_ProceduralArticulation_Params>().ForEach(
+    [&](FCk_Entity InEntity, const ck::FFragment_ProceduralArticulation_Params&)
+    {
+        const auto Handle = ck::MakeHandle(InEntity, TransientEntity);
+        if (ck_procedural_animation_debug::Get_IsActive(Handle)
+            && UCk_Utils_ProceduralArticulation_UE::Has(Handle))
+        { Entities.Add(Handle); }
+    });
     return Entities;
 }
 

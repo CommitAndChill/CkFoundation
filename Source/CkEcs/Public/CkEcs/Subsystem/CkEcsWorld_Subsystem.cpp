@@ -12,6 +12,7 @@
 #include "CkProfile/Stats/CkStats.h"
 
 #include <Engine/World.h>
+#include <GameFramework/WorldSettings.h>
 #include <Engine/Engine.h>
 #include <HAL/FileManager.h>
 #include <Misc/FileHelper.h>
@@ -21,6 +22,47 @@
 // --------------------------------------------------------------------------------------------------------------------
 
 DECLARE_STATS_GROUP(TEXT("CkEcsWorldActor_Tick"), STATGROUP_CkEcsWorldActor_Tick, STATCAT_Advanced);
+
+namespace ck_ecs_production_preview
+{
+    const auto WorldSettingsTag = FName{TEXT("CkProductionPreviewWorld")};
+}
+
+auto
+    UCk_EcsWorld_Subsystem_UE::
+    Mark_ProductionPreviewWorld(
+        UWorld& InWorld)
+    -> bool
+{
+    if (InWorld.WorldType != EWorldType::GamePreview || InWorld.IsInitialized()
+        || InWorld.GetWorldSettings() == nullptr)
+    { return false; }
+    InWorld.GetWorldSettings()->Tags.AddUnique(ck_ecs_production_preview::WorldSettingsTag);
+    return true;
+}
+
+auto
+    UCk_EcsWorld_Subsystem_UE::
+    Is_ProductionPreviewWorld(
+        const UWorld& InWorld)
+    -> bool
+{
+    const auto* Settings = InWorld.GetWorldSettings();
+    return InWorld.WorldType == EWorldType::GamePreview && Settings != nullptr
+        && Settings->ActorHasTag(ck_ecs_production_preview::WorldSettingsTag);
+}
+
+auto
+    UCk_EcsWorld_Subsystem_UE::
+    ShouldCreateSubsystem(
+        UObject* InOuter) const
+    -> bool
+{
+    if (const auto* World = Cast<UWorld>(InOuter);
+        World != nullptr && World->WorldType == EWorldType::GamePreview)
+    { return Is_ProductionPreviewWorld(*World); }
+    return Super::ShouldCreateSubsystem(InOuter);
+}
 
 // --------------------------------------------------------------------------------------------------------------------
 

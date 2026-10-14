@@ -78,6 +78,7 @@ namespace ck
 
     public:
         friend class FProcessor_ProceduralBodyPose_Update;
+        friend class FProcessor_ProceduralArticulation_Observe;
 
     private:
         FTransform _HeldTarget = FTransform::Identity;
@@ -151,6 +152,7 @@ namespace ck
 
     public:
         CK_PROPERTY_GET(_Offset);
+        CK_PROPERTY_GET(_BaseOffset);
         CK_PROPERTY_GET(_TargetOffset);
 
     public:
@@ -167,6 +169,7 @@ namespace ck
     public:
         friend class FProcessor_ProceduralBodyPose_HandleRequests;
         friend class FProcessor_ProceduralBodyPose_Update;
+        friend class FProcessor_ProceduralArticulation_Observe;
         friend class ::UCk_Utils_ProceduralBodyPose_UE;
 
     private:

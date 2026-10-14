@@ -162,7 +162,14 @@ public:
 
     static auto Get_OnPreBuildProcessorGraph() -> FOnPreBuildProcessorGraph&;
 
+    // Opt a newly created GamePreview world into the production ECS/Jolt preview pipeline.
+    // Call after CreateWorld(skip InitWorld) and before InitWorld; the marker is owned by WorldSettings.
+    static auto Mark_ProductionPreviewWorld(UWorld& InWorld) -> bool;
+    static auto Is_ProductionPreviewWorld(const UWorld& InWorld) -> bool;
+
 public:
+    auto ShouldCreateSubsystem(UObject* InOuter) const -> bool override;
+
     auto
     Initialize(
         FSubsystemCollectionBase& Collection) -> void override;
