@@ -56,7 +56,11 @@ auto
     auto& Store = Player.Get<ck::FFragment_ProceduralActionPlayer>()._Receipts;
     const auto& Tuning = Player.Get<ck::FFragment_ProceduralActionPlayer_Params>().Get_Tuning();
     auto Identity = FCk_ProceduralAction_Identity{};
-    if (Store.ReserveUnbound(Identity) != ck::procedural_action::EReceiptStoreWrite::Accepted) { return {}; }
+    const auto Reserved = Store.ReserveUnbound(Identity);
+    CK_ENSURE_IF_NOT(Reserved == ck::procedural_action::EReceiptStoreWrite::Accepted,
+        TEXT("ProceduralAction Create rejected: player [{}] has no receipt capacity left ([{}] retained instances)."),
+        InPlayer, Store.Get_RetainedCount())
+    { return {}; }
 
     // Sealed before the entity exists, so a terminal the loaded path commits synchronously is already the player's to
     // acknowledge.
@@ -218,7 +222,8 @@ auto
         const FCk_Handle_ProceduralAction& InAction)
     -> FCk_ProceduralAction_Receipt
 {
-    if (ck::Is_NOT_Valid(InAction) || NOT Has(InAction)) { return {}; }
+    if (ck::Is_NOT_Valid(InAction) || NOT Has(InAction))
+    { return {}; }
     const auto& Params = InAction.Get<ck::FFragment_ProceduralAction_Params>();
     const auto Player = Params.Get_Player();
     return ck::IsValid(Player) && Player.Has<ck::FFragment_ProceduralActionPlayer>()
@@ -318,15 +323,11 @@ auto
     -> FCk_Handle_ProceduralAction
 {
     auto Request = InRequest;
-    if (InDelegate.IsBound()) { Request.Set_CompletionDelegate(InDelegate); }
+    if (InDelegate.IsBound())
+    { Request.Set_CompletionDelegate(InDelegate); }
     const auto Valid = ck::IsValid(InAction) && Has(InAction)
         && NOT InAction.Has<ck::FTag_DestroyEntity_Initiate>();
     CK_ENSURE_IF_NOT(Valid, TEXT("ProceduralAction Cancel rejected action [{}]."), InAction)
-    {
-        Request.TryFireCompletion(InAction, ECk_Request_OperationResult::Failed_NotEnqueued);
-        return InAction;
-    }
-    if (NOT Valid)
     {
         Request.TryFireCompletion(InAction, ECk_Request_OperationResult::Failed_NotEnqueued);
         return InAction;
@@ -344,15 +345,11 @@ auto
     -> FCk_Handle_ProceduralAction
 {
     auto Request = InRequest;
-    if (InDelegate.IsBound()) { Request.Set_CompletionDelegate(InDelegate); }
+    if (InDelegate.IsBound())
+    { Request.Set_CompletionDelegate(InDelegate); }
     const auto Valid = ck::IsValid(InAction) && Has(InAction)
         && NOT InAction.Has<ck::FTag_DestroyEntity_Initiate>();
     CK_ENSURE_IF_NOT(Valid, TEXT("ProceduralAction Release rejected action [{}]."), InAction)
-    {
-        Request.TryFireCompletion(InAction, ECk_Request_OperationResult::Failed_NotEnqueued);
-        return InAction;
-    }
-    if (NOT Valid)
     {
         Request.TryFireCompletion(InAction, ECk_Request_OperationResult::Failed_NotEnqueued);
         return InAction;

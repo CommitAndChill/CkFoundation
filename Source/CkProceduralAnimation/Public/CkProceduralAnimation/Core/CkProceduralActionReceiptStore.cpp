@@ -1,5 +1,6 @@
 #include "CkProceduralAnimation/Core/CkProceduralActionReceiptStore.h"
 #include "CkProceduralAnimation/Core/CkProceduralActionMotion.h"
+#include "CkProceduralAnimation/CkProceduralAnimation_Log.h"
 
 #include <limits>
 
@@ -45,7 +46,8 @@ namespace ck::procedural_action
             {
                 const auto* Limb = InPose.Get_Limbs().FindByPredicate([Id](const auto& InLimb)
                 { return InLimb.Get_Id() == Id; });
-                if (Limb != nullptr) { Count += 2 + Limb->Get_Segments().Num(); }
+                if (Limb != nullptr)
+                { Count += 2 + Limb->Get_Segments().Num(); }
             }
             return Count;
         }
@@ -116,21 +118,24 @@ namespace ck::procedural_action
             bool InHasBodyClaim)
             -> bool
         {
-            if (InHasBodyClaim && NOT InPose.Get_HasBodyPresentation()) { return false; }
+            if (InHasBodyClaim && NOT InPose.Get_HasBodyPresentation())
+            { return false; }
             if (NOT IsRigid(InPose.Get_RootFrame())
                 || (InHasBodyClaim && NOT IsRigid(InPose.Get_BodyPresentation())))
             { return false; }
             auto Claimed = TSet<FName>{};
             for (const auto Id : InClaimed) { Claimed.Add(Id); }
             auto Seen = TSet<FName>{};
-            if (InPose.Get_Limbs().Num() > receipt_limits::MaxClaimedLimbs) { return false; }
+            if (InPose.Get_Limbs().Num() > receipt_limits::MaxClaimedLimbs)
+            { return false; }
             for (const auto& Limb : InPose.Get_Limbs())
             {
                 if (Limb.Get_Id().IsNone() || Seen.Contains(Limb.Get_Id())
                     || Limb.Get_Segments().Num() > receipt_limits::MaxSegmentsPerLimb)
                 { return false; }
                 Seen.Add(Limb.Get_Id());
-                if (NOT Claimed.Contains(Limb.Get_Id())) { continue; }
+                if (NOT Claimed.Contains(Limb.Get_Id()))
+                { continue; }
                 if (Limb.Get_Segments().IsEmpty()
                     || NOT IsRigid(Limb.Get_RequestedEndpoint())
                     || NOT IsRigid(Limb.Get_AcceptedEndpoint())
@@ -163,7 +168,8 @@ namespace ck::procedural_action
             {
                 const auto* Limb = InPose.Get_Limbs().FindByPredicate([Id](const auto& InLimb)
                 { return InLimb.Get_Id() == Id; });
-                if (Limb != nullptr) { Limbs.Add(*Limb); }
+                if (Limb != nullptr)
+                { Limbs.Add(*Limb); }
             }
             return FCk_ProceduralArticulation_Pose{InPose.Get_RootFrame(),
                 InHasBodyClaim ? InPose.Get_BodyPresentation() : FTransform::Identity,
@@ -228,7 +234,8 @@ namespace ck::procedural_action
         OutInvalidField = NAME_None;
         const auto Check = [&](bool InValid, FName InField) -> bool
         {
-            if (NOT InValid) { OutInvalidField = InField; }
+            if (NOT InValid)
+            { OutInvalidField = InField; }
             return InValid;
         };
         const auto& Playback = InTuning.Get_Playback();
@@ -275,7 +282,8 @@ namespace ck::procedural_action
         -> bool
     {
         auto InvalidField = FName{};
-        if (_Configured || NOT ValidateCapacity(InCapacity, InvalidField)) { return false; }
+        if (_Configured || NOT ValidateCapacity(InCapacity, InvalidField))
+        { return false; }
         _Capacity = InCapacity;
         _Configured = true;
         return true;
@@ -286,7 +294,8 @@ namespace ck::procedural_action
         -> bool
     {
         const auto* Stream = _Streams.Find(InIdentity);
-        if (Stream == nullptr) { return false; }
+        if (Stream == nullptr)
+        { return false; }
         _RetainedRecordSlots -= 2 + Stream->PendingOrdinaryCount;
         _RetainedPoseTransforms -= Stream->LastConsumedTransforms;
         for (const auto& Record : Stream->Records)
@@ -305,7 +314,8 @@ namespace ck::procedural_action
         -> EReceiptStoreWrite
     {
         const auto Reservation = ReserveUnbound(OutIdentity);
-        if (Reservation != EReceiptStoreWrite::Accepted) { return Reservation; }
+        if (Reservation != EReceiptStoreWrite::Accepted)
+        { return Reservation; }
         const auto Binding = BindChannels(OutIdentity, InClaimedLimbIds, InHasBodyClaim);
         if (Binding != EReceiptStoreWrite::Accepted)
         {
@@ -328,7 +338,8 @@ namespace ck::procedural_action
         auto Active = 0;
         for (const auto& Entry : _Streams)
         { if (NOT Entry.Value.Terminal) { ++Active; } }
-        if (Active >= _Capacity.Get_MaxConcurrentInstances()) { return EReceiptStoreWrite::CapacityExceeded; }
+        if (Active >= _Capacity.Get_MaxConcurrentInstances())
+        { return EReceiptStoreWrite::CapacityExceeded; }
         const auto Id = ++_IdentityHighWater;
         auto Stream = FStream{};
         Stream.Identity = FCk_ProceduralAction_Identity{Id};
@@ -346,7 +357,8 @@ namespace ck::procedural_action
         -> EReceiptStoreWrite
     {
         auto* Stream = _Streams.Find(InIdentity.Get_Value());
-        if (Stream == nullptr) { return EReceiptStoreWrite::InvalidIdentity; }
+        if (Stream == nullptr)
+        { return EReceiptStoreWrite::InvalidIdentity; }
         if (Stream->HasChannelBinding || Stream->LastSequence != 0
             || (InClaimedLimbIds.IsEmpty() && NOT InHasBodyClaim)
             || InClaimedLimbIds.Num() > receipt_limits::MaxClaimedLimbs)
@@ -354,7 +366,8 @@ namespace ck::procedural_action
         auto Seen = TSet<FName>{};
         for (const auto Id : InClaimedLimbIds)
         {
-            if (Id.IsNone() || Seen.Contains(Id)) { return EReceiptStoreWrite::InvalidRecord; }
+            if (Id.IsNone() || Seen.Contains(Id))
+            { return EReceiptStoreWrite::InvalidRecord; }
             Seen.Add(Id);
         }
         Stream->ClaimedLimbIds = InClaimedLimbIds;
@@ -426,11 +439,16 @@ namespace ck::procedural_action
         -> EReceiptStoreWrite
     {
         auto* Stream = _Streams.Find(InIdentity.Get_Value());
-        if (Stream == nullptr) { return EReceiptStoreWrite::InvalidIdentity; }
-        if (Stream->Terminal) { return EReceiptStoreWrite::AlreadyTerminal; }
-        if (Stream->WindowsClosed) { return EReceiptStoreWrite::AlreadyClosed; }
-        if (NOT Stream->HasChannelBinding) { return EReceiptStoreWrite::InvalidRecord; }
-        if (Stream->EntityRemoved) { return EReceiptStoreWrite::InvalidRecord; }
+        if (Stream == nullptr)
+        { return EReceiptStoreWrite::InvalidIdentity; }
+        if (Stream->Terminal)
+        { return EReceiptStoreWrite::AlreadyTerminal; }
+        if (Stream->WindowsClosed)
+        { return EReceiptStoreWrite::AlreadyClosed; }
+        if (NOT Stream->HasChannelBinding)
+        { return EReceiptStoreWrite::InvalidRecord; }
+        if (Stream->EntityRemoved)
+        { return EReceiptStoreWrite::InvalidRecord; }
         const auto& Stamp = InReceipt.Get_Stamp();
         const auto& Interval = InReceipt.Get_Interval();
         const auto From = Interval.Get_FromTime().Get_Seconds();
@@ -479,7 +497,8 @@ namespace ck::procedural_action
         auto WindowIds = TSet<FName>{};
         for (const auto Id : Interval.Get_Windows())
         {
-            if (Id.IsNone() || WindowIds.Contains(Id)) { return EReceiptStoreWrite::InvalidRecord; }
+            if (Id.IsNone() || WindowIds.Contains(Id))
+            { return EReceiptStoreWrite::InvalidRecord; }
             WindowIds.Add(Id);
         }
         auto LastEventTime = From;
@@ -546,9 +565,12 @@ namespace ck::procedural_action
         -> EReceiptStoreWrite
     {
         auto* Stream = _Streams.Find(InIdentity.Get_Value());
-        if (Stream == nullptr) { return EReceiptStoreWrite::InvalidIdentity; }
-        if (Stream->Terminal) { return EReceiptStoreWrite::AlreadyTerminal; }
-        if (Stream->WindowsClosed) { return EReceiptStoreWrite::AlreadyClosed; }
+        if (Stream == nullptr)
+        { return EReceiptStoreWrite::InvalidIdentity; }
+        if (Stream->Terminal)
+        { return EReceiptStoreWrite::AlreadyTerminal; }
+        if (Stream->WindowsClosed)
+        { return EReceiptStoreWrite::AlreadyClosed; }
         Stream->Records.Add(FCk_ProceduralAction_Record{InIdentity, ++Stream->LastSequence,
             ECk_ProceduralAction_RecordKind::WindowsClosed, {}, Stream->ActiveWindowIds,
             FCk_ProceduralAction_Result{ECk_ProceduralAction_Outcome::None,
@@ -575,12 +597,15 @@ namespace ck::procedural_action
         -> EReceiptStoreWrite
     {
         auto* Stream = _Streams.Find(InIdentity.Get_Value());
-        if (Stream == nullptr) { return EReceiptStoreWrite::InvalidIdentity; }
-        if (Stream->Terminal) { return EReceiptStoreWrite::AlreadyTerminal; }
+        if (Stream == nullptr)
+        { return EReceiptStoreWrite::InvalidIdentity; }
+        if (Stream->Terminal)
+        { return EReceiptStoreWrite::AlreadyTerminal; }
         if (InResult.Get_Outcome() == ECk_ProceduralAction_Outcome::None
             || InResult.Get_Recovery() == ECk_ProceduralAction_Recovery::Pending)
         { return EReceiptStoreWrite::InvalidRecord; }
-        if (NOT Stream->WindowsClosed) { CloseWindows(InIdentity, InResult.Get_Reason()); }
+        if (NOT Stream->WindowsClosed)
+        { CloseWindows(InIdentity, InResult.Get_Reason()); }
         auto Record = FCk_ProceduralAction_Record{InIdentity, ++Stream->LastSequence,
             ECk_ProceduralAction_RecordKind::Terminal, {}, {}, InResult};
         Record.Set_Context(InContext);
@@ -598,7 +623,8 @@ namespace ck::procedural_action
         -> bool
     {
         auto* Stream = _Streams.Find(InIdentity.Get_Value());
-        if (Stream == nullptr) { return false; }
+        if (Stream == nullptr)
+        { return false; }
         Stream->EntityRemoved = true;
         if (Stream->Terminal && Stream->AcknowledgedThrough == Stream->LastSequence)
         { RemoveStream(InIdentity.Get_Value()); }
@@ -631,9 +657,11 @@ namespace ck::procedural_action
         auto Records = TArray<FCk_ProceduralAction_Record>{};
         for (const auto& Record : Stream->Records)
         {
-            if (Record.Get_StreamSequence() <= EffectiveCursor) { continue; }
+            if (Record.Get_StreamSequence() <= EffectiveCursor)
+            { continue; }
             Records.Add(Record);
-            if (Records.Num() >= InMaxRecords) { break; }
+            if (Records.Num() >= InMaxRecords)
+            { break; }
         }
         const auto LastReturnedSequence = Records.IsEmpty()
             ? EffectiveCursor : Records.Last().Get_StreamSequence();
@@ -654,7 +682,8 @@ namespace ck::procedural_action
         if (InIdentity.Get_Value() <= 0 || InIdentity.Get_Value() > _IdentityHighWater)
         { return ECk_ProceduralAction_ReadResult::InvalidCursor; }
         auto* Stream = _Streams.Find(InIdentity.Get_Value());
-        if (Stream == nullptr) { return ECk_ProceduralAction_ReadResult::StreamExpired; }
+        if (Stream == nullptr)
+        { return ECk_ProceduralAction_ReadResult::StreamExpired; }
         if (InThroughStreamSequence < 0 || InThroughStreamSequence > Stream->LastSequence)
         { return ECk_ProceduralAction_ReadResult::InvalidCursor; }
         Stream->AcknowledgedThrough = FMath::Max(Stream->AcknowledgedThrough, InThroughStreamSequence);
@@ -688,7 +717,8 @@ namespace ck::procedural_action
         }
         Stream->Records.RemoveAll([this, Stream](const FCk_ProceduralAction_Record& InRecord)
         {
-            if (InRecord.Get_StreamSequence() > Stream->AcknowledgedThrough) { return false; }
+            if (InRecord.Get_StreamSequence() > Stream->AcknowledgedThrough)
+            { return false; }
             if (InRecord.Get_Kind() == ECk_ProceduralAction_RecordKind::AcceptedPose)
             {
                 --Stream->PendingOrdinaryCount;
@@ -715,9 +745,18 @@ namespace ck::procedural_action
         for (const auto& Entry : _Streams)
         {
             const auto& Stream = Entry.Value;
-            if (Stream.EntityRemoved && Stream.Terminal
-                && _ServiceTime - Stream.TerminalServiceTime >= receipt_limits::OrphanRetention)
+            if (NOT Stream.Terminal)
+            { continue; }
+            if (Stream.EntityRemoved && _ServiceTime - Stream.TerminalServiceTime >= receipt_limits::OrphanRetention)
             { Expired.Add(Entry.Key); }
+            else if (NOT Stream.EntityRemoved
+                && _ServiceTime - Stream.TerminalServiceTime >= receipt_limits::UnacknowledgedTerminalRetention)
+            {
+                procedural_animation::Warning(TEXT("ProceduralAction stream [{}] expired unacknowledged [{}] s after "
+                    "its terminal record; releasing it."), Stream.Identity.Get_Value(),
+                    receipt_limits::UnacknowledgedTerminalRetention.Get_Seconds());
+                Expired.Add(Entry.Key);
+            }
         }
         for (const auto Id : Expired) { RemoveStream(Id); }
         return true;
@@ -758,7 +797,8 @@ namespace ck::procedural_action
         -> FCk_ProceduralAction_Receipt
     {
         const auto* Stream = _Streams.Find(InIdentity.Get_Value());
-        if (Stream == nullptr) { return {}; }
+        if (Stream == nullptr)
+        { return {}; }
         for (auto Index = Stream->Records.Num() - 1; Index >= 0; --Index)
         {
             if (Stream->Records[Index].Get_Kind() == ECk_ProceduralAction_RecordKind::AcceptedPose)

@@ -40,7 +40,8 @@ namespace ck::procedural_action
         }
         const auto Interpolated = InFrom.Get_Seconds()
             + (InRequested.Get_Seconds() - InFrom.Get_Seconds()) * InFraction;
-        if (NOT FMath::IsFinite(Interpolated)) { return false; }
+        if (NOT FMath::IsFinite(Interpolated))
+        { return false; }
         OutTime = FCk_Time{FMath::Clamp(Interpolated, InFrom.Get_Seconds(), InMaximum.Get_Seconds())};
         return OutTime > InFrom;
     }

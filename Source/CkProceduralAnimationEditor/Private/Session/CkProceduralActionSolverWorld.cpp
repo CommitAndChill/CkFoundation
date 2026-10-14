@@ -97,6 +97,7 @@ auto
     _Clip.Reset(InClip);
     _PlaySpec = FCk_ProceduralAction_PlaySpec{TSoftObjectPtr<UCk_ProceduralAction_Data>{InClip}};
     _PlaySpec.Set_SlotBindings(InSlotBindings);
+    _PlaySpec.Set_Delivery(ECk_ProceduralAction_Delivery::Explicit);
     _PreviewRevision = InPreviewRevision;
     if (NOT BuildWorld())
     {

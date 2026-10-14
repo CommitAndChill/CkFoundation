@@ -36,7 +36,8 @@ namespace ck::procedural_action
         {
             for (auto Index = 0; Index + 1 < InKeys.Num(); ++Index)
             {
-                if (InTime <= InKeys[Index + 1].Get_Time().Get_Value()) { return Index; }
+                if (InTime <= InKeys[Index + 1].Get_Time().Get_Value())
+                { return Index; }
             }
             return FMath::Max(0, InKeys.Num() - 2);
         }
@@ -76,8 +77,10 @@ namespace ck::procedural_action
                 const auto Carried = FVectorKey{FCk_FloatRange_0to1{0.0}, InCarried, FVector::ZeroVector, FVector::ZeroVector};
                 return BlendVector(Carried, First, InTime, InInterpolation);
             }
-            if (InKeys.Num() == 1 || InTime <= First.Get_Time().Get_Value()) { return First.Get_Value(); }
-            if (InTime >= InKeys.Last().Get_Time().Get_Value()) { return InKeys.Last().Get_Value(); }
+            if (InKeys.Num() == 1 || InTime <= First.Get_Time().Get_Value())
+            { return First.Get_Value(); }
+            if (InTime >= InKeys.Last().Get_Time().Get_Value())
+            { return InKeys.Last().Get_Value(); }
             const auto Index = Segment(InKeys, InTime);
             return BlendVector(InKeys[Index], InKeys[Index + 1], InTime, InInterpolation);
         }
@@ -96,8 +99,10 @@ namespace ck::procedural_action
                 const auto Carried = (InCarried | First.Get_Value()) < 0.0 ? -InCarried : InCarried;
                 return FQuat::Slerp(Carried, First.Get_Value(), FMath::Clamp(InTime / FirstTime, 0.0, 1.0)).GetNormalized();
             }
-            if (InKeys.Num() == 1 || InTime <= FirstTime) { return First.Get_Value(); }
-            if (InTime >= InKeys.Last().Get_Time().Get_Value()) { return InKeys.Last().Get_Value(); }
+            if (InKeys.Num() == 1 || InTime <= FirstTime)
+            { return First.Get_Value(); }
+            if (InTime >= InKeys.Last().Get_Time().Get_Value())
+            { return InKeys.Last().Get_Value(); }
             const auto Index = Segment(InKeys, InTime);
             const auto Span = InKeys[Index + 1].Get_Time().Get_Value() - InKeys[Index].Get_Time().Get_Value();
             const auto Alpha = Span > 0.0 ? FMath::Clamp((InTime - InKeys[Index].Get_Time().Get_Value()) / Span, 0.0, 1.0) : 0.0;
@@ -173,7 +178,8 @@ namespace ck::procedural_action
             if (FVector::Dist(InA.Get_Body().GetTranslation(), InB.Get_Body().GetTranslation()) > MaxTravel
                 || AngularDeltaDegrees(InA.Get_Body().GetRotation(), InB.Get_Body().GetRotation()) > MaxAngle)
             { return false; }
-            if (InA.Get_Limbs().Num() != InB.Get_Limbs().Num()) { return false; }
+            if (InA.Get_Limbs().Num() != InB.Get_Limbs().Num())
+            { return false; }
             for (auto Index = 0; Index < InA.Get_Limbs().Num(); ++Index)
             {
                 if (InA.Get_Limbs()[Index].Get_Slot() != InB.Get_Limbs()[Index].Get_Slot()
@@ -208,7 +214,8 @@ namespace ck::procedural_action
         for (const auto& Slot : InClip.Get_Slots())
         {
             const auto* InitialLimb = InInitial.Get_Limbs().Find(Slot.Get_Id());
-            if (InitialLimb == nullptr || NOT evaluation_detail::IsRigid(*InitialLimb)) { OutPose = {}; return false; }
+            if (InitialLimb == nullptr || NOT evaluation_detail::IsRigid(*InitialLimb))
+            { OutPose = {}; return false; }
             const auto& InitialTransform = *InitialLimb;
             auto Limb = FLimbPose{};
             Limb.Get_Slot() = Slot.Get_Id();
@@ -216,7 +223,8 @@ namespace ck::procedural_action
             Limb.Get_Orientation() = InitialTransform.GetRotation();
             if (const auto* Bend = InInitial.Get_BendDirections().Find(Slot.Get_Id()))
             {
-                if (NOT evaluation_detail::IsFinite(*Bend) || Bend->SizeSquared() <= 1.0e-8) { OutPose = {}; return false; }
+                if (NOT evaluation_detail::IsFinite(*Bend) || Bend->SizeSquared() <= 1.0e-8)
+                { OutPose = {}; return false; }
                 Limb.Get_BendDirection() = Bend->GetSafeNormal();
             }
             OutPose.Get_Limbs().Add(Limb);
@@ -233,7 +241,8 @@ namespace ck::procedural_action
             for (const auto& Track : Phase.Get_LimbTracks())
             {
                 auto* Limb = OutPose.Get_Limbs().FindByPredicate([&](const FLimbPose& InLimb) { return InLimb.Get_Slot() == Track.Get_Slot(); });
-                if (Limb == nullptr) { OutPose = {}; return false; }
+                if (Limb == nullptr)
+                { OutPose = {}; return false; }
                 Limb->Get_ReachPolicy() = Track.Get_ReachPolicy();
                 if (NOT Track.Get_PositionKeys().IsEmpty())
                 { Limb->Get_Position() = evaluation_detail::SampleVector(Track.Get_PositionKeys(), Progress, Track.Get_Interpolation(), Limb->Get_Position()); }
@@ -242,13 +251,15 @@ namespace ck::procedural_action
                 if (NOT Track.Get_BendKeys().IsEmpty())
                 {
                     const auto Bend = evaluation_detail::SampleVector(Track.Get_BendKeys(), Progress, Track.Get_Interpolation(), Limb->Get_BendDirection());
-                    if (Bend.SizeSquared() <= 1.0e-8) { OutPose = {}; return false; }
+                    if (Bend.SizeSquared() <= 1.0e-8)
+                    { OutPose = {}; return false; }
                     Limb->Get_BendDirection() = Bend.GetSafeNormal();
                     Limb->Get_HasBend() = true;
                 }
             }
             OutPose.Get_PhaseIndex() = PhaseIndex;
-            if (InTimeSeconds <= PhaseEnd) { break; }
+            if (InTimeSeconds <= PhaseEnd)
+            { break; }
         }
         return true;
     }
@@ -274,7 +285,8 @@ namespace ck::procedural_action
             || InBudget.Get_MaxSamples() <= 0)
         { return false; }
         auto Current = FEvaluatedPose{};
-        if (NOT Evaluate(InClip, InInitial, InStart, Current)) { return false; }
+        if (NOT Evaluate(InClip, InInitial, InStart, Current))
+        { return false; }
         auto Accepted = InStartSeconds;
         const auto Requested = FMath::Min(InRequestedEndSeconds, InClip.Get_Duration().Get_Seconds());
         while (Accepted < Requested && OutInterval.Get_Samples().Num() < InBudget.Get_MaxSamples())
@@ -283,21 +295,26 @@ namespace ck::procedural_action
             for (const auto& Phase : InClip.Get_Phases())
             {
                 const auto Boundary = (Phase.Get_Start() + Phase.Get_Duration()).Get_Seconds();
-                if (Boundary > Accepted && Boundary < End) { End = Boundary; }
+                if (Boundary > Accepted && Boundary < End)
+                { End = Boundary; }
                 for (const auto CriticalTime : Phase.Get_CriticalTimes())
                 {
                     const auto Time = CriticalTime.Get_Seconds();
-                    if (Time > Accepted && Time < End) { End = Time; }
+                    if (Time > Accepted && Time < End)
+                    { End = Time; }
                 }
             }
             for (const auto& Event : InClip.Get_Events())
             {
                 const auto EventTime = Event.Get_Time().Get_Seconds();
-                if (EventTime > Accepted && EventTime < End) { End = EventTime; }
+                if (EventTime > Accepted && EventTime < End)
+                { End = EventTime; }
             }
-            if (End <= Accepted) { OutInterval = {}; return false; }
+            if (End <= Accepted)
+            { OutInterval = {}; return false; }
             auto Next = FEvaluatedPose{};
-            if (NOT Evaluate(InClip, InInitial, FCk_Time{End}, Next)) { OutInterval = {}; return false; }
+            if (NOT Evaluate(InClip, InInitial, FCk_Time{End}, Next))
+            { OutInterval = {}; return false; }
             auto Refinements = 0;
             while (NOT evaluation_detail::WithinAuthoredBudget(Current, Next, InBudget) && Refinements++ < 32)
             {
@@ -305,7 +322,8 @@ namespace ck::procedural_action
                 if (End <= Accepted || NOT Evaluate(InClip, InInitial, FCk_Time{End}, Next))
                 { OutInterval = {}; return false; }
             }
-            if (NOT evaluation_detail::WithinAuthoredBudget(Current, Next, InBudget)) { OutInterval = {}; return false; }
+            if (NOT evaluation_detail::WithinAuthoredBudget(Current, Next, InBudget))
+            { OutInterval = {}; return false; }
             for (const auto& Event : InClip.Get_Events())
             {
                 const auto EventTime = Event.Get_Time().Get_Seconds();

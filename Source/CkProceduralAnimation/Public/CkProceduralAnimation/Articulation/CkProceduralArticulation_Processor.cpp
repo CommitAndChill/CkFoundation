@@ -1,6 +1,7 @@
 #include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Processor.h"
 
 #include "CkProceduralAnimation/Core/CkProceduralLimbSolve.h"
+#include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Control.h"
 #include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Utils.h"
 #include "CkProceduralAnimation/ActionPlayer/CkProceduralActionPlayer_Fragment.h"
 #include "CkProceduralAnimation/BodyPose/CkProceduralBodyPose_Fragment.h"
@@ -88,6 +89,14 @@ namespace ck
         FFragment_ProceduralArticulation_Health& InHealth)
         -> void
     {
+        FCk_ProceduralArticulation_Control::ReleaseDeadClaims(InHandle);
+
+        // A transient fault is the other writer's frame, not a broken rig: re-arm and republish.
+        const auto TransientFault = InHealth._State == ECk_ProceduralArticulation_Health::Faulted
+            && (InHealth._Fault == ECk_ProceduralArticulation_Fault::SettlementMismatch
+                || InHealth._Fault == ECk_ProceduralArticulation_Fault::SettlementTimeout);
+        if (TransientFault)
+        { InHealth.Clear(); }
         if (InHealth._State == ECk_ProceduralArticulation_Health::Faulted)
         { return; }
 

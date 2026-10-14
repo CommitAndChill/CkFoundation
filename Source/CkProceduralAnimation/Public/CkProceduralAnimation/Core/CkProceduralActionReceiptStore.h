@@ -23,6 +23,9 @@ namespace ck::procedural_action
         constexpr int32 RetainedInstancesPerConcurrent = 4;
         constexpr int64 PoseTransformsPerRecord = 32;
         constexpr auto OrphanRetention = FCk_Time{2.0};
+        // A terminal Explicit stream nobody acknowledges is released after this, so a consumer that never reads
+        // cannot hold the player's capacity forever.
+        constexpr auto UnacknowledgedTerminalRetention = FCk_Time{5.0};
     }
 
     // The store's derived budget: see FCk_ProceduralAction_Capacity.

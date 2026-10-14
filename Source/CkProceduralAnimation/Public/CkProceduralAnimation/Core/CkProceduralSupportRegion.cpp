@@ -69,7 +69,8 @@ namespace ck::procedural_support
             TArray<FVector>* OutProjectedRegion)
         -> FObservation
     {
-        if (OutProjectedRegion != nullptr) { OutProjectedRegion->Reset(); }
+        if (OutProjectedRegion != nullptr)
+        { OutProjectedRegion->Reset(); }
         if (NOT ValidatePolicy(InPolicy))
         { return FObservation{EResult::InvalidPolicy, 0, 0.0}; }
         if (InPolicy.Get_Mode() == ECk_ProceduralLimbControl_SupportMode::Disabled)
@@ -172,7 +173,8 @@ namespace ck::procedural_support
             for (const auto& Point : Hull)
             {
                 const auto Vertex = InRootProxy + AxisX * Point.X + AxisY * Point.Y;
-                if (Vertex.ContainsNaN()) { return FObservation{EResult::InvalidContact, Count, 0.0}; }
+                if (Vertex.ContainsNaN())
+                { return FObservation{EResult::InvalidContact, Count, 0.0}; }
                 Vertices.Add(Vertex);
             }
             OutProjectedRegion->Append(Vertices);

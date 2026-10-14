@@ -55,10 +55,15 @@ namespace ck
                 Result = ECk_Request_OperationResult::Failed_Cancelled;
                 return;
             }
-            if (NOT PlayerValid || InAction._State == ECk_ProceduralAction_State::Finished
+            if (NOT PlayerValid)
+            { return; }
+            if (InAction._State == ECk_ProceduralAction_State::Finished
                 || InAction._State == ECk_ProceduralAction_State::Cancelling
                 || InAction._State == ECk_ProceduralAction_State::Returning)
-            { return; }
+            {
+                Result = ECk_Request_OperationResult::Succeeded;
+                return;
+            }
             InAction._PendingStageKey.Reset();
             InAction._PendingHoldStageKey.Reset();
             InAction._Result = FCk_ProceduralAction_Result{
@@ -93,7 +98,13 @@ namespace ck
                 Result = ECk_Request_OperationResult::Failed_Cancelled;
                 return;
             }
-            if (NOT PlayerValid || InAction._ReleaseWhenFinished) { return; }
+            if (NOT PlayerValid)
+            { return; }
+            if (InAction._ReleaseWhenFinished)
+            {
+                Result = ECk_Request_OperationResult::Succeeded;
+                return;
+            }
             InAction._ReleaseWhenFinished = true;
             InAction._PendingStageKey.Reset();
             InAction._PendingHoldStageKey.Reset();
@@ -131,7 +142,8 @@ namespace ck
             }
             Result = ECk_Request_OperationResult::Succeeded;
         }}), policy::DontResetContainer{});
-        if (InRequests._Requests.IsEmpty()) { InHandle.Remove<MarkedDirtyBy>(); }
+        if (InRequests._Requests.IsEmpty())
+        { InHandle.Remove<MarkedDirtyBy>(); }
     }
 
     auto

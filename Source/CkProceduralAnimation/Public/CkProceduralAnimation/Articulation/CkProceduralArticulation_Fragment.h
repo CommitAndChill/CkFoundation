@@ -24,6 +24,9 @@ namespace ck
 
     private:
         TArray<FCk_ArticulationControlToken> _LimbOwners;
+        // Tokens whose claimed limb died since their claims were last released; read by the controller's
+        // interruption query and cleared by ReleaseClaims.
+        TArray<FCk_ArticulationControlToken> _LostLimbOwners;
         FCk_ArticulationControlToken _BodyOwner;
         uint64 _Revision = 0;
         uint64 _NextBatchNonce = 1;
@@ -37,6 +40,7 @@ namespace ck
 
     public:
         CK_PROPERTY_GET(_Revision);
+        CK_PROPERTY_GET(_LostLimbOwners);
         CK_DEFINE_CONSTRUCTORS(FFragment_ProceduralArticulation_Claims, _LimbOwners);
     };
 
@@ -124,6 +128,20 @@ namespace ck
         FTransform _ObservedPart = FTransform::Identity;
         TArray<FCk_Handle_Transform> _FaultObservedHandles;
         TArray<FTransform> _FaultObservedPoses;
+
+    public:
+        auto
+            Clear()
+            -> void
+        {
+            _State = ECk_ProceduralArticulation_Health::Operational;
+            _Fault = ECk_ProceduralArticulation_Fault::None;
+            _OffendingLimb = NAME_None;
+            _OffendingPart = INDEX_NONE;
+            _ObservedPart = FTransform::Identity;
+            _FaultObservedHandles.Reset();
+            _FaultObservedPoses.Reset();
+        }
 
     public:
         CK_PROPERTY_GET(_State);

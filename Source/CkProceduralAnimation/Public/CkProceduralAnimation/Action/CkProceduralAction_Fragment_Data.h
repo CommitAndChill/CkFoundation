@@ -314,7 +314,7 @@ private:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite,
               Category = "Delivery", meta = (AllowPrivateAccess = true))
-    ECk_ProceduralAction_Delivery _Delivery = ECk_ProceduralAction_Delivery::Explicit;
+    ECk_ProceduralAction_Delivery _Delivery = ECk_ProceduralAction_Delivery::Auto;
 
 public:
     CK_PROPERTY_GET(_Clip);

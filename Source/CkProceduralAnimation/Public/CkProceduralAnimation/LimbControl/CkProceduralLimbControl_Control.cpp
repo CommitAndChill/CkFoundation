@@ -3,6 +3,7 @@
 
 #include "CkProceduralAnimation/LimbControl/CkProceduralLimbControl_Fragment.h"
 #include "CkProceduralAnimation/ActionPlayer/CkProceduralActionPlayer_Fragment.h"
+#include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Fragment.h"
 #include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Utils.h"
 #include "CkProceduralAnimation/Limb/CkProceduralLimb_Utils.h"
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Utils.h"
@@ -261,6 +262,9 @@ auto
     { return TEXT("OwnerLost"); }
     if (UCk_Utils_ProceduralArticulation_UE::Get_Health(InSubject) == ECk_ProceduralArticulation_Health::Faulted)
     { return TEXT("ArticulationFaulted"); }
+    if (InSubject.Has<ck::FFragment_ProceduralArticulation_Claims>()
+        && InSubject.Get<ck::FFragment_ProceduralArticulation_Claims>().Get_LostLimbOwners().Contains(InToken))
+    { return FName{TEXT("LimbUnavailable")}; }
     if (NOT Controller->Get_LocomotorIds().IsEmpty())
     {
         const auto Observation = FCk_ProceduralGaitParticipation_Control::GetObservation(
@@ -456,19 +460,22 @@ auto
         {
             const auto* Limb = Controller._ReturnActual.Get_Limbs().FindByPredicate([Id](const auto& InLimb)
             { return InLimb.Get_Id() == Id; });
-            if (Limb == nullptr) { return false; }
+            if (Limb == nullptr)
+            { return false; }
             Targets.Emplace(Id, Limb->Get_AcceptedEndpoint(), TOptional<FVector>{},
                 ECk_ArticulationReachPolicy::ProjectToReach);
         }
         auto Body = TOptional<FTransform>{};
         if (Controller.Get_Channels().Get_Body())
         {
-            if (NOT Controller._ReturnActual.Get_HasBodyPresentation()) { return false; }
+            if (NOT Controller._ReturnActual.Get_HasBodyPresentation())
+            { return false; }
             Body = Controller._ReturnActual.Get_BodyPresentation();
         }
         Held.Emplace(Controller.Get_Token(), 0, MoveTemp(Targets), Body);
     }
-    if (Held.IsEmpty()) { return false; }
+    if (Held.IsEmpty())
+    { return false; }
     InOutCandidates.Append(MoveTemp(Held));
     return true;
 }
@@ -681,7 +688,8 @@ auto
                 Controller._DedicatedReturnOriginTime = Controller._AcceptedReturnTime;
                 Controller._DedicatedReturned = Controller._Channels.Get_LimbIds().Num()
                     == Controller._LocomotorIds.Num() && NOT Controller._Channels.Get_Body();
-                if (HasLocomotion) { Controller._LocomotionReturned = false; }
+                if (HasLocomotion)
+                { Controller._LocomotionReturned = false; }
                 if (HasLocomotion && Controller._RecoveryStarted
                     && FCk_ProceduralGaitParticipation_Control::RebaseRecoveryStart(
                         Gait, Controller._Token, Actual) != ECk_ProceduralGaitParticipation_Result::Accepted)

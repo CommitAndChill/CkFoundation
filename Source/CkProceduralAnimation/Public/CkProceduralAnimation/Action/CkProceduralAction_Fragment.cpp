@@ -9,7 +9,8 @@ namespace ck
         ECk_ProceduralAction_State InState)
         -> void
     {
-        if (_State == InState) { return; }
+        if (_State == InState)
+        { return; }
         const auto Terminal = InState == ECk_ProceduralAction_State::Finished
             ? TOptional<FCk_ProceduralAction_Terminal>{FCk_ProceduralAction_Terminal{
                 InParams.Get_Identity(), _Generation, _Result, _Context}}

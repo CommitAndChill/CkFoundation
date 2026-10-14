@@ -49,11 +49,13 @@ namespace ck::procedural_action
             { return false; }
             for (auto Other = 0; Other < Index; ++Other)
             {
-                if (InPose.Get_Limbs()[Other].Get_Id() == Limb.Get_Id()) { return false; }
+                if (InPose.Get_Limbs()[Other].Get_Id() == Limb.Get_Id())
+                { return false; }
             }
             for (const auto& Segment : Limb.Get_Segments())
             {
-                if (NOT IsSegmentPoseValid(Segment)) { return false; }
+                if (NOT IsSegmentPoseValid(Segment))
+                { return false; }
             }
         }
         return true;

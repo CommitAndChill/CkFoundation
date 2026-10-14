@@ -65,6 +65,13 @@ public:
         const FCk_ArticulationChannelSet& InChannels)
         -> ECk_ArticulationControlResult;
 
+    // Releases every claim whose limb is no longer live and records the owning tokens as lost.
+    // Runs at the top of FProcessor_ProceduralArticulation_Update::ForEachEntity, before any hold.
+    static auto
+    ReleaseDeadClaims(
+        FCk_Handle_ProceduralArticulation& InSubject)
+        -> void;
+
     static auto
     FailPendingPublication(
         const FCk_Handle_ProceduralArticulation& InSubject,

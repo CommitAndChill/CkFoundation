@@ -82,6 +82,7 @@ namespace ck
     public:
         using Group = FGroup_Transform_Derived;
         using RunAfter = TDepList<FProcessor_ProceduralBodyPose_Update,
+            FProcessor_ProceduralRig_Update,
             FProcessor_ProceduralLimbControl_UpdateRecovery,
             FProcessor_ProceduralAction_HandleRequests,
             FProcessor_ProceduralActionPlayer_HandleRequests>;

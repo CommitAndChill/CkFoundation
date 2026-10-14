@@ -107,6 +107,18 @@ namespace ck
         const FFragment_ProceduralActionPlayer& InPlayer)
         -> void
     {
+        for (auto ActionHandle : InPlayer._Actions)
+        {
+            if (ck::Is_NOT_Valid(ActionHandle) || NOT ActionHandle.Has<FFragment_ProceduralAction>())
+            { continue; }
+            auto& Action = ActionHandle.Get<FFragment_ProceduralAction>();
+            if (Action._State == ECk_ProceduralAction_State::Finished)
+            { continue; }
+            Action._Result = FCk_ProceduralAction_Result{ECk_ProceduralAction_Outcome::SubjectLost,
+                ECk_ProceduralAction_Recovery::NotRequired, NAME_None};
+            Action.CommitState(ActionHandle, ActionHandle.Get<FFragment_ProceduralAction_Params>(),
+                ECk_ProceduralAction_State::Finished);
+        }
         for (const auto& Action : InPlayer._Actions)
         {
             if (ck::IsValid(Action) && NOT Action.Has<FTag_DestroyEntity_Initiate>()
