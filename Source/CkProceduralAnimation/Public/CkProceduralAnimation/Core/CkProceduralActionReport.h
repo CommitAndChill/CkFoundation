@@ -16,7 +16,8 @@ namespace ck::procedural_action
         PublicDiagnostics.Reserve(FMath::Min(InDiagnostics.Num(), content_limits::MaxDiagnostics));
         for (const auto& Diagnostic : InDiagnostics)
         {
-            if (PublicDiagnostics.Num() >= content_limits::MaxDiagnostics) { break; }
+            if (PublicDiagnostics.Num() >= content_limits::MaxDiagnostics)
+            { break; }
             PublicDiagnostics.Emplace(
                 Diagnostic.Get_Severity() == EDiagnosticSeverity::Error
                     ? ECk_ProceduralAction_DiagnosticSeverity::Error

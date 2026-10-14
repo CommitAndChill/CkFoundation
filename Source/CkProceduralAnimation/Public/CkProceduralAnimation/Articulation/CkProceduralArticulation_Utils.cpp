@@ -206,15 +206,11 @@ auto
         && ck_procedural_articulation_utils::Get_IsRigid(
             UCk_Utils_Transform_UE::Get_EntityCurrentTransform(InRoot));
     const auto Valid = RootValid && ck_procedural_articulation_utils::Get_IsLayoutAdmissible(InSpec, InRoot);
-    if (NOT Valid)
-    {
-        CK_ENSURE_IF_NOT(false,
-            TEXT("Procedural articulation Add rejected root [{}]: require a live rigid root/presentation, sealed 0..64 dedicated limb layout, "
-                 "1..8 positive links, finite normalized direct-child part transforms with nonzero visual scale, "
-                 "unique bindings and no competing gait, leg or part writer."), InRoot)
-        { }
-        return {};
-    }
+    CK_ENSURE_IF_NOT(Valid,
+        TEXT("Procedural articulation Add rejected root [{}]: require a live rigid root/presentation, sealed 0..64 dedicated limb layout, "
+             "1..8 positive links, finite normalized direct-child part transforms with nonzero visual scale, "
+             "unique bindings and no competing gait, leg or part writer."), InRoot)
+    { return {}; }
 
     auto Created = TArray<FCk_Handle_ProceduralLimb>{};
     const auto& Layouts = InSpec.Get_Layout().Get_Limbs();
@@ -410,5 +406,26 @@ auto
     }
 
     InArticulation.AddOrGet<ck::FFragment_ProceduralLimbControl_Requests>()._Requests.Emplace(MoveTemp(Request));
+    return InArticulation;
+}
+
+auto
+    UCk_Utils_ProceduralArticulation_UE::
+    Request_ClearFault(
+        FCk_Handle_ProceduralArticulation& InArticulation,
+        const FCk_Request_ProceduralArticulation_ClearFault& InRequest,
+        const FCk_Delegate_Request_OnCompleted& InDelegate)
+    -> FCk_Handle_ProceduralArticulation
+{
+    const auto Valid = ck::IsValid(InArticulation) && Has(InArticulation)
+        && NOT InArticulation.Has<ck::FTag_DestroyEntity_Initiate>();
+    CK_ENSURE_IF_NOT(Valid, TEXT("ProceduralArticulation ClearFault rejected articulation [{}]."), InArticulation)
+    {
+        InDelegate.ExecuteIfBound(InArticulation, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return InArticulation;
+    }
+
+    InArticulation.Get<ck::FFragment_ProceduralArticulation_Health>().Clear();
+    InDelegate.ExecuteIfBound(InArticulation, ECk_Request_OperationResult::Succeeded);
     return InArticulation;
 }

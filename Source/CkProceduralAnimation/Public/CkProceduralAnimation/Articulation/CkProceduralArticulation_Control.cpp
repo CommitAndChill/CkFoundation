@@ -6,6 +6,7 @@
 #include "CkProceduralAnimation/Core/CkProceduralLimbSolve.h"
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Fragment.h"
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Utils.h"
+#include "CkProceduralAnimation/Leg/CkProceduralLeg_Fragment.h"
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Utils.h"
 #include "CkProceduralAnimation/Rig/CkProceduralRig_Processor.h"
 
@@ -59,6 +60,17 @@ namespace ck_procedural_articulation_control
     {
         return InSubject.Get<ck::FFragment_ProceduralArticulation_Health>().Get_State()
             == ECk_ProceduralArticulation_Health::Faulted;
+    }
+
+    auto
+        Get_IsLimbLive(
+            const FCk_Handle_ProceduralLimb& InLimb)
+        -> bool
+    {
+        const auto Leg = UCk_Utils_ProceduralLeg_UE::Cast(InLimb.ConvertToHandle());
+        if (ck::IsValid(Leg))
+        { return ck::procedural_leg::Get_IsLive(Leg); }
+        return ck::IsValid(InLimb) && NOT InLimb.Has<ck::FTag_DestroyEntity_Initiate>();
     }
 
     auto
@@ -699,15 +711,20 @@ auto
         && (Pose.Get_PendingObservation() || Pose.Get_IssuedRevision() != Pose.Get_SettledRevision()
             || Pose._HasControlCandidate))
     { return ECk_ArticulationControlResult::Busy; }
+    // A lost token's dead limbs were released when they died; the rest of its channels still release normally.
+    const auto Lost = Claims._LostLimbOwners.Contains(InToken);
     auto Indices = TArray<int32>{};
     auto Seen = TSet<FName>{};
     for (const auto& Id : InChannels.Get_LimbIds())
     {
         const auto Index = Get_LimbIndex(InSubject, Id);
-        if (Id.IsNone() || Seen.Contains(Id) || NOT Claims._LimbOwners.IsValidIndex(Index)
-            || Claims._LimbOwners[Index] != InToken)
+        if (Id.IsNone() || Seen.Contains(Id) || NOT Claims._LimbOwners.IsValidIndex(Index))
         { return ECk_ArticulationControlResult::ClaimLost; }
         Seen.Add(Id);
+        if (Lost && Claims._LimbOwners[Index] == FCk_ArticulationControlToken{})
+        { continue; }
+        if (Claims._LimbOwners[Index] != InToken)
+        { return ECk_ArticulationControlResult::ClaimLost; }
         Indices.Add(Index);
     }
     if (InChannels.Get_Body() && Claims._BodyOwner != InToken)
@@ -724,8 +741,36 @@ auto
     { Claims._LimbOwners[Index] = FCk_ArticulationControlToken{}; }
     if (InChannels.Get_Body())
     { Claims._BodyOwner = FCk_ArticulationControlToken{}; }
+    Claims._LostLimbOwners.Remove(InToken);
     ++Claims._Revision;
     return ECk_ArticulationControlResult::Accepted;
+}
+
+auto
+    FCk_ProceduralArticulation_Control::
+    ReleaseDeadClaims(
+        FCk_Handle_ProceduralArticulation& InSubject)
+    -> void
+{
+    using namespace ck_procedural_articulation_control;
+    if (NOT Get_IsSubjectLive(InSubject))
+    { return; }
+    auto& Claims = InSubject.Get<ck::FFragment_ProceduralArticulation_Claims>();
+    const auto& Limbs = InSubject.Get<ck::FFragment_ProceduralArticulation_Bindings>().Get_Limbs();
+    auto Released = false;
+    for (auto Index = 0; Index < Claims._LimbOwners.Num(); ++Index)
+    {
+        const auto Owner = Claims._LimbOwners[Index];
+        if (Owner == FCk_ArticulationControlToken{})
+        { continue; }
+        if (Limbs.IsValidIndex(Index) && Get_IsLimbLive(Limbs[Index]))
+        { continue; }
+        Claims._LimbOwners[Index] = FCk_ArticulationControlToken{};
+        Claims._LostLimbOwners.AddUnique(Owner);
+        Released = true;
+    }
+    if (Released)
+    { ++Claims._Revision; }
 }
 
 auto

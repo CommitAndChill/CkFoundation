@@ -124,17 +124,21 @@ namespace ck::procedural_action
                     if (FMath::IsFinite(InRoot) && InRoot > 0.0 && InRoot < 1.0)
                     {
                         const auto Progress = InStart + Span * InRoot;
-                        if (FMath::IsFinite(Progress)) { OutProgress.Add(Progress); }
+                        if (FMath::IsFinite(Progress))
+                        { OutProgress.Add(Progress); }
                     }
                 };
                 if (FMath::Abs(A) <= UE_DOUBLE_SMALL_NUMBER)
                 {
-                    if (FMath::Abs(B) > UE_DOUBLE_SMALL_NUMBER) { AddRoot(-C / (2.0 * B)); }
+                    if (FMath::Abs(B) > UE_DOUBLE_SMALL_NUMBER)
+                    { AddRoot(-C / (2.0 * B)); }
                     continue;
                 }
                 const auto Discriminant = B * B - 3.0 * A * C;
-                if (NOT FMath::IsFinite(Discriminant)) { return false; }
-                if (Discriminant < 0.0) { continue; }
+                if (NOT FMath::IsFinite(Discriminant))
+                { return false; }
+                if (Discriminant < 0.0)
+                { continue; }
                 const auto Root = FMath::Sqrt(Discriminant);
                 AddRoot((-B - Root) / (3.0 * A));
                 AddRoot((-B + Root) / (3.0 * A));
@@ -199,7 +203,8 @@ namespace ck::procedural_action
         auto AddError = [&](FName InCode, const FString& InField, FName InPhase, FName InSlot,
             int32 InKey, const FString& InExpected, const FString& InActual) -> void
         {
-            if (OutDiagnostics.Num() >= content_limits::MaxDiagnostics) { return; }
+            if (OutDiagnostics.Num() >= content_limits::MaxDiagnostics)
+            { return; }
             OutDiagnostics.Add(FDiagnostic{EDiagnosticSeverity::Error, InCode, AssetPath, InField,
                 InPhase, InSlot, InKey, InExpected, InActual});
         };
@@ -207,7 +212,8 @@ namespace ck::procedural_action
         // Reject oversized authored arrays before copying any key or constructing compiled events.
         auto RejectCount = [&](int64 InCount, int64 InMax, const FString& InField) -> bool
         {
-            if (InCount <= InMax) { return false; }
+            if (InCount <= InMax)
+            { return false; }
             AddError(TEXT("ContentLimit"), InField, {}, {}, INDEX_NONE,
                 FString::Printf(TEXT("at most %lld"), InMax), FString::Printf(TEXT("%lld"), InCount));
             return true;
@@ -314,7 +320,8 @@ namespace ck::procedural_action
                 const auto& Key = Phase.Get_BodyKeys()[KeyIndex];
                 const auto KeyPath = FString::Printf(TEXT("%s.BodyKeys[%d]"), *Path, KeyIndex);
                 const auto Time = Key.Get_Time().Get_Value();
-                if (FMath::IsFinite(Time) && Time >= 0.0 && Time <= 1.0) { CriticalProgress.Add(Time); }
+                if (FMath::IsFinite(Time) && Time >= 0.0 && Time <= 1.0)
+                { CriticalProgress.Add(Time); }
                 if (NOT FMath::IsFinite(Time) || Time <= LastTime || Time < 0.0 || Time > 1.0)
                 { AddError(TEXT("KeyTime"), KeyPath + TEXT(".Time"), Phase.Get_Id(), {}, KeyIndex, TEXT("finite strictly increasing [0,1]"), FString::SanitizeFloat(Time)); }
                 LastTime = Time;
@@ -359,7 +366,8 @@ namespace ck::procedural_action
                     {
                         const auto& Key = InKeys[KeyIndex];
                         const auto Time = Key.Get_Time().Get_Value();
-                        if (FMath::IsFinite(Time) && Time >= 0.0 && Time <= 1.0) { CriticalProgress.Add(Time); }
+                        if (FMath::IsFinite(Time) && Time >= 0.0 && Time <= 1.0)
+                        { CriticalProgress.Add(Time); }
                         const auto KeyPath = FString::Printf(TEXT("%s.%s[%d]"), *TrackPath, InName, KeyIndex);
                         if (NOT FMath::IsFinite(Time) || Time <= Previous || Time < 0.0 || Time > 1.0)
                         { AddError(TEXT("KeyTime"), KeyPath + TEXT(".Time"), Phase.Get_Id(), Track.Get_Slot(), KeyIndex, TEXT("finite strictly increasing [0,1]"), FString::SanitizeFloat(Time)); }
@@ -383,7 +391,8 @@ namespace ck::procedural_action
                 {
                     const auto& Key = Track.Get_OrientationKeys()[KeyIndex];
                     const auto Time = Key.Get_Time().Get_Value();
-                    if (FMath::IsFinite(Time) && Time >= 0.0 && Time <= 1.0) { CriticalProgress.Add(Time); }
+                    if (FMath::IsFinite(Time) && Time >= 0.0 && Time <= 1.0)
+                    { CriticalProgress.Add(Time); }
                     const auto KeyPath = FString::Printf(TEXT("%s.OrientationKeys[%d]"), *TrackPath, KeyIndex);
                     if (NOT FMath::IsFinite(Time) || Time <= LastTime || Time < 0.0 || Time > 1.0)
                     { AddError(TEXT("KeyTime"), KeyPath + TEXT(".Time"), Phase.Get_Id(), Track.Get_Slot(), KeyIndex, TEXT("finite strictly increasing [0,1]"), FString::SanitizeFloat(Time)); }
@@ -414,7 +423,8 @@ namespace ck::procedural_action
             }
             for (const auto& Track : CompiledPhase.Get_LimbTracks())
             {
-                if (Track.Get_Interpolation() != ECk_ProceduralAction_Interpolation::Smooth) { continue; }
+                if (Track.Get_Interpolation() != ECk_ProceduralAction_Interpolation::Smooth)
+                { continue; }
                 const auto AddTrackExtrema = [&](const TArray<FVectorKey>& InKeys) -> void
                 {
                     for (auto Index = 0; Index + 1 < InKeys.Num(); ++Index)
@@ -434,11 +444,57 @@ namespace ck::procedural_action
             {
                 for (const auto Progress : CriticalProgress)
                 {
-                    if (Progress <= 0.0 || Progress >= 1.0) { continue; }
+                    if (Progress <= 0.0 || Progress >= 1.0)
+                    { continue; }
                     const auto RelativeTime = InvertProgress(CompiledPhase, Progress);
                     const auto AbsoluteTime = FCk_Time{CompiledPhase.Get_Start().Get_Seconds() + Duration * RelativeTime};
                     if (CompiledPhase.Get_CriticalTimes().IsEmpty() || AbsoluteTime > CompiledPhase.Get_CriticalTimes().Last())
                     { CompiledPhase.Get_CriticalTimes().Add(AbsoluteTime); }
+                }
+            }
+            if (NOT Candidate._Phases.IsEmpty())
+            {
+                const auto& Previous = Candidate._Phases.Last();
+                const auto StartsAtZero = [](const auto& InKeys)
+                { return NOT InKeys.IsEmpty() && InKeys[0].Get_Time().Get_Value() == 0.0; };
+                const auto EndsAtOne = [](const auto& InKeys)
+                { return NOT InKeys.IsEmpty() && InKeys.Last().Get_Time().Get_Value() == 1.0; };
+                const auto SameRotation = [](const FQuat& InA, const FQuat& InB)
+                { return FMath::Abs(InA | InB) > 1.0 - 1.0e-6; };
+                const auto AddBoundaryError = [&](const FString& InField, FName InSlot)
+                {
+                    AddError(TEXT("PhaseBoundary"), InField, Phase.Get_Id(), InSlot, INDEX_NONE,
+                        TEXT("the previous phase's end value"), TEXT("a different start value"));
+                };
+                const auto& Body = CompiledPhase.Get_BodyKeys();
+                const auto& PreviousBody = Previous.Get_BodyKeys();
+                if (StartsAtZero(Body) && EndsAtOne(PreviousBody)
+                    && (FVector::Distance(Body[0].Get_Translation(), PreviousBody.Last().Get_Translation()) > 1.0e-3
+                        || NOT SameRotation(Body[0].Get_Rotation(), PreviousBody.Last().Get_Rotation())))
+                { AddBoundaryError(Path + TEXT(".BodyKeys"), {}); }
+                for (auto TrackIndex = 0; TrackIndex < CompiledPhase.Get_LimbTracks().Num(); ++TrackIndex)
+                {
+                    const auto& Track = CompiledPhase.Get_LimbTracks()[TrackIndex];
+                    const auto* PreviousTrack = Previous.Get_LimbTracks().FindByPredicate(
+                        [&Track](const FCompiledLimbTrack& InTrack) { return InTrack.Get_Slot() == Track.Get_Slot(); });
+                    if (PreviousTrack == nullptr)
+                    { continue; }
+                    const auto TrackPath = FString::Printf(TEXT("%s.LimbTracks[%d]"), *Path, TrackIndex);
+                    const auto VectorsDiffer = [&](const TArray<FVectorKey>& InKeys, const TArray<FVectorKey>& InPrevious,
+                        double InTolerance)
+                    {
+                        return StartsAtZero(InKeys) && EndsAtOne(InPrevious)
+                            && FVector::Distance(InKeys[0].Get_Value(), InPrevious.Last().Get_Value()) > InTolerance;
+                    };
+                    if (VectorsDiffer(Track.Get_PositionKeys(), PreviousTrack->Get_PositionKeys(), 1.0e-3))
+                    { AddBoundaryError(TrackPath + TEXT(".PositionKeys"), Track.Get_Slot()); }
+                    const auto& Orientations = Track.Get_OrientationKeys();
+                    const auto& PreviousOrientations = PreviousTrack->Get_OrientationKeys();
+                    if (StartsAtZero(Orientations) && EndsAtOne(PreviousOrientations)
+                        && NOT SameRotation(Orientations[0].Get_Value(), PreviousOrientations.Last().Get_Value()))
+                    { AddBoundaryError(TrackPath + TEXT(".OrientationKeys"), Track.Get_Slot()); }
+                    if (VectorsDiffer(Track.Get_BendKeys(), PreviousTrack->Get_BendKeys(), 1.0e-4))
+                    { AddBoundaryError(TrackPath + TEXT(".BendKeys"), Track.Get_Slot()); }
                 }
             }
             Candidate._Phases.Add(MoveTemp(CompiledPhase));
@@ -504,8 +560,10 @@ namespace ck::procedural_action
         }
         Candidate._Events.StableSort([](const FCompiledEvent& InA, const FCompiledEvent& InB)
         {
-            if (InA.Get_Time() != InB.Get_Time()) { return InA.Get_Time() < InB.Get_Time(); }
-            if (InA.Get_Kind() != InB.Get_Kind()) { return static_cast<uint8>(InA.Get_Kind()) < static_cast<uint8>(InB.Get_Kind()); }
+            if (InA.Get_Time() != InB.Get_Time())
+            { return InA.Get_Time() < InB.Get_Time(); }
+            if (InA.Get_Kind() != InB.Get_Kind())
+            { return static_cast<uint8>(InA.Get_Kind()) < static_cast<uint8>(InB.Get_Kind()); }
             return InA.Get_AuthoredIndex() < InB.Get_AuthoredIndex();
         });
         auto EqualTimeCount = 0;
@@ -530,7 +588,8 @@ namespace ck::procedural_action
                 break;
             }
         }
-        if (NOT OutDiagnostics.IsEmpty()) { return false; }
+        if (NOT OutDiagnostics.IsEmpty())
+        { return false; }
         Candidate._ContentHash = Hash;
         OutClip = MoveTemp(Candidate);
         return true;

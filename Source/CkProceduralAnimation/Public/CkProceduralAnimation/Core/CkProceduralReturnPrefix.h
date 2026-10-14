@@ -44,7 +44,8 @@ namespace ck::procedural_action
             }
             UnsafeFraction = Fraction;
         }
-        if (NOT HasSafeFraction) { return {}; }
+        if (NOT HasSafeFraction)
+        { return {}; }
         for (auto Improvement = 0; Improvement < 4 && OutProbeCount < 31; ++Improvement)
         {
             const auto Fraction = (SafeFraction + UnsafeFraction) * 0.5;

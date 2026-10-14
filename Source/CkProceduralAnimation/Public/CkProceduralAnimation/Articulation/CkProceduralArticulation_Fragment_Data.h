@@ -4,6 +4,7 @@
 
 #include "CkCore/Macros/CkMacros.h"
 #include "CkEcs/Handle/CkHandle_TypeSafe.h"
+#include "CkEcs/Request/CkRequest_Data.h"
 #include "CkJolt/Query/CkJoltQuery_Data.h"
 
 #include "CkProceduralArticulation_Fragment_Data.generated.h"
@@ -106,4 +107,16 @@ public:
     CK_PROPERTY(_Presentation);
     CK_PROPERTY(_ClearanceSettings);
     CK_DEFINE_CONSTRUCTORS(FCk_ProceduralArticulation_Spec, _Layout, _Bindings);
+};
+
+/** Clears a latched fault. The next update publishes again, skipping bindings whose limb is no longer live; a cause
+ *  that is still present faults again. */
+USTRUCT(BlueprintType)
+struct CKPROCEDURALANIMATION_API FCk_Request_ProceduralArticulation_ClearFault : public FCk_Request_Base
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(FCk_Request_ProceduralArticulation_ClearFault);
+    CK_REQUEST_DEFINE_DEBUG_NAME(FCk_Request_ProceduralArticulation_ClearFault);
 };

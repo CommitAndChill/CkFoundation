@@ -130,4 +130,14 @@ public:
         UPARAM(ref) FCk_Handle_ProceduralArticulation& InArticulation,
         const FCk_Request_ProceduralArticulation_RecoverUnplantedLimbs& InRequest,
         const FCk_Delegate_Request_OnCompleted& InDelegate);
+
+    // Clears a latched fault immediately and completes Succeeded; the next update decides whether the rig holds.
+    UFUNCTION(BlueprintCallable, Category = "Ck|Utils|ProceduralArticulation",
+        DisplayName = "[Ck][ProceduralArticulation] Request Clear Fault",
+        meta = (AutoCreateRefTerm = "InDelegate"))
+    static FCk_Handle_ProceduralArticulation
+    Request_ClearFault(
+        UPARAM(ref) FCk_Handle_ProceduralArticulation& InArticulation,
+        const FCk_Request_ProceduralArticulation_ClearFault& InRequest,
+        const FCk_Delegate_Request_OnCompleted& InDelegate);
 };

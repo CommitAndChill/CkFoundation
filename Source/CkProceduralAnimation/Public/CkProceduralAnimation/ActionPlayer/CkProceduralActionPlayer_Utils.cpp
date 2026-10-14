@@ -34,7 +34,8 @@ auto
     CK_ENSURE_IF_NOT(Valid,
         TEXT("ProceduralActionPlayer Add rejected subject [{}], invalid field [{}]."), InSubject, InvalidField)
     { return {}; }
-    if (NOT FCk_ProceduralLimbControl_Control::Attach(InSubject, InSpec.Get_Locomotion())) { return {}; }
+    if (NOT FCk_ProceduralLimbControl_Control::Attach(InSubject, InSpec.Get_Locomotion()))
+    { return {}; }
 
     InSubject.Add<ck::FFragment_ProceduralActionPlayer_Params>(InSpec.Get_Capacity(), InSpec.Get_Tuning());
     auto& Player = InSubject.Add<ck::FFragment_ProceduralActionPlayer>();
@@ -70,7 +71,8 @@ auto
         const FCk_Handle_ProceduralActionPlayer& InPlayer)
     -> TArray<FCk_ProceduralAction_Identity>
 {
-    if (ck::Is_NOT_Valid(InPlayer) || NOT Has(InPlayer)) { return {}; }
+    if (ck::Is_NOT_Valid(InPlayer) || NOT Has(InPlayer))
+    { return {}; }
     return InPlayer.Get<ck::FFragment_ProceduralActionPlayer>().Get_Receipts()
         .Get_RetainedIdentities();
 }
@@ -84,7 +86,8 @@ auto
     -> FCk_Handle_ProceduralActionPlayer
 {
     auto Request = InRequest;
-    if (InDelegate.IsBound()) { Request.Set_CompletionDelegate(InDelegate); }
+    if (InDelegate.IsBound())
+    { Request.Set_CompletionDelegate(InDelegate); }
     const auto Valid = ck::IsValid(InPlayer) && Has(InPlayer)
         && NOT InPlayer.Has<ck::FTag_DestroyEntity_Initiate>()
         && InRequest.Get_ActionIdentity().Get_Value() > 0
