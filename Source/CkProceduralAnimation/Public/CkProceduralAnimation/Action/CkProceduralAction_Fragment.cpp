@@ -26,6 +26,15 @@ namespace ck
     }
 
     auto
+    FFragment_ProceduralAction::Get_Token(
+        const FFragment_ProceduralAction_Params& InParams) const
+        -> FCk_ArticulationControlToken
+    {
+        return FCk_ArticulationControlToken{static_cast<uint64>(InParams.Get_Identity().Get_Value()),
+            static_cast<uint64>(_Generation)};
+    }
+
+    auto
     FFragment_ProceduralAction::BeginFailureContext(
         const FCk_Handle_ProceduralAction& InHandle,
         const FFragment_ProceduralAction_Params& InParams)

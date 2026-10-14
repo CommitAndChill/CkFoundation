@@ -1,5 +1,6 @@
 #include "CkProceduralAnimation/ActionBuilder/CkProceduralActionBuilder_Utils.h"
 
+#include "CkProceduralAnimation/Core/CkProceduralRigidTransform.h"
 #include "CkProceduralAnimation/Core/CkProceduralActionReport.h"
 #include "CkProceduralAnimation/Core/CkProceduralActionValidation.h"
 
@@ -36,12 +37,12 @@ namespace ck::procedural_action::builder_detail
     Reject(
         const TArray<FDiagnostic>& InDiagnostics)
         -> FCk_ProceduralAction_ValidationReport
-    { return MakePublicReport(ECk_ProceduralAction_ReportStatus::Invalid, false, InDiagnostics); }
+    { return MakePublicReport(ECk_ProceduralAction_ReportStatus::Invalid, InDiagnostics); }
 
     auto
     Accept()
         -> FCk_ProceduralAction_ValidationReport
-    { return MakePublicReport(ECk_ProceduralAction_ReportStatus::Valid, false, {}); }
+    { return MakePublicReport(ECk_ProceduralAction_ReportStatus::Valid, {}); }
 
     auto
     IsFinite(
@@ -63,15 +64,6 @@ namespace ck::procedural_action::builder_detail
         const FVector& InValue)
         -> bool
     { return IsFinite(InValue) && FMath::IsNearlyEqual(InValue.SizeSquared(), 1.0, UnitTolerance); }
-
-    auto
-    IsRigid(
-        const FTransform& InValue)
-        -> bool
-    {
-        return IsFinite(InValue.GetTranslation()) && IsUnit(InValue.GetRotation())
-            && InValue.GetScale3D().Equals(FVector::OneVector, 1.0e-6);
-    }
 
     auto
     IsUnitTime(
@@ -801,65 +793,6 @@ auto
 
 auto
     UCk_Utils_ProceduralActionBuilder_UE::
-    Add_BodyKey(
-        FCk_ProceduralAction_ClipDraft& InDraft,
-        FName InPhaseId,
-        const FCk_ProceduralAction_TransformKey& InKey)
-    -> FCk_ProceduralAction_ValidationReport
-{
-    using namespace ck::procedural_action;
-    auto Diagnostics = TArray<FDiagnostic>{};
-    const auto PhaseIndex = builder_detail::FindPhase(InDraft, InPhaseId);
-    if (PhaseIndex == INDEX_NONE)
-    {
-        builder_detail::AddError(Diagnostics, TEXT("PhaseReference"), TEXT("PhaseId"), InPhaseId, {}, INDEX_NONE,
-            TEXT("declared phase ID"), InPhaseId.ToString());
-        return builder_detail::Reject(Diagnostics);
-    }
-    auto Budget = builder_detail::Make_BudgetFor(InDraft);
-    auto Phase = InDraft.Get_Phases()[PhaseIndex];
-    builder_detail::DoAdd_BodyKey(InDraft, PhaseIndex, Phase, InKey, Budget, Diagnostics);
-    if (NOT Diagnostics.IsEmpty())
-    { return builder_detail::Reject(Diagnostics); }
-    InDraft.Get_Phases()[PhaseIndex] = MoveTemp(Phase);
-    return builder_detail::Accept();
-}
-
-auto
-    UCk_Utils_ProceduralActionBuilder_UE::
-    Add_LimbKey(
-        FCk_ProceduralAction_ClipDraft& InDraft,
-        FName InPhaseId,
-        FCk_FloatRange_0to1 InTime,
-        const FCk_ProceduralAction_LimbPoseTarget& InTarget)
-    -> FCk_ProceduralAction_ValidationReport
-{
-    using namespace ck::procedural_action;
-    auto Diagnostics = TArray<FDiagnostic>{};
-    const auto PhaseIndex = builder_detail::FindPhase(InDraft, InPhaseId);
-    if (PhaseIndex == INDEX_NONE)
-    {
-        builder_detail::AddError(Diagnostics, TEXT("PhaseReference"), TEXT("PhaseId"), InPhaseId, {}, INDEX_NONE,
-            TEXT("declared phase ID"), InPhaseId.ToString());
-        return builder_detail::Reject(Diagnostics);
-    }
-    if (NOT builder_detail::IsUnitTime(InTime.Get_Value()))
-    {
-        builder_detail::AddError(Diagnostics, TEXT("KeyTime"), TEXT("Time"), InPhaseId, InTarget.Get_Slot(), INDEX_NONE,
-            TEXT("finite [0,1]"), FString::SanitizeFloat(InTime.Get_Value()));
-        return builder_detail::Reject(Diagnostics);
-    }
-    auto Budget = builder_detail::Make_BudgetFor(InDraft);
-    auto Phase = InDraft.Get_Phases()[PhaseIndex];
-    builder_detail::DoAdd_LimbTarget(InDraft, PhaseIndex, Phase, InTime.Get_Value(), InTarget, TEXT("Target"), Budget, Diagnostics);
-    if (NOT Diagnostics.IsEmpty())
-    { return builder_detail::Reject(Diagnostics); }
-    InDraft.Get_Phases()[PhaseIndex] = MoveTemp(Phase);
-    return builder_detail::Accept();
-}
-
-auto
-    UCk_Utils_ProceduralActionBuilder_UE::
     Add_PoseKey(
         FCk_ProceduralAction_ClipDraft& InDraft,
         FName InPhaseId,
@@ -884,7 +817,7 @@ auto
     auto Phase = InDraft.Get_Phases()[PhaseIndex];
     if (InPose.Get_BodyMode() == ECk_ProceduralAction_ValueMode::Set)
     {
-        if (NOT builder_detail::IsRigid(InPose.Get_Body()))
+        if (NOT ck::procedural_animation::IsRigid(InPose.Get_Body(), ck::procedural_animation::AuthoredRotationTolerance))
         {
             builder_detail::AddError(Diagnostics, TEXT("TransformKey"), TEXT("Pose.Body"), InPhaseId, {}, INDEX_NONE,
                 TEXT("finite unit-scale rigid transform"), TEXT("malformed transform"));
@@ -945,7 +878,7 @@ auto
             builder_detail::AddError(Diagnostics, TEXT("MissingKey"), Path + TEXT(".BodyKeys"), InPhaseId, {}, INDEX_NONE,
                 TEXT("an existing key at the pose time"), TimeText);
         }
-        else if (NOT builder_detail::IsRigid(InPose.Get_Body()))
+        else if (NOT ck::procedural_animation::IsRigid(InPose.Get_Body(), ck::procedural_animation::AuthoredRotationTolerance))
         {
             builder_detail::AddError(Diagnostics, TEXT("TransformKey"), TEXT("Pose.Body"), InPhaseId, {}, KeyIndex,
                 TEXT("finite unit-scale rigid transform"), TEXT("malformed transform"));
@@ -1034,37 +967,6 @@ auto
     { return builder_detail::Reject(Diagnostics); }
     Phase.Set_LimbTracks(Tracks);
     InDraft.Get_Phases()[PhaseIndex] = MoveTemp(Phase);
-    return builder_detail::Accept();
-}
-
-auto
-    UCk_Utils_ProceduralActionBuilder_UE::
-    Add_Marker(
-        FCk_ProceduralAction_ClipDraft& InDraft,
-        const FCk_ProceduralAction_Marker& InMarker)
-    -> FCk_ProceduralAction_ValidationReport
-{
-    using namespace ck::procedural_action;
-    auto Diagnostics = TArray<FDiagnostic>{};
-    const auto& Markers = InDraft.Get_Markers();
-    if (Markers.Num() >= content_limits::MaxMarkers)
-    {
-        builder_detail::AddError(Diagnostics, TEXT("ContentLimit"), TEXT("Markers"), {}, {}, INDEX_NONE,
-            FString::Printf(TEXT("at most %d"), content_limits::MaxMarkers), TEXT("one more marker"));
-        return builder_detail::Reject(Diagnostics);
-    }
-    const auto Path = FString::Printf(TEXT("Markers[%d]"), Markers.Num());
-    if (InMarker.Get_Id().IsNone() || Markers.ContainsByPredicate([&InMarker](const FCk_ProceduralAction_Marker& InExisting)
-        { return InExisting.Get_Id() == InMarker.Get_Id(); }))
-    {
-        builder_detail::AddError(Diagnostics, TEXT("MarkerId"), Path + TEXT(".Id"), InMarker.Get_At().Get_PhaseId(), {}, INDEX_NONE,
-            TEXT("unique nonempty ID"), InMarker.Get_Id().ToString());
-    }
-    auto Resolved = 0.0;
-    builder_detail::ResolveTimeRef(InDraft, InMarker.Get_At(), Path + TEXT(".At"), Diagnostics, Resolved);
-    if (NOT Diagnostics.IsEmpty())
-    { return builder_detail::Reject(Diagnostics); }
-    InDraft.Get_Markers().Add(InMarker);
     return builder_detail::Accept();
 }
 
@@ -1250,7 +1152,7 @@ auto
             TEXT("rest taken as the slot frame's origin")});
     }
     OutDraft = MoveTemp(Draft);
-    return MakePublicReport(ECk_ProceduralAction_ReportStatus::Valid, false, Warnings);
+    return MakePublicReport(ECk_ProceduralAction_ReportStatus::Valid, Warnings);
 }
 
 auto

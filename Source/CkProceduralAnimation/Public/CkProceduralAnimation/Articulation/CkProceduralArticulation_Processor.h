@@ -17,6 +17,8 @@ namespace ck
         TReadOnly<FFragment_ProceduralArticulation_Params>,
         TReadOnly<FFragment_ProceduralArticulation_Bindings>,
         TReadWrite<FFragment_ProceduralArticulation_Pose>,
+        TReadWrite<FFragment_ProceduralArticulation_LegacyCandidate>,
+        TReadWrite<FFragment_ProceduralArticulation_ControlCandidate>,
         TReadWrite<FFragment_ProceduralArticulation_Health>,
         TExclude<FTag_DestroyEntity_Initiate>,
         CK_IGNORE_PENDING_KILL>
@@ -33,6 +35,8 @@ namespace ck
             const FFragment_ProceduralArticulation_Params& InParams,
             const FFragment_ProceduralArticulation_Bindings& InBindings,
             FFragment_ProceduralArticulation_Pose& InPose,
+            FFragment_ProceduralArticulation_LegacyCandidate& InLegacy,
+            FFragment_ProceduralArticulation_ControlCandidate& InControl,
             FFragment_ProceduralArticulation_Health& InHealth)
             -> void;
     };
@@ -42,6 +46,7 @@ namespace ck
         FCk_Handle_ProceduralArticulation,
         TReadOnly<FFragment_ProceduralArticulation_Params>,
         TReadWrite<FFragment_ProceduralArticulation_Pose>,
+        TReadOnly<FFragment_ProceduralArticulation_LegacyCandidate>,
         TReadWrite<FFragment_ProceduralArticulation_Health>,
         TExclude<FTag_DestroyEntity_Initiate>,
         CK_IGNORE_PENDING_KILL>
@@ -58,6 +63,7 @@ namespace ck
             HandleType InHandle,
             const FFragment_ProceduralArticulation_Params& InParams,
             FFragment_ProceduralArticulation_Pose& InPose,
+            const FFragment_ProceduralArticulation_LegacyCandidate& InLegacy,
             FFragment_ProceduralArticulation_Health& InHealth)
             -> void;
     };

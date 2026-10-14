@@ -5,10 +5,10 @@
 #include "SEditorViewport.h"
 
 class FAdvancedPreviewScene;
-class FCkProceduralActionViewportClient;
+class FCk_ProceduralActionViewportClient;
 class FCk_ProceduralActionAuthoringSession;
 class FCk_ProceduralActionEditorModel;
-class FCkProceduralActionEditorModes;
+class FCk_ProceduralActionEditorModes;
 class FPrimitiveDrawInterface;
 class UStaticMeshComponent;
 struct FStreamableHandle;
@@ -27,7 +27,7 @@ public:
     SLATE_BEGIN_ARGS(SCkProceduralAction_Viewport) {}
         SLATE_ARGUMENT(TSharedPtr<FCk_ProceduralActionAuthoringSession>, Session)
         SLATE_ARGUMENT(TSharedPtr<FCk_ProceduralActionEditorModel>, Model)
-        SLATE_ARGUMENT(TSharedPtr<FCkProceduralActionEditorModes>, Modes)
+        SLATE_ARGUMENT(TSharedPtr<FCk_ProceduralActionEditorModes>, Modes)
         SLATE_ATTRIBUTE(FText, Hud)
     SLATE_END_ARGS()
 
@@ -58,7 +58,7 @@ public:
     { return _Error; }
 
 private:
-    friend class FCkProceduralActionViewportClient;
+    friend class FCk_ProceduralActionViewportClient;
 
     struct FResolved
     {
@@ -130,10 +130,10 @@ private:
 
     TWeakPtr<FCk_ProceduralActionAuthoringSession> _Session;
     TWeakPtr<FCk_ProceduralActionEditorModel> _Model;
-    TWeakPtr<FCkProceduralActionEditorModes> _Modes;
+    TWeakPtr<FCk_ProceduralActionEditorModes> _Modes;
     TAttribute<FText> _Hud;
     TSharedPtr<FAdvancedPreviewScene> _Scene;
-    TSharedPtr<FCkProceduralActionViewportClient> _Client;
+    TSharedPtr<FCk_ProceduralActionViewportClient> _Client;
     TSharedPtr<FStreamableHandle> _LoadHandle;
     UStaticMeshComponent* _BodyComponent = nullptr;
     TMap<FName, UStaticMeshComponent*> _LimbComponents;

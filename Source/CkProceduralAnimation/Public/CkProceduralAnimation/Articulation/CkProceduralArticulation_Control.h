@@ -51,14 +51,6 @@ public:
         -> ECk_ArticulationSettlement;
 
     static auto
-    TryTransferClaims(
-        const FCk_Handle_ProceduralArticulation& InSubject,
-        FCk_ArticulationControlToken InFrom,
-        FCk_ArticulationControlToken InTo,
-        const FCk_ArticulationChannelSet& InChannels)
-        -> ECk_ArticulationControlResult;
-
-    static auto
     ReleaseClaims(
         const FCk_Handle_ProceduralArticulation& InSubject,
         FCk_ArticulationControlToken InToken,
@@ -84,10 +76,4 @@ public:
         FName InLimbId,
         bool InBody)
         -> FCk_ArticulationControlToken;
-
-    static auto
-    GetControlState(
-        const FCk_Handle_ProceduralArticulation& InSubject,
-        FCk_ArticulationControlToken InToken)
-        -> FCk_ArticulationControlState;
 };

@@ -12,8 +12,8 @@ class SCkProceduralAction_TimelineLanes;
 
 /** The clip on a time ruler in seconds: a Sections row (a bar per section with its easing drawn inside and a hollow start
  *  when it starts from the carried pose; drag a boundary to change a duration), a lane per channel with its keys (drag a
- *  key within its section), an Events lane (drag a marker, a window or either window edge) and a Poses row. Right-click
- *  an item to delete it. Selection and the playhead are the model's; every edit is one command. */
+ *  key within its section; a pose label is written beside the keys it names, on the first channel keyed at its time) and an
+ *  Events lane (drag a marker, a window or either window edge). Right-click an item to delete it. Selection and the playhead are the model's; every edit is one command. */
 class SCkProceduralAction_Timeline : public SCompoundWidget
 {
 public:
@@ -54,10 +54,11 @@ public:
     };
     struct FPose
     {
-        FGuid Id;
         FName PhaseId;
+        double KeyTime = 0.0;
         FString Label;
         double Seconds = 0.0;
+        int32 Row = 0;
     };
 
     auto
@@ -85,17 +86,6 @@ private:
     auto
         Get_ViewRange() const
         -> TRange<double>;
-    auto
-        Snap(
-            double InSeconds) const
-        -> double;
-    // The section a raw clip time falls in and its fraction there; a boundary belongs to the section that ends there.
-    auto
-        Get_SectionAt(
-            double InSeconds,
-            FName& OutPhaseId,
-            double& OutFraction) const
-        -> bool;
     auto
         Report(
             bool InSucceeded,

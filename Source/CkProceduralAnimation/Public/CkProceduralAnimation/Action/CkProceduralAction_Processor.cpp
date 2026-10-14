@@ -35,9 +35,7 @@ namespace ck
         auto Player = PlayerHandle;
         auto Subject = PlayerValid ? UCk_Utils_ProceduralArticulation_UE::CastChecked(Player)
             : FCk_Handle_ProceduralArticulation{};
-        const auto Token = FCk_ArticulationControlToken{
-            static_cast<uint64>(InParams.Get_Identity().Get_Value()),
-            static_cast<uint64>(InAction._Generation)};
+        const auto Token = InAction.Get_Token(InParams);
         const auto IsStillLive = [&]() -> bool
         {
             return ck::IsValid(InHandle) && NOT InHandle.Has<FTag_DestroyEntity_Initiate>()
@@ -163,8 +161,7 @@ namespace ck
         {
             auto& PlayerFragment = Player.Get<FFragment_ProceduralActionPlayer>();
             const auto Identity = InParams.Get_Identity();
-            const auto Token = FCk_ArticulationControlToken{static_cast<uint64>(Identity.Get_Value()),
-                static_cast<uint64>(InAction._Generation)};
+            const auto Token = InAction.Get_Token(InParams);
             if (NOT InAction._OwnerLossReconciled && InAction._State != ECk_ProceduralAction_State::Finished)
             {
                 if (InAction._HasClaim)

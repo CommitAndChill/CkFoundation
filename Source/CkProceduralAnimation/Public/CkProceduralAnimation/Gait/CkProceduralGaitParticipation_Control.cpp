@@ -299,12 +299,7 @@ auto
     for (const auto Contact : Lease->_ContactTrusted)
     { Trusted &= Contact; }
     Trusted &= NOT Interrupted;
-    const auto State = Interrupted ? ECk_ProceduralGaitParticipation_State::Interrupted
-        : Lease->_ReadyForHandoff ? ECk_ProceduralGaitParticipation_State::ReadyForHandoff
-        : Lease->_Recovering ? ECk_ProceduralGaitParticipation_State::Recovering
-        : Lease->_ProtectionActive ? ECk_ProceduralGaitParticipation_State::Protected
-        : ECk_ProceduralGaitParticipation_State::Unplanted;
-    return FCk_ProceduralGaitParticipation_Observation{State, Lease->_ProtectionActive, Trusted,
+    return FCk_ProceduralGaitParticipation_Observation{Lease->_ProtectionActive, Trusted,
         Interrupted, Reason, Lease->_RecoveryGeneration, Gait._SolveSequence, Lease->_AcceptedElapsed};
 }
 
@@ -375,28 +370,6 @@ auto
             InSnapshot.Get_SupportUp(), Lease._SupportPolicy))
         { return false; }
     }
-    return true;
-}
-
-auto
-    FCk_ProceduralGaitParticipation_Control::
-    RequestInterrupt(
-        const FCk_Handle_ProceduralGait& InGait,
-        FCk_ArticulationControlToken InToken,
-        FName InReason)
-    -> bool
-{
-    if (NOT ck_procedural_gait_participation::Get_IsLiveGait(InGait))
-    { return false; }
-    auto Gait = InGait;
-    auto& Fragment = Gait.Get<ck::FFragment_ProceduralGait>();
-    auto* Lease = Fragment._ParticipationLeases.FindByPredicate([InToken](const auto& InLease)
-        { return InLease._Token == InToken; });
-    if (Lease == nullptr)
-    { return false; }
-    Lease->_Interrupted = true;
-    if (Lease->_Reason.IsNone())
-    { Lease->_Reason = InReason; }
     return true;
 }
 

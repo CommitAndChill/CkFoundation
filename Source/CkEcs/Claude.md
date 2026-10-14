@@ -844,6 +844,15 @@ Scheduling contract: `FProcessor_ReplicatedFragments_Dispatch` lives in `FGroup_
 
 ---
 
+## Production preview worlds
+
+An editor tool can run the production ECS and Jolt pipelines in a preview scene. Create the world as
+`EWorldType::GamePreview` with `InitWorld` skipped, call `UCk_EcsWorld_Subsystem_UE::Mark_ProductionPreviewWorld(World)`,
+then initialize it. The mark is a tag on the world's `AWorldSettings`; `Is_ProductionPreviewWorld` reads it.
+`UCk_EcsWorld_Subsystem_UE` and the CkJolt subsystem create themselves in a `GamePreview` world only when it is
+marked; every other world type keeps the existing Game/PIE policy. `Mark_ProductionPreviewWorld` returns `false` for
+a world that is not `GamePreview`, is already initialized, or has no world settings.
+
 ## Anti-patterns
 
 1. **Don't put game logic outside processors.** Timers, attribute math, state transitions — all belong in `ForEachEntity`.

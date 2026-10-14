@@ -1,5 +1,6 @@
 #include "CkProceduralAnimation/Core/CkProceduralActionEvaluation.h"
 
+#include "CkProceduralAnimation/Core/CkProceduralRigidTransform.h"
 #include "CkProceduralAnimation/Core/CkProceduralActionProgress.h"
 
 namespace ck::procedural_action
@@ -12,19 +13,6 @@ namespace ck::procedural_action
             -> bool
         {
             return FMath::IsFinite(InValue.X) && FMath::IsFinite(InValue.Y) && FMath::IsFinite(InValue.Z);
-        }
-
-        auto
-        IsRigid(
-            const FTransform& InValue)
-            -> bool
-        {
-            const auto& Rotation = InValue.GetRotation();
-            return IsFinite(InValue.GetTranslation()) && IsFinite(InValue.GetScale3D())
-                && InValue.GetScale3D().Equals(FVector::OneVector, 1.0e-6)
-                && FMath::IsFinite(Rotation.X) && FMath::IsFinite(Rotation.Y)
-                && FMath::IsFinite(Rotation.Z) && FMath::IsFinite(Rotation.W)
-                && FMath::Abs(Rotation.SizeSquared() - 1.0) <= 1.0e-4;
         }
 
         template<typename TKey>
@@ -206,7 +194,7 @@ namespace ck::procedural_action
             || InTimeSeconds < 0.0 || InTime > InClip.Get_Duration())
         { return false; }
         if (InClip.Get_BodyInitialSource() == ECk_ProceduralAction_InitialSource::CapturedAcceptedPose
-            && NOT evaluation_detail::IsRigid(InInitial.Get_Body()))
+            && NOT procedural_animation::IsRigid(InInitial.Get_Body(), procedural_animation::AuthoredRotationTolerance))
         { return false; }
         OutPose.Get_Body() = InClip.Get_BodyInitialSource() == ECk_ProceduralAction_InitialSource::IdentityOffset
             ? FTransform::Identity : InInitial.Get_Body();
@@ -214,7 +202,8 @@ namespace ck::procedural_action
         for (const auto& Slot : InClip.Get_Slots())
         {
             const auto* InitialLimb = InInitial.Get_Limbs().Find(Slot.Get_Id());
-            if (InitialLimb == nullptr || NOT evaluation_detail::IsRigid(*InitialLimb))
+            if (InitialLimb == nullptr
+                || NOT procedural_animation::IsRigid(*InitialLimb, procedural_animation::AuthoredRotationTolerance))
             { OutPose = {}; return false; }
             const auto& InitialTransform = *InitialLimb;
             auto Limb = FLimbPose{};

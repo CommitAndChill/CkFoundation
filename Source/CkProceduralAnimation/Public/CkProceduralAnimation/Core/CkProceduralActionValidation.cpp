@@ -28,15 +28,6 @@ namespace ck::procedural_action
         }
 
         auto
-        IsRigid(
-            const FTransform& InValue)
-            -> bool
-        {
-            return IsFinite(InValue.GetTranslation()) && IsUnit(InValue.GetRotation())
-                && InValue.GetScale3D().Equals(FVector::OneVector, 1.0e-6);
-        }
-
-        auto
         IsAllowed(
             ECk_ProceduralAction_Easing InValue)
             -> bool

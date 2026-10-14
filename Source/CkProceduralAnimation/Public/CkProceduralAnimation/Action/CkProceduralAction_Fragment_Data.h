@@ -38,7 +38,6 @@ enum class ECk_ProceduralAction_Outcome : uint8
     Cancelled,
     OwnerLost,
     SubjectLost,
-    PartLost,
     AssetFailed,
     InvalidContent,
     SupportLost,
@@ -219,15 +218,10 @@ private:
               Category = "Watchdogs", meta = (AllowPrivateAccess = true))
     FCk_Time _PublicationTimeout = FCk_Time{1.0};
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite,
-              Category = "Watchdogs", meta = (AllowPrivateAccess = true))
-    FCk_Time _MaxTimeBacklog = FCk_Time{0.5};
-
 public:
     CK_PROPERTY(_LoadTimeout);
     CK_PROPERTY(_AcquisitionTimeout);
     CK_PROPERTY(_PublicationTimeout);
-    CK_PROPERTY(_MaxTimeBacklog);
 };
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -331,8 +325,7 @@ UENUM(BlueprintType)
 enum class ECk_ProceduralAction_ReportStatus : uint8
 {
     Valid,
-    Invalid,
-    ContentNotResident
+    Invalid
 };
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralAction_ReportStatus);
 
@@ -398,16 +391,12 @@ private:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation", meta = (AllowPrivateAccess = true))
     ECk_ProceduralAction_ReportStatus _Status = ECk_ProceduralAction_ReportStatus::Invalid;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation", meta = (AllowPrivateAccess = true))
-    bool _Advisory = false;
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Validation", meta = (AllowPrivateAccess = true))
     TArray<FCk_ProceduralAction_Diagnostic> _Diagnostics;
 
 public:
     CK_PROPERTY_GET(_Status);
-    CK_PROPERTY_GET(_Advisory);
     CK_PROPERTY_GET(_Diagnostics);
-    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralAction_ValidationReport, _Status, _Advisory,
-        _Diagnostics);
+    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralAction_ValidationReport, _Status, _Diagnostics);
 };
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -452,6 +441,16 @@ public:
  *  travel in micrometres or segment angle in millidegrees for SamplingBudgetExceeded, unacknowledged records for a
  *  ReceiptOverflow at the per-action limit. A RecoveryFailed that did not miss a deadline, a clip whose sampled
  *  interval was rejected before settlement and a ReceiptOverflow on a player-wide limit carry only phase and limbs. */
+// What a failure context measured: a deadline (elapsed against a limit) or a count against a budget.
+UENUM(BlueprintType)
+enum class ECk_ProceduralAction_FailureMeasurement : uint8
+{
+    None,
+    Deadline,
+    Budget
+};
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralAction_FailureMeasurement);
+
 USTRUCT(BlueprintType)
 struct CKPROCEDURALANIMATION_API FCk_ProceduralAction_FailureContext
 {
@@ -471,32 +470,75 @@ private:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
               Category = "Action", meta = (AllowPrivateAccess = true))
+    ECk_ProceduralAction_FailureMeasurement _Measurement = ECk_ProceduralAction_FailureMeasurement::None;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+              Category = "Action", meta = (AllowPrivateAccess = true,
+                  EditCondition = "_Measurement == ECk_ProceduralAction_FailureMeasurement::Deadline"))
     FCk_Time _Elapsed;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
-              Category = "Action", meta = (AllowPrivateAccess = true))
+              Category = "Action", meta = (AllowPrivateAccess = true,
+                  EditCondition = "_Measurement == ECk_ProceduralAction_FailureMeasurement::Deadline"))
     FCk_Time _Limit;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
-              Category = "Action", meta = (AllowPrivateAccess = true))
+              Category = "Action", meta = (AllowPrivateAccess = true,
+                  EditCondition = "_Measurement == ECk_ProceduralAction_FailureMeasurement::Budget"))
     FName _BudgetUnit = NAME_None;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
-              Category = "Action", meta = (AllowPrivateAccess = true))
+              Category = "Action", meta = (AllowPrivateAccess = true,
+                  EditCondition = "_Measurement == ECk_ProceduralAction_FailureMeasurement::Budget"))
     int64 _Observed = 0;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
-              Category = "Action", meta = (AllowPrivateAccess = true))
+              Category = "Action", meta = (AllowPrivateAccess = true,
+                  EditCondition = "_Measurement == ECk_ProceduralAction_FailureMeasurement::Budget"))
     int64 _Budget = 0;
+
+    // Why the player last published nothing for this action before a publication deadline ran out.
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+              Category = "Action", meta = (AllowPrivateAccess = true))
+    FName _StallReason = NAME_None;
 
 public:
     CK_PROPERTY(_PhaseId);
     CK_PROPERTY(_LimbIds);
-    CK_PROPERTY(_Elapsed);
-    CK_PROPERTY(_Limit);
-    CK_PROPERTY(_BudgetUnit);
-    CK_PROPERTY(_Observed);
-    CK_PROPERTY(_Budget);
+    CK_PROPERTY_GET(_Measurement);
+    CK_PROPERTY_GET(_Elapsed);
+    CK_PROPERTY_GET(_Limit);
+    CK_PROPERTY_GET(_BudgetUnit);
+    CK_PROPERTY_GET(_Observed);
+    CK_PROPERTY_GET(_Budget);
+    CK_PROPERTY(_StallReason);
+
+public:
+    auto
+        Set_Deadline(
+            FCk_Time InElapsed,
+            FCk_Time InLimit)
+        -> ThisType&
+    {
+        _Measurement = ECk_ProceduralAction_FailureMeasurement::Deadline;
+        _Elapsed = InElapsed;
+        _Limit = InLimit;
+        return *this;
+    }
+
+    auto
+        Set_BudgetExcess(
+            FName InUnit,
+            int64 InObserved,
+            int64 InBudget)
+        -> ThisType&
+    {
+        _Measurement = ECk_ProceduralAction_FailureMeasurement::Budget;
+        _BudgetUnit = InUnit;
+        _Observed = InObserved;
+        _Budget = InBudget;
+        return *this;
+    }
 };
 
 // --------------------------------------------------------------------------------------------------------------------

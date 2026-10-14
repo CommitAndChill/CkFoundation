@@ -12,7 +12,8 @@
 class UGameInstance;
 class UWorld;
 
-// Disposable production GamePreview world used by the editor. No global frame-counter mutation or direct processor calls.
+// A disposable production GamePreview world the editor plays one clip in. It advances only through its own world ticks:
+// it never moves the engine's frame counter and never calls a processor directly.
 class CKPROCEDURALANIMATIONEDITOR_API FCk_ProceduralActionSolverWorld
 {
 public:
@@ -60,80 +61,80 @@ public:
         -> void;
 
     auto
-        GetStatus() const
+        Get_Status() const
         -> EStatus
     {
         return _Status;
     }
     auto
-        GetError() const
+        Get_Error() const
         -> const FString&
     {
         return _Error;
     }
     auto
-        GetStep() const
+        Get_Step() const
         -> int64
     {
         return _Step;
     }
     auto
-        GetSeekTargetStep() const
+        Get_SeekTargetStep() const
         -> int64
     {
         return _SeekTarget;
     }
     auto
-        GetWorld() const
+        Get_World() const
         -> UWorld*
     {
         return _World;
     }
     auto
-        GetSubject() const
+        Get_Subject() const
         -> FCk_Handle_ProceduralArticulation
     {
         return _Subject;
     }
     auto
-        GetPlayer() const
+        Get_Player() const
         -> FCk_Handle_ProceduralActionPlayer
     {
         return _Player;
     }
     auto
-        GetAction() const
+        Get_Action() const
         -> FCk_Handle_ProceduralAction
     {
         return _Action;
     }
     auto
-        GetIsFloorReady() const
+        Get_IsFloorReady() const
         -> bool;
     auto
-        GetIsActionTerminal() const
+        Get_IsActionTerminal() const
         -> bool
     {
         return _Recording.Get_Terminal();
     }
     auto
-        GetObservationHorizonStep() const
+        Get_ObservationHorizonStep() const
         -> int64
     {
         return _ObservationHorizonStep;
     }
     auto
-        GetScenarioNextEventStep() const
+        Get_ScenarioNextEventStep() const
         -> int64
     {
         return _ScenarioEvents.IsValidIndex(_NextScenarioEvent)
             ? _ScenarioEvents[_NextScenarioEvent].Get_Step() : INDEX_NONE;
     }
     auto
-        GetAreObstaclesReady() const
+        Get_AreObstaclesReady() const
         -> bool;
     auto
-        GetRecording() const
+        Get_Recording() const
         -> const FCk_ProceduralActionRecordedStore&
     {
         return _Recording;
@@ -147,7 +148,7 @@ private:
         CreateAction()
         -> bool;
     auto
-        IsWalkingPrepared() const
+        Get_IsWalkingPrepared() const
         -> bool;
     auto
         DestroyWorld()

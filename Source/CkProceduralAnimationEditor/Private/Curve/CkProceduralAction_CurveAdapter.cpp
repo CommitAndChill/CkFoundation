@@ -78,7 +78,7 @@ namespace ck_procedural_action_curve
         -> bool
     {
         OutKeys.Reset();
-        if (InChannel == FCk_ProceduralAction_PoseGroup::Get_BodyChannelName())
+        if (InChannel == ck::procedural_action_editor::Get_BodyChannelName())
         {
             OutSmooth = InPhase.Get_BodyInterpolation() == ECk_ProceduralAction_Interpolation::Smooth;
             for (const auto& Key : InPhase.Get_BodyKeys())
@@ -112,7 +112,7 @@ namespace ck_procedural_action_curve
 
 // --------------------------------------------------------------------------------------------------------------------
 
-FCkProceduralAction_CurveAdapter::~FCkProceduralAction_CurveAdapter()
+FCk_ProceduralAction_CurveAdapter::~FCk_ProceduralAction_CurveAdapter()
 {
     if (_PendingRebuild.IsValid())
     { FTSTicker::GetCoreTicker().RemoveTicker(_PendingRebuild); }
@@ -124,16 +124,14 @@ FCkProceduralAction_CurveAdapter::~FCkProceduralAction_CurveAdapter()
 }
 
 auto
-    FCkProceduralAction_CurveAdapter::
+    FCk_ProceduralAction_CurveAdapter::
     Init(
         TSharedPtr<FCk_ProceduralActionAuthoringSession> InSession,
-        TSharedPtr<FCk_ProceduralActionEditorModel> InModel,
-        FSimpleDelegate InOnChanged)
+        TSharedPtr<FCk_ProceduralActionEditorModel> InModel)
     -> TSharedRef<SWidget>
 {
     _Session = InSession;
     _Model = InModel;
-    _OnChanged = MoveTemp(InOnChanged);
     // CurveEditor modifies its model owner before broadcasting. The transient, nontransactional owner keeps a rejected
     // proxy edit out of the clip's undo history; accepted edits Modify the clip through a command.
     _ProxyOwner.Reset(NewObject<UCurveFloat>(GetTransientPackage(), NAME_None, RF_Transient));
@@ -145,7 +143,7 @@ auto
 }
 
 auto
-    FCkProceduralAction_CurveAdapter::
+    FCk_ProceduralAction_CurveAdapter::
     Refresh()
     -> void
 {
@@ -159,13 +157,13 @@ auto
 }
 
 auto
-    FCkProceduralAction_CurveAdapter::
+    FCk_ProceduralAction_CurveAdapter::
     ScheduleRebuild()
     -> void
 {
     if (_PendingRebuild.IsValid())
     { return; }
-    const auto WeakAdapter = TWeakPtr<FCkProceduralAction_CurveAdapter>{AsShared()};
+    const auto WeakAdapter = TWeakPtr<FCk_ProceduralAction_CurveAdapter>{AsShared()};
     _PendingRebuild = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakAdapter](float) -> bool
     {
         if (const auto Adapter = WeakAdapter.Pin())
@@ -178,7 +176,7 @@ auto
 }
 
 auto
-    FCkProceduralAction_CurveAdapter::
+    FCk_ProceduralAction_CurveAdapter::
     Reject(
         const FString& InError)
     -> void
@@ -188,7 +186,7 @@ auto
 }
 
 auto
-    FCkProceduralAction_CurveAdapter::
+    FCk_ProceduralAction_CurveAdapter::
     GetStatusText() const
     -> FText
 {
@@ -201,11 +199,11 @@ auto
     const auto Channel = _Channels[0]->Channel;
     return FText::Format(LOCTEXT("Status", "{0} / {1}: X/Y/Z over seconds of the clip; pick a channel in Channels to switch"),
         FText::FromName(_PhaseId),
-        Channel == FCk_ProceduralAction_PoseGroup::Get_BodyChannelName() ? LOCTEXT("Body", "Body") : FText::FromName(Channel));
+        Channel == ck::procedural_action_editor::Get_BodyChannelName() ? LOCTEXT("Body", "Body") : FText::FromName(Channel));
 }
 
 auto
-    FCkProceduralAction_CurveAdapter::
+    FCk_ProceduralAction_CurveAdapter::
     FindCurve(
         FName InChannel,
         int32 InAxis)
@@ -220,7 +218,7 @@ auto
 }
 
 auto
-    FCkProceduralAction_CurveAdapter::
+    FCk_ProceduralAction_CurveAdapter::
     RebuildCurves()
     -> void
 {
@@ -238,7 +236,7 @@ auto
     const auto Session = _Session.Pin();
     const auto Model = _Model.Pin();
     _PhaseId = Model.IsValid() ? Model->Get_SelectedPhase() : NAME_None;
-    const auto* Clip = Session.IsValid() ? Session->GetClip() : nullptr;
+    const auto* Clip = Session.IsValid() ? Session->Get_Clip() : nullptr;
     if (Clip == nullptr || _PhaseId.IsNone())
     { return; }
     const auto* Phase = Clip->Get_Phases().FindByPredicate([this](const FCk_ProceduralAction_Phase& InPhase)
@@ -248,7 +246,7 @@ auto
 
     auto Channels = TArray<FName>{};
     if (Clip->Get_BodyChannel().Get_Enabled() || NOT Phase->Get_BodyKeys().IsEmpty())
-    { Channels.Add(FCk_ProceduralAction_PoseGroup::Get_BodyChannelName()); }
+    { Channels.Add(ck::procedural_action_editor::Get_BodyChannelName()); }
     for (const auto& Track : Phase->Get_LimbTracks())
     { Channels.Add(Track.Get_Slot()); }
     // One channel at a time: the selected one, else the first, so X/Y/Z read unambiguously.
@@ -272,7 +270,7 @@ auto
 }
 
 auto
-    FCkProceduralAction_CurveAdapter::
+    FCk_ProceduralAction_CurveAdapter::
     AddChannel(
         FName InChannel,
         const TArray<ck_procedural_action_curve::FKeySample>& InKeys,
@@ -281,14 +279,14 @@ auto
 {
     using namespace ck_procedural_action_curve;
     const auto Session = _Session.Pin();
-    const auto* Timing = Session.IsValid() ? Session->GetTiming().FindByPredicate([this](const FCompiledPhase& InPhase)
+    const auto* Timing = Session.IsValid() ? Session->Get_Timing().FindByPredicate([this](const FCompiledPhase& InPhase)
         { return InPhase.Get_Id() == _PhaseId; }) : nullptr;
     if (Timing == nullptr)
     { return; }
     const auto Seconds = Timing->Get_Duration().Get_Seconds();
     auto Curves = MakeUnique<FChannelCurves>();
     Curves->Channel = InChannel;
-    const auto Label = InChannel == FCk_ProceduralAction_PoseGroup::Get_BodyChannelName() ? FString{TEXT("Body")} : InChannel.ToString();
+    const auto Label = InChannel == ck::procedural_action_editor::Get_BodyChannelName() ? FString{TEXT("Body")} : InChannel.ToString();
     for (auto Axis = 0; Axis < 3; ++Axis)
     {
         auto& Curve = Curves->Axes[Axis];
@@ -307,7 +305,7 @@ auto
             Axis == 0 ? TEXT("X") : Axis == 1 ? TEXT("Y") : TEXT("Z"))));
         CurveModel->SetColor(AxisColor(Axis));
         CurveModel->SetClampInputRange(TRange<double>{Timing->Get_Start().Get_Seconds(), (Timing->Get_Start() + Timing->Get_Duration()).Get_Seconds()});
-        CurveModel->OnCurveModified().AddSP(AsShared(), &FCkProceduralAction_CurveAdapter::OnCurveModified, InChannel, Axis);
+        CurveModel->OnCurveModified().AddSP(AsShared(), &FCk_ProceduralAction_CurveAdapter::OnCurveModified, InChannel, Axis);
         const auto ModelId = _Editor->AddCurve(MoveTemp(CurveModel));
         _Editor->PinCurve(ModelId);
     }
@@ -315,7 +313,7 @@ auto
 }
 
 auto
-    FCkProceduralAction_CurveAdapter::
+    FCk_ProceduralAction_CurveAdapter::
     OnCurveModified(
         FName InChannel,
         int32 InAxis)
@@ -326,10 +324,10 @@ auto
     { return; }
     TGuardValue<bool> CallbackGuard{_InCallback, true};
     const auto Session = _Session.Pin();
-    auto* Clip = Session.IsValid() ? Session->GetClip() : nullptr;
+    auto* Clip = Session.IsValid() ? Session->Get_Clip() : nullptr;
     const auto* Phase = Clip == nullptr ? nullptr : Clip->Get_Phases().FindByPredicate([this](const FCk_ProceduralAction_Phase& InPhase)
         { return InPhase.Get_Id() == _PhaseId; });
-    const auto* Timing = Session.IsValid() ? Session->GetTiming().FindByPredicate([this](const FCompiledPhase& InPhase)
+    const auto* Timing = Session.IsValid() ? Session->Get_Timing().FindByPredicate([this](const FCompiledPhase& InPhase)
         { return InPhase.Get_Id() == _PhaseId; }) : nullptr;
     const auto* ChannelCurves = _Channels.FindByPredicate([InChannel](const TUniquePtr<FChannelCurves>& InCurves)
         { return InCurves->Channel == InChannel; });
@@ -387,7 +385,7 @@ auto
         Key.Arrive[InAxis] = RichKey.ArriveTangent * Seconds;
         Key.Leave[InAxis] = RichKey.LeaveTangent * Seconds;
         NewSamples.Add(Key);
-        if (InChannel == FCk_ProceduralAction_PoseGroup::Get_BodyChannelName())
+        if (InChannel == ck::procedural_action_editor::Get_BodyChannelName())
         {
             auto BodyKey = FCk_ProceduralAction_TransformKey{FCk_FloatRange_0to1{Time}, Key.Value, Key.Rotation};
             BodyKey.Set_ArriveTangent(Key.Arrive);
@@ -407,7 +405,7 @@ auto
         ? ECk_ProceduralAction_Interpolation::Smooth : ECk_ProceduralAction_Interpolation::Linear;
     auto Commands = FCk_ProceduralActionAuthoringCommands{Clip};
     auto CommandError = FString{};
-    const auto Written = InChannel == FCk_ProceduralAction_PoseGroup::Get_BodyChannelName()
+    const auto Written = InChannel == ck::procedural_action_editor::Get_BodyChannelName()
         ? Commands.SetBodyKeys(_PhaseId, BodyKeys, Interpolation, Retimed, CommandError)
         : Commands.SetPositionKeys(_PhaseId, InChannel, PositionKeys, Interpolation, Retimed, CommandError);
     if (NOT Written)
@@ -423,7 +421,6 @@ auto
         { Curves.Samples[InAxis].Add(*It, NewSamples[Index]); }
     }
     _Error.Reset();
-    _OnChanged.ExecuteIfBound();
 }
 
 #undef LOCTEXT_NAMESPACE

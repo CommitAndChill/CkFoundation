@@ -1,5 +1,5 @@
 #include "CkProceduralAnimationEditor/CkProceduralActionAuthoringCommands.h"
-#include "CkProceduralAnimationEditor/CkProceduralActionPoseGroups.h"
+#include "CkProceduralAnimationEditor/CkProceduralActionEditorData.h"
 #include "CkProceduralAnimationEditor/CkProceduralActionPreviewSpace.h"
 #include "CkProceduralAnimationEditor/CkProceduralActionPreview_Config.h"
 #include "CkProceduralAnimationEditor/CkProceduralActionSolvedCapture.h"
@@ -13,11 +13,11 @@
 
 namespace ck_procedural_action_authoring
 {
-    // The editor-only metadata a command may change beside the draft, in the same transaction.
+    // The editor data a command may change beside the draft, in the same transaction.
     struct FEditorMetadata
     {
-        TArray<FCk_ProceduralAction_PoseGroup> Groups;
-        FCk_ProceduralAction_EditorSubject Subject;
+        TArray<FCk_ProceduralActionEditor_PoseLabel> Labels;
+        FCk_ProceduralActionEditor_Subject Subject;
     };
 
     using FDraftEdit = TFunctionRef<bool(FCk_ProceduralAction_ClipDraft&, FEditorMetadata&, FString&)>;
@@ -102,8 +102,8 @@ namespace ck_procedural_action_authoring
 
     auto
         IsSame(
-            const TArray<FCk_ProceduralAction_PoseGroup>& InA,
-            const TArray<FCk_ProceduralAction_PoseGroup>& InB)
+            const TArray<FCk_ProceduralActionEditor_PoseLabel>& InA,
+            const TArray<FCk_ProceduralActionEditor_PoseLabel>& InB)
         -> bool
     {
         if (InA.Num() != InB.Num())
@@ -116,7 +116,76 @@ namespace ck_procedural_action_authoring
         return true;
     }
 
-    // Draft -> edit -> Write_Into, keys and editor metadata in one transaction. The edit validates every input before the
+    // A curve edit is refused when the compiler rejects the edited phase's key times (two keys at one time, out of order):
+    // the clip would not compile, and no later edit could tell the merged keys apart again.
+    auto
+        RejectKeyTimes(
+            const FCk_ProceduralAction_ClipDraft& InDraft,
+            FName InPhaseId,
+            FString& OutError)
+        -> bool
+    {
+        auto Compiled = ck::procedural_action::FCompiledClip{};
+        auto Diagnostics = TArray<ck::procedural_action::FDiagnostic>{};
+        ck::procedural_action::Compile(ck::procedural_action::MakeClipSource(InDraft), Compiled, Diagnostics);
+        const auto* KeyTime = Diagnostics.FindByPredicate([InPhaseId](const ck::procedural_action::FDiagnostic& InDiagnostic)
+            { return InDiagnostic.Get_Code() == FName{TEXT("KeyTime")} && InDiagnostic.Get_PhaseId() == InPhaseId; });
+        if (KeyTime == nullptr)
+        { return false; }
+        OutError = ck::procedural_action_editor::Describe(*KeyTime);
+        return true;
+    }
+
+    // A label stays only while its phase exists and some channel is keyed at its time.
+    auto
+        DropUnkeyedLabels(
+            TArray<FCk_ProceduralActionEditor_PoseLabel>& InOutLabels,
+            const TArray<FCk_ProceduralAction_Phase>& InPhases)
+        -> void
+    {
+        InOutLabels.RemoveAll([&InPhases](const FCk_ProceduralActionEditor_PoseLabel& InLabel)
+        {
+            const auto* Phase = InPhases.FindByPredicate([&InLabel](const FCk_ProceduralAction_Phase& InPhase)
+                { return InPhase.Get_Id() == InLabel.Get_PhaseId(); });
+            return Phase == nullptr
+                || ck::procedural_action_editor::Get_ChannelsKeyedAt(*Phase, InLabel.Get_Time().Get_Value()).IsEmpty();
+        });
+    }
+
+    // One label per keyed time of a recipe, named after its phase and time.
+    auto
+        MakeRecipeLabels(
+            const TArray<FCk_ProceduralAction_Phase>& InPhases)
+        -> TArray<FCk_ProceduralActionEditor_PoseLabel>
+    {
+        auto Labels = TArray<FCk_ProceduralActionEditor_PoseLabel>{};
+        for (const auto& Phase : InPhases)
+        {
+            auto Times = TArray<double>{};
+            const auto AddTime = [&Times](const auto& InKey)
+            {
+                const auto Time = InKey.Get_Time().Get_Value();
+                if (NOT Times.ContainsByPredicate([Time](double InKnown) { return ck::procedural_action_editor::IsSamePoseTime(InKnown, Time); }))
+                { Times.Add(Time); }
+            };
+            for (const auto& Key : Phase.Get_BodyKeys())
+            { AddTime(Key); }
+            for (const auto& Track : Phase.Get_LimbTracks())
+            {
+                for (const auto& Key : Track.Get_PositionKeys())
+                { AddTime(Key); }
+            }
+            Times.Sort();
+            for (const auto Time : Times)
+            {
+                Labels.Add(FCk_ProceduralActionEditor_PoseLabel{Phase.Get_Id(), FCk_FloatRange_0to1{Time},
+                    FName{*FString::Printf(TEXT("%s %.3g"), *Phase.Get_Id().ToString(), Time)}});
+            }
+        }
+        return Labels;
+    }
+
+    // Draft -> edit -> Write_Into, keys and editor data in one transaction. The edit validates every input before the
     // transaction opens, so a refused edit neither dirties the package nor leaves an empty undo entry, and an edit that
     // changes nothing opens no transaction. InAlsoWrite changes other objects (a scenario config) inside the same
     // transaction. The result need not compile: Play stays gated on Compile.
@@ -133,11 +202,15 @@ namespace ck_procedural_action_authoring
         if (NOT Reject(UCk_Utils_ProceduralActionBuilder_UE::Make_Draft_FromData(&InClip, Draft), OutError))
         { return false; }
         const auto Original = Draft;
-        auto Metadata = FEditorMetadata{InClip.Get_EditorPoseGroups(), InClip.Get_EditorSubject()};
+        const auto OriginalMetadata = FEditorMetadata{ck::procedural_action_editor::Get_PoseLabels(InClip),
+            ck::procedural_action_editor::Get_Subject(InClip)};
+        auto Metadata = OriginalMetadata;
         if (NOT InEdit(Draft, Metadata, OutError))
         { return false; }
-        const auto Unchanged = IsSame(Draft, Original) && IsSame(Metadata.Groups, InClip.Get_EditorPoseGroups())
-            && IsSame(Metadata.Subject, InClip.Get_EditorSubject()) && NOT InAlsoWrite;
+        DropUnkeyedLabels(Metadata.Labels, Draft.Get_Phases());
+        const auto MetadataUnchanged = IsSame(Metadata.Labels, OriginalMetadata.Labels)
+            && IsSame(Metadata.Subject, OriginalMetadata.Subject);
+        const auto Unchanged = IsSame(Draft, Original) && MetadataUnchanged && NOT InAlsoWrite;
         if (Unchanged)
         { return true; }
 
@@ -152,8 +225,13 @@ namespace ck_procedural_action_authoring
             OutError = DescribeErrors(WriteReport.Get_Diagnostics());
             return false;
         }
-        InClip.Set_EditorPoseGroups(Metadata.Groups);
-        InClip.Set_EditorSubject(Metadata.Subject);
+        if (NOT MetadataUnchanged)
+        {
+            auto* EditorData = UCk_Utils_ProceduralActionEditor_UE::Get_EditorData(&InClip);
+            EditorData->Modify();
+            EditorData->Set_PoseLabels(Metadata.Labels);
+            EditorData->Set_Subject(Metadata.Subject);
+        }
         if (InAlsoWrite)
         { InAlsoWrite(); }
         InClip.PostEditChange();
@@ -224,12 +302,14 @@ namespace ck_procedural_action_authoring
             { return false; }
             if (Phase.Get_Id() == InFirstPhase)
             {
-                if (Start.IsSet()) { return false; }
+                if (Start.IsSet())
+                { return false; }
                 Start = Elapsed + Duration * InFirstTime;
             }
             if (Phase.Get_Id() == InLastPhase)
             {
-                if (End.IsSet()) { return false; }
+                if (End.IsSet())
+                { return false; }
                 End = Elapsed + Duration * InLastTime;
             }
             Elapsed += Duration;
@@ -256,61 +336,30 @@ namespace ck_procedural_action_authoring
             { return InLeft.Get_Time().Get_Value() < InRight.Get_Time().Get_Value(); });
     }
 
-    // A pose follows a moved key while the key is its only channel; a pose over several channels lets the moved channel go,
-    // because its other channels stay where they were. A pose left with no channel is gone.
+    // A label at a moved key's old time follows it to the new one, unless another channel still keys the old time or a
+    // label already names the new one. InPhase is the phase after the edit.
     auto
-        RetimeGroups(
-            TArray<FCk_ProceduralAction_PoseGroup>& InOutGroups,
-            FName InPhaseId,
-            FName InChannel,
-            const TArray<double>& InKeyedTimes,
+        RetimeLabels(
+            TArray<FCk_ProceduralActionEditor_PoseLabel>& InOutLabels,
+            const FCk_ProceduralAction_Phase& InPhase,
             const TArray<FCk_ProceduralActionRetimedKey>& InRetimed)
         -> void
     {
-        for (auto& Group : InOutGroups)
+        for (const auto& Retime : InRetimed)
         {
-            if (Group.Get_PhaseId() != InPhaseId || NOT Group.Get_Channels().Contains(InChannel))
+            auto* Label = InOutLabels.FindByPredicate([&InPhase, &Retime](const FCk_ProceduralActionEditor_PoseLabel& InLabel)
+            {
+                return InLabel.Get_PhaseId() == InPhase.Get_Id()
+                    && ck::procedural_action_editor::IsSamePoseTime(InLabel.Get_Time().Get_Value(), Retime.Get_From());
+            });
+            if (Label == nullptr)
             { continue; }
-            const auto Time = Group.Get_Time().Get_Value();
-            const auto StillKeyed = InKeyedTimes.ContainsByPredicate([Time](double InKeyed)
-                { return ck::procedural_action_editor::IsSamePoseTime(InKeyed, Time); });
-            const auto* Moved = InRetimed.FindByPredicate([Time](const FCk_ProceduralActionRetimedKey& InRetime)
-                { return ck::procedural_action_editor::IsSamePoseTime(InRetime.Get_From(), Time); });
-            if (Moved != nullptr && Group.Get_Channels().Num() == 1)
-            {
-                Group.Set_Time(FCk_FloatRange_0to1{Moved->Get_To()});
-                continue;
-            }
-            if (Moved != nullptr || NOT StillKeyed)
-            { Group.Get_Channels().Remove(InChannel); }
-        }
-        InOutGroups.RemoveAll([](const FCk_ProceduralAction_PoseGroup& InGroup) { return InGroup.Get_Channels().IsEmpty(); });
-    }
-
-    // Removes the keys a pose wrote at its phase and time; tracks stay.
-    auto
-        RemovePoseKeys(
-            TArray<FCk_ProceduralAction_Phase>& InOutPhases,
-            const FCk_ProceduralAction_PoseGroup& InGroup)
-        -> void
-    {
-        auto* Phase = FindPhase(InOutPhases, InGroup.Get_PhaseId());
-        if (Phase == nullptr)
-        { return; }
-        const auto KeyedAtGroup = AtTime(InGroup.Get_Time().Get_Value());
-        for (const auto Channel : InGroup.Get_Channels())
-        {
-            if (Channel == FCk_ProceduralAction_PoseGroup::Get_BodyChannelName())
-            {
-                Phase->Get_BodyKeys().RemoveAll(KeyedAtGroup);
-                continue;
-            }
-            if (auto* Track = FindTrack(*Phase, Channel))
-            {
-                Track->Get_PositionKeys().RemoveAll(KeyedAtGroup);
-                Track->Get_OrientationKeys().RemoveAll(KeyedAtGroup);
-                Track->Get_BendKeys().RemoveAll(KeyedAtGroup);
-            }
+            const auto OldTimeStillKeyed = NOT ck::procedural_action_editor::Get_ChannelsKeyedAt(InPhase, Retime.Get_From()).IsEmpty();
+            const auto NewTimeLabelled = ck::procedural_action_editor::FindPoseLabel(InOutLabels, InPhase.Get_Id(), Retime.Get_To())
+                != nullptr;
+            if (OldTimeStillKeyed || NewTimeLabelled)
+            { continue; }
+            Label->Set_Time(FCk_FloatRange_0to1{Retime.Get_To()});
         }
     }
 
@@ -327,25 +376,26 @@ namespace ck_procedural_action_authoring
         TMap<FName, FKeyTangents> Bends;
     };
 
-    // Add_PoseKey writes zero tangents; a moved or duplicated pose keeps the tangents its keys had.
+    // Add_PoseKey writes zero tangents; a key a pose rewrites keeps the tangents it had.
     auto
         ReadTangents(
             TArray<FCk_ProceduralAction_Phase> InPhases,
-            const FCk_ProceduralAction_PoseGroup& InGroup)
+            FName InPhaseId,
+            double InTime)
         -> FPoseTangents
     {
         auto Result = FPoseTangents{};
-        auto* Phase = FindPhase(InPhases, InGroup.Get_PhaseId());
+        auto* Phase = FindPhase(InPhases, InPhaseId);
         if (Phase == nullptr)
         { return Result; }
-        const auto KeyedAtGroup = AtTime(InGroup.Get_Time().Get_Value());
-        if (const auto* Key = Phase->Get_BodyKeys().FindByPredicate(KeyedAtGroup))
+        const auto KeyedAtTime = AtTime(InTime);
+        if (const auto* Key = Phase->Get_BodyKeys().FindByPredicate(KeyedAtTime))
         { Result.Body = FKeyTangents{Key->Get_ArriveTangent(), Key->Get_LeaveTangent()}; }
         for (const auto& Track : Phase->Get_LimbTracks())
         {
-            if (const auto* Key = Track.Get_PositionKeys().FindByPredicate(KeyedAtGroup))
+            if (const auto* Key = Track.Get_PositionKeys().FindByPredicate(KeyedAtTime))
             { Result.Positions.Add(Track.Get_Slot(), FKeyTangents{Key->Get_ArriveTangent(), Key->Get_LeaveTangent()}); }
-            if (const auto* Key = Track.Get_BendKeys().FindByPredicate(KeyedAtGroup))
+            if (const auto* Key = Track.Get_BendKeys().FindByPredicate(KeyedAtTime))
             { Result.Bends.Add(Track.Get_Slot(), FKeyTangents{Key->Get_ArriveTangent(), Key->Get_LeaveTangent()}); }
         }
         return Result;
@@ -364,7 +414,7 @@ namespace ck_procedural_action_authoring
         if (Phase == nullptr)
         { return; }
         const auto KeyedAtTime = AtTime(InTime);
-        if (InTangents.Body.IsSet() && InChannels.Contains(FCk_ProceduralAction_PoseGroup::Get_BodyChannelName()))
+        if (InTangents.Body.IsSet() && InChannels.Contains(ck::procedural_action_editor::Get_BodyChannelName()))
         {
             if (auto* Key = Phase->Get_BodyKeys().FindByPredicate(KeyedAtTime))
             { Key->Set_ArriveTangent(InTangents.Body->Arrive).Set_LeaveTangent(InTangents.Body->Leave); }
@@ -400,110 +450,6 @@ namespace ck_procedural_action_authoring
         if (Bends.Num() != 1)
         { return; }
         Bends.Insert(FCk_ProceduralAction_VectorKey{FCk_FloatRange_0to1{0.0}, InDirection}, 0);
-    }
-
-    auto
-        FindEditablePose(
-            const UCk_ProceduralAction_Data& InClip,
-            const FGuid& InPoseId,
-            FCk_ProceduralActionPoseGroupView& OutView,
-            FString& OutError)
-        -> bool
-    {
-        if (NOT ck::procedural_action_editor::FindPoseGroup(InClip, InPoseId, OutView))
-        {
-            OutError = FString::Printf(TEXT("Pose %s does not exist in this clip."), *InPoseId.ToString());
-            return false;
-        }
-        if (OutView.Get_IsBroken())
-        {
-            OutError = FString::Printf(TEXT("Pose %s is broken: %s Repair its keys or delete it first."),
-                *OutView.Get_Group().Get_Label().ToString(), *OutView.Get_BrokenReason());
-            return false;
-        }
-        return true;
-    }
-
-    auto
-        UpsertGroup(
-            TArray<FCk_ProceduralAction_PoseGroup>& InOutGroups,
-            const FCk_ProceduralAction_PoseGroup& InGroup)
-        -> void
-    {
-        if (auto* Existing = InOutGroups.FindByPredicate([&InGroup](const FCk_ProceduralAction_PoseGroup& InCandidate)
-            { return InCandidate.Get_Id() == InGroup.Get_Id(); }))
-        {
-            *Existing = InGroup;
-            return;
-        }
-        InOutGroups.Add(InGroup);
-    }
-
-    auto
-        HasSameChannels(
-            const TArray<FName>& InExpected,
-            const TArray<FName>& InActual,
-            FString& OutError)
-        -> bool
-    {
-        const auto Missing = InExpected.FilterByPredicate([&InActual](FName InName) { return NOT InActual.Contains(InName); });
-        const auto Extra = InActual.FilterByPredicate([&InExpected](FName InName) { return NOT InExpected.Contains(InName); });
-        if (NOT Missing.IsEmpty())
-        {
-            OutError = FString::Printf(TEXT("The pose is missing required participant(s): %s. A whole pose covers every participant."),
-                *JoinNames(Missing));
-            return false;
-        }
-        if (NOT Extra.IsEmpty())
-        {
-            OutError = FString::Printf(TEXT("The pose writes channel(s) that are not participants: %s."), *JoinNames(Extra));
-            return false;
-        }
-        return true;
-    }
-
-    auto
-        CapturePoseKey(
-            UCk_ProceduralAction_Data& InClip,
-            FName InPhaseId,
-            const FCk_ProceduralAction_PoseKey& InPose,
-            FName InLabel,
-            ECk_ProceduralAction_PoseProvenance InProvenance,
-            FGuid& OutPoseId,
-            FString& OutError)
-        -> bool
-    {
-        const auto Channels = ck::procedural_action_editor::Get_PoseChannels(InPose);
-        const auto NewId = FGuid::NewGuid();
-        const auto Committed = CommitDraft(InClip, LOCTEXT("CapturePose", "Capture Action Pose"),
-            [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata& InOutMetadata, FString& OutEditError)
-        {
-            const auto Report = UCk_Utils_ProceduralActionBuilder_UE::Add_PoseKey(InOutDraft, InPhaseId, InPose);
-            if (NOT IsAccepted(Report))
-            {
-                OutEditError = (HasCode(Report, TEXT("KeyTime"))
-                    ? FString{TEXT("A key already exists at this time; use Update Pose to change it or Duplicate to another time. ")}
-                    : FString{}) + DescribeErrors(Report.Get_Diagnostics());
-                return false;
-            }
-            if (auto* Phase = FindPhase(InOutDraft.Get_Phases(), InPhaseId))
-            {
-                for (const auto& Limb : InPose.Get_Limbs())
-                {
-                    auto* Track = FindTrack(*Phase, Limb.Get_Slot());
-                    if (Track != nullptr && Limb.Get_BendMode() == ECk_ProceduralAction_ValueMode::Set)
-                    { EnsureBendStart(*Track, Limb.Get_Bend()); }
-                }
-            }
-            auto Group = FCk_ProceduralAction_PoseGroup{NewId, InPhaseId, InPose.Get_Time(), Channels};
-            Group.Set_Label(InLabel.IsNone() ? FName{*FString::Printf(TEXT("Pose %d"), InOutMetadata.Groups.Num() + 1)} : InLabel);
-            Group.Set_Provenance(InProvenance);
-            InOutMetadata.Groups.Add(Group);
-            return true;
-        }, OutError);
-        if (Committed)
-        { OutPoseId = NewId; }
-        return Committed;
     }
 
     // Converts one solved endpoint into its slot's declared track space; the frames match the runtime's resolution
@@ -635,8 +581,7 @@ namespace ck_procedural_action_authoring
         { return Refuse(TEXT("Phase ID does not exist."), OutError); }
         const auto Time = InPose.Get_Time().Get_Value();
         const auto Channels = ck::procedural_action_editor::Get_PoseChannels(InPose);
-        const auto Tangents = ReadTangents(InOutDraft.Get_Phases(),
-            FCk_ProceduralAction_PoseGroup{FGuid{}, InPhaseId, InPose.Get_Time(), Channels});
+        const auto Tangents = ReadTangents(InOutDraft.Get_Phases(), InPhaseId, Time);
         const auto KeyedAtTime = AtTime(Time);
         if (InPose.Get_BodyMode() == ECk_ProceduralAction_ValueMode::Set)
         { Phase->Get_BodyKeys().RemoveAll(KeyedAtTime); }
@@ -666,7 +611,7 @@ namespace ck_procedural_action_authoring
         return true;
     }
 
-    // Every time a channel is still keyed at in a phase, for the pose groups that name it.
+    // Every time a channel is keyed at in a phase.
     auto
         Get_KeyedTimes(
             const FCk_ProceduralAction_Phase& InPhase,
@@ -675,7 +620,7 @@ namespace ck_procedural_action_authoring
     {
         auto Times = TArray<double>{};
         const auto AddTime = [&Times](const auto& InKey) { Times.AddUnique(InKey.Get_Time().Get_Value()); };
-        if (InChannel == FCk_ProceduralAction_PoseGroup::Get_BodyChannelName())
+        if (InChannel == ck::procedural_action_editor::Get_BodyChannelName())
         {
             for (const auto& Key : InPhase.Get_BodyKeys())
             { AddTime(Key); }
@@ -748,7 +693,8 @@ auto
 {
     using namespace ck_procedural_action_authoring;
     auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
+    if (Clip == nullptr)
+    { return false; }
     return CommitDraft(*Clip, LOCTEXT("AddPhase", "Add Action Phase"),
         [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata&, FString& OutEditError)
     {
@@ -767,7 +713,8 @@ auto
 {
     using namespace ck_procedural_action_authoring;
     auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
+    if (Clip == nullptr)
+    { return false; }
     return CommitDraft(*Clip, LOCTEXT("ReorderPhase", "Reorder Action Phase"),
         [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata&, FString& OutEditError)
     {
@@ -801,7 +748,8 @@ auto
 {
     using namespace ck_procedural_action_authoring;
     auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
+    if (Clip == nullptr)
+    { return false; }
     return CommitDraft(*Clip, LOCTEXT("RemovePhase", "Remove Action Phase"),
         [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata& InOutMetadata, FString& OutEditError)
     {
@@ -824,7 +772,6 @@ auto
             }
         }
         InOutDraft.Get_Phases().RemoveAll([InId](const FCk_ProceduralAction_Phase& InPhase) { return InPhase.Get_Id() == InId; });
-        InOutMetadata.Groups.RemoveAll([InId](const FCk_ProceduralAction_PoseGroup& InGroup) { return InGroup.Get_PhaseId() == InId; });
         return true;
     }, OutError);
 }
@@ -878,10 +825,10 @@ auto
             Window.Set_Start(RenameRef(Window.Get_Start()));
             Window.Set_End(RenameRef(Window.Get_End()));
         }
-        for (auto& Group : InOutMetadata.Groups)
+        for (auto& Label : InOutMetadata.Labels)
         {
-            if (Group.Get_PhaseId() == InOldId)
-            { Group.Set_PhaseId(InNewId); }
+            if (Label.Get_PhaseId() == InOldId)
+            { Label.Set_PhaseId(InNewId); }
         }
         return true;
     }, OutError);
@@ -896,7 +843,8 @@ auto
 {
     using namespace ck_procedural_action_authoring;
     auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
+    if (Clip == nullptr)
+    { return false; }
     return CommitDraft(*Clip, LOCTEXT("AddSlot", "Add Action Slot"),
         [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata&, FString& OutEditError)
     { return Reject(UCk_Utils_ProceduralActionBuilder_UE::Add_Slot(InOutDraft, FCk_ProceduralAction_Slot{InId}), OutEditError); },
@@ -912,7 +860,8 @@ auto
 {
     using namespace ck_procedural_action_authoring;
     auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
+    if (Clip == nullptr)
+    { return false; }
     return CommitDraft(*Clip, LOCTEXT("RemoveSlot", "Remove Action Slot"),
         [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata& InOutMetadata, FString& OutEditError)
     {
@@ -944,7 +893,8 @@ auto
 {
     using namespace ck_procedural_action_authoring;
     auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
+    if (Clip == nullptr)
+    { return false; }
     if (InOldId.IsNone() || InNewId.IsNone() || InOldId == InNewId)
     { return Refuse(TEXT("Slot rename needs distinct nonempty old and new IDs."), OutError); }
     if (InScenario != nullptr)
@@ -988,14 +938,6 @@ auto
                 Track = MoveTemp(Renamed);
             }
         }
-        for (auto& Group : InOutMetadata.Groups)
-        {
-            for (auto& Channel : Group.Get_Channels())
-            {
-                if (Channel == InOldId)
-                { Channel = InNewId; }
-            }
-        }
         RenameBindings(InOutMetadata.Subject.Get_SlotBindings(), InOldId, InNewId);
         return true;
     }, OutError, InScenario == nullptr ? TFunction<void()>{} : TFunction<void()>{[InScenario, InOldId, InNewId]()
@@ -1016,168 +958,6 @@ auto
 
 auto
     FCk_ProceduralActionAuthoringCommands::
-    AddLimbTrack(
-        FName InPhaseId,
-        FName InSlotId,
-        FString& OutError)
-    -> bool
-{
-    using namespace ck_procedural_action_authoring;
-    auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
-    return CommitDraft(*Clip, LOCTEXT("AddTrack", "Add Action Limb Track"),
-        [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata&, FString& OutEditError)
-    {
-        if (NOT HasSlot(InOutDraft, InSlotId))
-        { return Refuse(TEXT("The track slot is not declared."), OutEditError); }
-        auto* Phase = FindPhase(InOutDraft.Get_Phases(), InPhaseId);
-        if (Phase == nullptr)
-        { return Refuse(TEXT("Phase ID does not exist."), OutEditError); }
-        if (FindTrack(*Phase, InSlotId) != nullptr)
-        { return Refuse(TEXT("This phase already has a track for the slot."), OutEditError); }
-        Phase->Get_LimbTracks().Add(FCk_ProceduralAction_LimbTrack{InSlotId});
-        return true;
-    }, OutError);
-}
-
-auto
-    FCk_ProceduralActionAuthoringCommands::
-    AddBodyKey(
-        FName InPhaseId,
-        double InNormalizedTime,
-        const FTransform& InValue,
-        FString& OutError)
-    -> bool
-{
-    using namespace ck_procedural_action_authoring;
-    auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
-    if (NOT IsNormalized(InNormalizedTime))
-    { return Refuse(TEXT("Key time must be in [0,1]."), OutError); }
-    if (InValue.ContainsNaN() || NOT InValue.GetScale3D().Equals(FVector::OneVector, 1.0e-4))
-    { return Refuse(TEXT("Body key must be a finite rigid transform."), OutError); }
-    return CommitDraft(*Clip, LOCTEXT("AddBodyKey", "Add Action Body Key"),
-        [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata&, FString& OutEditError)
-    {
-        if (NOT InOutDraft.Get_BodyChannel().Get_Enabled())
-        { return Refuse(TEXT("Enable the body channel before adding body keys."), OutEditError); }
-        auto* Phase = FindPhase(InOutDraft.Get_Phases(), InPhaseId);
-        if (Phase == nullptr)
-        { return Refuse(TEXT("Phase ID does not exist."), OutEditError); }
-        auto& Keys = Phase->Get_BodyKeys();
-        if (Keys.ContainsByPredicate(AtTime(InNormalizedTime)))
-        { return Refuse(TEXT("A body key already exists at this time."), OutEditError); }
-        Keys.Add(FCk_ProceduralAction_TransformKey{FCk_FloatRange_0to1{InNormalizedTime}, InValue.GetTranslation(), InValue.GetRotation()});
-        SortByTime(Keys);
-        return true;
-    }, OutError);
-}
-
-auto
-    FCk_ProceduralActionAuthoringCommands::
-    AddPositionKey(
-        FName InPhaseId,
-        FName InSlotId,
-        double InNormalizedTime,
-        const FVector& InValue,
-        FString& OutError)
-    -> bool
-{
-    using namespace ck_procedural_action_authoring;
-    auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
-    if (NOT IsNormalized(InNormalizedTime) || InValue.ContainsNaN())
-    { return Refuse(TEXT("Position key needs finite coordinates and time in [0,1]."), OutError); }
-    return CommitDraft(*Clip, LOCTEXT("AddPositionKey", "Add Action Position Key"),
-        [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata&, FString& OutEditError)
-    {
-        auto* Phase = FindPhase(InOutDraft.Get_Phases(), InPhaseId);
-        if (Phase == nullptr)
-        { return Refuse(TEXT("Phase ID does not exist."), OutEditError); }
-        auto* Track = FindTrack(*Phase, InSlotId);
-        if (Track == nullptr)
-        { return Refuse(TEXT("This phase has no track for the slot."), OutEditError); }
-        auto& Keys = Track->Get_PositionKeys();
-        if (Keys.ContainsByPredicate(AtTime(InNormalizedTime)))
-        { return Refuse(TEXT("A position key already exists at this time."), OutEditError); }
-        Keys.Add(FCk_ProceduralAction_VectorKey{FCk_FloatRange_0to1{InNormalizedTime}, InValue});
-        SortByTime(Keys);
-        return true;
-    }, OutError);
-}
-
-auto
-    FCk_ProceduralActionAuthoringCommands::
-    SetPositionKey(
-        FName InPhaseId,
-        FName InSlotId,
-        double InNormalizedTime,
-        const FVector& InValue,
-        FString& OutError)
-    -> bool
-{
-    using namespace ck_procedural_action_authoring;
-    auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
-    if (NOT IsNormalized(InNormalizedTime) || InValue.ContainsNaN())
-    { return Refuse(TEXT("Endpoint gizmo needs finite coordinates and time in [0,1]."), OutError); }
-    return CommitDraft(*Clip, LOCTEXT("SetEndpoint", "Move Action Endpoint"),
-        [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata&, FString& OutEditError)
-    {
-        auto* Phase = FindPhase(InOutDraft.Get_Phases(), InPhaseId);
-        if (Phase == nullptr)
-        { return Refuse(TEXT("Selected phase no longer exists."), OutEditError); }
-        auto* Track = FindTrack(*Phase, InSlotId);
-        if (Track == nullptr)
-        { return Refuse(TEXT("Selected limb track no longer exists."), OutEditError); }
-        auto& Keys = Track->Get_PositionKeys();
-        if (auto* Existing = Keys.FindByPredicate(AtTime(InNormalizedTime)))
-        { Existing->Set_Value(InValue); }
-        else
-        { Keys.Add(FCk_ProceduralAction_VectorKey{FCk_FloatRange_0to1{InNormalizedTime}, InValue}); }
-        SortByTime(Keys);
-        return true;
-    }, OutError);
-}
-
-auto
-    FCk_ProceduralActionAuthoringCommands::
-    SetBendKey(
-        FName InPhaseId,
-        FName InSlotId,
-        double InNormalizedTime,
-        const FVector& InValue,
-        FString& OutError)
-    -> bool
-{
-    using namespace ck_procedural_action_authoring;
-    auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
-    if (NOT IsNormalized(InNormalizedTime) || InValue.ContainsNaN() || InValue.SizeSquared() <= 1.0e-8)
-    { return Refuse(TEXT("Bend gizmo needs a finite nonzero direction and time in [0,1]."), OutError); }
-    const auto Direction = InValue.GetSafeNormal();
-    return CommitDraft(*Clip, LOCTEXT("SetBend", "Move Action Bend Guide"),
-        [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata&, FString& OutEditError)
-    {
-        auto* Phase = FindPhase(InOutDraft.Get_Phases(), InPhaseId);
-        if (Phase == nullptr)
-        { return Refuse(TEXT("Selected phase no longer exists."), OutEditError); }
-        auto* Track = FindTrack(*Phase, InSlotId);
-        if (Track == nullptr)
-        { return Refuse(TEXT("Selected limb track no longer exists."), OutEditError); }
-        auto& Keys = Track->Get_BendKeys();
-        if (auto* Existing = Keys.FindByPredicate(AtTime(InNormalizedTime)))
-        { Existing->Set_Value(Direction); }
-        else
-        { Keys.Add(FCk_ProceduralAction_VectorKey{FCk_FloatRange_0to1{InNormalizedTime}, Direction}); }
-        SortByTime(Keys);
-        EnsureBendStart(*Track, Direction);
-        return true;
-    }, OutError);
-}
-
-auto
-    FCk_ProceduralActionAuthoringCommands::
     SetBodyKeys(
         FName InPhaseId,
         const TArray<FCk_ProceduralAction_TransformKey>& InKeys,
@@ -1188,7 +968,8 @@ auto
 {
     using namespace ck_procedural_action_authoring;
     auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
+    if (Clip == nullptr)
+    { return false; }
     return CommitDraft(*Clip, LOCTEXT("SetBodyKeys", "Edit Action Body Curve"),
         [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata& InOutMetadata, FString& OutEditError)
     {
@@ -1197,10 +978,9 @@ auto
         { return Refuse(TEXT("Phase ID does not exist."), OutEditError); }
         Phase->Set_BodyKeys(InKeys);
         Phase->Set_BodyInterpolation(InInterpolation);
-        auto Times = TArray<double>{};
-        for (const auto& Key : InKeys)
-        { Times.Add(Key.Get_Time().Get_Value()); }
-        RetimeGroups(InOutMetadata.Groups, InPhaseId, FCk_ProceduralAction_PoseGroup::Get_BodyChannelName(), Times, InRetimed);
+        if (RejectKeyTimes(InOutDraft, InPhaseId, OutEditError))
+        { return false; }
+        RetimeLabels(InOutMetadata.Labels, *Phase, InRetimed);
         return true;
     }, OutError);
 }
@@ -1218,7 +998,8 @@ auto
 {
     using namespace ck_procedural_action_authoring;
     auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
+    if (Clip == nullptr)
+    { return false; }
     return CommitDraft(*Clip, LOCTEXT("SetPositionKeys", "Edit Action Endpoint Curve"),
         [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata& InOutMetadata, FString& OutEditError)
     {
@@ -1228,10 +1009,9 @@ auto
         { return Refuse(TEXT("This phase has no track for the slot."), OutEditError); }
         Track->Set_PositionKeys(InKeys);
         Track->Set_Interpolation(InInterpolation);
-        auto Times = TArray<double>{};
-        for (const auto& Key : InKeys)
-        { Times.Add(Key.Get_Time().Get_Value()); }
-        RetimeGroups(InOutMetadata.Groups, InPhaseId, InSlotId, Times, InRetimed);
+        if (RejectKeyTimes(InOutDraft, InPhaseId, OutEditError))
+        { return false; }
+        RetimeLabels(InOutMetadata.Labels, *Phase, InRetimed);
         return true;
     }, OutError);
 }
@@ -1247,7 +1027,8 @@ auto
 {
     using namespace ck_procedural_action_authoring;
     auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
+    if (Clip == nullptr)
+    { return false; }
     return CommitDraft(*Clip, LOCTEXT("AddMarker", "Add Action Marker"),
         [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata&, FString& OutEditError)
     {
@@ -1274,7 +1055,8 @@ auto
 {
     using namespace ck_procedural_action_authoring;
     auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
+    if (Clip == nullptr)
+    { return false; }
     return CommitDraft(*Clip, LOCTEXT("AddWindow", "Add Action Window"),
         [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata&, FString& OutEditError)
     {
@@ -1300,7 +1082,8 @@ auto
 {
     using namespace ck_procedural_action_authoring;
     auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
+    if (Clip == nullptr)
+    { return false; }
     return CommitDraft(*Clip, LOCTEXT("MoveMarker", "Move Action Marker"),
         [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata&, FString& OutEditError)
     {
@@ -1327,7 +1110,8 @@ auto
 {
     using namespace ck_procedural_action_authoring;
     auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
+    if (Clip == nullptr)
+    { return false; }
     return CommitDraft(*Clip, LOCTEXT("MoveWindowEdge", "Move Action Window Edge"),
         [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata&, FString& OutEditError)
     {
@@ -1413,7 +1197,8 @@ auto
 {
     using namespace ck_procedural_action_authoring;
     auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
+    if (Clip == nullptr)
+    { return false; }
     return CommitDraft(*Clip, LOCTEXT("SetSlotSpace", "Set Action Slot Space"),
         [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata&, FString& OutEditError)
     {
@@ -1466,175 +1251,9 @@ auto
 
 auto
     FCk_ProceduralActionAuthoringCommands::
-    CapturePose(
-        FName InPhaseId,
-        const FCk_ProceduralAction_PoseKey& InPose,
-        const TArray<FName>& InParticipants,
-        FName InLabel,
-        FGuid& OutPoseId,
-        FString& OutError)
-    -> bool
-{
-    using namespace ck_procedural_action_authoring;
-    auto* Clip = GetClip(OutError);
-    if (Clip == nullptr)
-    { return false; }
-    if (InParticipants.IsEmpty())
-    { return Refuse(TEXT("Select at least one participating channel before capturing a pose."), OutError); }
-    if (NOT HasSameChannels(InParticipants, ck::procedural_action_editor::Get_PoseChannels(InPose), OutError))
-    { return false; }
-    return CapturePoseKey(*Clip, InPhaseId, InPose, InLabel, ECk_ProceduralAction_PoseProvenance::Requested, OutPoseId, OutError);
-}
-
-auto
-    FCk_ProceduralActionAuthoringCommands::
-    UpdatePose(
-        const FGuid& InPoseId,
-        const FCk_ProceduralAction_PoseKey& InPose,
-        FString& OutError)
-    -> bool
-{
-    using namespace ck_procedural_action_authoring;
-    auto* Clip = GetClip(OutError);
-    if (Clip == nullptr)
-    { return false; }
-    auto View = FCk_ProceduralActionPoseGroupView{};
-    if (NOT FindEditablePose(*Clip, InPoseId, View, OutError))
-    { return false; }
-    auto Group = View.Get_Group();
-    if (NOT HasSameChannels(Group.Get_Channels(), ck::procedural_action_editor::Get_PoseChannels(InPose), OutError))
-    { return false; }
-    auto Pose = InPose;
-    Pose.Set_Time(Group.Get_Time());
-    Group.Set_Provenance(ECk_ProceduralAction_PoseProvenance::Requested);
-    return CommitDraft(*Clip, LOCTEXT("UpdatePose", "Update Action Pose"),
-        [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata& InOutMetadata, FString& OutEditError)
-    {
-        if (NOT Reject(UCk_Utils_ProceduralActionBuilder_UE::Replace_PoseKey(InOutDraft, Group.Get_PhaseId(), Pose), OutEditError))
-        { return false; }
-        UpsertGroup(InOutMetadata.Groups, Group);
-        return true;
-    }, OutError);
-}
-
-auto
-    FCk_ProceduralActionAuthoringCommands::
-    DuplicatePose(
-        const FGuid& InPoseId,
-        FName InPhaseId,
-        double InNormalizedTime,
-        FGuid& OutPoseId,
-        FString& OutError)
-    -> bool
-{
-    using namespace ck_procedural_action_authoring;
-    auto* Clip = GetClip(OutError);
-    if (Clip == nullptr)
-    { return false; }
-    if (NOT IsNormalized(InNormalizedTime))
-    { return Refuse(TEXT("Duplicate needs a time in [0,1]."), OutError); }
-    auto View = FCk_ProceduralActionPoseGroupView{};
-    if (NOT FindEditablePose(*Clip, InPoseId, View, OutError))
-    { return false; }
-    const auto& Source = View.Get_Group();
-    auto Pose = FCk_ProceduralAction_PoseKey{};
-    if (NOT ck::procedural_action_editor::ReadPoseKey(Clip->Get_Phases(), Source, Pose, OutError))
-    { return false; }
-    const auto Tangents = ReadTangents(Clip->Get_Phases(), Source);
-    Pose.Set_Time(FCk_FloatRange_0to1{InNormalizedTime});
-    const auto NewId = FGuid::NewGuid();
-    const auto Committed = CommitDraft(*Clip, LOCTEXT("DuplicatePose", "Duplicate Action Pose"),
-        [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata& InOutMetadata, FString& OutEditError)
-    {
-        if (NOT Reject(UCk_Utils_ProceduralActionBuilder_UE::Add_PoseKey(InOutDraft, InPhaseId, Pose), OutEditError))
-        { return false; }
-        WriteTangents(InOutDraft.Get_Phases(), InPhaseId, InNormalizedTime, Source.Get_Channels(), Tangents);
-        auto Copy = FCk_ProceduralAction_PoseGroup{NewId, InPhaseId, FCk_FloatRange_0to1{InNormalizedTime}, Source.Get_Channels()};
-        Copy.Set_Label(Source.Get_Label());
-        Copy.Set_Provenance(Source.Get_Provenance());
-        InOutMetadata.Groups.Add(Copy);
-        return true;
-    }, OutError);
-    if (Committed)
-    { OutPoseId = NewId; }
-    return Committed;
-}
-
-auto
-    FCk_ProceduralActionAuthoringCommands::
-    MovePose(
-        const FGuid& InPoseId,
-        FName InPhaseId,
-        double InNormalizedTime,
-        FString& OutError)
-    -> bool
-{
-    using namespace ck_procedural_action_authoring;
-    auto* Clip = GetClip(OutError);
-    if (Clip == nullptr)
-    { return false; }
-    if (NOT IsNormalized(InNormalizedTime))
-    { return Refuse(TEXT("Move needs a time in [0,1]."), OutError); }
-    auto View = FCk_ProceduralActionPoseGroupView{};
-    if (NOT FindEditablePose(*Clip, InPoseId, View, OutError))
-    { return false; }
-    const auto Source = View.Get_Group();
-    if (Source.Get_PhaseId() == InPhaseId && ck::procedural_action_editor::IsSamePoseTime(Source.Get_Time().Get_Value(), InNormalizedTime))
-    { return true; }
-    auto Pose = FCk_ProceduralAction_PoseKey{};
-    if (NOT ck::procedural_action_editor::ReadPoseKey(Clip->Get_Phases(), Source, Pose, OutError))
-    { return false; }
-    const auto Tangents = ReadTangents(Clip->Get_Phases(), Source);
-    Pose.Set_Time(FCk_FloatRange_0to1{InNormalizedTime});
-    return CommitDraft(*Clip, LOCTEXT("MovePose", "Move Action Pose"),
-        [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata& InOutMetadata, FString& OutEditError)
-    {
-        RemovePoseKeys(InOutDraft.Get_Phases(), Source);
-        if (NOT Reject(UCk_Utils_ProceduralActionBuilder_UE::Add_PoseKey(InOutDraft, InPhaseId, Pose), OutEditError))
-        { return false; }
-        WriteTangents(InOutDraft.Get_Phases(), InPhaseId, InNormalizedTime, Source.Get_Channels(), Tangents);
-        auto Moved = Source;
-        Moved.Set_PhaseId(InPhaseId);
-        Moved.Set_Time(FCk_FloatRange_0to1{InNormalizedTime});
-        UpsertGroup(InOutMetadata.Groups, Moved);
-        return true;
-    }, OutError);
-}
-
-auto
-    FCk_ProceduralActionAuthoringCommands::
-    DeletePose(
-        const FGuid& InPoseId,
-        FString& OutError)
-    -> bool
-{
-    using namespace ck_procedural_action_authoring;
-    auto* Clip = GetClip(OutError);
-    if (Clip == nullptr)
-    { return false; }
-    auto View = FCk_ProceduralActionPoseGroupView{};
-    if (NOT ck::procedural_action_editor::FindPoseGroup(*Clip, InPoseId, View))
-    {
-        OutError = FString::Printf(TEXT("Pose %s does not exist in this clip."), *InPoseId.ToString());
-        return false;
-    }
-    const auto Group = View.Get_Group();
-    return CommitDraft(*Clip, LOCTEXT("DeletePose", "Delete Action Pose"),
-        [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata& InOutMetadata, FString&)
-    {
-        RemovePoseKeys(InOutDraft.Get_Phases(), Group);
-        InOutMetadata.Groups.RemoveAll([&Group](const FCk_ProceduralAction_PoseGroup& InCandidate)
-            { return InCandidate.Get_Id() == Group.Get_Id(); });
-        return true;
-    }, OutError);
-}
-
-auto
-    FCk_ProceduralActionAuthoringCommands::
     CaptureSolvedPose(
         const FCk_ProceduralActionSolvedSnapshot& InSnapshot,
         const FCk_ProceduralActionSolvedCaptureTarget& InTarget,
-        FGuid& OutPoseId,
         FString& OutError)
     -> bool
 {
@@ -1671,7 +1290,7 @@ auto
     auto Malformed = TArray<FName>{};
     for (const auto Channel : InTarget.Get_Channels())
     {
-        if (Channel == FCk_ProceduralAction_PoseGroup::Get_BodyChannelName())
+        if (Channel == ck::procedural_action_editor::Get_BodyChannelName())
         {
             if (NOT Solved.Get_HasBodyPresentation())
             {
@@ -1730,8 +1349,7 @@ auto
         return false;
     }
     Pose.Set_Limbs(Limbs);
-    return CapturePoseKey(*Clip, InTarget.Get_PhaseId(), Pose, InTarget.Get_Label(), ECk_ProceduralAction_PoseProvenance::Solved,
-        OutPoseId, OutError);
+    return RecordPose(InTarget.Get_PhaseId(), Pose, InTarget.Get_Label(), OutError);
 }
 
 auto
@@ -1748,8 +1366,6 @@ auto
     auto Recipe = FCk_ProceduralAction_ClipDraft{};
     if (NOT Reject(UCk_Utils_ProceduralActionBuilder_UE::Make_FromRecipe(InRecipe, Recipe), OutError))
     { return false; }
-    auto Derived = TArray<FCk_ProceduralActionPoseGroupView>{};
-    ck::procedural_action_editor::DerivePoseGroups(Recipe.Get_Phases(), {}, Derived);
     return CommitDraft(*Clip, LOCTEXT("CreateFromRecipe", "Create Action From Recipe"),
         [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata& InOutMetadata, FString& OutEditError)
     {
@@ -1757,14 +1373,7 @@ auto
             || NOT InOutDraft.Get_Markers().IsEmpty() || NOT InOutDraft.Get_Windows().IsEmpty())
         { return Refuse(TEXT("A recipe creates a new motion and never overwrites authored content; start from an empty clip."), OutEditError); }
         InOutDraft = Recipe;
-        InOutMetadata.Groups.Reset();
-        for (const auto& View : Derived)
-        {
-            const auto& Source = View.Get_Group();
-            auto Group = FCk_ProceduralAction_PoseGroup{FGuid::NewGuid(), Source.Get_PhaseId(), Source.Get_Time(), Source.Get_Channels()};
-            Group.Set_Label(Source.Get_Label());
-            InOutMetadata.Groups.Add(Group);
-        }
+        InOutMetadata.Labels = MakeRecipeLabels(Recipe.Get_Phases());
         return true;
     }, OutError);
 }
@@ -1834,7 +1443,8 @@ auto
 {
     using namespace ck_procedural_action_authoring;
     auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
+    if (Clip == nullptr)
+    { return false; }
     if (InConfig == nullptr)
     { return Refuse(TEXT("The clip has no preview subject to bind the slot to."), OutError); }
     const auto Walking = InConfig->Get_SubjectMode() == ECk_ProceduralActionPreview_SubjectMode::Walking;
@@ -1864,15 +1474,16 @@ auto
 
 auto
     FCk_ProceduralActionAuthoringCommands::
-    SetEditorSubject(
-        const FCk_ProceduralAction_EditorSubject& InSubject,
+    SetSubject(
+        const FCk_ProceduralActionEditor_Subject& InSubject,
         FString& OutError)
     -> bool
 {
     using namespace ck_procedural_action_authoring;
     auto* Clip = GetClip(OutError);
-    if (Clip == nullptr) { return false; }
-    return CommitDraft(*Clip, LOCTEXT("SetEditorSubject", "Set Action Preview Subject"),
+    if (Clip == nullptr)
+    { return false; }
+    return CommitDraft(*Clip, LOCTEXT("SetSubject", "Set Action Preview Subject"),
         [&](FCk_ProceduralAction_ClipDraft&, FEditorMetadata& InOutMetadata, FString&)
     {
         InOutMetadata.Subject = InSubject;
@@ -1905,7 +1516,6 @@ auto
         FName InPhaseId,
         const FCk_ProceduralAction_PoseKey& InPose,
         FName InLabel,
-        FGuid& OutPoseId,
         FString& OutError)
     -> bool
 {
@@ -1913,41 +1523,28 @@ auto
     auto* Clip = GetClip(OutError);
     if (Clip == nullptr)
     { return false; }
-    const auto Channels = ck::procedural_action_editor::Get_PoseChannels(InPose);
-    if (Channels.IsEmpty())
+    if (ck::procedural_action_editor::Get_PoseChannels(InPose).IsEmpty())
     { return Refuse(TEXT("Tick at least one channel for Record to cover."), OutError); }
     const auto Time = InPose.Get_Time().Get_Value();
     if (NOT IsNormalized(Time))
     { return Refuse(TEXT("Key time must be in [0,1]."), OutError); }
-    auto PoseId = FGuid::NewGuid();
-    const auto Committed = CommitDraft(*Clip, LOCTEXT("RecordPose", "Record Action Pose"),
+    return CommitDraft(*Clip, LOCTEXT("RecordPose", "Record Action Pose"),
         [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata& InOutMetadata, FString& OutEditError)
     {
         if (NOT WritePoseKeys(InOutDraft, InPhaseId, InPose, OutEditError))
         { return false; }
-        auto* Existing = InOutMetadata.Groups.FindByPredicate([InPhaseId, Time](const FCk_ProceduralAction_PoseGroup& InGroup)
-        {
-            return InGroup.Get_PhaseId() == InPhaseId
-                && ck::procedural_action_editor::IsSamePoseTime(InGroup.Get_Time().Get_Value(), Time);
-        });
+        auto* Existing = InOutMetadata.Labels.FindByPredicate([InPhaseId, Time](const FCk_ProceduralActionEditor_PoseLabel& InLabel)
+            { return InLabel.Get_PhaseId() == InPhaseId && ck::procedural_action_editor::IsSamePoseTime(InLabel.Get_Time().Get_Value(), Time); });
         if (Existing != nullptr)
         {
-            PoseId = Existing->Get_Id();
-            for (const auto Channel : Channels)
-            { Existing->Get_Channels().AddUnique(Channel); }
-            Existing->Set_Provenance(ECk_ProceduralAction_PoseProvenance::Requested);
             if (NOT InLabel.IsNone())
             { Existing->Set_Label(InLabel); }
             return true;
         }
-        auto Group = FCk_ProceduralAction_PoseGroup{PoseId, InPhaseId, InPose.Get_Time(), Channels};
-        Group.Set_Label(InLabel.IsNone() ? FName{*FString::Printf(TEXT("Pose %d"), InOutMetadata.Groups.Num() + 1)} : InLabel);
-        InOutMetadata.Groups.Add(Group);
+        const auto Label = InLabel.IsNone() ? FName{*FString::Printf(TEXT("Pose %d"), InOutMetadata.Labels.Num() + 1)} : InLabel;
+        InOutMetadata.Labels.Add(FCk_ProceduralActionEditor_PoseLabel{InPhaseId, InPose.Get_Time(), Label});
         return true;
     }, OutError);
-    if (Committed)
-    { OutPoseId = PoseId; }
-    return Committed;
 }
 
 auto
@@ -1977,7 +1574,7 @@ auto
         { return Refuse(TEXT("The channel has no key at that time."), OutEditError); }
         if (HasTime(Before, InTo))
         { return Refuse(TEXT("The channel already has a key at the new time."), OutEditError); }
-        if (InChannel == FCk_ProceduralAction_PoseGroup::Get_BodyChannelName())
+        if (InChannel == ck::procedural_action_editor::Get_BodyChannelName())
         { RetimeKeys(Phase->Get_BodyKeys(), InFrom, InTo); }
         else if (auto* Track = FindTrack(*Phase, InChannel))
         {
@@ -1985,8 +1582,7 @@ auto
             RetimeKeys(Track->Get_OrientationKeys(), InFrom, InTo);
             RetimeKeys(Track->Get_BendKeys(), InFrom, InTo);
         }
-        RetimeGroups(InOutMetadata.Groups, InPhaseId, InChannel, Get_KeyedTimes(*Phase, InChannel),
-            {FCk_ProceduralActionRetimedKey{InFrom, InTo}});
+        RetimeLabels(InOutMetadata.Labels, *Phase, {FCk_ProceduralActionRetimedKey{InFrom, InTo}});
         return true;
     }, OutError);
 }
@@ -2005,13 +1601,15 @@ auto
     if (Clip == nullptr)
     { return false; }
     return CommitDraft(*Clip, LOCTEXT("DeleteKey", "Delete Action Key"),
-        [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata& InOutMetadata, FString& OutEditError)
+        [&](FCk_ProceduralAction_ClipDraft& InOutDraft, FEditorMetadata&, FString& OutEditError)
     {
         auto* Phase = FindPhase(InOutDraft.Get_Phases(), InPhaseId);
         if (Phase == nullptr)
         { return Refuse(TEXT("Phase ID does not exist."), OutEditError); }
+        if (NOT HasTime(Get_KeyedTimes(*Phase, InChannel), InTime))
+        { return Refuse(TEXT("The channel has no key at that time."), OutEditError); }
         const auto KeyedAtTime = AtTime(InTime);
-        if (InChannel == FCk_ProceduralAction_PoseGroup::Get_BodyChannelName())
+        if (InChannel == ck::procedural_action_editor::Get_BodyChannelName())
         { Phase->Get_BodyKeys().RemoveAll(KeyedAtTime); }
         else if (auto* Track = FindTrack(*Phase, InChannel))
         {
@@ -2019,7 +1617,6 @@ auto
             Track->Get_OrientationKeys().RemoveAll(KeyedAtTime);
             Track->Get_BendKeys().RemoveAll(KeyedAtTime);
         }
-        RetimeGroups(InOutMetadata.Groups, InPhaseId, InChannel, Get_KeyedTimes(*Phase, InChannel), {});
         return true;
     }, OutError);
 }
@@ -2051,8 +1648,9 @@ auto
 
 auto
     FCk_ProceduralActionAuthoringCommands::
-    RenamePose(
-        const FGuid& InPoseId,
+    RenameLabel(
+        FName InPhaseId,
+        double InTime,
         FName InLabel,
         FString& OutError)
     -> bool
@@ -2063,14 +1661,17 @@ auto
     { return false; }
     if (InLabel.IsNone())
     { return Refuse(TEXT("A pose needs a name."), OutError); }
-    return CommitDraft(*Clip, LOCTEXT("RenamePose", "Rename Action Pose"),
+    return CommitDraft(*Clip, LOCTEXT("RenameLabel", "Rename Action Pose"),
         [&](FCk_ProceduralAction_ClipDraft&, FEditorMetadata& InOutMetadata, FString& OutEditError)
     {
-        auto* Group = InOutMetadata.Groups.FindByPredicate([&InPoseId](const FCk_ProceduralAction_PoseGroup& InGroup)
-            { return InGroup.Get_Id() == InPoseId; });
-        if (Group == nullptr)
-        { return Refuse(TEXT("The pose does not exist in this clip."), OutEditError); }
-        Group->Set_Label(InLabel);
+        auto* Label = InOutMetadata.Labels.FindByPredicate([InPhaseId, InTime](const FCk_ProceduralActionEditor_PoseLabel& InCandidate)
+        {
+            return InCandidate.Get_PhaseId() == InPhaseId
+                && ck::procedural_action_editor::IsSamePoseTime(InCandidate.Get_Time().Get_Value(), InTime);
+        });
+        if (Label == nullptr)
+        { return Refuse(TEXT("No pose is labelled at this time."), OutEditError); }
+        Label->Set_Label(InLabel);
         return true;
     }, OutError);
 }

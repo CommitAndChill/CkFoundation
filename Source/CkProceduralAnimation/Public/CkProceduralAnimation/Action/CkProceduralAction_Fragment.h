@@ -25,6 +25,7 @@ namespace ck
     class FProcessor_ProceduralActionPlayer_Observe;
     class FProcessor_ProceduralActionPlayer_ReconcileOwnerLoss;
     class FProcessor_ProceduralActionPlayer_EndPlay;
+    struct FTechnique_ProceduralActionPlayer_Service;
 
     struct CKPROCEDURALANIMATION_API FProceduralActionClipParams
     {
@@ -64,6 +65,7 @@ namespace ck
     {
         CK_GENERATED_BODY(FFragment_ProceduralAction_Loading);
         friend class FProcessor_ProceduralActionPlayer_Service;
+        friend struct FTechnique_ProceduralActionPlayer_Service;
         friend class ::UCk_Utils_ProceduralAnimation_Debug_UE;
 
     private:
@@ -100,6 +102,7 @@ namespace ck
         friend class FProcessor_ProceduralAction_Service;
         friend class FProcessor_ProceduralAction_EndPlay;
         friend class FProcessor_ProceduralActionPlayer_Service;
+        friend struct FTechnique_ProceduralActionPlayer_Service;
         friend class FProcessor_ProceduralActionPlayer_Observe;
         friend class FProcessor_ProceduralActionPlayer_ReconcileOwnerLoss;
         friend class FProcessor_ProceduralActionPlayer_EndPlay;
@@ -121,6 +124,8 @@ namespace ck
         TOptional<FCk_ArticulationStageKey> _PendingHoldStageKey;
         FCk_Time _AdmissionElapsed;
         FCk_Time _PublicationElapsed;
+        // Why the player last published nothing while this action waited to publish; cleared when a publication settles.
+        FName _LastStall = NAME_None;
         FCk_Time _ServiceElapsed;
         FCk_Time _AcceptedTime;
         FCk_Time _PendingToTime;
@@ -131,7 +136,8 @@ namespace ck
         bool _PendingIsEntryBlend = false;
         bool _HasAuthoredReceipt = false;
         FCk_ProceduralAction_Interval _PendingClipInterval;
-        TArray<FCk_ProceduralAction_Sample> _PendingIntermediateSamples;
+        // The last candidate the step loop accepted before the published one: the settled pose is measured from it.
+        TOptional<FCk_ProceduralArticulation_Pose> _PendingLastIntermediatePose;
         FCk_ProceduralAction_SamplingReport _PendingClipSampling;
         FCk_ProceduralArticulation_Pose _PendingPredictedPose;
         int64 _NextSampleSequence = 1;
@@ -151,11 +157,19 @@ namespace ck
             -> FCk_ProceduralAction_FailureContext&;
 
     public:
+        // The articulation token this action claims and stages with: its identity at its current generation.
+        auto
+            Get_Token(
+                const FFragment_ProceduralAction_Params& InParams) const
+            -> FCk_ArticulationControlToken;
+
+    public:
         CK_PROPERTY_GET(_State);
         CK_PROPERTY_GET(_Result);
         CK_PROPERTY_GET(_Context);
         CK_PROPERTY_GET(_EntryPose);
         CK_PROPERTY_GET(_Generation);
+        CK_PROPERTY_GET(_LastStall);
     };
 
     struct CKPROCEDURALANIMATION_API FFragment_ProceduralAction_Requests

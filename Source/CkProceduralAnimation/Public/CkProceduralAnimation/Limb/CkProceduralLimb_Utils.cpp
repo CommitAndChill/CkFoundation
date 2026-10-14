@@ -54,8 +54,8 @@ auto
     { return false; }
 
     const auto Index = InLimb.Get<ck::FFragment_ProceduralLimb>().Get_Index();
-    if (Owner.Has<ck::FFragment_ProceduralArticulation_Pose>()
-        && Owner.Get<ck::FFragment_ProceduralArticulation_Pose>().Get_LegacyWalker())
+    if (Owner.Has<ck::FFragment_ProceduralArticulation_LegacyCandidate>()
+        && Owner.Get<ck::FFragment_ProceduralArticulation_LegacyCandidate>().Get_LegacyWalker())
     {
         if (NOT Owner.Has<ck::FFragment_ProceduralArticulation_Bindings>())
         { return false; }

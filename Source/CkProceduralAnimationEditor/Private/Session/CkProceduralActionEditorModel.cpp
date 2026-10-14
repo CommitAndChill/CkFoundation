@@ -1,6 +1,6 @@
 #include "CkProceduralAnimationEditor/CkProceduralActionEditorModel.h"
 
-#include "CkProceduralAnimation/Action/CkProceduralAction_Data.h"
+#include "CkProceduralAnimationEditor/CkProceduralActionEditorData.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -10,7 +10,7 @@ auto
     -> FName
 {
     const auto Channel = _Selection.Get_Channel();
-    return Channel == FCk_ProceduralAction_PoseGroup::Get_BodyChannelName() ? NAME_None : Channel;
+    return Channel == ck::procedural_action_editor::Get_BodyChannelName() ? NAME_None : Channel;
 }
 
 auto
@@ -86,29 +86,6 @@ auto
     auto Selection = _Selection;
     Selection.Set_Kind(ECk_ProceduralActionEditor_SelectionKind::Event);
     Selection.Set_EventId(InEventId);
-    DoSetSelection(Selection);
-}
-
-auto
-    FCk_ProceduralActionEditorModel::
-    SelectPose(
-        const FGuid& InPoseId,
-        FName InPhaseId)
-    -> void
-{
-    auto Selection = _Selection;
-    Selection.Set_PoseId(InPoseId);
-    Selection.Set_PhaseId(InPhaseId);
-    DoSetSelection(Selection);
-}
-
-auto
-    FCk_ProceduralActionEditorModel::
-    ClearPose()
-    -> void
-{
-    auto Selection = _Selection;
-    Selection.Set_PoseId(FGuid{});
     DoSetSelection(Selection);
 }
 

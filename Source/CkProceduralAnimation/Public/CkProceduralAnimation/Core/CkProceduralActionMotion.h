@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Observation.h"
+#include "CkProceduralAnimation/Core/CkProceduralRigidTransform.h"
 
 #include <limits>
 
@@ -33,19 +34,16 @@ namespace ck::procedural_action
         const FCk_ProceduralArticulation_Pose& InPose)
         -> bool
     {
-        const auto IsRigid = [](const FTransform& InTransform)
-        {
-            return NOT InTransform.ContainsNaN() && InTransform.GetRotation().IsNormalized()
-                && InTransform.GetScale3D().Equals(FVector::OneVector, 1.0e-6);
-        };
-        if (NOT IsRigid(InPose.Get_RootFrame())
-            || (InPose.Get_HasBodyPresentation() && NOT IsRigid(InPose.Get_BodyPresentation())))
+        constexpr auto Tolerance = procedural_animation::ComposedRotationTolerance;
+        if (NOT procedural_animation::IsRigid(InPose.Get_RootFrame(), Tolerance)
+            || (InPose.Get_HasBodyPresentation()
+                && NOT procedural_animation::IsRigid(InPose.Get_BodyPresentation(), Tolerance)))
         { return false; }
         for (auto Index = 0; Index < InPose.Get_Limbs().Num(); ++Index)
         {
             const auto& Limb = InPose.Get_Limbs()[Index];
             if (Limb.Get_Id().IsNone() || Limb.Get_Segments().IsEmpty()
-                || NOT IsRigid(Limb.Get_AcceptedEndpoint()))
+                || NOT procedural_animation::IsRigid(Limb.Get_AcceptedEndpoint(), Tolerance))
             { return false; }
             for (auto Other = 0; Other < Index; ++Other)
             {

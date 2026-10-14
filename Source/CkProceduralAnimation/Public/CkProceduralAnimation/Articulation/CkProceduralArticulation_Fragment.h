@@ -75,6 +75,7 @@ namespace ck
         CK_DEFINE_CONSTRUCTORS(FFragment_ProceduralArticulation_Bindings, _Bindings, _Limbs, _Presentation);
     };
 
+    // What the articulation issued, what it expects to observe and what it last settled.
     struct CKPROCEDURALANIMATION_API FFragment_ProceduralArticulation_Pose
     {
         CK_GENERATED_BODY(FFragment_ProceduralArticulation_Pose);
@@ -83,7 +84,6 @@ namespace ck
         friend class ::FCk_ProceduralArticulation_Control;
         friend class FProcessor_ProceduralRig_Update;
         friend class FProcessor_ProceduralBodyPose_Update;
-        friend class ::UCk_Utils_ProceduralAnimation_UE;
 
     private:
         TArray<FTransform> _ExpectedParts;
@@ -93,15 +93,7 @@ namespace ck
         uint64 _IssuedRevision = 0;
         uint64 _SettledRevision = 0;
         bool _PendingObservation = false;
-        bool _LegacyWalker = false;
-        bool _HasLegacyCandidate = false;
-        TArray<FCk_Handle_Transform> _LegacyHandles;
-        TArray<FTransform> _LegacyPoses;
-        FTransform _LegacyPresentation = FTransform::Identity;
-        bool _HasLegacyPresentation = false;
-        bool _HasControlCandidate = false;
-        TArray<FCk_Handle_Transform> _ControlHandles;
-        TArray<FTransform> _ControlPoses;
+        // The subject pose the next publication predicts, whichever candidate it publishes.
         FCk_ProceduralArticulation_Pose _PredictedSubjectPose;
         FCk_ProceduralArticulation_Pose _SettledSubjectPose;
 
@@ -110,7 +102,41 @@ namespace ck
         CK_PROPERTY_GET(_SettledRevision);
         CK_PROPERTY_GET(_SettledSubjectPose);
         CK_PROPERTY_GET(_PendingObservation);
+    };
+
+    // The walker's rig and body pose write their own parts' candidate here; the articulation publishes it.
+    struct CKPROCEDURALANIMATION_API FFragment_ProceduralArticulation_LegacyCandidate
+    {
+        CK_GENERATED_BODY(FFragment_ProceduralArticulation_LegacyCandidate);
+        friend class FProcessor_ProceduralArticulation_Update;
+        friend class FProcessor_ProceduralArticulation_Observe;
+        friend class FProcessor_ProceduralRig_Update;
+        friend class FProcessor_ProceduralBodyPose_Update;
+        friend class ::UCk_Utils_ProceduralAnimation_UE;
+
+    private:
+        bool _LegacyWalker = false;
+        bool _HasLegacyCandidate = false;
+        TArray<FCk_Handle_Transform> _LegacyHandles;
+        TArray<FTransform> _LegacyPoses;
+        FTransform _LegacyPresentation = FTransform::Identity;
+        bool _HasLegacyPresentation = false;
+
+    public:
         CK_PROPERTY_GET(_LegacyWalker);
+    };
+
+    // A batch the controller staged, waiting for the articulation to publish it.
+    struct CKPROCEDURALANIMATION_API FFragment_ProceduralArticulation_ControlCandidate
+    {
+        CK_GENERATED_BODY(FFragment_ProceduralArticulation_ControlCandidate);
+        friend class FProcessor_ProceduralArticulation_Update;
+        friend class ::FCk_ProceduralArticulation_Control;
+
+    private:
+        bool _HasControlCandidate = false;
+        TArray<FCk_Handle_Transform> _ControlHandles;
+        TArray<FTransform> _ControlPoses;
     };
 
     struct CKPROCEDURALANIMATION_API FFragment_ProceduralArticulation_Health

@@ -765,9 +765,9 @@ namespace ck
             TArray<FProceduralRig_SelectedChain>* OutPreview)
         -> bool
     {
-        if (OutPreview == nullptr && InHandle.Has<FFragment_ProceduralArticulation_Pose>())
+        if (OutPreview == nullptr && InHandle.Has<FFragment_ProceduralArticulation_LegacyCandidate>())
         {
-            auto& Staged = InHandle.Get<FFragment_ProceduralArticulation_Pose>();
+            auto& Staged = InHandle.Get<FFragment_ProceduralArticulation_LegacyCandidate>();
             Staged._HasLegacyCandidate = false;
             Staged._LegacyHandles.Reset();
             Staged._LegacyPoses.Reset();
@@ -892,8 +892,8 @@ namespace ck
         RayCount = 0;
         if (Chains.IsEmpty())
         {
-            if (OutPreview == nullptr && InHandle.Has<FFragment_ProceduralArticulation_Pose>())
-            { InHandle.Get<FFragment_ProceduralArticulation_Pose>()._HasLegacyCandidate = false; }
+            if (OutPreview == nullptr && InHandle.Has<FFragment_ProceduralArticulation_LegacyCandidate>())
+            { InHandle.Get<FFragment_ProceduralArticulation_LegacyCandidate>()._HasLegacyCandidate = false; }
             return false;
         }
 
@@ -968,11 +968,13 @@ namespace ck
         const auto HasArticulation = InHandle.Has<FFragment_ProceduralArticulation_Pose>();
         auto* ArticulationPose = HasArticulation
             ? &InHandle.Get<FFragment_ProceduralArticulation_Pose>() : nullptr;
-        if (ArticulationPose != nullptr)
+        auto* LegacyCandidate = HasArticulation
+            ? &InHandle.Get<FFragment_ProceduralArticulation_LegacyCandidate>() : nullptr;
+        if (LegacyCandidate != nullptr)
         {
-            ArticulationPose->_LegacyHandles.Reset();
-            ArticulationPose->_LegacyPoses.Reset();
-            ArticulationPose->_HasLegacyCandidate = false;
+            LegacyCandidate->_LegacyHandles.Reset();
+            LegacyCandidate->_LegacyPoses.Reset();
+            LegacyCandidate->_HasLegacyCandidate = false;
         }
         auto PredictedLimbs = TArray<FCk_ProceduralArticulation_LimbPose>{};
         PredictedLimbs.Reserve(Chains.Num());
@@ -1014,8 +1016,8 @@ namespace ck
                 const auto& To = Chosen.Joints[Index + 1];
                 if (ArticulationPose != nullptr)
                 {
-                    ArticulationPose->_LegacyHandles.Add(Params.Get_Segments()[Index]);
-                    ArticulationPose->_LegacyPoses.Emplace(
+                    LegacyCandidate->_LegacyHandles.Add(Params.Get_Segments()[Index]);
+                    LegacyCandidate->_LegacyPoses.Emplace(
                         ck_procedural_rig::Get_SegmentRotation(From, To, Chosen.Pole), (From + To) * 0.5);
                 }
                 else
@@ -1030,8 +1032,8 @@ namespace ck
                     Chain.Leg.Get<FFragment_ProceduralLeg>().Get_Foot().Get_Rotation(), TOptional<FQuat>{});
                 if (ArticulationPose != nullptr)
                 {
-                    ArticulationPose->_LegacyHandles.Add(Params.Get_Foot());
-                    ArticulationPose->_LegacyPoses.Emplace(Rotation, Chosen.Joints.Last());
+                    LegacyCandidate->_LegacyHandles.Add(Params.Get_Foot());
+                    LegacyCandidate->_LegacyPoses.Emplace(Rotation, Chosen.Joints.Last());
                 }
                 else
                 { ck_procedural_rig::Request_Pose(Params.Get_Foot(), Chosen.Joints.Last(), Rotation); }
@@ -1045,7 +1047,7 @@ namespace ck
                     != FCk_Handle_Transform{};
             ArticulationPose->_PredictedSubjectPose = FCk_ProceduralArticulation_Pose{
                 BodyTransform, Posed, HasPresentation, MoveTemp(PredictedLimbs)};
-            ArticulationPose->_HasLegacyCandidate = true;
+            LegacyCandidate->_HasLegacyCandidate = true;
         }
         return true;
     }

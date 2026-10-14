@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CkProceduralAnimation/Core/CkProceduralActionEvaluation.h"
-#include "CkProceduralAnimationEditor/CkProceduralActionPoseGroups.h"
+#include "CkProceduralAnimationEditor/CkProceduralActionEditorData.h"
 #include "CkProceduralAnimationEditor/CkProceduralActionPreview_Config.h"
 
 #include "UObject/StrongObjectPtr.h"
@@ -22,9 +22,15 @@ public:
     CK_DEFINE_CONSTRUCTORS(FCk_ProceduralActionKeyTime, _PhaseId, _KeyTime);
 };
 
+/** The compiled view of one clip on one preview subject. It holds no playhead: the editor model owns the time, and every
+ *  view evaluates the clip at the model's time through EvaluateAt. Get_Revision changes only when what a preview plays
+ *  changes (the compiled content, its subject or its preview config), so an edit that rebuilds nothing restarts nothing. */
 class CKPROCEDURALANIMATIONEDITOR_API FCk_ProceduralActionAuthoringSession
 {
 public:
+    // The preview's step: the Solver simulates and the transport steps at this rate.
+    static constexpr auto FramesPerSecond = 60.0;
+
     explicit FCk_ProceduralActionAuthoringSession(
         UCk_ProceduralAction_Data* InClip);
 
@@ -40,145 +46,56 @@ public:
     auto
         Refresh()
         -> void;
-    auto
-        SetTime(
-            FCk_Time InTime)
-        -> void;
+    // The authored pose at InTime; false when the clip does not compile or InTime is outside it.
     auto
         EvaluateAt(
             FCk_Time InTime,
             ck::procedural_action::FEvaluatedPose& OutPose) const
         -> bool;
-    auto
-        Advance(
-            FCk_Time InDelta)
-        -> void;
-    auto
-        SetPlaying(
-            bool InPlaying)
-        -> void;
 
     auto
-        GetClip() const
+        Get_Clip() const
         -> UCk_ProceduralAction_Data*
-    {
-        return _Clip.Get();
-    }
+    { return _Clip.Get(); }
     auto
-        GetPreviewConfig() const
+        Get_PreviewConfig() const
         -> UCk_ProceduralActionPreview_Config*
-    {
-        return _PreviewConfig.Get();
-    }
+    { return _PreviewConfig.Get(); }
     auto
-        GetCompiledClip() const
+        Get_CompiledClip() const
         -> const ck::procedural_action::FCompiledClip&
-    {
-        return _Compiled;
-    }
-    auto
-        GetPose() const
-        -> const ck::procedural_action::FEvaluatedPose&
-    {
-        return _Pose;
-    }
+    { return _Compiled; }
     // Each section's timing and easing; valid whenever the section durations are, even when the clip does not compile.
     auto
-        GetTiming() const
+        Get_Timing() const
         -> const TArray<ck::procedural_action::FCompiledPhase>&
-    {
-        return _Timing;
-    }
+    { return _Timing; }
     auto
-        GetDiagnostics() const
+        Get_Diagnostics() const
         -> const TArray<ck::procedural_action::FDiagnostic>&
-    {
-        return _Diagnostics;
-    }
+    { return _Diagnostics; }
     auto
-        GetTime() const
-        -> FCk_Time
-    {
-        return _Time;
-    }
-    auto
-        GetRevision() const
+        Get_Revision() const
         -> uint64
-    {
-        return _Revision;
-    }
+    { return _Revision; }
     auto
-        GetDuration() const
+        Get_Duration() const
         -> FCk_Time
-    {
-        return _Compiled.Get_Duration();
-    }
+    { return _Compiled.Get_Duration(); }
     auto
-        IsCompiled() const
+        Get_IsCompiled() const
         -> bool
-    {
-        return _CompiledValid;
-    }
+    { return _CompiledValid; }
+    // The clip compiles, its preview is valid, and the preview can start it.
     auto
-        HasPose() const
+        Get_CanPlay() const
         -> bool
-    {
-        return _HasPose;
-    }
+    { return _CompiledValid && _HasStart && _AppearanceError.IsEmpty(); }
     auto
-        IsPlaying() const
-        -> bool
-    {
-        return _Playing;
-    }
-    auto
-        CanPlay() const
-        -> bool
-    {
-        return _CompiledValid && _HasPose && _AppearanceError.IsEmpty();
-    }
-    auto
-        GetStatusText() const
+        Get_StatusText(
+            FCk_Time InTime) const
         -> FText;
 
-    // Pose groups of the current revision: the clip's persisted groups plus temporary ones derived for unclaimed key
-    // times. Rebuilt by Refresh, never per frame.
-    auto
-        GetPoseGroups() const
-        -> const TArray<FCk_ProceduralActionPoseGroupView>&
-    {
-        return _PoseGroups;
-    }
-    auto
-        FindPoseGroup(
-            const FGuid& InId) const
-        -> const FCk_ProceduralActionPoseGroupView*;
-
-    // The staging pose holds the requested targets the author is editing. It belongs to the session: nothing here writes
-    // the clip or the Solver world, and only an explicit capture command turns it into keys.
-    auto
-        SetStagingTime(
-            FName InPhaseId,
-            FCk_FloatRange_0to1 InTime)
-        -> void;
-    auto
-        SetStagingBody(
-            const FTransform& InBody)
-        -> void;
-    auto
-        SetStagingLimb(
-            const FCk_ProceduralAction_LimbPoseTarget& InTarget)
-        -> void;
-    // Participants are the channels a whole-pose capture must cover; staged targets outside them are released.
-    auto
-        SetParticipants(
-            const TArray<FName>& InParticipants)
-        -> void;
-    auto
-        LoadStagingFromPoseGroup(
-            const FGuid& InId,
-            FString& OutError)
-        -> bool;
     // A time at a section boundary belongs to the section that ends there (its key at 1), never to the next section's start;
     // only time 0 is the first section's start. Both need valid section durations, not a compiling clip.
     auto
@@ -192,35 +109,26 @@ public:
             FCk_FloatRange_0to1 InKeyTime,
             FCk_Time& OutElapsed) const
         -> bool;
+    // The section InTime falls in and the raw, uneased fraction there, the time markers and windows are placed at. A time
+    // past the last section falls in it at 1.
+    auto
+        ToRawFraction(
+            FCk_Time InTime,
+            FName& OutPhaseId,
+            double& OutFraction) const
+        -> bool;
     auto
         Get_PhaseStart(
             FName InPhaseId,
             FCk_Time& OutStart) const
         -> bool;
-
-    auto
-        GetStagingPhaseId() const
-        -> FName
-    {
-        return _StagingPhaseId;
-    }
-    auto
-        GetStagingPose() const
-        -> const FCk_ProceduralAction_PoseKey&
-    {
-        return _StagingPose;
-    }
-    auto
-        GetParticipants() const
-        -> const TArray<FName>&
-    {
-        return _Participants;
-    }
+    // The preview frame nearest InTime.
+    static auto
+        SnapToFrame(
+            FCk_Time InTime)
+        -> FCk_Time;
 
 private:
-    auto
-        EvaluateCurrent()
-        -> void;
     auto
         RefreshTiming()
         -> void;
@@ -231,20 +139,17 @@ private:
 private:
     TStrongObjectPtr<UCk_ProceduralAction_Data> _Clip;
     TStrongObjectPtr<UCk_ProceduralActionPreview_Config> _PreviewConfig;
-    TOptional<FCk_ProceduralAction_EditorSubject> _DerivedFrom;
+    TOptional<FCk_ProceduralActionEditor_Subject> _DerivedFrom;
     TArray<ck::procedural_action::FCompiledPhase> _Timing;
     ck::procedural_action::FCompiledClip _Compiled;
     ck::procedural_action::FInitialPose _Initial;
-    ck::procedural_action::FEvaluatedPose _Pose;
     TArray<ck::procedural_action::FDiagnostic> _Diagnostics;
-    TArray<FCk_ProceduralActionPoseGroupView> _PoseGroups;
-    FCk_ProceduralAction_PoseKey _StagingPose;
-    FName _StagingPhaseId;
-    TArray<FName> _Participants;
     FString _AppearanceError;
-    FCk_Time _Time;
+    // What the current revision was built from: a refresh that finds all three unchanged keeps the revision.
+    TOptional<uint64> _RevisionContentHash;
+    FCk_ProceduralActionEditor_Subject _RevisionSubject;
+    TWeakObjectPtr<UCk_ProceduralActionPreview_Config> _RevisionConfig;
     uint64 _Revision = 0;
     bool _CompiledValid = false;
-    bool _HasPose = false;
-    bool _Playing = false;
+    bool _HasStart = false;
 };

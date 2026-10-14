@@ -138,24 +138,6 @@ public:
     CK_DEFINE_CONSTRUCTORS(FCk_ArticulationStageKey, _Token, _SampleSequence, _BatchNonce);
 };
 
-struct CKPROCEDURALANIMATION_API FCk_ArticulationControlState
-{
-    CK_GENERATED_BODY(FCk_ArticulationControlState);
-    friend class FCk_ProceduralArticulation_Control;
-
-private:
-    bool _HasClaims = false;
-    bool _HasPendingSample = false;
-    uint64 _LastIssuedRevision = 0;
-    uint64 _LastSettledRevision = 0;
-
-public:
-    CK_PROPERTY_GET(_HasClaims);
-    CK_PROPERTY_GET(_HasPendingSample);
-    CK_PROPERTY_GET(_LastIssuedRevision);
-    CK_PROPERTY_GET(_LastSettledRevision);
-};
-
 struct CKPROCEDURALANIMATION_API FCk_ArticulationBatchEvaluation
 {
     CK_GENERATED_BODY(FCk_ArticulationBatchEvaluation);

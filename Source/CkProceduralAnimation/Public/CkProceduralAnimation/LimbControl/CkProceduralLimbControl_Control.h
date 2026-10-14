@@ -27,6 +27,12 @@ CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralLimbControl_AcquireResult);
 class CKPROCEDURALANIMATION_API FCk_ProceduralLimbControl_Control
 {
 public:
+    // The support and return policies Attach accepts.
+    static auto
+        Get_IsLocomotionValid(
+            const FCk_ProceduralLimbControl_Locomotion& InLocomotion)
+        -> bool;
+
     static auto
         Attach(
             FCk_Handle_ProceduralArticulation& InSubject,

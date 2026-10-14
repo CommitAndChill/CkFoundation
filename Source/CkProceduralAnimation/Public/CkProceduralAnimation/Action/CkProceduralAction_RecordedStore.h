@@ -2,6 +2,8 @@
 
 #include "CkProceduralAnimation/Action/CkProceduralAction_Receipt.h"
 
+#include "CkCore/Ensure/CkEnsure.h"
+
 // A copied, consumer-owned recording. It never retains the source player or its registry.
 class CKPROCEDURALANIMATION_API FCk_ProceduralActionRecordedStore
 {
@@ -15,7 +17,11 @@ public:
         int64 InMaximumCopiedPoseTransforms = DefaultMaximumCopiedPoseTransforms)
         : _MaximumCopiedPoseTransforms(InMaximumCopiedPoseTransforms)
     {
-        check(InMaximumCopiedPoseTransforms >= 0);
+        const auto BudgetValid = InMaximumCopiedPoseTransforms >= 0;
+        CK_ENSURE_IF_NOT(BudgetValid,
+            TEXT("Recorded store rejected a negative pose-transform budget [{}]; it records nothing."),
+            InMaximumCopiedPoseTransforms)
+        { _MaximumCopiedPoseTransforms = 0; }
     }
 
     struct FProvenance
@@ -69,7 +75,7 @@ private:
     TArray<FCk_ProceduralAction_Record> _Records;
     TArray<FGap> _Gaps;
     int64 _LastCopiedSequence = 0;
-    const int64 _MaximumCopiedPoseTransforms;
+    int64 _MaximumCopiedPoseTransforms;
     int64 _CopiedPoseTransforms = 0;
     ECk_ProceduralAction_ReadResult _LastReadResult = ECk_ProceduralAction_ReadResult::Pending;
     FString _LastError;

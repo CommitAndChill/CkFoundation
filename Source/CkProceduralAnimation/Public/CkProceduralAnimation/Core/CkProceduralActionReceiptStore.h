@@ -13,7 +13,8 @@ namespace ck::procedural_action
         constexpr int32 MaxConcurrentInstances = 64;
         constexpr int32 MaxRetainedInstances = 256;
         constexpr int32 MaxOrdinaryRecordsPerInstance = 4096;
-        constexpr int32 MaxSamplesPerReceipt = 64;
+        // Sub-steps the service may evaluate inside one published receipt interval.
+        constexpr int32 MaxSamplingSteps = 64;
         constexpr int32 MaxEventsPerReceipt = 64;
         constexpr int32 MaxWindowsPerReceipt = 32;
         constexpr int32 MaxClaimedLimbs = 64;

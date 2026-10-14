@@ -4,7 +4,7 @@
 #include "CkProceduralAnimationEditor/CkProceduralActionAuthoringSession.h"
 #include "CkProceduralAnimationEditor/CkProceduralActionEditorModel.h"
 #include "CkProceduralAnimationEditor/CkProceduralActionEditorModes.h"
-#include "CkProceduralAnimationEditor/CkProceduralActionPoseGroups.h"
+#include "CkProceduralAnimationEditor/CkProceduralActionEditorData.h"
 #include "CkProceduralAnimationEditor/CkProceduralActionPreviewSpace.h"
 #include "CkProceduralAnimation/Debug/CkProceduralAnimation_Debug.h"
 #include "CkEditorTools/Style/CkStyle.h"
@@ -103,10 +103,10 @@ namespace ck_procedural_action_viewport
 
 // --------------------------------------------------------------------------------------------------------------------
 
-class FCkProceduralActionViewportClient final : public FEditorViewportClient
+class FCk_ProceduralActionViewportClient final : public FEditorViewportClient
 {
 public:
-    FCkProceduralActionViewportClient(
+    FCk_ProceduralActionViewportClient(
         FPreviewScene* InScene,
         const TSharedRef<SCkProceduralAction_Viewport>& InWidget)
         : FEditorViewportClient(nullptr, InScene, InWidget)
@@ -230,7 +230,7 @@ auto
     MakeEditorViewportClient()
     -> TSharedRef<FEditorViewportClient>
 {
-    _Client = MakeShared<FCkProceduralActionViewportClient>(_Scene.Get(), SharedThis(this));
+    _Client = MakeShared<FCk_ProceduralActionViewportClient>(_Scene.Get(), SharedThis(this));
     _Client->SetViewMode(VMI_Lit);
     _Client->SetViewLocation(FVector{-300.0, -300.0, 180.0});
     _Client->SetViewRotation(FRotator{-12.0, 45.0, 0.0});
@@ -300,7 +300,7 @@ auto
     { return; }
     _LiveSubject.Reset();
     if (const auto Modes = _Modes.Pin(); Modes.IsValid() && Get_IsShowingSolver())
-    { _LiveSubject = Modes->GetDisplayedFrame()->Subject; }
+    { _LiveSubject = Modes->Get_DisplayedFrame()->Subject; }
     if (NOT _Drag.IsSet())
     { RefreshPose(); }
     if (_NeedsFrame)
@@ -313,7 +313,7 @@ auto
     -> bool
 {
     const auto Modes = _Modes.Pin();
-    return Modes.IsValid() && Modes->GetDisplayedFrame() != nullptr;
+    return Modes.IsValid() && Modes->Get_DisplayedFrame() != nullptr;
 }
 
 auto
@@ -325,8 +325,8 @@ auto
 {
     const auto Session = _Session.Pin();
     const auto Model = _Model.Pin();
-    const auto* Config = Session.IsValid() ? Session->GetPreviewConfig() : nullptr;
-    const auto* Clip = Session.IsValid() ? Session->GetClip() : nullptr;
+    const auto* Config = Session.IsValid() ? Session->Get_PreviewConfig() : nullptr;
+    const auto* Clip = Session.IsValid() ? Session->Get_Clip() : nullptr;
     auto Key = FCk_ProceduralActionKeyTime{};
     if (_Closed || Config == nullptr || Clip == nullptr || InChannel.IsNone() || NOT Model.IsValid()
         || NOT Session->ElapsedToKey(Model->Get_Time(), Key))
@@ -338,23 +338,24 @@ auto
     const auto KeyTime = Key.Get_KeyTime().Get_Value();
     const auto KeyedHere = [KeyTime](const auto& InKey)
         { return ck::procedural_action_editor::IsSamePoseTime(InKey.Get_Time().Get_Value(), KeyTime); };
-    const auto Evaluated = Session->IsCompiled() && Session->HasPose();
+    auto Pose = ck::procedural_action::FEvaluatedPose{};
+    const auto Evaluated = Session->EvaluateAt(FMath::Clamp(Model->Get_Time(), FCk_Time{}, Session->Get_Duration()), Pose);
     const auto IsWalking = Config->Get_SubjectMode() == ECk_ProceduralActionPreview_SubjectMode::Walking;
     auto BodyWorld = IsWalking ? Config->Get_RootFrame() : Config->Get_PresentationFrame();
-    if (Evaluated && NOT ck::procedural_action_editor::ResolveBodyWorld(*Config, Session->GetCompiledClip(), Session->GetPose(), BodyWorld))
+    if (Evaluated && NOT ck::procedural_action_editor::ResolveBodyWorld(*Config, Session->Get_CompiledClip(), Pose, BodyWorld))
     { return false; }
     OutResolved = FResolved{};
     OutResolved.PhaseId = Key.Get_PhaseId();
     OutResolved.Channel = InChannel;
     OutResolved.KeyTime = KeyTime;
-    if (InChannel == FCk_ProceduralAction_PoseGroup::Get_BodyChannelName())
+    if (InChannel == ck::procedural_action_editor::Get_BodyChannelName())
     {
         if (NOT Clip->Get_BodyChannel().Get_Enabled())
         { return false; }
         OutResolved.IsBody = true;
         OutResolved.Frame = Config->Get_RootFrame();
         const auto* BodyKey = Phase->Get_BodyKeys().FindByPredicate(KeyedHere);
-        OutResolved.Body = Evaluated ? Session->GetPose().Get_Body()
+        OutResolved.Body = Evaluated ? Pose.Get_Body()
             : BodyKey != nullptr ? FTransform{BodyKey->Get_Rotation(), BodyKey->Get_Translation()} : FTransform::Identity;
         OutResolved.Endpoint = BodyWorld.GetLocation();
         OutResolved.Orientation = BodyWorld.GetRotation();
@@ -366,7 +367,7 @@ auto
     const auto Compiled = ck::procedural_action::FCompiledSlot{Slot->Get_Id(), Slot->Get_InitialSource(), Slot->Get_Space()};
     if (NOT ck::procedural_action_editor::ResolveSlotFrame(*Config, Compiled, BodyWorld, OutResolved.Frame, OutResolved.Scale))
     { return false; }
-    const auto* Limb = Evaluated ? Session->GetPose().Get_Limbs().FindByPredicate([InChannel](const auto& InLimb)
+    const auto* Limb = Evaluated ? Pose.Get_Limbs().FindByPredicate([InChannel](const auto& InLimb)
         { return InLimb.Get_Slot() == InChannel; }) : nullptr;
     const auto* Track = Phase->Get_LimbTracks().FindByPredicate([InChannel](const FCk_ProceduralAction_LimbTrack& InTrack)
         { return InTrack.Get_Slot() == InChannel; });
@@ -455,8 +456,8 @@ auto
     else if (_Gizmo == EGizmo::Move)
     {
         const auto Session = _Session.Pin();
-        const auto Limb = Session.IsValid() && Session->GetPreviewConfig() != nullptr
-            ? ck_procedural_action_viewport::BoundLimb(*Session->GetPreviewConfig(), _Drag->Channel) : NAME_None;
+        const auto Limb = Session.IsValid() && Session->Get_PreviewConfig() != nullptr
+            ? ck_procedural_action_viewport::BoundLimb(*Session->Get_PreviewConfig(), _Drag->Channel) : NAME_None;
         if (auto** Component = _LimbComponents.Find(Limb); Component != nullptr && *Component != nullptr)
         { (*Component)->SetWorldLocation(_DragLocation); }
     }
@@ -475,7 +476,7 @@ auto
     const auto Session = _Session.Pin();
     const auto Model = _Model.Pin();
     const auto Moved = NOT _DragLocation.Equals(Get_WidgetLocation(), 1.0e-4) || NOT _DragRotation.Equals(FQuat::Identity, 1.0e-6);
-    if (NOT Moved || NOT Session.IsValid() || NOT Model.IsValid() || Session->GetClip() == nullptr)
+    if (NOT Moved || NOT Session.IsValid() || NOT Model.IsValid() || Session->Get_Clip() == nullptr)
     { return; }
     auto Pose = FCk_ProceduralAction_PoseKey{FCk_FloatRange_0to1{Start.KeyTime}};
     const auto RootRotation = Start.Frame.GetRotation();
@@ -507,10 +508,9 @@ auto
         }
         Pose.Set_Limbs({Target});
     }
-    if (FCk_ProceduralActionAuthoringCommands{Session->GetClip()}.SetPoseKeys(Start.PhaseId, Pose, _Error))
+    if (FCk_ProceduralActionAuthoringCommands{Session->Get_Clip()}.SetPoseKeys(Start.PhaseId, Pose, _Error))
     {
         Model->SelectKey(Start.PhaseId, Start.Channel, FCk_FloatRange_0to1{Start.KeyTime});
-        Model->NotifyContentChanged();
     }
 }
 
@@ -565,7 +565,7 @@ auto
     }
     ClearComponents();
     const auto Session = _Session.Pin();
-    const auto* Config = Session.IsValid() ? Session->GetPreviewConfig() : nullptr;
+    const auto* Config = Session.IsValid() ? Session->Get_PreviewConfig() : nullptr;
     auto Error = FString{};
     if (Config == nullptr || NOT Config->ValidateAppearance(Error))
     { return; }
@@ -590,7 +590,7 @@ auto
     -> void
 {
     const auto Session = _Session.Pin();
-    const auto* Config = Session.IsValid() ? Session->GetPreviewConfig() : nullptr;
+    const auto* Config = Session.IsValid() ? Session->Get_PreviewConfig() : nullptr;
     if (_Closed || Config == nullptr || NOT _Scene.IsValid())
     { return; }
     ClearComponents();
@@ -620,7 +620,7 @@ auto
     -> void
 {
     const auto Session = _Session.Pin();
-    const auto* Config = Session.IsValid() ? Session->GetPreviewConfig() : nullptr;
+    const auto* Config = Session.IsValid() ? Session->Get_PreviewConfig() : nullptr;
     if (_Closed || Config == nullptr)
     { return; }
     const auto LimbScale = [Config](FName InLimb) -> FVector
@@ -641,9 +641,9 @@ auto
         return;
     }
     auto Body = FResolved{};
-    if (_BodyComponent != nullptr && Resolve(FCk_ProceduralAction_PoseGroup::Get_BodyChannelName(), Body))
+    if (_BodyComponent != nullptr && Resolve(ck::procedural_action_editor::Get_BodyChannelName(), Body))
     { _BodyComponent->SetWorldTransform(ck_procedural_action_viewport::WithScale(FTransform{Body.Orientation, Body.Endpoint}, Config->Get_BodyPreviewMeshScale())); }
-    if (const auto* Clip = Session->GetClip())
+    if (const auto* Clip = Session->Get_Clip())
     {
         for (const auto& Slot : Clip->Get_Slots())
         {
@@ -668,7 +668,7 @@ auto
     using namespace ck_procedural_action_viewport;
     const auto Session = _Session.Pin();
     const auto Model = _Model.Pin();
-    const auto* Config = Session.IsValid() ? Session->GetPreviewConfig() : nullptr;
+    const auto* Config = Session.IsValid() ? Session->Get_PreviewConfig() : nullptr;
     if (_Closed || InPdi == nullptr || Config == nullptr || NOT Model.IsValid())
     { return; }
     auto SurfaceError = FString{};
@@ -719,9 +719,9 @@ auto
         InPdi->SetHitProxy(nullptr);
     };
     auto Body = FResolved{};
-    if (Resolve(FCk_ProceduralAction_PoseGroup::Get_BodyChannelName(), Body))
+    if (Resolve(ck::procedural_action_editor::Get_BodyChannelName(), Body))
     { DrawHandle(Body.Channel, Body.Endpoint); }
-    const auto* Clip = Session->GetClip();
+    const auto* Clip = Session->Get_Clip();
     if (Clip == nullptr)
     { return; }
     for (const auto& Slot : Clip->Get_Slots())
@@ -764,15 +764,15 @@ auto
         if (Entry.Value != nullptr)
         { Bounds += Entry.Value->Bounds.GetBox(); }
     }
-    if (const auto Session = _Session.Pin(); Session.IsValid() && Session->GetPreviewConfig() != nullptr)
+    if (const auto Session = _Session.Pin(); Session.IsValid() && Session->Get_PreviewConfig() != nullptr)
     {
-        for (const auto& Binding : Session->GetPreviewConfig()->Get_LimbBindings())
+        for (const auto& Binding : Session->Get_PreviewConfig()->Get_LimbBindings())
         {
             for (const auto& Frame : Binding.Get_SegmentFrames())
             { Bounds += Frame.GetLocation(); }
             Bounds += Binding.Get_TerminalFrame().GetLocation();
         }
-        Bounds += Session->GetPreviewConfig()->Get_PresentationFrame().GetLocation();
+        Bounds += Session->Get_PreviewConfig()->Get_PresentationFrame().GetLocation();
     }
     if (NOT Bounds.IsValid)
     { return; }

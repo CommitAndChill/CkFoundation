@@ -2,6 +2,7 @@
 
 #include "CkProceduralAnimation/Action/CkProceduralAction_Data.h"
 #include "CkProceduralAnimation/ActionBuilder/CkProceduralActionBuilder_Data.h"
+#include "CkProceduralAnimationEditor/CkProceduralActionEditorData.h"
 #include "Math/Axis.h"
 
 class FCk_ProceduralActionSolvedCaptureTarget;
@@ -26,7 +27,7 @@ namespace ck::procedural_action_editor
 
 // --------------------------------------------------------------------------------------------------------------------
 
-// A key that moved in time on one channel, so the pose that named it can follow.
+// A key that moved in time on one channel, so the pose label at its time can follow.
 class CKPROCEDURALANIMATIONEDITOR_API FCk_ProceduralActionRetimedKey
 {
     CK_GENERATED_BODY(FCk_ProceduralActionRetimedKey);
@@ -44,10 +45,11 @@ public:
 // --------------------------------------------------------------------------------------------------------------------
 
 // Edits the authored asset only. Every command copies the clip into a builder draft, applies its edit and writes it back
-// with Write_Into in one editor transaction, keys and editor metadata (pose groups, subject) together; an edit that
-// changes nothing opens no transaction. Every command validates its inputs before the transaction opens, but the result
-// may still not compile (a phase without its key at 1): such a clip stays saveable and Play reports why. A command that
-// moves a key in time moves the pose that names it; a key a pose loses leaves that pose.
+// with Write_Into in one editor transaction, keys and editor data (pose labels, subject) together; an edit that changes
+// nothing opens no transaction. Every command validates its inputs before the transaction opens, but the result may
+// still not compile (a phase without its key at 1): such a clip stays saveable and Play reports why. A label names the
+// keys at its phase and time: it follows a moved key when no other channel keeps a key at its old time, and it goes when
+// no channel is keyed at its time any more.
 class CKPROCEDURALANIMATIONEDITOR_API FCk_ProceduralActionAuthoringCommands
 {
 public:
@@ -71,7 +73,7 @@ public:
             FName InId,
             FString& OutError)
         -> bool;
-    // Renames the phase and every marker, window edge and pose group that names it.
+    // Renames the phase and every marker, window edge and pose label that names it.
     auto
         RenamePhase(
             FName InOldId,
@@ -96,46 +98,8 @@ public:
             FName InNewId,
             FString& OutError)
         -> bool;
-    auto
-        AddLimbTrack(
-            FName InPhaseId,
-            FName InSlotId,
-            FString& OutError)
-        -> bool;
-    auto
-        AddBodyKey(
-            FName InPhaseId,
-            double InNormalizedTime,
-            const FTransform& InValue,
-            FString& OutError)
-        -> bool;
-    auto
-        AddPositionKey(
-            FName InPhaseId,
-            FName InSlotId,
-            double InNormalizedTime,
-            const FVector& InValue,
-            FString& OutError)
-        -> bool;
-    auto
-        SetPositionKey(
-            FName InPhaseId,
-            FName InSlotId,
-            double InNormalizedTime,
-            const FVector& InValue,
-            FString& OutError)
-        -> bool;
-    // A bend track needs its key at 0 (a limb may enter the phase with no bend to move from), so the first bend key of a
-    // phase also writes the same direction at 0.
-    auto
-        SetBendKey(
-            FName InPhaseId,
-            FName InSlotId,
-            double InNormalizedTime,
-            const FVector& InValue,
-            FString& OutError)
-        -> bool;
-    // Replaces a phase's body keys and their interpolation; InRetimed names the keys that moved.
+    // Replaces a phase's body keys and their interpolation; InRetimed names the keys that moved. Refused when the compiler
+    // rejects the phase's key times.
     auto
         SetBodyKeys(
             FName InPhaseId,
@@ -144,7 +108,8 @@ public:
             const TArray<FCk_ProceduralActionRetimedKey>& InRetimed,
             FString& OutError)
         -> bool;
-    // Replaces a slot track's position keys and its interpolation; InRetimed names the keys that moved.
+    // Replaces a slot track's position keys and its interpolation; InRetimed names the keys that moved. Refused when the
+    // compiler rejects the phase's key times.
     auto
         SetPositionKeys(
             FName InPhaseId,
@@ -213,51 +178,12 @@ public:
             EAxis::Type InPlaneNormal,
             FString& OutError)
         -> bool;
-    // InParticipants are the channels the pose must cover (slots, or FCk_ProceduralAction_PoseGroup::Get_BodyChannelName);
-    // a participant the pose omits, or a pose channel outside them, is refused. The time must be unkeyed on every channel.
-    auto
-        CapturePose(
-            FName InPhaseId,
-            const FCk_ProceduralAction_PoseKey& InPose,
-            const TArray<FName>& InParticipants,
-            FName InLabel,
-            FGuid& OutPoseId,
-            FString& OutError)
-        -> bool;
-    // Replaces the values of an existing pose at its own phase and time; the pose must list exactly the group's channels.
-    auto
-        UpdatePose(
-            const FGuid& InPoseId,
-            const FCk_ProceduralAction_PoseKey& InPose,
-            FString& OutError)
-        -> bool;
-    auto
-        DuplicatePose(
-            const FGuid& InPoseId,
-            FName InPhaseId,
-            double InNormalizedTime,
-            FGuid& OutPoseId,
-            FString& OutError)
-        -> bool;
-    auto
-        MovePose(
-            const FGuid& InPoseId,
-            FName InPhaseId,
-            double InNormalizedTime,
-            FString& OutError)
-        -> bool;
-    auto
-        DeletePose(
-            const FGuid& InPoseId,
-            FString& OutError)
-        -> bool;
     // Requires a ready, settled snapshot recorded for InTarget's session revision; converts every requested channel into
-    // its slot's declared track space and writes nothing unless the whole conversion succeeds.
+    // its slot's declared track space and writes nothing unless the whole conversion succeeds. Records it like RecordPose.
     auto
         CaptureSolvedPose(
             const FCk_ProceduralActionSolvedSnapshot& InSnapshot,
             const FCk_ProceduralActionSolvedCaptureTarget& InTarget,
-            FGuid& OutPoseId,
             FString& OutError)
         -> bool;
     // Validated like Add_Phase; the phase's keys keep their normalized times.
@@ -273,7 +199,7 @@ public:
             ECk_ProceduralAction_Easing InEasing,
             FString& OutError)
         -> bool;
-    // Fills an empty clip from a recipe and names each recipe key time as a pose; never overwrites authored content.
+    // Fills an empty clip from a recipe and labels each recipe key time; never overwrites authored content.
     auto
         CreateFromRecipe(
             const FCk_ProceduralAction_RecipeSpec& InRecipe,
@@ -288,26 +214,25 @@ public:
             FString& OutError)
         -> bool;
     auto
-        SetEditorSubject(
-            const FCk_ProceduralAction_EditorSubject& InSubject,
+        SetSubject(
+            const FCk_ProceduralActionEditor_Subject& InSubject,
             FString& OutError)
         -> bool;
-    // Writes a pose's keys at its time, replacing the kinds of key it sets (a track the phase lacks is added); pose names
-    // stay as they are.
+    // Writes a pose's keys at its time, replacing the kinds of key it sets (a track the phase lacks is added); labels stay
+    // as they are.
     auto
         SetPoseKeys(
             FName InPhaseId,
             const FCk_ProceduralAction_PoseKey& InPose,
             FString& OutError)
         -> bool;
-    // SetPoseKeys, then names the pose: the pose already at that phase and time grows to cover these channels, else a new
-    // one is made.
+    // SetPoseKeys, then labels the time: a label already there keeps its name unless InLabel names it anew; a new label is
+    // InLabel, or "Pose N" when InLabel is None.
     auto
         RecordPose(
             FName InPhaseId,
             const FCk_ProceduralAction_PoseKey& InPose,
             FName InLabel,
-            FGuid& OutPoseId,
             FString& OutError)
         -> bool;
     // Moves every key a channel has at InFrom (position, orientation and bend ride together) to InTo in the same phase.
@@ -333,9 +258,11 @@ public:
             ECk_ProceduralAction_ReachPolicy InPolicy,
             FString& OutError)
         -> bool;
+    // Renames the label at a phase and key time; refused when no label is there.
     auto
-        RenamePose(
-            const FGuid& InPoseId,
+        RenameLabel(
+            FName InPhaseId,
+            double InTime,
             FName InLabel,
             FString& OutError)
         -> bool;

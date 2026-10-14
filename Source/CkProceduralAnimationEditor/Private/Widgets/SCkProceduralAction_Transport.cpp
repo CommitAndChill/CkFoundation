@@ -9,18 +9,13 @@
 
 #define LOCTEXT_NAMESPACE "CkProceduralActionTransport"
 
-namespace ck_procedural_action_transport
-{
-    constexpr auto FramesPerSecond = 60.0;
-}
-
 auto
     SCkProceduralAction_Transport::
     Construct(
         const FArguments& InArgs)
     -> void
 {
-    using namespace ck_procedural_action_transport;
+    constexpr auto FramesPerSecond = FCk_ProceduralActionAuthoringSession::FramesPerSecond;
     _Session = InArgs._Session;
     _Model = InArgs._Model;
     _Length = InArgs._Length;
@@ -30,7 +25,7 @@ auto
     const auto SetTime = [WeakModel](double InSeconds)
     {
         if (const auto Model = WeakModel.Pin())
-        { Model->SetTime(FCk_Time{FMath::RoundToDouble(InSeconds * FramesPerSecond) / FramesPerSecond}); }
+        { Model->SetTime(FCk_ProceduralActionAuthoringSession::SnapToFrame(FCk_Time{InSeconds})); }
     };
     auto Controls = TArray<FTransportControlWidget>{};
     for (const auto Type : {ETransportControlWidgetType::BackwardEnd, ETransportControlWidgetType::BackwardStep,
@@ -117,7 +112,7 @@ auto
     -> double
 {
     const auto Session = _Session.Pin();
-    const auto Clip = Session.IsValid() ? Session->GetDuration().Get_Seconds() : 0.0;
+    const auto Clip = Session.IsValid() ? Session->Get_Duration().Get_Seconds() : 0.0;
     return FMath::Max(Clip, _Length ? _Length() : 0.0);
 }
 
@@ -131,18 +126,14 @@ auto
     if (NOT Session.IsValid() || NOT Model.IsValid())
     { return FText::GetEmpty(); }
     const auto Seconds = Model->Get_Time().Get_Seconds();
-    const auto Frame = FMath::RoundToInt(Seconds * ck_procedural_action_transport::FramesPerSecond);
-    auto Key = FCk_ProceduralActionKeyTime{};
-    auto Start = FCk_Time{};
-    const auto* Timing = Session->ElapsedToKey(Model->Get_Time(), Key)
-        ? Session->GetTiming().FindByPredicate([&Key](const ck::procedural_action::FCompiledPhase& InPhase) { return InPhase.Get_Id() == Key.Get_PhaseId(); })
-        : nullptr;
-    if (Seconds > Session->GetDuration().Get_Seconds() + 1.0e-6)
+    const auto Frame = FMath::RoundToInt(Seconds * FCk_ProceduralActionAuthoringSession::FramesPerSecond);
+    auto PhaseId = FName{};
+    auto Fraction = 0.0;
+    if (Seconds > Session->Get_Duration().Get_Seconds() + 1.0e-6)
     { return FText::FromString(FString::Printf(TEXT("%.2f s | frame %d | after the clip"), Seconds, Frame)); }
-    if (Timing == nullptr || NOT Session->Get_PhaseStart(Key.Get_PhaseId(), Start))
+    if (NOT Session->ToRawFraction(Model->Get_Time(), PhaseId, Fraction))
     { return FText::FromString(FString::Printf(TEXT("%.2f s | frame %d"), Seconds, Frame)); }
-    const auto Fraction = (Seconds - Start.Get_Seconds()) / Timing->Get_Duration().Get_Seconds();
-    return FText::FromString(FString::Printf(TEXT("%.2f s | frame %d | %s %.2f"), Seconds, Frame, *Key.Get_PhaseId().ToString(), Fraction));
+    return FText::FromString(FString::Printf(TEXT("%.2f s | frame %d | %s %.2f"), Seconds, Frame, *PhaseId.ToString(), Fraction));
 }
 
 #undef LOCTEXT_NAMESPACE

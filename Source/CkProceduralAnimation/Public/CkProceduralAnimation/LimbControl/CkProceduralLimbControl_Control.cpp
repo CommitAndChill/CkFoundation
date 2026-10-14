@@ -53,6 +53,16 @@ namespace ck::procedural_limb_control
 
 auto
     FCk_ProceduralLimbControl_Control::
+    Get_IsLocomotionValid(
+        const FCk_ProceduralLimbControl_Locomotion& InLocomotion)
+    -> bool
+{
+    return ck::procedural_support::ValidatePolicy(InLocomotion.Get_Support())
+        && ck::procedural_limb_control::IsValidPolicy(InLocomotion.Get_Return());
+}
+
+auto
+    FCk_ProceduralLimbControl_Control::
     Attach(
         FCk_Handle_ProceduralArticulation& InSubject,
         const FCk_ProceduralLimbControl_Locomotion& InLocomotion)
@@ -62,8 +72,7 @@ auto
         || NOT UCk_Utils_ProceduralArticulation_UE::Has(InSubject)
         || InSubject.Has<ck::FFragment_ProceduralLimbControl>()
         || InSubject.Has<ck::FFragment_ProceduralLimbControl_Params>()
-        || NOT ck::procedural_support::ValidatePolicy(InLocomotion.Get_Support())
-        || NOT ck::procedural_limb_control::IsValidPolicy(InLocomotion.Get_Return())
+        || NOT Get_IsLocomotionValid(InLocomotion)
         || (InLocomotion.Get_Support().Get_Mode() != ECk_ProceduralLimbControl_SupportMode::Disabled
             && NOT UCk_Utils_ProceduralGait_UE::Has(InSubject)))
     { return false; }

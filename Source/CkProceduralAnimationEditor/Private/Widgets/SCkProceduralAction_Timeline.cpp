@@ -3,7 +3,7 @@
 #include "CkProceduralAnimationEditor/CkProceduralActionAuthoringCommands.h"
 #include "CkProceduralAnimationEditor/CkProceduralActionAuthoringSession.h"
 #include "CkProceduralAnimationEditor/CkProceduralActionEditorModel.h"
-#include "CkProceduralAnimationEditor/CkProceduralActionPoseGroups.h"
+#include "CkProceduralAnimationEditor/CkProceduralActionEditorData.h"
 #include "CkProceduralAnimation/Core/CkProceduralActionProgress.h"
 #include "CkProceduralAnimation/Core/CkProceduralActionValidation.h"
 #include "CkEditorTools/Style/CkStyle.h"
@@ -30,7 +30,13 @@ namespace ck_procedural_action_timeline
     constexpr auto LaneHeight = 20.0f;
     constexpr auto PickPixels = 6.0f;
     constexpr auto DragPixels = 3.0f;
-    constexpr auto FrameSeconds = 1.0 / 60.0;
+    constexpr auto FrameSeconds = 1.0 / FCk_ProceduralActionAuthoringSession::FramesPerSecond;
+
+    auto
+        Snap(
+            double InSeconds)
+        -> double
+    { return FCk_ProceduralActionAuthoringSession::SnapToFrame(FCk_Time{InSeconds}).Get_Seconds(); }
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -41,7 +47,7 @@ public:
     SLATE_BEGIN_ARGS(SCkProceduralAction_TimelineLanes) {}
     SLATE_END_ARGS()
 
-    enum class EHit : uint8 { None, Empty, SectionBody, SectionEdge, Key, Marker, WindowStart, WindowEnd, WindowBody, Pose };
+    enum class EHit : uint8 { None, Empty, SectionBody, SectionEdge, Key, Marker, WindowStart, WindowEnd, WindowBody };
 
     auto
         Construct(
@@ -93,7 +99,7 @@ public:
         -> FCursorReply override;
 
 private:
-    auto RowCount() const -> int32 { return _Timeline->_Channels.Num() + _Timeline->_EventLanes + 2; }
+    auto RowCount() const -> int32 { return _Timeline->_Channels.Num() + _Timeline->_EventLanes + 1; }
     auto RowTop(int32 InRow) const -> float
     {
         using namespace ck_procedural_action_timeline;
@@ -102,8 +108,7 @@ private:
     auto RowHeight(int32 InRow) const -> float
     { return InRow == 0 ? ck_procedural_action_timeline::SectionRowHeight : ck_procedural_action_timeline::LaneHeight; }
     auto EventsRow() const -> int32 { return _Timeline->_Channels.Num() + 1; }
-    auto PosesRow() const -> int32 { return _Timeline->_Channels.Num() + _Timeline->_EventLanes + 1; }
-    auto IsEventRow(int32 InRow) const -> bool { return InRow >= EventsRow() && InRow < PosesRow(); }
+    auto IsEventRow(int32 InRow) const -> bool { return InRow >= EventsRow(); }
     auto RowAt(float InY) const -> int32
     {
         for (auto Row = 0; Row < RowCount(); ++Row)
@@ -127,6 +132,7 @@ private:
         return View.GetLowerBoundValue() + (InX - ck_procedural_action_timeline::Gutter) / Width * View.Size<double>();
     }
     auto HitTest(const FGeometry& InGeometry, const FVector2f& InLocal, int32& OutIndex) const -> EHit;
+    auto ReorderSection(int32 InIndex, int32 InNewIndex) -> void;
     auto Click() -> void;
     auto Commit() -> void;
     auto Get_DragSeconds(int32 InIndex, EHit InKind, double InFallback) const -> double
@@ -137,7 +143,7 @@ private:
         if (NOT _Dragging || _Hit != EHit::WindowBody || _HitIndex != InIndex)
         { return 0.0; }
         const auto& Event = _Timeline->_Events[InIndex];
-        const auto Start = _Timeline->Snap(Event.Start + _DragSeconds - _PressSeconds);
+        const auto Start = ck_procedural_action_timeline::Snap(Event.Start + _DragSeconds - _PressSeconds);
         return FMath::Clamp(Start - Event.Start, -Event.Start, _Timeline->Get_Total() - Event.End);
     }
 
@@ -206,16 +212,6 @@ auto
         }
         return EHit::Empty;
     }
-    if (Row == PosesRow())
-    {
-        for (auto Index = 0; Index < Timeline._Poses.Num(); ++Index)
-        {
-            const auto X = ToX(InGeometry, Timeline._Poses[Index].Seconds);
-            if (InLocal.X >= X - PickPixels && InLocal.X <= X + 60.0f)
-            { OutIndex = Index; return EHit::Pose; }
-        }
-        return EHit::Empty;
-    }
     for (auto Index = 0; Index < Timeline._Keys.Num(); ++Index)
     {
         if (Timeline._Keys[Index].Row == Row && Near(Timeline._Keys[Index].Seconds, PickPixels))
@@ -271,8 +267,7 @@ auto
     {
         Box(InLayer, 0.0f, RowTop(Row), Size.X, RowHeight(Row), Row % 2 == 0 ? CkStyle::Bg1() : CkStyle::Bg2());
         const auto Name = Row == 0 ? FString{TEXT("Sections")} : Row == EventsRow() ? FString{TEXT("Events")} : IsEventRow(Row) ? FString{}
-            : Row == PosesRow() ? FString{TEXT("Poses")}
-            : Timeline._Channels[Row - 1] == FCk_ProceduralAction_PoseGroup::Get_BodyChannelName() ? FString{TEXT("Body")} : Timeline._Channels[Row - 1].ToString();
+            : Timeline._Channels[Row - 1] == ck::procedural_action_editor::Get_BodyChannelName() ? FString{TEXT("Body")} : Timeline._Channels[Row - 1].ToString();
         const auto Selected = Row > 0 && Row < EventsRow() && Timeline._Channels[Row - 1] == Selection.Get_Channel();
         Text(InLayer + 1, 6.0f, RowTop(Row) + 3.0f, Name, Selected ? CkStyle::TextStrong() : CkStyle::TextDim());
     }
@@ -331,32 +326,36 @@ auto
         Box(InLayer + 2, Left, EventsTop + 4.0f, Right - Left, LaneHeight - 8.0f, IsSelected ? CkStyle::Selection() : CkStyle::InfoDim());
         Text(InLayer + 3, Left + 4.0f, EventsTop + 3.0f, Event.Id.ToString(), CkStyle::Text());
     }
-    // Poses at one time (a section's end and the next one's start) share a tick and a label; a label stops before the next tick.
-    const auto PosesTop = RowTop(PosesRow());
+    // Labels at one time on one lane (a section's end and the next one's start) share a caption; a caption stops before the
+    // next one on its lane.
     auto Ordered = TArray<const SCkProceduralAction_Timeline::FPose*>{};
     for (const auto& Pose : Timeline._Poses)
     { Ordered.Add(&Pose); }
-    Ordered.Sort([](const SCkProceduralAction_Timeline::FPose& InA, const SCkProceduralAction_Timeline::FPose& InB) { return InA.Seconds < InB.Seconds; });
+    Ordered.Sort([](const SCkProceduralAction_Timeline::FPose& InA, const SCkProceduralAction_Timeline::FPose& InB)
+        { return InA.Row != InB.Row ? InA.Row < InB.Row : InA.Seconds < InB.Seconds; });
     const auto FontMeasure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
     for (auto Index = 0; Index < Ordered.Num();)
     {
+        const auto Row = Ordered[Index]->Row;
         const auto X = ToX(InGeometry, Ordered[Index]->Seconds);
         auto Label = FString{};
         auto IsSelected = false;
         auto Next = Index;
-        for (; Next < Ordered.Num() && FMath::Abs(ToX(InGeometry, Ordered[Next]->Seconds) - X) < 1.0f; ++Next)
+        for (; Next < Ordered.Num() && Ordered[Next]->Row == Row && FMath::Abs(ToX(InGeometry, Ordered[Next]->Seconds) - X) < 1.0f; ++Next)
         {
             Label += (Label.IsEmpty() ? FString{} : FString{TEXT(" / ")}) + Ordered[Next]->Label;
-            IsSelected |= Selection.Get_PoseId() == Ordered[Next]->Id;
+            IsSelected |= Selection.Get_Kind() == ECk_ProceduralActionEditor_SelectionKind::Key
+                && Selection.Get_PhaseId() == Ordered[Next]->PhaseId
+                && ck::procedural_action_editor::IsSamePoseTime(Selection.Get_KeyTime().Get_Value(), Ordered[Next]->KeyTime);
         }
-        const auto Room = (Next < Ordered.Num() ? ToX(InGeometry, Ordered[Next]->Seconds) : Size.X) - X - 8.0f;
+        const auto NextOnLane = Next < Ordered.Num() && Ordered[Next]->Row == Row;
+        const auto Room = (NextOnLane ? ToX(InGeometry, Ordered[Next]->Seconds) : Size.X) - X - 14.0f;
         if (FontMeasure->Measure(Label, Font).X > Room)
         {
             const auto Last = FontMeasure->FindLastWholeCharacterIndexBeforeOffset(Label, Font, FMath::Max(0, FMath::FloorToInt(Room) - 8));
             Label = Last >= 0 ? Label.Left(Last + 1) + TEXT("...") : FString{};
         }
-        Line(InLayer + 2, FVector2f{X, PosesTop + 2.0f}, FVector2f{X, PosesTop + LaneHeight - 2.0f}, IsSelected ? CkStyle::Selection() : CkStyle::Ok(), 2.0f);
-        Text(InLayer + 3, X + 4.0f, PosesTop + 3.0f, Label, IsSelected ? CkStyle::TextStrong() : CkStyle::Text());
+        Text(InLayer + 4, X + 7.0f, RowTop(Row) + 3.0f, Label, IsSelected ? CkStyle::TextStrong() : CkStyle::Ok());
         Index = Next;
     }
     const auto PlayheadX = ToX(InGeometry, Model->Get_Time().Get_Seconds());
@@ -389,9 +388,25 @@ auto
                 : _Hit == EHit::Marker
                     ? FText::Format(LOCTEXT("DeleteMarker", "Delete marker {0}"), FText::FromName(Events[_HitIndex].Id))
                     : _Hit == EHit::Key ? LOCTEXT("DeleteKey", "Delete key")
-                        : _Hit == EHit::Pose ? LOCTEXT("DeletePose", "Delete pose")
-                            : FText::Format(LOCTEXT("DeleteWindow", "Delete window {0}"), FText::FromName(Events[_HitIndex].Id));
+                        : FText::Format(LOCTEXT("DeleteWindow", "Delete window {0}"), FText::FromName(Events[_HitIndex].Id));
             Menu.AddMenuEntry(What, FText::GetEmpty(), FSlateIcon{}, FUIAction{FExecuteAction::CreateLambda([OnDelete]() { OnDelete(); })});
+            if (_Hit == EHit::SectionBody || _Hit == EHit::SectionEdge)
+            {
+                const auto Index = _HitIndex;
+                const auto Count = _Timeline->_Sections.Num();
+                const auto WeakLanes = TWeakPtr<SCkProceduralAction_TimelineLanes>{SharedThis(this)};
+                const auto Reorder = [WeakLanes, Index](int32 InNewIndex)
+                {
+                    if (const auto Lanes = WeakLanes.Pin())
+                    { Lanes->ReorderSection(Index, InNewIndex); }
+                };
+                Menu.AddMenuEntry(LOCTEXT("MoveEarlier", "Move section earlier"), FText::GetEmpty(), FSlateIcon{},
+                    FUIAction{FExecuteAction::CreateLambda([Reorder, Index]() { Reorder(Index - 1); }),
+                        FCanExecuteAction::CreateLambda([Index]() { return Index > 0; })});
+                Menu.AddMenuEntry(LOCTEXT("MoveLater", "Move section later"), FText::GetEmpty(), FSlateIcon{},
+                    FUIAction{FExecuteAction::CreateLambda([Reorder, Index]() { Reorder(Index + 1); }),
+                        FCanExecuteAction::CreateLambda([Index, Count]() { return Index + 1 < Count; })});
+            }
             Menu.AddSeparator();
         }
         _Hit = EHit::None;
@@ -416,7 +431,7 @@ auto
     if (_Hit == EHit::Empty)
     {
         if (const auto Model = _Timeline->_Model.Pin())
-        { Model->SetTime(FCk_Time{_Timeline->Snap(_DragSeconds)}); }
+        { Model->SetTime(FCk_Time{ck_procedural_action_timeline::Snap(_DragSeconds)}); }
     }
     return FReply::Handled().CaptureMouse(SharedThis(this));
 }
@@ -434,7 +449,7 @@ auto
     _Dragging |= FVector2f::Distance(Local, _PressLocal) > ck_procedural_action_timeline::DragPixels;
     if (NOT _Dragging)
     { return FReply::Handled(); }
-    auto Seconds = _Timeline->Snap(ToSeconds(InGeometry, Local.X));
+    auto Seconds = ck_procedural_action_timeline::Snap(ToSeconds(InGeometry, Local.X));
     if (_Hit == EHit::Key && _Timeline->_Keys.IsValidIndex(_HitIndex))
     {
         const auto& Key = _Timeline->_Keys[_HitIndex];
@@ -443,12 +458,12 @@ auto
     }
     else if (_Hit == EHit::SectionEdge && _Timeline->_Sections.IsValidIndex(_HitIndex))
     { Seconds = FMath::Max(Seconds, _Timeline->_Sections[_HitIndex].Start + ck_procedural_action_timeline::FrameSeconds); }
-    else if (_Hit == EHit::Empty || _Hit == EHit::SectionBody || _Hit == EHit::Pose)
+    else if (_Hit == EHit::Empty || _Hit == EHit::SectionBody)
     { Seconds = FMath::Clamp(Seconds, 0.0, _Timeline->Get_Extent()); }
     else
     { Seconds = FMath::Clamp(Seconds, 0.0, _Timeline->Get_Total()); }
     _DragSeconds = Seconds;
-    if (_Hit == EHit::Empty || _Hit == EHit::SectionBody || _Hit == EHit::Pose)
+    if (_Hit == EHit::Empty || _Hit == EHit::SectionBody)
     {
         if (const auto Model = _Timeline->_Model.Pin())
         { Model->SetTime(FCk_Time{Seconds}); }
@@ -520,6 +535,23 @@ auto
 
 auto
     SCkProceduralAction_TimelineLanes::
+    ReorderSection(
+        int32 InIndex,
+        int32 InNewIndex)
+    -> void
+{
+    auto& Timeline = *_Timeline;
+    const auto Session = Timeline._Session.Pin();
+    if (NOT Session.IsValid() || NOT Timeline._Sections.IsValidIndex(InIndex))
+    { return; }
+    const auto Id = Timeline._Sections[InIndex].Id;
+    auto Error = FString{};
+    const auto Done = FCk_ProceduralActionAuthoringCommands{Session->Get_Clip()}.ReorderPhase(Id, InNewIndex, Error);
+    Timeline.Report(Done, FString::Printf(TEXT("Moved %s."), *Id.ToString()), Error);
+}
+
+auto
+    SCkProceduralAction_TimelineLanes::
     Click()
     -> void
 {
@@ -528,9 +560,6 @@ auto
     const auto Session = Timeline._Session.Pin();
     if (NOT Model.IsValid() || NOT Session.IsValid())
     { return; }
-    // A pose stays selected across other selections; clear it so Delete acts on what was just clicked.
-    if (_Hit != EHit::Pose && _Hit != EHit::Empty && _Hit != EHit::None)
-    { Model->ClearPose(); }
     switch (_Hit)
     {
         case EHit::SectionBody:
@@ -551,13 +580,6 @@ auto
             Model->SelectEvent(Timeline._Events[_HitIndex].Id);
             Model->SetTime(FCk_Time{_Hit == EHit::WindowEnd ? Timeline._Events[_HitIndex].End : Timeline._Events[_HitIndex].Start});
             break;
-        case EHit::Pose:
-        {
-            const auto& Pose = Timeline._Poses[_HitIndex];
-            Model->SelectPose(Pose.Id, Pose.PhaseId);
-            Model->SetTime(FCk_Time{Pose.Seconds});
-            break;
-        }
         default:
             break;
     }
@@ -571,7 +593,7 @@ auto
     auto& Timeline = *_Timeline;
     const auto Session = Timeline._Session.Pin();
     const auto Model = Timeline._Model.Pin();
-    auto* Clip = Session.IsValid() ? Session->GetClip() : nullptr;
+    auto* Clip = Session.IsValid() ? Session->Get_Clip() : nullptr;
     if (Clip == nullptr || NOT Model.IsValid())
     { return; }
     auto Commands = FCk_ProceduralActionAuthoringCommands{Clip};
@@ -590,7 +612,7 @@ auto
         case EHit::Key:
         {
             const auto& Key = Timeline._Keys[_HitIndex];
-            const auto* Timing = Session->GetTiming().FindByPredicate([&Key](const ck::procedural_action::FCompiledPhase& InPhase)
+            const auto* Timing = Session->Get_Timing().FindByPredicate([&Key](const ck::procedural_action::FCompiledPhase& InPhase)
                 { return InPhase.Get_Id() == Key.PhaseId; });
             if (Timing == nullptr)
             { return; }
@@ -612,8 +634,8 @@ auto
             auto EndPhase = FName{};
             auto StartFraction = 0.0;
             auto EndFraction = 0.0;
-            if (FMath::IsNearlyZero(Shift) || NOT Timeline.Get_SectionAt(Event.Start + Shift, StartPhase, StartFraction)
-                || NOT Timeline.Get_SectionAt(Event.End + Shift, EndPhase, EndFraction))
+            if (FMath::IsNearlyZero(Shift) || NOT Session->ToRawFraction(FCk_Time{Event.Start + Shift}, StartPhase, StartFraction)
+                || NOT Session->ToRawFraction(FCk_Time{Event.End + Shift}, EndPhase, EndFraction))
             { return; }
             Done = Commands.MoveWindow(Event.Id, FCk_ProceduralAction_TimeRef{StartPhase, FCk_FloatRange_0to1{StartFraction}},
                 FCk_ProceduralAction_TimeRef{EndPhase, FCk_FloatRange_0to1{EndFraction}}, Error);
@@ -626,7 +648,7 @@ auto
         {
             auto PhaseId = FName{};
             auto Fraction = 0.0;
-            if (NOT Timeline.Get_SectionAt(_DragSeconds, PhaseId, Fraction))
+            if (NOT Session->ToRawFraction(FCk_Time{_DragSeconds}, PhaseId, Fraction))
             { return; }
             const auto Id = Timeline._Events[_HitIndex].Id;
             constexpr auto StartEdge = true;
@@ -638,8 +660,6 @@ auto
         default:
             return;
     }
-    if (Done)
-    { Model->NotifyContentChanged(); }
     Timeline.Report(Done, What, Error);
 }
 
@@ -680,7 +700,7 @@ auto
                 .OnScrubPositionChanged_Lambda([this](double InSeconds, bool)
                 {
                     if (const auto Model = _Model.Pin())
-                    { Model->SetTime(FCk_Time{Snap(FMath::Clamp(InSeconds, 0.0, Get_Extent()))}); }
+                    { Model->SetTime(FCk_Time{ck_procedural_action_timeline::Snap(FMath::Clamp(InSeconds, 0.0, Get_Extent()))}); }
                 })
                 .OnViewRangeChanged_Lambda([this](TRange<double> InRange)
                 {
@@ -724,33 +744,6 @@ auto
 
 auto
     SCkProceduralAction_Timeline::
-    Snap(
-        double InSeconds) const
-    -> double
-{ return FMath::RoundToDouble(InSeconds / ck_procedural_action_timeline::FrameSeconds) * ck_procedural_action_timeline::FrameSeconds; }
-
-auto
-    SCkProceduralAction_Timeline::
-    Get_SectionAt(
-        double InSeconds,
-        FName& OutPhaseId,
-        double& OutFraction) const
-    -> bool
-{
-    for (const auto& Section : _Sections)
-    {
-        if (InSeconds <= Section.Start + Section.Duration + 1.0e-9 || &Section == &_Sections.Last())
-        {
-            OutPhaseId = Section.Id;
-            OutFraction = FMath::Clamp((InSeconds - Section.Start) / Section.Duration, 0.0, 1.0);
-            return true;
-        }
-    }
-    return false;
-}
-
-auto
-    SCkProceduralAction_Timeline::
     Report(
         bool InSucceeded,
         const FString& InSuccess,
@@ -767,7 +760,7 @@ auto
     -> void
 {
     const auto Session = _Session.Pin();
-    const auto* Clip = Session.IsValid() ? Session->GetClip() : nullptr;
+    const auto* Clip = Session.IsValid() ? Session->Get_Clip() : nullptr;
     const auto PreviousTotal = Get_Total();
     _Sections.Reset();
     _Channels.Reset();
@@ -776,7 +769,7 @@ auto
     _Poses.Reset();
     if (Clip == nullptr)
     { return; }
-    for (const auto& Timing : Session->GetTiming())
+    for (const auto& Timing : Session->Get_Timing())
     {
         auto Section = FSection{Timing.Get_Id(), Timing.Get_Start().Get_Seconds(), Timing.Get_Duration().Get_Seconds(), Timing.Get_Easing()};
         for (auto Step = 0; Step <= 16; ++Step)
@@ -787,7 +780,7 @@ auto
         _Sections.Add(MoveTemp(Section));
     }
     if (Clip->Get_BodyChannel().Get_Enabled())
-    { _Channels.Add(FCk_ProceduralAction_PoseGroup::Get_BodyChannelName()); }
+    { _Channels.Add(ck::procedural_action_editor::Get_BodyChannelName()); }
     for (const auto& Slot : Clip->Get_Slots())
     { _Channels.Add(Slot.Get_Id()); }
     const auto AddKey = [this, &Session](FName InPhaseId, FName InChannel, double InKeyTime)
@@ -812,7 +805,7 @@ auto
         if (Clip->Get_BodyChannel().Get_Enabled())
         {
             for (const auto& Key : Phase.Get_BodyKeys())
-            { AddKey(Phase.Get_Id(), FCk_ProceduralAction_PoseGroup::Get_BodyChannelName(), Key.Get_Time().Get_Value()); }
+            { AddKey(Phase.Get_Id(), ck::procedural_action_editor::Get_BodyChannelName(), Key.Get_Time().Get_Value()); }
         }
         for (const auto& Track : Phase.Get_LimbTracks())
         {
@@ -850,15 +843,18 @@ auto
         Event.Lane = Lane;
     }
     _EventLanes = FMath::Max(1, LaneEnds.Num());
-    for (const auto& View : Session->GetPoseGroups())
+    for (const auto& Label : ck::procedural_action_editor::Get_PoseLabels(*Clip))
     {
-        const auto& Group = View.Get_Group();
+        const auto* Phase = Clip->Get_Phases().FindByPredicate([&Label](const FCk_ProceduralAction_Phase& InPhase)
+            { return InPhase.Get_Id() == Label.Get_PhaseId(); });
         auto Elapsed = FCk_Time{};
-        if (Session->KeyToElapsed(Group.Get_PhaseId(), Group.Get_Time(), Elapsed))
-        {
-            _Poses.Add(FPose{Group.Get_Id(), Group.Get_PhaseId(),
-                Group.Get_Label().ToString() + (View.Get_IsBroken() ? TEXT(" (broken)") : TEXT("")), Elapsed.Get_Seconds()});
-        }
+        if (Phase == nullptr || NOT Session->KeyToElapsed(Label.Get_PhaseId(), Label.Get_Time(), Elapsed))
+        { continue; }
+        const auto Keyed = ck::procedural_action_editor::Get_ChannelsKeyedAt(*Phase, Label.Get_Time().Get_Value());
+        const auto Lane = _Channels.IndexOfByPredicate([&Keyed](FName InChannel) { return Keyed.Contains(InChannel); });
+        if (Lane == INDEX_NONE)
+        { continue; }
+        _Poses.Add(FPose{Label.Get_PhaseId(), Label.Get_Time().Get_Value(), Label.Get_Label().ToString(), Elapsed.Get_Seconds(), Lane + 1});
     }
     const auto Total = Get_Total();
     if (NOT FMath::IsNearlyEqual(Total, PreviousTotal) && Total > 0.0)

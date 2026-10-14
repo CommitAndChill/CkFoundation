@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CkProceduralAnimation/ActionBuilder/CkProceduralActionBuilder_Data.h"
+#include "CkProceduralAnimationEditor/CkProceduralActionEditorData.h"
 
 #include "Containers/Ticker.h"
 #include "EditorUndoClient.h"
@@ -9,8 +10,8 @@
 
 class FCk_ProceduralActionAuthoringSession;
 class FCk_ProceduralActionEditorModel;
-class FCkProceduralAction_CurveAdapter;
-class FCkProceduralActionEditorModes;
+class FCk_ProceduralAction_CurveAdapter;
+class FCk_ProceduralActionEditorModes;
 class IDetailsView;
 class SCkProceduralAction_Channels;
 class SCkProceduralAction_Issues;
@@ -88,7 +89,7 @@ public:
     { return _Session; }
     auto
         Get_Modes() const
-        -> const FCkProceduralActionEditorModes*
+        -> const FCk_ProceduralActionEditorModes*
     { return _Modes.Get(); }
     auto
         Get_SelectionProxy() const
@@ -135,7 +136,7 @@ public:
         ApplyStartingShape(
             ECk_ProceduralAction_Recipe InRecipe)
         -> bool;
-    // Deletes the selected pose, else the selected key.
+    // Deletes the selected key, event or section.
     auto
         DeleteSelection()
         -> bool;
@@ -208,19 +209,12 @@ private:
     auto
         Get_HudText() const
         -> FText;
-    // The section a clip time falls in and the raw fraction there, for events (keys use the session's ElapsedToKey).
-    auto
-        Get_SectionAt(
-            FCk_Time InTime,
-            FName& OutPhaseId,
-            double& OutFraction) const
-        -> bool;
 
 private:
     TSharedPtr<FCk_ProceduralActionAuthoringSession> _Session;
     TSharedPtr<FCk_ProceduralActionEditorModel> _Model;
-    TSharedPtr<FCkProceduralActionEditorModes> _Modes;
-    TSharedPtr<FCkProceduralAction_CurveAdapter> _Curves;
+    TSharedPtr<FCk_ProceduralActionEditorModes> _Modes;
+    TSharedPtr<FCk_ProceduralAction_CurveAdapter> _Curves;
     TSharedPtr<SWidget> _CurvesPanel;
     TSharedPtr<SCkProceduralAction_Viewport> _Viewport;
     TSharedPtr<SCkProceduralAction_Channels> _Channels;
@@ -228,12 +222,15 @@ private:
     TSharedPtr<SCkProceduralAction_Issues> _Issues;
     TSharedPtr<IDetailsView> _Details;
     TStrongObjectPtr<UCk_ProceduralActionSelectionProxy> _SelectionProxy;
+    // The subject the preview's meshes were built for; a refresh that finds another one rebuilds them.
+    FCk_ProceduralActionEditor_Subject _ShownSubject;
     FTSTicker::FDelegateHandle _TickerHandle;
     FDelegateHandle _PropertyChangedHandle;
     FDelegateHandle _ModelChangedHandle;
     uint64 _BuiltContentRevision = 0;
     uint64 _BuiltSelectionRevision = 0;
     uint64 _AppliedTimeRequest = 0;
+    int32 _SelectedPhaseIndex = 0;
     bool _SourceRefreshPending = false;
     bool _AppearanceRefreshPending = false;
     bool _DetailsRefreshPending = false;

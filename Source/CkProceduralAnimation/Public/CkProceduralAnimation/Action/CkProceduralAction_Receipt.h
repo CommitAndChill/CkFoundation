@@ -8,16 +8,6 @@
 // --------------------------------------------------------------------------------------------------------------------
 
 UENUM(BlueprintType)
-enum class ECk_ProceduralAction_SampleEvidence : uint8
-{
-    Evaluated,
-    Settled
-};
-CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralAction_SampleEvidence);
-
-// --------------------------------------------------------------------------------------------------------------------
-
-UENUM(BlueprintType)
 enum class ECk_ProceduralAction_EventKind : uint8
 {
     WindowExit,
@@ -146,36 +136,6 @@ public:
 
 // --------------------------------------------------------------------------------------------------------------------
 
-// Evaluated samples are solver candidates, not observed intermediate rendered frames or physical contact.
-USTRUCT(BlueprintType)
-struct CKPROCEDURALANIMATION_API FCk_ProceduralAction_Sample
-{
-    GENERATED_BODY()
-
-public:
-    CK_GENERATED_BODY(FCk_ProceduralAction_Sample);
-
-private:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Observation", meta = (AllowPrivateAccess = true))
-    FCk_Time _Time;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Observation", meta = (AllowPrivateAccess = true))
-    FCk_ProceduralArticulation_Pose _Pose;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Observation", meta = (AllowPrivateAccess = true))
-    ECk_ProceduralAction_SampleEvidence _Evidence = ECk_ProceduralAction_SampleEvidence::Evaluated;
-
-public:
-    CK_PROPERTY_GET(_Time);
-    CK_PROPERTY_GET(_Pose);
-    CK_PROPERTY_GET(_Evidence);
-
-public:
-    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralAction_Sample, _Time, _Pose, _Evidence);
-};
-
-// --------------------------------------------------------------------------------------------------------------------
-
 USTRUCT(BlueprintType)
 struct CKPROCEDURALANIMATION_API FCk_ProceduralAction_SamplingReport
 {
@@ -239,9 +199,6 @@ private:
     FCk_ProceduralArticulation_Pose _CurrentPose;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Observation", meta = (AllowPrivateAccess = true))
-    TArray<FCk_ProceduralAction_Sample> _IntermediateSamples;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Observation", meta = (AllowPrivateAccess = true))
     FCk_ProceduralAction_SamplingReport _Sampling;
 
 public:
@@ -250,11 +207,10 @@ public:
     CK_PROPERTY_GET(_Interval);
     CK_PROPERTY_GET(_PreviousPose);
     CK_PROPERTY_GET(_CurrentPose);
-    CK_PROPERTY_GET(_IntermediateSamples);
     CK_PROPERTY_GET(_Sampling);
 
 public:
-    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralAction_Receipt, _HasAcceptedPose, _Stamp, _Interval, _PreviousPose, _CurrentPose, _IntermediateSamples, _Sampling);
+    CK_DEFINE_CONSTRUCTORS(FCk_ProceduralAction_Receipt, _HasAcceptedPose, _Stamp, _Interval, _PreviousPose, _CurrentPose, _Sampling);
 };
 
 // --------------------------------------------------------------------------------------------------------------------

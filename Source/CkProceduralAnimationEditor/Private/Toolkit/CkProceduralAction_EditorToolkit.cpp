@@ -82,23 +82,15 @@ auto
     { FCk_ProceduralActionEditorCommands::Register(); }
     _Session = MakeShared<FCk_ProceduralActionAuthoringSession>(InClip);
     _Model = MakeShared<FCk_ProceduralActionEditorModel>();
-    _Modes = MakeShared<FCkProceduralActionEditorModes>(_Session);
+    _Modes = MakeShared<FCk_ProceduralActionEditorModes>(_Session);
     _SelectionProxy.Reset(NewObject<UCk_ProceduralActionSelectionProxy>(GetTransientPackage(), NAME_None, RF_Transient));
     _SelectionProxy->OnEdited = [this](FName InProperty) { OnProxyEdited(InProperty); };
 
-    if (InClip->Get_EditorSubject().Get_IsEmpty())
-    {
-        if (const auto* Legacy = ck::procedural_action_editor::FindLegacyPreview(*InClip))
-        {
-            Finish(FCk_ProceduralActionAuthoringCommands{InClip}.SetEditorSubject(
-                ck::procedural_action_editor::MakeSubjectFromLegacyPreview(*Legacy, *InClip), _Message),
-                FString::Printf(TEXT("The clip now remembers its preview subject from %s; save it to keep that."), *Legacy->GetPathName()), _Message);
-        }
-    }
     _Session->UseDerivedPreview();
+    _ShownSubject = ck::procedural_action_editor::Get_Subject(*InClip);
     auto Recorded = TArray<FName>{};
     if (InClip->Get_BodyChannel().Get_Enabled())
-    { Recorded.Add(FCk_ProceduralAction_PoseGroup::Get_BodyChannelName()); }
+    { Recorded.Add(ck::procedural_action_editor::Get_BodyChannelName()); }
     for (const auto& Slot : InClip->Get_Slots())
     { Recorded.Add(Slot.Get_Id()); }
     _Model->SetRecordChannels(Recorded);
@@ -121,13 +113,8 @@ auto
         { Top = Parent; }
         return Proxy->Get_IsCategoryShown(FName{*Top->GetMetaData(TEXT("Category"))});
     }));
-    const auto WeakModel = TWeakPtr<FCk_ProceduralActionEditorModel>{_Model};
-    _Curves = MakeShared<FCkProceduralAction_CurveAdapter>();
-    _CurvesPanel = _Curves->Init(_Session, _Model, FSimpleDelegate::CreateLambda([WeakModel]()
-    {
-        if (const auto Model = WeakModel.Pin())
-        { Model->NotifyContentChanged(); }
-    }));
+    _Curves = MakeShared<FCk_ProceduralAction_CurveAdapter>();
+    _CurvesPanel = _Curves->Init(_Session, _Model);
 
     BindCommands();
     const auto Extender = MakeShared<FExtender>();
@@ -250,7 +237,7 @@ auto
     List->MapAction(Commands.Record, FExecuteAction::CreateLambda([this]() { RecordPose(); }));
     List->MapAction(Commands.TogglePlay, FExecuteAction::CreateSP(this, &FCk_ProceduralAction_EditorToolkit::TogglePlay));
     List->MapAction(Commands.GoToStart, FExecuteAction::CreateLambda([this]() { _Model->SetTime(FCk_Time{}); }));
-    List->MapAction(Commands.GoToEnd, FExecuteAction::CreateLambda([this]() { _Model->SetTime(_Session->GetDuration()); }));
+    List->MapAction(Commands.GoToEnd, FExecuteAction::CreateLambda([this]() { _Model->SetTime(_Session->Get_Duration()); }));
     List->MapAction(Commands.Delete, FExecuteAction::CreateLambda([this]() { DeleteSelection(); }));
     List->MapAction(Commands.AddSection, FExecuteAction::CreateLambda([this]() { AddSection(); }));
     List->MapAction(Commands.AddSlot, FExecuteAction::CreateLambda([this]() { AddSlot(); }));
@@ -287,7 +274,7 @@ auto
     [
         SNew(STextBlock)
         .Tag(FName{TEXT("CkActionEditor.IssueCount")})
-        .Text_Lambda([this]() { return FText::Format(LOCTEXT("IssueCount", "Issues: {0}"), _Session.IsValid() ? _Session->GetDiagnostics().Num() : 0); })
+        .Text_Lambda([this]() { return FText::Format(LOCTEXT("IssueCount", "Issues: {0}"), _Session.IsValid() ? _Session->Get_Diagnostics().Num() : 0); })
     ]);
     InBuilder.EndSection();
 }
@@ -307,8 +294,8 @@ auto
         [
             SNew(SObjectPropertyEntryBox)
             .AllowedClass(UCk_ProceduralActionPreview_Config::StaticClass())
-            .ObjectPath_Lambda([this]() { return _Session.IsValid() && _Session->GetClip() != nullptr
-                ? _Session->GetClip()->Get_EditorSubject().Get_Scenario().ToString() : FString{}; })
+            .ObjectPath_Lambda([this]() { return _Session.IsValid() && _Session->Get_Clip() != nullptr
+                ? ck::procedural_action_editor::Get_Subject(*_Session->Get_Clip()).Get_Scenario().ToString() : FString{}; })
             .OnObjectChanged_Lambda([this](const FAssetData& InAsset) { SetScenario(Cast<UCk_ProceduralActionPreview_Config>(InAsset.GetAsset())); })
         ]
     ];
@@ -355,7 +342,7 @@ auto
 {
     if (_Closed || NOT _Session.IsValid())
     { return 0.0; }
-    return (Get_IsSolved() && _Modes.IsValid() ? _Modes->GetDuration() : _Session->GetDuration()).Get_Seconds();
+    return (Get_IsSolved() && _Modes.IsValid() ? _Modes->Get_Duration() : _Session->Get_Duration()).Get_Seconds();
 }
 
 auto
@@ -365,7 +352,8 @@ auto
 {
     if (_Closed || NOT _Modes.IsValid() || NOT _Session.IsValid())
     { return FText::GetEmpty(); }
-    return _Modes->GetMode() == FCkProceduralActionEditorModes::EMode::Solver ? _Modes->GetStatusText() : _Session->GetStatusText();
+    return _Modes->Get_Mode() == FCk_ProceduralActionEditorModes::EMode::Solver ? _Modes->Get_StatusText()
+        : _Session->Get_StatusText(_Model->Get_Time());
 }
 
 auto
@@ -376,7 +364,7 @@ auto
     if (_Closed || NOT _Model.IsValid())
     { return FText::GetEmpty(); }
     auto Key = FCk_ProceduralActionKeyTime{};
-    const auto Section = _Model->Get_Time() > _Session->GetDuration() ? FString{TEXT("after the clip")}
+    const auto Section = _Model->Get_Time() > _Session->Get_Duration() ? FString{TEXT("after the clip")}
         : _Session->ElapsedToKey(_Model->Get_Time(), Key) ? Key.Get_PhaseId().ToString() : FString{};
     return FText::FromString(FString::Printf(TEXT("%s | %.2f s | %s\n%s%s%s"), Get_IsSolved() ? TEXT("SOLVED") : TEXT("AUTHORED"),
         _Model->Get_Time().Get_Seconds(), *Section, *Get_StatusText().ToString(), _Message.IsEmpty() ? TEXT("") : TEXT("\n"), *_Message));
@@ -387,15 +375,25 @@ auto
     Refresh()
     -> void
 {
-    if (_Closed || NOT _Session.IsValid() || _Session->GetClip() == nullptr)
+    if (_Closed || NOT _Session.IsValid() || _Session->Get_Clip() == nullptr)
     { return; }
-    const auto* Clip = _Session->GetClip();
+    const auto* Clip = _Session->Get_Clip();
     const auto Phase = _Model->Get_SelectedPhase();
-    if (NOT Clip->Get_Phases().IsEmpty() && NOT Clip->Get_Phases().ContainsByPredicate([Phase](const FCk_ProceduralAction_Phase& InPhase) { return InPhase.Get_Id() == Phase; }))
+    const auto PhaseIndex = Clip->Get_Phases().IndexOfByPredicate([Phase](const FCk_ProceduralAction_Phase& InPhase)
+        { return InPhase.Get_Id() == Phase; });
+    if (Phase.IsNone() && NOT Clip->Get_Phases().IsEmpty())
     {
         _Model->SelectSection(Clip->Get_Phases()[0].Get_Id());
         return;
     }
+    // A selected section that vanished was renamed, by an edit or its undo: select what now sits where it was.
+    if (PhaseIndex == INDEX_NONE && NOT Clip->Get_Phases().IsEmpty())
+    {
+        const auto Index = FMath::Clamp(_SelectedPhaseIndex, 0, Clip->Get_Phases().Num() - 1);
+        _Model->RenameSection(Phase, Clip->Get_Phases()[Index].Get_Id());
+        return;
+    }
+    _SelectedPhaseIndex = PhaseIndex;
     const auto ContentChanged = _BuiltContentRevision != _Model->Get_ContentRevision();
     const auto SelectionChanged = _BuiltSelectionRevision != _Model->Get_SelectionRevision();
     _BuiltContentRevision = _Model->Get_ContentRevision();
@@ -436,11 +434,7 @@ auto
     { return; }
     _AppliedTimeRequest = _Model->Get_TimeRequestRevision();
     if (Get_IsSolved())
-    {
-        _Modes->Show(_Model->Get_Time());
-        return;
-    }
-    _Session->SetTime(_Model->Get_Time());
+    { _Modes->Show(_Model->Get_Time()); }
 }
 
 auto
@@ -460,18 +454,18 @@ auto
     -> void
 {
     const auto Playing = _Model->Get_IsPlaying();
+    const auto Step = FCk_Time{FMath::Min(static_cast<double>(InDeltaSeconds), 0.1)};
     if (Get_IsSolved())
     {
-        _Session->SetPlaying(false);
-        if (_Modes->GetMode() != FCkProceduralActionEditorModes::EMode::Solver)
+        if (_Modes->Get_Mode() != FCk_ProceduralActionEditorModes::EMode::Solver)
         { RestartSolver(); }
         if (Playing)
         {
             // The playhead may lead the solved frames by one step, so the Solver keeps simulating toward it.
-            const auto Next = _Model->Get_Time().Get_Seconds() + FMath::Min(static_cast<double>(InDeltaSeconds), 0.1);
-            const auto SolvedEnd = _Modes->GetSolvedTime().Get_Seconds();
-            auto Target = FMath::Min(Next, SolvedEnd + 1.0 / 60.0);
-            if (_Modes->GetIsComplete() && Next >= SolvedEnd)
+            const auto Next = (_Model->Get_Time() + Step).Get_Seconds();
+            const auto SolvedEnd = _Modes->Get_SolvedTime().Get_Seconds();
+            auto Target = FMath::Min(Next, SolvedEnd + 1.0 / FCk_ProceduralActionAuthoringSession::FramesPerSecond);
+            if (_Modes->Get_IsComplete() && Next >= SolvedEnd)
             {
                 Target = _Model->Get_IsLooping() ? 0.0 : SolvedEnd;
                 if (NOT _Model->Get_IsLooping())
@@ -483,31 +477,25 @@ auto
         _Modes->Tick();
         return;
     }
-    if (_Modes->GetMode() != FCkProceduralActionEditorModes::EMode::Authored)
+    if (_Modes->Get_Mode() != FCk_ProceduralActionEditorModes::EMode::Authored)
     { _Modes->EnterAuthored(); }
-    if (Playing && NOT _Session->IsPlaying())
-    {
-        _Session->SetPlaying(true);
-        if (NOT _Session->IsPlaying())
-        {
-            _Model->SetPlaying(false);
-            Finish(false, {}, _Session->GetStatusText().ToString());
-            return;
-        }
-    }
-    else if (NOT Playing && _Session->IsPlaying())
-    { _Session->SetPlaying(false); }
-    if (NOT _Session->IsPlaying())
+    if (NOT Playing)
     { return; }
-    _Session->Advance(FCk_Time{FMath::Min(static_cast<double>(InDeltaSeconds), 0.1)});
-    _Model->FollowSourceTime(_Session->GetTime());
-    if (NOT _Session->IsPlaying())
+    if (NOT _Session->Get_CanPlay())
     {
-        if (_Model->Get_IsLooping())
-        { _Session->SetPlaying(true); }
-        else
+        _Model->SetPlaying(false);
+        Finish(false, {}, _Session->Get_StatusText(_Model->Get_Time()).ToString());
+        return;
+    }
+    const auto Duration = _Session->Get_Duration();
+    auto Next = _Model->Get_Time() + Step;
+    if (Next >= Duration)
+    {
+        Next = _Model->Get_IsLooping() ? FCk_Time{} : Duration;
+        if (NOT _Model->Get_IsLooping())
         { _Model->SetPlaying(false); }
     }
+    _Model->FollowSourceTime(Next);
 }
 
 auto
@@ -521,8 +509,12 @@ auto
     if (_SourceRefreshPending)
     {
         _SourceRefreshPending = false;
+        const auto Subject = ck::procedural_action_editor::Get_Subject(*_Session->Get_Clip());
+        _AppearanceRefreshPending |= NOT FCk_ProceduralActionEditor_Subject::StaticStruct()->CompareScriptStruct(
+            &_ShownSubject, &Subject, PPF_None);
         if (_AppearanceRefreshPending)
         {
+            _ShownSubject = Subject;
             _AppearanceRefreshPending = false;
             _Session->UseDerivedPreview();
             if (_Viewport.IsValid())
@@ -543,15 +535,17 @@ auto
         FPropertyChangedEvent&)
     -> void
 {
-    const auto* Clip = _Closed || NOT _Session.IsValid() ? nullptr : _Session->GetClip();
+    const auto* Clip = _Closed || NOT _Session.IsValid() ? nullptr : _Session->Get_Clip();
     if (Clip == nullptr || InObject == nullptr || InObject == _SelectionProxy.Get())
     { return; }
-    if (InObject == Clip)
+    // The clip's editor data is its subobject; a Details edit there changes the preview subject.
+    if (InObject == Clip || InObject->GetOuter() == Clip)
     {
         _SourceRefreshPending = true;
+        _AppearanceRefreshPending |= InObject != Clip;
         return;
     }
-    const auto& Subject = Clip->Get_EditorSubject();
+    const auto& Subject = ck::procedural_action_editor::Get_Subject(*Clip);
     if (InObject == Subject.Get_Scenario().Get() || InObject == Subject.Get_WalkingRig().Get() || InObject == Subject.Get_WalkingGait().Get())
     {
         _SourceRefreshPending = true;
