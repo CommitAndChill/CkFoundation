@@ -1,4 +1,6 @@
 #include "CkProceduralAnimation/BodyPose/CkProceduralBodyPose_Processor.h"
+#include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Fragment.h"
+#include "CkProceduralAnimation/ActionPlayer/CkProceduralActionPlayer_Fragment.h"
 
 #include "CkProceduralAnimation/Core/CkProceduralBodySupport.h"
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Utils.h"
@@ -82,7 +84,8 @@ namespace ck
             auto Result = ECk_Request_OperationResult::Failed_Cancelled;
             const auto Guard = MakeCompletionGuard(InRequest, InHandle, Result);
 
-            if (InHandle.Has<FTag_DestroyEntity_Initiate>())
+            if (InHandle.Has<FTag_DestroyEntity_Initiate>()
+                || InHandle.Has<FFragment_ProceduralActionPlayer>())
             { return; }
 
             DoHandleRequest(InHandle, InActionComp, InRequest);
@@ -120,6 +123,10 @@ namespace ck
             const FFragment_Transform& InTransform)
         -> void
     {
+        auto* ArticulationPose = InHandle.Has<FFragment_ProceduralArticulation_Pose>()
+            ? &InHandle.Get<FFragment_ProceduralArticulation_Pose>() : nullptr;
+        if (ArticulationPose != nullptr)
+        { ArticulationPose->_HasLegacyPresentation = false; }
         const auto DeltaSeconds = static_cast<float>(InDeltaT.Get_Seconds());
         if (NOT FMath::IsFinite(DeltaSeconds) || DeltaSeconds <= 0.0f)
         { return; }
@@ -153,7 +160,7 @@ namespace ck
         for (auto Index = 0; Index < HipLocals.Num(); ++Index)
         {
             const auto& Leg = InGaitComp._Legs[Index];
-            const auto Supports = procedural_leg::Get_IsSupporting(Leg);
+            const auto Supports = procedural_leg::Get_IsStructurallyEnabled(Leg);
             Legs.Emplace(HipLocals[Index], Supports ? Supporting : Unsupported);
         }
 
@@ -361,9 +368,19 @@ namespace ck
         }
 
         const auto Posed = InPoseComp._Offset * Body;
-        UCk_Utils_Transform_UE::Request_SetTransform(Presentation, FCk_Request_Transform_SetTransform{Posed}, {});
-        InActionComp._Sample = FCk_ProceduralBodyPose_ActionSample{Posed, InActionComp._SampleId,
-            InActionComp._Sample.Get_PoseRevision() + 1};
+        if (ArticulationPose != nullptr)
+        {
+            ArticulationPose->_LegacyPresentation = Posed;
+            ArticulationPose->_HasLegacyPresentation = true;
+            ArticulationPose->_PredictedSubjectPose = FCk_ProceduralArticulation_Pose{
+                Body, Posed, true, TArray<FCk_ProceduralArticulation_LimbPose>{}};
+        }
+        else
+        {
+            UCk_Utils_Transform_UE::Request_SetTransform(Presentation, FCk_Request_Transform_SetTransform{Posed}, {});
+            InActionComp._Sample = FCk_ProceduralBodyPose_ActionSample{Posed, InActionComp._SampleId,
+                InActionComp._Sample.Get_PoseRevision() + 1};
+        }
     }
 
     // --------------------------------------------------------------------------------------------------------------------

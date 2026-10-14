@@ -87,22 +87,26 @@ namespace ck
             const FFragment_EntityScript_RequestSpawnEntity& InRequestFragment)
         -> void
     {
-        // A dying owner means this spawn lost the race with its owner's destroy cascade; cancel rather than
-        // materialize a zombie child that outlives its owner. Must run BEFORE the mid-construction defer below
-        // (else an owner dying mid-construction defers forever), and Is_NOT_Valid must short-circuit the Has
-        // queries — a finalized owner is a tombstone handle and any Has query on it would itself ensure.
-        if (const auto& LifetimeOwner = InRequestFragment.Get_Owner();
-            ck::Is_NOT_Valid(LifetimeOwner) ||
-            LifetimeOwner.Has_Any<FTag_DestroyEntity_Initiate, FTag_DestroyEntity_EndPlay,
-                FTag_DestroyEntity_Teardown, FTag_DestroyEntity_Await, FTag_DestroyEntity_Finalize>())
+        // World teardown leaves the transient owner alive while destroying both the request and its new entity.
+        // This processor deliberately visits pending-kill requests to complete them, so all three lifetimes must
+        // still be live before construction. Check before deferring for an owner's construction pipeline.
+        const auto IsDestroyedOrPending = [](const FCk_Handle& InEntity)
+        {
+            return ck::Is_NOT_Valid(InEntity) ||
+                InEntity.Has_Any<FTag_DestroyEntity_Initiate, FTag_DestroyEntity_EndPlay,
+                    FTag_DestroyEntity_Teardown, FTag_DestroyEntity_Await, FTag_DestroyEntity_Finalize>();
+        };
+        const auto& LifetimeOwner = InRequestFragment.Get_Owner();
+        if (IsDestroyedOrPending(LifetimeOwner) || IsDestroyedOrPending(InHandle)
+            || IsDestroyedOrPending(InRequestFragment.Get_NewEntity()))
         {
             ck_entity_script_spawn_trace::LogVisit(
                 TEXT("cancelled"),
                 InHandle,
                 InRequestFragment);
 
-            ck::ecs::Verbose(TEXT("Cancelling EntityScript spawn of [{}] — lifetime owner [{}] is destroyed or "
-                "pending-destroy (owner cascade applied late)"),
+            ck::ecs::Verbose(TEXT("Cancelling EntityScript spawn of [{}] — owner [{}], request or new entity "
+                "is destroyed or pending-destroy"),
                 InRequestFragment.Get_EntityScriptClassArchetype(), LifetimeOwner);
 
             InRequestFragment.TryFireCompletion(InRequestFragment.Get_NewEntity(),
@@ -119,8 +123,7 @@ namespace ck
 
         // A child EntityScript spawned from inside a parent's Construct callback must wait for the parent to
         // finish its own pipeline — these two tags are the true "construction in progress" markers.
-        if (const auto& LifetimeOwner = InRequestFragment.Get_Owner();
-            LifetimeOwner.Has_Any<FTag_EntityScript_ContinueConstruction, FTag_EntityScript_FinishConstruction>())
+        if (LifetimeOwner.Has_Any<FTag_EntityScript_ContinueConstruction, FTag_EntityScript_FinishConstruction>())
         {
             ck_entity_script_spawn_trace::LogVisit(
                 TEXT("deferred"),

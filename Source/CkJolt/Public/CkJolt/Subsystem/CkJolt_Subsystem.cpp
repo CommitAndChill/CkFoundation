@@ -931,6 +931,18 @@ auto
 
 auto
     UCk_Jolt_Subsystem::
+    ShouldCreateSubsystem(
+        UObject* InOuter) const
+    -> bool
+{
+    if (const auto* World = Cast<UWorld>(InOuter);
+        World != nullptr && World->WorldType == EWorldType::GamePreview)
+    { return UCk_EcsWorld_Subsystem_UE::Is_ProductionPreviewWorld(*World); }
+    return Super::ShouldCreateSubsystem(InOuter);
+}
+
+auto
+    UCk_Jolt_Subsystem::
     DoesSupportWorldType(
         const EWorldType::Type InWorldType) const
         -> bool

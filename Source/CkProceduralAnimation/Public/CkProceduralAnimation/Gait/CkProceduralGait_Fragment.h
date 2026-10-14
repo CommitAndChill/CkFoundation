@@ -7,6 +7,8 @@
 #include "CkProceduralAnimation/Core/CkProceduralGaitSolver.h"
 #include "CkProceduralAnimation/Core/CkProceduralSurfaceMotion.h"
 #include "CkProceduralAnimation/Debug/CkProceduralAnimation_Debug.h"
+#include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Control_Data.h"
+#include "CkProceduralAnimation/LimbControl/CkProceduralLimbControl_Fragment_Data.h"
 
 #include "CkCore/Macros/CkMacros.h"
 
@@ -22,6 +24,7 @@
 class UCk_Utils_ProceduralGait_UE;
 class UCk_Utils_ProceduralBodyPose_UE;
 class UCk_Utils_ProceduralAnimation_Debug_UE;
+class FCk_ProceduralGaitParticipation_Control;
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -138,8 +141,46 @@ namespace ck
         friend class ::UCk_Utils_ProceduralGait_UE;
         friend class ::UCk_Utils_ProceduralBodyPose_UE;
         friend class ::UCk_Utils_ProceduralAnimation_Debug_UE;
+        friend class ::FCk_ProceduralGaitParticipation_Control;
 
     private:
+        struct FParticipationLease
+        {
+            CK_GENERATED_BODY(FParticipationLease);
+
+            friend class FProcessor_ProceduralGait_Update;
+            friend class ::FCk_ProceduralGaitParticipation_Control;
+            friend class ::UCk_Utils_ProceduralAnimation_Debug_UE;
+
+        private:
+            FCk_ArticulationControlToken _Token;
+            TArray<int32> _LegIndices;
+            TArray<FName> _LimbIds;
+            FCk_ProceduralLimbControl_Support _SupportPolicy;
+            FCk_ProceduralLimbControl_Return _ReturnPolicy;
+            TArray<FTransform> _StartWorld;
+            TArray<FTransform> _AcceptedWorld;
+            TArray<FProceduralGaitLegInput> _LatestInputs;
+            TArray<FVector> _LandingWorld;
+            TArray<FVector> _LandingNormalWorld;
+            TArray<bool> _ContactTrusted;
+            FCk_Time _AcceptedElapsed;
+            FCk_Time _RecoveryOrigin;
+            FCk_Time _SupportHold;
+            uint64 _RecoveryGeneration = 0;
+            uint64 _PreparedSolveSequence = 0;
+            bool _ProtectionActive = true;
+            bool _Interrupted = false;
+            bool _Recovering = false;
+            bool _ReadyForHandoff = false;
+            bool _LandingProbePending = false;
+            bool _RecoveryLease = false;
+            FName _Reason = NAME_None;
+
+        public:
+            CK_PROPERTY_GET(_LegIndices);
+        };
+
         FProceduralGaitSolver _Solver;
         TArray<FCk_Handle_ProceduralLeg> _Legs;
         uint64 _EnabledMask = ~uint64{0};
@@ -151,6 +192,12 @@ namespace ck
         FQuat _Basis = FQuat::Identity;
         uint64 _SolveSequence = 0;
         FProceduralGaitReachStance _ReachStance;
+        TArray<FParticipationLease> _ParticipationLeases;
+        uint64 _UnplantedMask = 0;
+        TArray<FName> _UnplantedReasons;
+
+    public:
+        CK_PROPERTY_GET(_SolveSequence);
     };
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -165,6 +212,7 @@ namespace ck
     public:
         friend class FProcessor_ProceduralGait_Setup;
         friend class FProcessor_ProceduralGait_Update;
+        friend class ::FCk_ProceduralGaitParticipation_Control;
 
     private:
         FProceduralSurfaceFeetSupport _Support;

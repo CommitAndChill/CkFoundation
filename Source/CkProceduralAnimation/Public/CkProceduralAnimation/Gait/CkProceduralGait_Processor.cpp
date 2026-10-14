@@ -4,6 +4,7 @@
 #include "CkProceduralAnimation/BodyPose/CkProceduralBodyPose_Utils.h"
 #include "CkProceduralAnimation/Core/CkProceduralFeetPlane.h"
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Utils.h"
+#include "CkProceduralAnimation/Gait/CkProceduralGaitParticipation_Control.h"
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Fragment.h"
 #include "CkProceduralAnimation/SurfaceMotion/CkSurfaceMotion_Fragment.h"
 #include "CkProceduralAnimation/SurfaceMotion/CkSurfaceMotion_Utils.h"
@@ -1100,7 +1101,7 @@ namespace ck_procedural_gait
             const FCk_Handle_ProceduralLeg& InLeg)
         -> bool
     {
-        return ck::procedural_leg::Get_IsSupporting(InLeg);
+        return ck::procedural_leg::Get_IsStructurallyEnabled(InLeg);
     }
 
     // Rebuilt from committed solver state; no second reservation lifetime or stale release path.
@@ -1115,7 +1116,7 @@ namespace ck_procedural_gait
         for (auto Index = 0; Index < InLegs.Num(); ++Index)
         {
             const auto& Leg = InLegs[Index];
-            if (NOT Get_IsLegEnabled(Leg))
+            if (NOT Get_IsLegEnabled(Leg) || NOT InSolver.IsLegParticipating(Index))
             { continue; }
             const auto Radius = Leg.Get<ck::FFragment_ProceduralLeg_Params>().Get_FootContactRadius();
             if (Radius <= 0.0f)
@@ -1192,7 +1193,7 @@ namespace ck_procedural_gait
         for (auto Index = 0; Index < InInputs.Num(); ++Index)
         {
             const auto& Input = InInputs[Index];
-            if (NOT Input.Get_Enabled())
+            if (NOT Input.Get_Enabled() || NOT Input.Get_Participating())
             { continue; }
 
             const auto& State = InSolver.GetLegState(Index);
@@ -1316,6 +1317,95 @@ namespace ck_procedural_gait
 }
 
 // --------------------------------------------------------------------------------------------------------------------
+
+namespace ck
+{
+    // Actual return settlement is qualified by the same touchdown resolver and current reservations as an ordinary gait
+    // touchdown. The caller's accepted pose is the only endpoint eligible for trust.
+    // --------------------------------------------------------------------------------------------------------------------
+
+}
+
+auto
+    FCk_ProceduralGaitParticipation_Control::
+    AcceptRecoverySettlement(
+        const FCk_Handle_ProceduralGait& InGait,
+        const FCk_ProceduralGaitParticipation_RecoveryCandidate& InCandidate,
+        const FCk_ProceduralArticulation_Pose& InActualSettled)
+    -> ECk_ProceduralGaitParticipation_Result
+{
+    auto Snapshot = FCk_ProceduralGaitParticipation_Snapshot{};
+    const auto SnapshotResult = GetSnapshot(InGait, Snapshot);
+    if (SnapshotResult != ECk_ProceduralGaitParticipation_Result::Accepted)
+    { return SnapshotResult; }
+    auto Gait = InGait;
+    auto& Fragment = Gait.Get<ck::FFragment_ProceduralGait>();
+    auto* Lease = Fragment._ParticipationLeases.FindByPredicate([&InCandidate](const auto& InLease)
+        { return InLease._Token == InCandidate.Get_Token(); });
+    if (Lease == nullptr || NOT Lease->_Recovering)
+    { return ECk_ProceduralGaitParticipation_Result::InvalidToken; }
+    if (Lease->_RecoveryGeneration != InCandidate.Get_Generation()
+        || Fragment._SolveSequence != InCandidate.Get_SolveSequence()
+        || InCandidate.Get_ProposedElapsed() < Lease->_AcceptedElapsed
+        || InCandidate.Get_Targets().Num() != Lease->_LimbIds.Num()
+        || Lease->_LandingWorld.Num() != Lease->_LimbIds.Num()
+        || Lease->_LandingNormalWorld.Num() != Lease->_LimbIds.Num())
+    { return ECk_ProceduralGaitParticipation_Result::Stale; }
+
+    auto Actual = TArray<FTransform>{};
+    Actual.Reserve(Lease->_LimbIds.Num());
+    for (auto Entry = 0; Entry < Lease->_LimbIds.Num(); ++Entry)
+    {
+        const auto Id = Lease->_LimbIds[Entry];
+        const auto* Limb = InActualSettled.Get_Limbs().FindByPredicate([Id](const auto& InLimb)
+            { return InLimb.Get_Id() == Id; });
+        if (Limb == nullptr || InCandidate.Get_Targets()[Entry].Get_Id() != Id
+            || Limb->Get_AcceptedEndpoint().ContainsNaN()
+            || NOT Limb->Get_AcceptedEndpoint().GetRotation().IsNormalized())
+        { return ECk_ProceduralGaitParticipation_Result::NotReady; }
+        Actual.Add(Limb->Get_AcceptedEndpoint());
+    }
+
+    auto Trusted = TArray<bool>{};
+    Trusted.Init(false, Lease->_LimbIds.Num());
+    if (InCandidate.Get_ProposedElapsed() - Lease->_RecoveryOrigin >= Lease->_ReturnPolicy.Get_Duration())
+    {
+        auto* World = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(Gait);
+        if (ck::Is_NOT_Valid(World) || NOT Gait.Has<ck::FFragment_ProceduralGait_Tunables>())
+        { return ECk_ProceduralGaitParticipation_Result::NotReady; }
+        const auto& Tunables = Gait.Get<ck::FFragment_ProceduralGait_Tunables>();
+        auto Reservations = ck_procedural_gait::Get_FootReservations(Fragment._Legs, Fragment._Solver, Fragment._Basis);
+        for (auto Entry = 0; Entry < Lease->_LegIndices.Num(); ++Entry)
+        {
+            const auto Index = Lease->_LegIndices[Entry];
+            const auto& Leg = Fragment._Legs[Index];
+            if (NOT ck::procedural_leg::Get_IsStructurallyEnabled(Leg))
+            { continue; }
+            const auto& Params = Leg.Get<ck::FFragment_ProceduralLeg_Params>();
+            const auto Hip = Snapshot.Get_RootFrame().TransformPosition(Params.Get_Placement().Get_HipLocal());
+            const auto Reach = ck_procedural_gait_utils::Get_Reach(Params.Get_Chain());
+            const auto Touchdown = ck_procedural_gait::Get_Touchdown(World, Actual[Entry].GetLocation(),
+                Lease->_LandingWorld[Entry], Lease->_LandingNormalWorld[Entry], Snapshot.Get_SupportUp(),
+                Tunables.Get_Probe(), Hip, TOptional<FVector>{}, Reach,
+                Params.Get_FootContactRadius(), Index, Reservations);
+            const auto ContactAccepted = Touchdown.Get_Trusted()
+                && Touchdown.Get_Position().Equals(Actual[Entry].GetLocation(),
+                    Lease->_ReturnPolicy.Get_ContactToleranceCm());
+            Trusted[Entry] = ContactAccepted;
+            if (ContactAccepted && Params.Get_FootContactRadius() > 0.0f)
+            { Reservations.Emplace(Touchdown.Get_Position(), Params.Get_FootContactRadius(), Index); }
+        }
+    }
+    Lease->_AcceptedWorld = MoveTemp(Actual);
+    Lease->_ContactTrusted = MoveTemp(Trusted);
+    Lease->_AcceptedElapsed = InCandidate.Get_ProposedElapsed();
+    Lease->_ReadyForHandoff = Lease->_ContactTrusted.Num() == Lease->_LegIndices.Num()
+        && Lease->_ContactTrusted.Contains(false) == false;
+    if (InCandidate.Get_ProposedElapsed() - Lease->_RecoveryOrigin >= Lease->_ReturnPolicy.Get_Duration()
+        && NOT Lease->_ReadyForHandoff)
+    { return ECk_ProceduralGaitParticipation_Result::NotReady; }
+    return ECk_ProceduralGaitParticipation_Result::Accepted;
+}
 
 namespace ck
 {
@@ -1609,7 +1699,10 @@ namespace ck
             const auto Live = procedural_leg::Get_IsLive(Leg);
             const auto Enabled = ck_procedural_gait::Get_IsLegEnabled(Leg);
 
-            Input.Set_Enabled(Enabled);
+            const auto Withdrawn = InGaitComp._ParticipationLeases.ContainsByPredicate([Index](const auto& InLease)
+                { return InLease._LegIndices.Contains(Index); });
+            const auto Unplanted = (InGaitComp._UnplantedMask & (uint64{1} << Index)) != 0;
+            Input.Set_Enabled(Enabled).Set_Participating(NOT Withdrawn && NOT Unplanted);
             DebugLeg.Set_Enabled(Enabled)
                 .Set_Status(NOT Live ? ECk_ProceduralLeg_Status::Detached
                     : Enabled ? ECk_ProceduralLeg_Status::Enabled
@@ -1705,7 +1798,16 @@ namespace ck
             DebugLeg.Get_Targeting().Set_QueryTarget(Ideal);
             MeanFootRadius += FVector::VectorPlaneProject(Placement.Get_RestFootLocal(), FVector::UpVector).Size();
 
-            const auto Planted = LegComp._Foot.Get_Phase() == ECk_ProceduralLeg_FootPhase::Planted;
+            const auto Planted = NOT Withdrawn && NOT Unplanted
+                && LegComp._Foot.Get_Phase() == ECk_ProceduralLeg_FootPhase::Planted;
+            const auto* RecoveryLease = InGaitComp._ParticipationLeases.FindByPredicate([Index](const auto& InLease)
+                { return InLease._LegIndices.Contains(Index); });
+            if (Withdrawn && (RecoveryLease == nullptr || NOT RecoveryLease->_Recovering
+                || NOT RecoveryLease->_LandingProbePending))
+            {
+                Input.Set_TargetValid(false).Set_TargetTrusted(false).Set_TargetIsFoothold(false);
+                continue;
+            }
             if (HasPose && Planted && LegComp._Foot.Get_Contact() == ECk_ProceduralLeg_FootContact::Trusted
                 && UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Leg) == InHandle.ConvertToHandle())
             {
@@ -1859,18 +1961,110 @@ namespace ck
                     static_cast<double>(Support._AttemptedStanceSpeed)));
             }
         }
-        const auto Solved = InGaitComp._Solver.Step(InDeltaT, CadenceSpeed, PlanarVelocity, Inputs, Outputs,
-            Airborne, CadenceDriveSpeed);
+        for (auto& Lease : InGaitComp._ParticipationLeases)
+        {
+            if (NOT Lease._Recovering || NOT Lease._LandingProbePending)
+            { continue; }
+            Lease._LatestInputs.SetNum(Lease._LegIndices.Num());
+            auto AllPrepared = true;
+            for (auto Entry = 0; Entry < Lease._LegIndices.Num(); ++Entry)
+            {
+                const auto Index = Lease._LegIndices[Entry];
+                Lease._LatestInputs[Entry] = Inputs[Index];
+                AllPrepared &= Inputs[Index].Get_TargetValid() && Inputs[Index].Get_TargetTrusted();
+            }
+            if (AllPrepared)
+            {
+                for (const auto Index : Lease._LegIndices)
+                {
+                    Lease._LandingWorld.Add(Basis.RotateVector(Inputs[Index].Get_IdealTarget()));
+                    Lease._LandingNormalWorld.Add(Basis.RotateVector(Inputs[Index].Get_GroundNormal()));
+                }
+                Lease._PreparedSolveSequence = InGaitComp._SolveSequence;
+                ++Lease._RecoveryGeneration;
+            }
+            Lease._LandingProbePending = false;
+        }
+        // A touchdown certifies the plant only at that instant. While a limb is borrowed, support protection must use
+        // current contact at each remaining plant; otherwise removing ground leaves the old trusted bit latched and an
+        // action can continue until its input timeout. Probe along the plant's own normal so wall and sloped holds use
+        // their actual contact frame. The ordinary gait path retains its existing touchdown semantics and solve cost.
+        if (InGaitComp._ParticipationLeases.ContainsByPredicate([](const auto& InLease)
+            { return InLease._ProtectionActive; }))
+        {
+            const auto RaysBeforeSupport = RayCount;
+            for (auto Index = 0; Index < LegCount; ++Index)
+            {
+                if (NOT Inputs[Index].Get_Enabled() || NOT Inputs[Index].Get_Participating())
+                { continue; }
+                const auto& Plant = InGaitComp._Solver.GetLegState(Index).Get_Plant();
+                if (InGaitComp._Solver.GetLegState(Index).Get_Swing().Get_Active()
+                    || NOT Plant.Get_Trusted())
+                { continue; }
+                const auto PlantWorld = Basis.RotateVector(Plant.Get_Position());
+                const auto PlantNormalWorld = Basis.RotateVector(Plant.Get_Normal()).GetSafeNormal();
+                const auto Hit = ck_procedural_gait::Get_GroundHit(World, PlantWorld, PlantNormalWorld,
+                    FVector::ZeroVector, Probe, ck_procedural_gait::EGroundProbeAttempts::RetryFromInsideSolid,
+                    RayCount, nullptr);
+                if (Hit.IsSet() && FVector::Dist(Hit->Get_Position(), PlantWorld)
+                    <= InTunables.Get_Foothold().Get_OcclusionTolerance())
+                { continue; }
+                InGaitComp._Solver.SetPlantedPose(Index, Plant.Get_Position(), Plant.Get_Normal(), false);
+            }
+            InDebugComp._RaysLastSolve += RayCount - RaysBeforeSupport;
+        }
+        auto Solved = false;
+        auto DeniedTakeoffs = TArray<FProceduralGaitDeniedTakeoff>{};
+        if (InGaitComp._ParticipationLeases.IsEmpty())
+        {
+            Solved = InGaitComp._Solver.Step(InDeltaT, CadenceSpeed, PlanarVelocity, Inputs, Outputs,
+                Airborne, CadenceDriveSpeed);
+        }
+        else
+        {
+            auto Snapshot = FCk_ProceduralGaitParticipation_Snapshot{};
+            const auto Fresh = FCk_ProceduralGaitParticipation_Control::GetSnapshot(InHandle, Snapshot)
+                == ECk_ProceduralGaitParticipation_Result::Accepted;
+            Solved = InGaitComp._Solver.StepWithTakeoffGuard(InDeltaT, CadenceSpeed, PlanarVelocity, Inputs, Outputs,
+                Airborne, CadenceDriveSpeed,
+                [InHandle, &Snapshot, Fresh](const FProceduralGaitSolver& InSolver, int32 InIndex, bool)
+                { return Fresh && FCk_ProceduralGaitParticipation_Control::CanTakeoff(InHandle, InSolver, InIndex, Snapshot); },
+                DeniedTakeoffs);
+        }
         CK_ENSURE_IF_NOT(Solved, TEXT("Procedural gait [{}] solver rejected runtime inputs; feature is failed, planted state retained."), InHandle)
         {
             InHandle.Add<FFragment_ProceduralGait_Failure>(ECk_ProceduralGait_Failure::SolverStep);
             return;
         }
+        if (InDeltaT > FCk_Time{})
+        {
+            auto SupportSnapshot = FCk_ProceduralGaitParticipation_Snapshot{};
+            const auto SupportReady = InGaitComp._ParticipationLeases.IsEmpty()
+                || FCk_ProceduralGaitParticipation_Control::GetSnapshot(InHandle, SupportSnapshot)
+                    == ECk_ProceduralGaitParticipation_Result::Accepted;
+            const auto SupportsRemain = SupportReady && (InGaitComp._ParticipationLeases.IsEmpty()
+                || FCk_ProceduralGaitParticipation_Control::CanTakeoff(
+                    InHandle, InGaitComp._Solver, INDEX_NONE, SupportSnapshot));
+            for (auto& Lease : InGaitComp._ParticipationLeases)
+            {
+                if (NOT Lease._ProtectionActive)
+                { continue; }
+                const auto Denied = DeniedTakeoffs.ContainsByPredicate([&Lease](const auto& InDenial)
+                    { return NOT Lease._LegIndices.Contains(InDenial.Get_LegIndex()); });
+                Lease._SupportHold = (Denied || NOT SupportsRemain) ? Lease._SupportHold + InDeltaT : FCk_Time{};
+                if (Lease._SupportHold >= Lease._SupportPolicy.Get_SupportHoldTimeout())
+                {
+                    Lease._Interrupted = true;
+                    if (Lease._Reason.IsNone())
+                    { Lease._Reason = TEXT("SupportHoldTimeout"); }
+                }
+            }
+        }
 
         auto TouchdownRays = int32{0};
         for (auto Index = 0; Index < LegCount; ++Index)
         {
-            if (NOT Inputs[Index].Get_Enabled())
+            if (NOT Inputs[Index].Get_Enabled() || NOT Inputs[Index].Get_Participating())
             { continue; }
 
             const auto& Output = Outputs[Index];
@@ -1928,7 +2122,8 @@ namespace ck
             for (auto Index = 0; Index < LegCount; ++Index)
             {
                 const auto& Leg = InGaitComp._Legs[Index];
-                if (NOT Inputs[Index].Get_Enabled() || NOT Outputs[Index].Get_Planted() || NOT procedural_leg::Get_IsSupporting(Leg))
+                if (NOT Inputs[Index].Get_Enabled() || NOT Inputs[Index].Get_Participating()
+                    || NOT Outputs[Index].Get_Planted() || NOT procedural_leg::Get_IsSupporting(Leg))
                 { continue; }
 
                 const auto& Foot = Leg.Get<FFragment_ProceduralLeg>()._Foot;

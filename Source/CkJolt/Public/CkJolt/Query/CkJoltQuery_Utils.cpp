@@ -10,11 +10,13 @@
 #include "CkJolt/Subsystem/CkJolt_Subsystem.h"
 
 #include <Engine/World.h>
+#include <ProfilingDebugging/CpuProfilerTrace.h>
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Physics/Body/Body.h>
 #include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Body/BodyFilter.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
 #include <Jolt/Physics/Collision/CollideShape.h>
@@ -25,6 +27,29 @@
 
 namespace ck_jolt_query_utils
 {
+    static auto Get_IsValidBodySelection(ECk_Jolt_QueryBodySelection InSelection) -> bool
+    {
+        return InSelection == ECk_Jolt_QueryBodySelection::Any ||
+            InSelection == ECk_Jolt_QueryBodySelection::StaticNonSensor;
+    }
+
+    class FBodySelectionFilter final : public JPH::BodyFilter
+    {
+    public:
+        explicit FBodySelectionFilter(ECk_Jolt_QueryBodySelection InSelection)
+            : _Selection(InSelection)
+        {}
+
+        auto ShouldCollideLocked(const JPH::Body& InBody) const -> bool override
+        {
+            return _Selection == ECk_Jolt_QueryBodySelection::Any ||
+                (InBody.GetMotionType() == JPH::EMotionType::Static && NOT InBody.IsSensor());
+        }
+
+    private:
+        ECk_Jolt_QueryBodySelection _Selection;
+    };
+
     struct FQueryContext
     {
         UWorld* _World = nullptr;
@@ -115,6 +140,11 @@ auto
 
     auto Result = FCk_Jolt_HitResult{};
 
+    const auto SelectionValid = Get_IsValidBodySelection(InFilter.Get_BodySelection());
+    CK_ENSURE(SelectionValid, TEXT("Jolt ray cast body selection is invalid"));
+    if (NOT SelectionValid)
+    { return Result; }
+
     const auto Context = Get_QueryContext(InWorldContextObject);
     if (ck::Is_NOT_Valid(Context._PhysicsSystem))
     { return Result; }
@@ -124,9 +154,12 @@ auto
 
     const auto ChannelFilter = ck::jolt::FCk_Jolt_ChannelQueryFilter{
         Context._JoltSubsystem->Get_LayerTable(), InFilter.Get_Channel(), InFilter.Get_MinResponse()};
+    const auto BodyFilter = FBodySelectionFilter{InFilter.Get_BodySelection()};
 
+    // One event per executed query (invalid worlds above do not count).
+    TRACE_CPUPROFILER_EVENT_SCOPE(Ck_JoltQuery_RayCast);
     if (NOT Context._PhysicsSystem->GetNarrowPhaseQuery().CastRay(Ray, RayResult,
-        JPH::BroadPhaseLayerFilter{}, ChannelFilter))
+        JPH::BroadPhaseLayerFilter{}, ChannelFilter, BodyFilter))
     { return Result; }
 
     const auto HitPosition = Ray.GetPointOnRay(RayResult.mFraction);
@@ -155,6 +188,11 @@ auto
 
     auto Result = FCk_Jolt_HitResult{};
 
+    const auto SelectionValid = Get_IsValidBodySelection(InFilter.Get_BodySelection());
+    CK_ENSURE(SelectionValid, TEXT("Jolt shape cast body selection is invalid"));
+    if (NOT SelectionValid)
+    { return Result; }
+
     const auto Context = Get_QueryContext(InWorldContextObject);
     if (ck::Is_NOT_Valid(Context._PhysicsSystem))
     { return Result; }
@@ -171,12 +209,36 @@ auto
 
     const auto ChannelFilter = ck::jolt::FCk_Jolt_ChannelQueryFilter{
         Context._JoltSubsystem->Get_LayerTable(), InFilter.Get_Channel(), InFilter.Get_MinResponse()};
+    const auto BodyFilter = FBodySelectionFilter{InFilter.Get_BodySelection()};
+
+    auto Settings = JPH::ShapeCastSettings{};
+    if (InFilter.Get_CollideWithBackFacesConvex())
+    { Settings.mBackFaceModeConvex = JPH::EBackFaceMode::CollideWithBackFaces; }
+
+    TRACE_CPUPROFILER_EVENT_SCOPE(Ck_JoltQuery_ShapeCast);
+    if (InStart.Equals(InEnd, 0.0))
+    {
+        auto Overlaps = JPH::ClosestHitCollisionCollector<JPH::CollideShapeCollector>{};
+        Context._PhysicsSystem->GetNarrowPhaseQuery().CollideShape(
+            Shape.GetPtr(), JPH::Vec3::sReplicate(1.0f), StartTransform,
+            JPH::CollideShapeSettings{}, JPH::RVec3::sZero(), Overlaps,
+            JPH::BroadPhaseLayerFilter{}, ChannelFilter, BodyFilter);
+        if (NOT Overlaps.HadHit())
+        { return Result; }
+
+        const auto& Hit = Overlaps.mHit;
+        Result.Set_HasHit(true);
+        Result.Set_Position(ck::jolt::Conv(Hit.mContactPointOn2));
+        Result.Set_Fraction(0.0f);
+        Result.Set_Normal(ck::jolt::Conv(-Hit.mPenetrationAxis.Normalized()));
+        Fill_HitAttribution(Context, Hit.mBodyID2, Result);
+        return Result;
+    }
 
     auto Collector = JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector>{};
-
     Context._PhysicsSystem->GetNarrowPhaseQuery().CastShape(
-        ShapeCast, JPH::ShapeCastSettings{}, JPH::RVec3::sZero(), Collector,
-        JPH::BroadPhaseLayerFilter{}, ChannelFilter);
+        ShapeCast, Settings, JPH::RVec3::sZero(), Collector,
+        JPH::BroadPhaseLayerFilter{}, ChannelFilter, BodyFilter);
 
     if (NOT Collector.HadHit())
     { return Result; }
@@ -206,6 +268,11 @@ auto
 
     auto Results = TArray<FCk_Jolt_HitResult>{};
 
+    const auto SelectionValid = Get_IsValidBodySelection(InFilter.Get_BodySelection());
+    CK_ENSURE(SelectionValid, TEXT("Jolt overlap body selection is invalid"));
+    if (NOT SelectionValid)
+    { return Results; }
+
     const auto Context = Get_QueryContext(InWorldContextObject);
     if (ck::Is_NOT_Valid(Context._PhysicsSystem))
     { return Results; }
@@ -219,12 +286,13 @@ auto
 
     const auto ChannelFilter = ck::jolt::FCk_Jolt_ChannelQueryFilter{
         Context._JoltSubsystem->Get_LayerTable(), InFilter.Get_Channel(), InFilter.Get_MinResponse()};
+    const auto BodyFilter = FBodySelectionFilter{InFilter.Get_BodySelection()};
 
     auto Collector = JPH::AllHitCollisionCollector<JPH::CollideShapeCollector>{};
 
     Context._PhysicsSystem->GetNarrowPhaseQuery().CollideShape(
         Shape.GetPtr(), JPH::Vec3::sReplicate(1.0f), Transform, JPH::CollideShapeSettings{},
-        JPH::RVec3::sZero(), Collector, JPH::BroadPhaseLayerFilter{}, ChannelFilter);
+        JPH::RVec3::sZero(), Collector, JPH::BroadPhaseLayerFilter{}, ChannelFilter, BodyFilter);
 
     Results.Reserve(Collector.mHits.size());
 
@@ -254,6 +322,11 @@ auto
 
     auto Results = TArray<FCk_Jolt_HitResult>{};
 
+    const auto SelectionValid = Get_IsValidBodySelection(InFilter.Get_BodySelection());
+    CK_ENSURE(SelectionValid, TEXT("Jolt multi ray cast body selection is invalid"));
+    if (NOT SelectionValid)
+    { return Results; }
+
     const auto Context = Get_QueryContext(InWorldContextObject);
     if (ck::Is_NOT_Valid(Context._PhysicsSystem))
     { return Results; }
@@ -262,11 +335,12 @@ auto
 
     const auto ChannelFilter = ck::jolt::FCk_Jolt_ChannelQueryFilter{
         Context._JoltSubsystem->Get_LayerTable(), InFilter.Get_Channel(), InFilter.Get_MinResponse()};
+    const auto BodyFilter = FBodySelectionFilter{InFilter.Get_BodySelection()};
 
     auto Collector = JPH::AllHitCollisionCollector<JPH::CastRayCollector>{};
 
     Context._PhysicsSystem->GetNarrowPhaseQuery().CastRay(
-        Ray, JPH::RayCastSettings{}, Collector, JPH::BroadPhaseLayerFilter{}, ChannelFilter);
+        Ray, JPH::RayCastSettings{}, Collector, JPH::BroadPhaseLayerFilter{}, ChannelFilter, BodyFilter);
 
     Collector.Sort();
 
@@ -303,6 +377,11 @@ auto
 
     auto Results = TArray<FCk_Jolt_HitResult>{};
 
+    const auto SelectionValid = Get_IsValidBodySelection(InFilter.Get_BodySelection());
+    CK_ENSURE(SelectionValid, TEXT("Jolt multi shape cast body selection is invalid"));
+    if (NOT SelectionValid)
+    { return Results; }
+
     const auto Context = Get_QueryContext(InWorldContextObject);
     if (ck::Is_NOT_Valid(Context._PhysicsSystem))
     { return Results; }
@@ -319,12 +398,17 @@ auto
 
     const auto ChannelFilter = ck::jolt::FCk_Jolt_ChannelQueryFilter{
         Context._JoltSubsystem->Get_LayerTable(), InFilter.Get_Channel(), InFilter.Get_MinResponse()};
+    const auto BodyFilter = FBodySelectionFilter{InFilter.Get_BodySelection()};
+
+    auto Settings = JPH::ShapeCastSettings{};
+    if (InFilter.Get_CollideWithBackFacesConvex())
+    { Settings.mBackFaceModeConvex = JPH::EBackFaceMode::CollideWithBackFaces; }
 
     auto Collector = JPH::AllHitCollisionCollector<JPH::CastShapeCollector>{};
 
     Context._PhysicsSystem->GetNarrowPhaseQuery().CastShape(
-        ShapeCast, JPH::ShapeCastSettings{}, JPH::RVec3::sZero(), Collector,
-        JPH::BroadPhaseLayerFilter{}, ChannelFilter);
+        ShapeCast, Settings, JPH::RVec3::sZero(), Collector,
+        JPH::BroadPhaseLayerFilter{}, ChannelFilter, BodyFilter);
 
     Collector.Sort();
 

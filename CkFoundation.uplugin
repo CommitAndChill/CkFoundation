@@ -57,6 +57,16 @@
       ]
     },
     {
+      "Name": "CkProceduralAnimationEditor",
+      "Type": "UncookedOnly",
+      "LoadingPhase": "Default",
+      "WhitelistPlatforms": [
+        "Win64",
+        "Mac",
+        "Linux"
+      ]
+    },
+    {
       "Name": "CkAggro",
       "Type": "Runtime",
       "LoadingPhase": "Default",

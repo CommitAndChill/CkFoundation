@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CkProceduralAnimation/Debug/CkProceduralAction_Debug.h"
 #include "CkProceduralAnimation/CkProceduralAnimation_Fragment_Data.h"
 #include "CkProceduralAnimation/Core/CkProceduralFootProbe.h"
 #include "CkProceduralAnimation/Core/CkProceduralFoothold.h"
@@ -452,9 +453,28 @@ public:
         const FCk_Handle& InHandle)
         -> FCk_ProceduralAnimation_DebugSnapshot;
 
+    // Diagnostic snapshots never reserve resources or authorize a gameplay effect.
+    UFUNCTION(BlueprintPure, Category = "Ck|Utils|ProceduralAnimation|Debug",
+        DisplayName = "[Ck][ProceduralAnimation] Get Action Snapshot")
+    static FCk_ProceduralAction_DebugInstance
+    Get_ActionSnapshot(
+        const FCk_Handle& InAction);
+
+    UFUNCTION(BlueprintPure, Category = "Ck|Utils|ProceduralAnimation|Debug",
+        DisplayName = "[Ck][ProceduralAnimation] Get Control Snapshot")
+    static FCk_ProceduralAction_DebugSubject
+    Get_ControlSnapshot(
+        const FCk_Handle& InSubject);
+
     // Discovery returns live handles; history must retain only copied snapshots.
     static auto
     Get_Entities(
+        UWorld* InWorld)
+        -> TArray<FCk_Handle>;
+
+    // Includes standalone and body-only subjects; does not change the gait-only Get_Entities contract.
+    static auto
+    Get_Articulations(
         UWorld* InWorld)
         -> TArray<FCk_Handle>;
 
