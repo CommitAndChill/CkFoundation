@@ -171,6 +171,13 @@ public:
     static FTransform
     Get_CrowdMemberTransform(const ACk_Iskm_BatchedCrowd_Actor* InCrowd, int32 InIndex);
 
+    // World box the member's tile primitive is frustum/occlusion culled against. Invalid box for a bad
+    // crowd/index. Diagnostics/tests: a member outside its tile's box is invisible however close it stands.
+    UFUNCTION(BlueprintPure, Category = "Ck|Utils|IskmBatched",
+        DisplayName = "[Ck][IskmBatched] Get Crowd Member Tile World Bounds")
+    static FBox
+    Get_CrowdMemberTileWorldBounds(const ACk_Iskm_BatchedCrowd_Actor* InCrowd, int32 InIndex);
+
     UFUNCTION(BlueprintPure, Category = "Ck|Utils|IskmBatched",
         DisplayName = "[Ck][IskmBatched] Get Crowd Member Sequence Index")
     static int32

@@ -85,6 +85,10 @@ public:
     float      Get_MemberAnimationTime(int32 InIndex) const;
     bool       Get_MemberVisible(int32 InIndex) const;
 
+    // World box the member's tile primitive is culled against: the fixed box the next render push sends (not the
+    // component's BoundsScale'd Bounds). Invalid box for a bad index or a member with no tile. Diagnostics/tests.
+    FBox       Get_MemberTileWorldBounds(int32 InIndex) const;
+
     // In-tile moves ride the light per-frame push; crossing a tile border migrates the member (rebuilds both).
     void       Set_MemberTransform(int32 InIndex, const FTransform& InWorldTransform);
 
@@ -256,7 +260,12 @@ private:
     void      RebuildTile(const FIntVector& InKey);
     // Light push (same instance count — transforms/frames/custom data only). Rolls members' velocity history.
     void      PushTile(const FIntVector& InKey);
-    FBox      TileLocalBounds() const;
+    // Component-relative fixed bounds: the tile's XY extent, and the Z spread of its VISIBLE members (tiles sit at
+    // world Z 0, so a fixed mesh-height Z range would cull every member standing above it).
+    FBox      TileLocalBounds(const FIntVector& InKey) const;
+    // The member's animated pose box, component-relative to its tile.
+    FBox      MemberLocalPoseBounds(const FMember& InMember) const;
+    FBox      AnimatedMeshBox() const;
 
     UPROPERTY(Transient)
     TObjectPtr<USceneComponent> _Root;

@@ -307,22 +307,64 @@ auto
 
 auto
     ACk_Iskm_BatchedCrowd_Actor::
-    TileLocalBounds() const
+    AnimatedMeshBox() const
     -> FBox
 {
-    // Component-relative (the component sits at the tile centre): the tile's XY extent padded by the ANIMATED
-    // pose box — an instance stands anywhere in the tile and sticks out at most its baked animated bounds.
-    const float Half = _TileSize * 0.5f;
-    FBox MeshBox = FBox(FVector(-50.0), FVector(50.0));
-    if (ck::IsValid(_Collection))
-    { MeshBox = _Collection->Get_AnimatedMeshBounds(); }
-    else
-    { CK_TRIGGER_ENSURE(TEXT("[CkIskm] TileLocalBounds on crowd [{}] with no AnimCollection — using a placeholder mesh box"), this); }
+    CK_ENSURE_IF_NOT(ck::IsValid(_Collection),
+        TEXT("[CkIskm] Crowd [{}] reads its animated mesh box with no AnimCollection — using a placeholder mesh box"), this)
+    { return FBox(FVector(-50.0), FVector(50.0)); }
+
+    return _Collection->Get_AnimatedMeshBounds();
+}
+
+auto
+    ACk_Iskm_BatchedCrowd_Actor::
+    MemberLocalPoseBounds(const FMember& InMember) const
+    -> FBox
+{
+    return AnimatedMeshBox().TransformBy(InMember.Inst.Transform);
+}
+
+auto
+    ACk_Iskm_BatchedCrowd_Actor::
+    TileLocalBounds(const FIntVector& InKey) const
+    -> FBox
+{
+    // Component-relative (the component sits at the tile centre, world Z 0). XY: the tile extent padded by the
+    // ANIMATED pose box — an instance stands anywhere in the tile and sticks out at most its baked animated bounds.
+    // Z: the visible members' actual pose spread. Tiles bucket by XY only, so the tile's Z says nothing about where
+    // its members stand; a fixed mesh-height range left hillside members wholly outside their primitive's bounds,
+    // and frustum/HZB culling dropped the whole tile.
+    const FBox MeshBox = AnimatedMeshBox();
     const FVector MeshSize = MeshBox.GetSize();
+    const float Half = _TileSize * 0.5f;
     const float PadXY = FMath::Max(MeshSize.X, MeshSize.Y);
+
+    auto MemberSpread = FBox{ForceInit};
+    if (const TArray<int32>* MemberIndices = _TileMembers.Find(InKey))
+    {
+        for (const int32 MemberIndex : *MemberIndices)
+        {
+            const FMember& M = _Members[MemberIndex];
+            if (M.Visible)
+            { MemberSpread += MemberLocalPoseBounds(M); }
+        }
+    }
+
+    // A tile with nothing visible renders nothing (no proxy at zero instances); the bare mesh box is a placeholder.
+    if (NOT MemberSpread.IsValid)
+    {
+        return FBox(
+            FVector(-Half - PadXY, -Half - PadXY, MeshBox.Min.Z),
+            FVector(+Half + PadXY, +Half + PadXY, MeshBox.Max.Z));
+    }
+
+    // Pad the spread by one mesh size so a moving member re-fits once per band, not per frame. Unioned (not just
+    // Z-copied) so any escape — including a scaled pose poking past the XY pad — is cured by the re-fit it triggers.
+    const FBox PaddedSpread = MemberSpread.ExpandBy(MeshSize);
     return FBox(
-        FVector(-Half - PadXY, -Half - PadXY, MeshBox.Min.Z),
-        FVector(+Half + PadXY, +Half + PadXY, MeshBox.Max.Z));
+        FVector(-Half - PadXY, -Half - PadXY, PaddedSpread.Min.Z),
+        FVector(+Half + PadXY, +Half + PadXY, PaddedSpread.Max.Z)) + PaddedSpread;
 }
 
 auto
@@ -348,7 +390,7 @@ auto
     Comp->SetWorldLocation(TileCentre(TileOfBucketKey(InKey)));
     Comp->Setup(_Collection, Mesh);
     Comp->Set_ManagedExternally(true);        // the manager advances animation + pushes per-frame data
-    Comp->Set_FixedLocalBounds(TileLocalBounds());
+    Comp->Set_FixedLocalBounds(TileLocalBounds(InKey));
     if (_RenderProfiles.IsValidIndex(InKey.Z) && _RuntimeProfileTuners.IsValidIndex(InKey.Z))
     {
         Comp->Apply_RenderProfile(
@@ -523,6 +565,8 @@ auto
             { Visible.Add(M.Inst); }
         }
     }
+    // Bounds BEFORE Set_Instances: the recreated proxy builds its primitive bounds from the fixed box.
+    Comp->Set_FixedLocalBounds(TileLocalBounds(InKey));
     Comp->Set_Instances(Visible);
 }
 
@@ -902,6 +946,24 @@ auto
 
 auto
     ACk_Iskm_BatchedCrowd_Actor::
+    Get_MemberTileWorldBounds(int32 InIndex) const
+    -> FBox
+{
+    CK_ENSURE_IF_NOT(_Members.IsValidIndex(InIndex),
+        TEXT("[CkIskm] Member index [{}] out of range [0..{})"), InIndex, _Members.Num())
+    { return FBox{ForceInit}; }
+
+    const FMember& M = _Members[InIndex];
+    const UCk_Iskm_BatchedClusterComponent* Comp = _Tiles.FindRef(MakeBucketKey(M.Tile, M.ProfileIndex));
+    if (ck::Is_NOT_Valid(Comp))
+    { return FBox{ForceInit}; }
+
+    // The same composition the per-frame push hands the scene (local fixed box x component transform).
+    return Comp->Get_LocalBounds().TransformBy(Comp->GetComponentTransform());
+}
+
+auto
+    ACk_Iskm_BatchedCrowd_Actor::
     Set_MemberTransform(int32 InIndex, const FTransform& InWorldTransform)
     -> void
 {
@@ -919,7 +981,16 @@ auto
         // so the move produces a real motion vector.
         M.Inst.Transform = InWorldTransform.GetRelativeTransform(FTransform(TileCentre(M.Tile)));
         if (M.Visible)
-        { _DirtyTiles.Add(MakeBucketKey(M.Tile, M.ProfileIndex)); }
+        {
+            const FIntVector Key = MakeBucketKey(M.Tile, M.ProfileIndex);
+            _DirtyTiles.Add(Key);
+
+            // Climbed or descended out of the tile's Z spread → re-fit over the tile's visible members (O(tile),
+            // once per padded band). The dirty push ships the new primitive bounds without a proxy recreate.
+            if (UCk_Iskm_BatchedClusterComponent* Comp = _Tiles.FindRef(Key);
+                ck::IsValid(Comp) && NOT Comp->Get_LocalBounds().IsInsideOrOn(MemberLocalPoseBounds(M)))
+            { Comp->Set_FixedLocalBounds(TileLocalBounds(Key)); }
+        }
 
         // Highlighted member walking out of its cluster's fixed bounds → rebuild (recomputes bounds).
         if (auto* Group = DoFind_MemberHighlightGroup(InIndex);
