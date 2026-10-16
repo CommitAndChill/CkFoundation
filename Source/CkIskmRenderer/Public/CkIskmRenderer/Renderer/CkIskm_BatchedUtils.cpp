@@ -374,6 +374,16 @@ auto
 
 auto
     UCk_Utils_IskmBatched_UE::
+    Get_CrowdMemberTileWorldBounds(const ACk_Iskm_BatchedCrowd_Actor* InCrowd, int32 InIndex)
+    -> FBox
+{
+    if (ck::Is_NOT_Valid(InCrowd))
+    { return FBox{ForceInit}; }
+    return InCrowd->Get_MemberTileWorldBounds(InIndex);
+}
+
+auto
+    UCk_Utils_IskmBatched_UE::
     Get_CrowdMemberSequenceIndex(const ACk_Iskm_BatchedCrowd_Actor* InCrowd, int32 InIndex)
     -> int32
 {
