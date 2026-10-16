@@ -9,6 +9,7 @@
 // carrier: a replicated fragment reaches a client only on an entity the replication driver knows about.
 
 #include "CkCore/Macros/CkMacros.h"
+#include "CkCore/Format/CkFormat.h"
 
 #include "CkSnapshot_LoadState.generated.h"
 

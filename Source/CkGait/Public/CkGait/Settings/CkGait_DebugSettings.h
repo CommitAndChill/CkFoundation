@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CkCore/Macros/CkMacros.h"
+#include "CkCore/Format/CkFormat.h"
 #include "CkSettings/UserSettings/CkUserSettings.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "CkGait_DebugSettings.generated.h"

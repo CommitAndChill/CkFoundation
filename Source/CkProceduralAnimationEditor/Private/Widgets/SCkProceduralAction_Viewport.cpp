@@ -11,6 +11,7 @@
 
 #include "AdvancedPreviewScene.h"
 #include "Components/StaticMeshComponent.h"
+#include "EditorModeManager.h"
 #include "EditorViewportClient.h"
 #include "Engine/AssetManager.h"
 #include "Engine/StaticMesh.h"
