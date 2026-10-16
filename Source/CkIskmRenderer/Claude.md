@@ -148,12 +148,13 @@ Streamable.RequestAsyncLoad(SoftPath, FStreamableDelegate::CreateLambda([Handle,
 registered once (`AddInstance` … `Finalize`) and live in `_Members` — the **single source of truth** for transform,
 animation time/frames, visibility, and custom data. The manager ticks all members itself and pushes per-frame data
 into per-tile `UCk_Iskm_BatchedClusterComponent`s (self-tick disabled); each tile is one GPUScene proxy at the tile
-centre with **fixed conservative bounds** (tile extent + baked animated pose box), so member movement never
-recomputes bounds. Rendering is client-local: no replication, and all ticking is skipped on dedicated servers.
+centre with **fixed conservative bounds**: XY = tile extent + baked animated pose box; Z = the visible members'
+actual pose spread padded by one mesh size (see *Plan-2 tile Z bounds* below). Movement within that box recomputes
+nothing; leaving it re-fits the tile once. Rendering is client-local: no replication, and all ticking is skipped on dedicated servers.
 
 **Driving members from game systems (the production API, all AS-exposed via `UCk_Utils_IskmBatched_UE`):**
 - `Set_CrowdMemberTransform(i, xf)` — every tick if the NPC moves. In-tile: rides the light `Push_LiveInstances`
-  path (no proxy recreate, no bounds work). Tile-border crossing: automatic migration (two `Set_Instances`
+  path (no proxy recreate; bounds work only when the pose leaves the tile's box, e.g. climbing a hill). Tile-border crossing: automatic migration (two `Set_Instances`
   rebuilds; velocity zeroed for one frame to avoid cross-primitive TAA smear).
 - `Set_CrowdMemberAnimation(i, seq, rate, resetTime)` — idle→walk etc. Sequence switches are instant (no
   crossfade — see *Scoped follow-up*). Time is preserved unless reset.
@@ -336,6 +337,20 @@ bound (one animated-pose box the engine applies per instance transform; the shar
 instance spread. Using the single mesh box for the primitive bound collapsed the primitive's scene bounds to one mesh at
 the component origin every animated frame — `FUpdateTransformCommand` then replaced the registration bounds, so
 everything away from the tile centre was wrongly frustum/occlusion culled ("flickers unless looking at the spawn point").
+
+**Plan-2 tile Z bounds (incident).** Tiles bucket by XY only and every tile component sits at world Z 0
+(`TileCentre`). The fixed bounds used to span only the mesh's own Z range, so the tile primitive covered roughly world
+Z [0, mesh height] wherever its members stood. On BusterBlock's main-map hill a far (batched) NPC was wholly outside
+its tile's bounds, the box was buried in the terrain, and primitive frustum/HZB culling dropped the whole tile: the
+body vanished while the far cosmetics (CkIsm, own bounds) kept rendering in mid-air. Primitive culling runs BEFORE
+per-instance GPU culling, so correct per-instance bounds do not save a primitive with wrong bounds. Now
+`TileLocalBounds(Key)` derives Z from the tile's visible members (`MemberLocalPoseBounds`) padded by one mesh size,
+unioned so any escape is curable. `RebuildTile` re-fits (BEFORE `Set_Instances`, so the recreated proxy reads the new
+box); an in-tile `Set_MemberTransform` whose pose leaves the box re-fits that tile once (the dirty push ships the new
+bounds, no proxy recreate). Moving back inside never shrinks the box until the next rebuild/escape - conservative,
+never hidden. Min/Max draw distance is measured from these bounds too, so it was off by the member height before.
+`Get_CrowdMemberTileWorldBounds` reports the box the next render push sends; `CkAutoTest_IskmRenderer_BatchedCrowdElevation`
+pins it.
 
 **Plan-2 tile rebuild.** `RebuildTile` reads live `FMember` state, so a rebuild never snaps animation back — that is what
 fixed the old "whole tile resets to spawn pose on any flip" bug. Crowd `Initialize` bakes the AnimCollection up front
