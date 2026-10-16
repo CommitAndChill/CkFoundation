@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CkRuntimeMesh/Internal/CkRuntimeMesh_Geometry.h"
+#include "CkCore/Format/CkFormat.h"
 
 namespace ck::runtimemesh::slice
 {

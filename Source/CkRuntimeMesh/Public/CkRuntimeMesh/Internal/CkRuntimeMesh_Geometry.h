@@ -2,6 +2,7 @@
 
 #include "BoxTypes.h"
 #include "CkCore/Macros/CkMacros.h"
+#include "CkCore/Format/CkFormat.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "Templates/SharedPointer.h"
 

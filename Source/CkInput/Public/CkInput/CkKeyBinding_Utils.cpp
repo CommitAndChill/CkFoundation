@@ -5,11 +5,13 @@
 #include "CkInput/CkPlayerMappableKeySettings.h"
 #include "CkInput/Subsystem/CkKeyBinding_Subsystem.h"
 
+#include <Engine/LocalPlayer.h>
 #include <EnhancedInputDeveloperSettings.h>
 #include <EnhancedInputSubsystems.h>
 #include <InputAction.h>
 #include <InputMappingContext.h>
 #include <PlayerMappableKeySettings.h>
+#include <Runtime/Launch/Resources/Version.h>
 #include <UserSettings/EnhancedInputUserSettings.h>
 
 // --------------------------------------------------------------------------------------------------------------------
