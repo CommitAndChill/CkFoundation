@@ -23,6 +23,8 @@
 #include <Jolt/Physics/Body/BodyID.h>
 #include <Jolt/Physics/Collision/Shape/DecoratedShape.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/TransformedShape.h>
 #include <Jolt/Physics/Body/Body.h>
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Body/BodyLockInterface.h>
@@ -142,31 +144,32 @@ namespace ck_jolt_occupancy_session
         if (ck::Is_NOT_Valid(Shape, ck::IsValid_Policy_NullptrOnly{}))
         { return 0; }
 
-        auto Context = JPH::Shape::GetTrianglesContext{};
-        Shape->GetTrianglesStart(Context, InQueryBox,
-            InBody.GetCenterOfMassPosition(), InBody.GetRotation(), JPH::Vec3::sReplicate(1.0f));
-
+        // GetTriangles* accepts leaves only. Let Jolt compose arbitrary decorator/compound transforms,
+        // including capsule Y-to-Z correction and translated/non-uniformly scaled mesh instances.
+        auto Leaves = JPH::AllHitCollisionCollector<JPH::TransformedShapeCollector>{};
+        Shape->CollectTransformedShapes(InQueryBox, InBody.GetCenterOfMassPosition(), InBody.GetRotation(),
+            JPH::Vec3::sReplicate(1.0f), JPH::SubShapeIDCreator{}, Leaves, JPH::ShapeFilter{});
         auto TrianglesAppended = 0;
-
-        for (;;)
+        for (const auto& Leaf : Leaves.mHits)
         {
-            const auto NumTriangles = Shape->GetTrianglesNext(Context, TriangleBatchSize, InScratchVertices.GetData());
-
-            if (NumTriangles == 0)
-            { break; }
-
-            const auto FirstVertex = OutSoup._Vertices.Num();
-
-            OutSoup._Vertices.Reserve(FirstVertex + (NumTriangles * 3));
-            OutSoup._Indices.Reserve(OutSoup._Indices.Num() + (NumTriangles * 3));
-
-            for (auto VertexIndex = 0; VertexIndex < NumTriangles * 3; ++VertexIndex)
+            auto Context = JPH::Shape::GetTrianglesContext{};
+            Leaf.mShape->GetTrianglesStart(Context, InQueryBox,
+                Leaf.mShapePositionCOM, Leaf.mShapeRotation, Leaf.GetShapeScale());
+            for (;;)
             {
-                OutSoup._Vertices.Emplace(ck::jolt::Conv(InScratchVertices[VertexIndex]));
-                OutSoup._Indices.Emplace(FirstVertex + VertexIndex);
+                const auto NumTriangles = Leaf.mShape->GetTrianglesNext(Context, TriangleBatchSize, InScratchVertices.GetData());
+                if (NumTriangles == 0)
+                { break; }
+                const auto FirstVertex = OutSoup._Vertices.Num();
+                OutSoup._Vertices.Reserve(FirstVertex + (NumTriangles * 3));
+                OutSoup._Indices.Reserve(OutSoup._Indices.Num() + (NumTriangles * 3));
+                for (auto VertexIndex = 0; VertexIndex < NumTriangles * 3; ++VertexIndex)
+                {
+                    OutSoup._Vertices.Emplace(ck::jolt::Conv(InScratchVertices[VertexIndex]));
+                    OutSoup._Indices.Emplace(FirstVertex + VertexIndex);
+                }
+                TrianglesAppended += NumTriangles;
             }
-
-            TrianglesAppended += NumTriangles;
         }
 
         return TrianglesAppended;
