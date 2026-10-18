@@ -19,6 +19,8 @@ void FCkUsfEditorModule::StartupModule()
     // Interactive editor only — commandlets (cook, resave) must not churn generated masters.
     if (NOT IsRunningCommandlet())
     {
+        _ShaderReload = MakeUnique<ck::usf_editor::FShaderReload>();
+        _ShaderReload->Startup();
         _PackageSavedHandle = UPackage::PackageSavedWithContextEvent.AddRaw(
             this, &FCkUsfEditorModule::OnPackageSaved);
     }
@@ -26,6 +28,11 @@ void FCkUsfEditorModule::StartupModule()
 
 void FCkUsfEditorModule::ShutdownModule()
 {
+    if (_ShaderReload.IsValid())
+    {
+        _ShaderReload->Shutdown();
+        _ShaderReload.Reset();
+    }
     if (_PackageSavedHandle.IsValid())
     {
         UPackage::PackageSavedWithContextEvent.Remove(_PackageSavedHandle);

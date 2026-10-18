@@ -1,5 +1,7 @@
 #pragma once
 
+#include "CkUsfEditor/Reload/CkUsf_ShaderReload.h"
+
 #include "CoreMinimal.h"
 #include "Containers/Ticker.h"
 #include "Modules/ModuleManager.h"
@@ -24,4 +26,5 @@ private:
     FDelegateHandle _PackageSavedHandle;
     FTSTicker::FDelegateHandle _PendingTicker;
     TArray<TWeakObjectPtr<UCkUsf_LookDefinition>> _PendingRegens;
+    TUniquePtr<ck::usf_editor::FShaderReload> _ShaderReload;
 };

@@ -107,9 +107,18 @@ of all of it.
 3. **Generate** — save the asset in-editor (auto-regens via the package-save hook), or run the
    console command `Ck_Usf_GenerateLooks [LookName]`, or call the `UCkUsf_GeneratorSubsystem`
    functions. Generation fails LOUDLY (log + result errors) on any contract violation.
-4. **Iterate on the .ush only** — no regeneration needed: run `recompileshaders changed` in the
-   editor console (the generated master references the include; the engine re-reads it). Set
-   `r.ShaderDevelopmentMode=1` in ConsoleVariables.ini for retry-on-error dialogs.
+4. **Iterate on the .ush only** — the editor watches `/CkUsf` shader files and reloads affected
+   loaded material looks on save. `Ck.Usf.AutoReload 0` pauses automatic reload; set it to `1`
+   to enable it again. `Ck_Usf_ReloadShaders` explicitly reloads all loaded CkUsf material looks.
+   Reload updates existing masters in place, preserving live MID parents and parameters, and
+   does not regenerate or save material assets. Shader compilation is asynchronous; check the
+   CkUsfEditor completion/error log before judging the result. Shared includes can affect many looks.
+   `/CkUsfRenderer` global shaders require the explicit `Ck_Usf_ReloadGlobalShaders` command;
+   a global shader compile error can terminate the editor under the engine's default error policy.
+   Material compile errors can display the default material until repaired and reloaded.
+   LookDefinition/signature changes still require generation. New C++ shader types and parameter
+   layouts require a rebuild. Set `r.ShaderDevelopmentMode=1` in ConsoleVariables.ini for the
+   engine's shader development diagnostics and retry dialogs.
 5. **Apply** — `Create_MID_ForLook` + assign to a mesh slot, or the post-process helpers.
 
 ## The parameter contract (enforced by the validator at generation)

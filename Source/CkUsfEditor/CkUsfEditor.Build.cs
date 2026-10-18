@@ -18,6 +18,7 @@ public class CkUsfEditor : CkModuleRules
             "MaterialEditor",
             "AssetTools",
             "AssetRegistry",
+            "DirectoryWatcher",
 
             "CkCore",
             "CkEcs",

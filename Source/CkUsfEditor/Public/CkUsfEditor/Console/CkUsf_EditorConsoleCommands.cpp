@@ -34,7 +34,8 @@ namespace ck_usf_editor_console
         TEXT("Ck_Usf_GenerateLooks [LookName]\n")
         TEXT("Regenerates CkUsf look master materials. No argument = every look; with an argument, ")
         TEXT("only the look whose effective name matches (e.g. Ck_Usf_GenerateLooks Hologram).\n")
-        TEXT("For .ush-only edits you do not need to regenerate — run `recompileshaders changed` instead."),
+        TEXT("For .ush-only edits, automatic material reload is enabled in the editor. ")
+        TEXT("Run Ck_Usf_ReloadShaders to reload loaded CkUsf materials manually."),
         FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& InArgs)
         {
             if (InArgs.IsEmpty())
