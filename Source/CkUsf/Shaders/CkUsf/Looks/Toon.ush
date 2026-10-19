@@ -1,0 +1,14 @@
+// @ckusf shading_model Toon
+#pragma once
+#include "/CkUsf/Common.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_Toon(FCkUsf_SurfaceInput In, float3 TintColor, float BandThreshold, float BandSoftness)
+{
+    FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
+    O.BaseColor = saturate(TintColor);
+    O.Roughness = 0.8;
+    O.Specular = 0.25;
+    O.ToonThreshold = saturate(BandThreshold);
+    O.ToonSoftness = saturate(BandSoftness);
+    return O;
+}

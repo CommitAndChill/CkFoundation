@@ -1,12 +1,27 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "CkUsfEditor/Generator/CkUsf_ShadingModelContract.h"
 
 class UCkUsf_LookDefinition;
 class UMaterial;
+class UMaterialExpressionCustom;
 
 namespace ck::usf_editor
 {
+    struct FPreparedLookShadingModelReload
+    {
+        TWeakObjectPtr<UMaterialExpressionCustom> Custom;
+        FShadingModelContract Contract;
+        FString Code;
+    };
+
+    // Preflight has no material mutations. A default preparation means this is an unmanaged custom material.
+    CKUSFEDITOR_API auto Prepare_LookShadingModelReload(
+        UMaterial& InMaterial, FPreparedLookShadingModelReload& OutPrepared, TArray<FString>& OutErrors) -> bool;
+    CKUSFEDITOR_API auto Apply_LookShadingModelReload(
+        UMaterial& InMaterial, const FPreparedLookShadingModelReload& InPrepared) -> void;
+
     struct FGenerateResult
     {
         int32 NumGenerated = 0;

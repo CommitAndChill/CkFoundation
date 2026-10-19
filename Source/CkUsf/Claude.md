@@ -121,6 +121,137 @@ of all of it.
    engine's shader development diagnostics and retry dialogs.
 5. **Apply** — `Create_MID_ForLook` + assign to a mesh slot, or the post-process helpers.
 
+## Native Toon shading model (initial slice)
+
+### Select the material shading model in a look's source
+
+Put one declaration in the leading comment header of the entrypoint `.ush`, before `#pragma`,
+`#include`, or code:
+
+```hlsl
+// @ckusf shading_model Cloth
+```
+
+Names are case-sensitive: `Unlit`, `DefaultLit`, `Subsurface`, `PreintegratedSkin`, `ClearCoat`,
+`SubsurfaceProfile`, `TwoSidedFoliage`, `Hair`, `Cloth`, `Eye`, `SingleLayerWater`,
+`ThinTranslucent`, `Toon`. This is editor-read material metadata, not a numeric runtime HLSL
+model ID. Declarations in nested includes do not override the entrypoint. Duplicate, conditional,
+misplaced, and unknown declarations reject reload before changing the affected material batch.
+Removing the declaration restores the LookDefinition's `_ShadingModel` and domain defaults.
+
+Initial generation and material reload share the same settings and pin-wiring contract. Saving
+the source automatically updates loaded masters; `Ck_Usf_ReloadShaders` does the same manually.
+Material and live MID identities/parameter overrides are preserved. Reload does not save assets;
+run normal generation outside PIE when publishing the source's material settings to disk.
+Changing LookDefinition parameters or the generated input/call layout still requires generation.
+Source selection targets desktop deferred surface materials. The legacy renderer is supported;
+the Substrate prototype requires **Blendable GBuffer** (`r.Substrate.ProjectGBufferFormat=0`)
+and legacy-root authoring. Explicitly connected FrontMaterial graphs, multiple/dynamic shading
+models, and Adaptive GBuffer reject before source-model reload changes the material.
+
+Use `_BlendMode = Inherit` to derive the selected model's required blend. Explicit incompatible
+blend/lighting overrides reject. Thin Translucent selects Translucent, per-pixel surface lighting,
+and Before DOF; Hair uses world-space `O.HairTangent`, `O.HairScatter`, and `O.HairBacklit`;
+Cloth uses `O.SubsurfaceColor` for fuzz and `O.ClothMask`; Eye uses `O.EyeIrisMask` and
+`O.EyeIrisDistance`. Eye and Subsurface Profile require a valid typed `_SubsurfaceProfile` asset
+on the LookDefinition. Water uses `O.WaterScattering`, `O.WaterAbsorption`, `O.WaterPhaseG`, and
+`O.WaterColorScaleBehindWater`; thin transmission uses `O.ThinTransmittance` and
+`O.ThinSurfaceCoverage`. Set the relevant surface outputs in HLSL; for example Unlit needs
+`O.EmissiveColor`. The generator connects actual water/thin output expressions. Leaving a model
+resets its specialized pins, profile, normal convention, blend, and lighting settings.
+
+The USF Materials gym defaults to the source-driven Toon master. **U** selects that material,
+**L** reloads it, **N/B/T** select prepared comparison materials, and **G** explicitly reloads
+shared lighting HLSL. Edit `Shaders/CkUsf/Looks/Toon.ush` to select another built-in model;
+edit the renderer's `ShadingModels/CkUsf_Toon.ush` to change Toon's lighting equation. These are
+different operations. Ordinary source-model selection needs only material recompilation.
+
+Generation records the exact source-definition object path in editor package metadata. Legacy
+masters can resolve a uniquely matching loaded definition; unavailable/ambiguous definitions or
+an incompatible generated layout require loading the source definition or regenerating the master.
+Invalid metadata/profile preflight preserves the material. Arbitrary HLSL compiler failures retain
+the existing material-reload behavior and can show the default material until repaired.
+
+`ECk_Usf_ShadingModel::Toon` selects the engine's native legacy `MSM_CkUsf` lighting model.
+It requires `UE_CK_USF_SHADING_MODEL_VERSION >= 1` from `EngineTypes.h`; generation rejects an
+unsupported engine explicitly before creating or changing a material. Toon accepts only
+`SurfaceLit` with `Opaque` (or its inherited opaque default) and desktop deferred rendering.
+The Substrate Blendable bridge additionally requires `UE_CK_USF_SUBSTRATE_BLENDABLE_VERSION >= 1`
+from the optional engine header `Rendering/CkUsfSubstrateSupport.h` and matching rebuilt binaries.
+Forward/mobile, Nanite, Adaptive, native layered FrontMaterial graphs, and path-traced Toon
+appearance remain outside acceptance; the engine's path-tracing fallback requires separate verification.
+
+Under Substrate Blendable, Unreal retains the legacy root material writer and reconstructs a
+Substrate slab from its GBuffer. The engine bridge preserves Toon's identity and band controls
+and calls the plugin's `CkUsf_ToonDiffuseGain` during Substrate's direct-light diffuse evaluation.
+It keeps the surrounding Substrate shadow, falloff, specular, and energy calculations. This is
+not a new layerable Substrate BSDF. The same `.ush` outputs and automatic material reload apply;
+lighting-function edits still require explicit `Ck_Usf_ReloadShadingModels`. Enabling Substrate
+or changing GBuffer format needs an initial editor restart; subsequent supported HLSL edits do not.
+See `docs/campaigns/2026-10-18-CkUsfCustomShadingModels/SUBSTRATE_PROTOTYPE.md` for exact scope and evidence.
+
+The shipped `CkUsf::Toon` LookDefinition uses `/CkUsf/Looks/Toon.ush`. Run
+`Ck_Usf_GenerateLooks Toon` after the rebuilt editor starts, then select **USF Materials** in the
+gym selector. Its **TOON (NATIVE LIGHTING)** station uses a non-Nanite sphere and a movable point
+key light. The generated master exposes `TintColor`, `BandThreshold`, and `BandSoftness`;
+the latter two drive the reserved output fields below.
+
+The USF Materials gym also has a separate comparison catalog. Outside PIE, run
+`Ck_GymUsf_GenerateShadingModels` once to create its 13 compiled legacy-model variants, then play.
+On the comparison sphere, **N/B** select next/previous, **T** restores CkUsf Toon, **F** frames
+the sphere, **G** invokes explicit lighting-HLSL reload, and **R** respawns looks while retaining
+the selected model. The shared control panel shows each variant's model-specific setup and
+sphere-preview limitations. **H** cycles panel visibility. Switching swaps cached MIDs; it does
+not mutate the production Toon master or require another material compilation.
+
+The variants include dedicated subsurface profiles, Hair tangent/scatter/backlit inputs, Cloth
+fuzz, a procedural Eye iris mask, Water volume outputs, and Thin Translucent transmission with
+surface forward lighting. Hair/Eye/foliage/water remain sphere comparisons, not substitutes for
+authored groom, eye, leaf, or water geometry. "From Material Expression" is a graph-based model
+selector, not an additional BxDF, so it is not another comparison entry. The catalog is specific
+to CkTests; the production LookDefinition shading-model enum is unchanged by these gym presets.
+The generation command validates/reuses an existing catalog; add `regenerate` to explicitly save
+a new immutable material batch and replace the catalog after all variants compile successfully.
+
+After initially changing the engine's native shading-model registration, rebuild every consuming
+project's editor once. The startup virtual-path mapping lives in that project's executable;
+an older executable can see new shared HLSL but fail to resolve `/CkUsfShadingModel`.
+
+The look writes `O.ToonThreshold` (default `0.5`) and `O.ToonSoftness` (default `0.05`). These
+outputs are wired only for Toon, to `MP_CustomData0/1`, clamped to `[0,1]`, and stored in
+`GBuffer.CustomData.xy` as UNorm8. They therefore have roughly `1/255` precision. Existing
+`ClearCoat`/`ClearCoatRoughness` outputs retain their original names and wiring for ClearCoat.
+`ToonThreshold` and `ToonSoftness` are reserved generated-output names; use different names for
+uniform parameters that drive them.
+
+The lighting shader is `Source/CkUsfRenderer/Shaders/ShadingModels/CkUsf_Toon.ush`, mapped to
+`/CkUsfShadingModel/CkUsf_Toon.ush` by the engine's early shader-source initialization. The engine
+includes it after `DefaultLitBxDF` is declared. It bands each direct light's diffuse cosine response using a
+monotone smooth transition centred on `ToonThreshold`; `ToonSoftness` is the transition's half
+width, with a minimum of `1/255` after GBuffer decoding. Specular keeps DefaultLit's response.
+UE continues to own light attenuation, shadow accumulation, indirect lighting, and exposure.
+This is a material shading model, independent of the full-screen CelShade look.
+
+After an HLSL-only edit, use the explicit `Ck_Usf_ReloadShadingModels` command. It enables
+shader development retry (`r.ShaderDevelopmentMode=1`) before invoking `RecompileShaders Changed`,
+which recompiles the engine lighting consumers and affected materials. The material-look watcher
+alone cannot update these shared lighting shaders. A new C++ enum or engine permutation change
+still requires a rebuild/restart; HLSL iteration after that bootstrap works in the same editor
+process. If a compile fails, repair the file on disk and choose Retry in the engine's development
+dialog. This is the engine's retry mechanism, not transactional last-known-good replacement;
+cancelling a failed global shader compile can terminate the editor. The error dialog itself has
+not been fault-injected in this slice's validation.
+
+`CK_USF_TOON_ITERATION_GAIN` is a diffuse gain marker for a controlled live reload check. The
+real-RHI `CkUsf.Toon` gate passed all five focused tests, including changing this gain from one
+to zero and restoring the exact source bytes. The same editor PID and MID produced linear mean
+RGB `0.954590 -> 0.000000 -> 0.954590`. Threshold and light-off controls independently verified
+native CustomData transport and direct lighting. Observed edit-to-verified-capture time was
+124.636 seconds, with a 10.462-second cached restoration; these include waiting for shader jobs
+and are not an earliest-visible-frame benchmark. Shared lighting includes can require substantial
+compilation. See `docs/campaigns/2026-10-18-CkUsfCustomShadingModels/PROGRESS.md` for evidence and
+validation limits.
+
 ## The parameter contract (enforced by the validator at generation)
 
 The generator passes params to the look function **positionally, in `_Parameters` declaration

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "Engine/SubsurfaceProfile.h"
 #include "CkUsf_LookDefinition.generated.h"
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -36,7 +37,18 @@ enum class ECk_Usf_ShadingModel : uint8
     Unlit,
     DefaultLit,
     Subsurface,
-    ClearCoat
+    ClearCoat,
+    // Appended: existing look assets retain their serialized shading-model values.
+    // Requires the engine's native CkUsf shading-model extension; SurfaceLit/Opaque only.
+    Toon,
+    PreintegratedSkin,
+    SubsurfaceProfile,
+    TwoSidedFoliage,
+    Hair,
+    Cloth,
+    Eye,
+    SingleLayerWater,
+    ThinTranslucent
 };
 
 UENUM(BlueprintType)
@@ -214,6 +226,9 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     ECk_Usf_ShadingModel _ShadingModel = ECk_Usf_ShadingModel::Inherit;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
+    TObjectPtr<USubsurfaceProfile> _SubsurfaceProfile;
 
     // Lit translucent-family surface looks only (see the enum). `Inherit` keeps the engine default.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")

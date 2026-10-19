@@ -1156,4 +1156,34 @@ namespace CkUsf
         _Parameters.Add(CkUsf::Usf_Scalar(n"GradientMapDisplacement", 0.1));
         _Parameters.Add(CkUsf::Usf_Scalar(n"GradientInvert", 0.5));
     }
+    asset Toon of UCkUsf_LookDefinition
+    {
+        _UshIncludePath  = "/CkUsf/Looks/Toon.ush";
+        _UshFunctionName = n"CkUsf_Look_Toon";
+        _Domain          = ECk_Usf_Domain::SurfaceLit;
+        _BlendMode       = ECk_Usf_BlendMode::Inherit;
+        _ShadingModel    = ECk_Usf_ShadingModel::Toon;
+        _SubsurfaceProfile = Cast<USubsurfaceProfile>(LoadObject(nullptr,
+            "/CkFoundation/CkUsf/Profiles/SP_CkUsf_Default.SP_CkUsf_Default"));
+        _LookName        = n"Toon";
+
+        FCk_Usf_ParamDesc Tint;
+        Tint._Name = n"TintColor";
+        Tint._Type = ECk_Usf_ParamType::Vector;
+        Tint._DefaultVector = FLinearColor(0.95, 0.35, 0.08, 1.0);
+        _Parameters.Add(Tint);
+
+        FCk_Usf_ParamDesc Threshold;
+        Threshold._Name = n"BandThreshold";
+        Threshold._Type = ECk_Usf_ParamType::Scalar;
+        Threshold._DefaultScalar = 0.5;
+        _Parameters.Add(Threshold);
+
+        FCk_Usf_ParamDesc Softness;
+        Softness._Name = n"BandSoftness";
+        Softness._Type = ECk_Usf_ParamType::Scalar;
+        Softness._DefaultScalar = 0.05;
+        _Parameters.Add(Softness);
+    }
+
 }

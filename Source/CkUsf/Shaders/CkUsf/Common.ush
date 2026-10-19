@@ -127,6 +127,20 @@ struct FCkUsf_SurfaceOutput
     float3 SubsurfaceColor;   // wired only for the Subsurface shading model
     float  ClearCoat;         // wired only for the ClearCoat shading model (MP_CustomData0)
     float  ClearCoatRoughness;// wired only for the ClearCoat shading model (MP_CustomData1)
+    float  ToonThreshold;     // Toon-only MP_CustomData0 -> GBuffer.CustomData.x (UNorm8)
+    float  ToonSoftness;      // Toon-only MP_CustomData1 -> GBuffer.CustomData.y (UNorm8)
+    float3 HairTangent;       // world space; native Hair repurposes Normal
+    float HairScatter;
+    float HairBacklit;
+    float ClothMask;
+    float EyeIrisMask;
+    float EyeIrisDistance;
+    float3 WaterScattering;
+    float3 WaterAbsorption;
+    float WaterPhaseG;
+    float3 WaterColorScaleBehindWater;
+    float3 ThinTransmittance;
+    float ThinSurfaceCoverage;
 };
 
 FCkUsf_SurfaceOutput CkUsf_DefaultSurface()
@@ -145,6 +159,20 @@ FCkUsf_SurfaceOutput CkUsf_DefaultSurface()
     O.SubsurfaceColor = float3(0.5, 0.2, 0.1);
     O.ClearCoat = 1.0;
     O.ClearCoatRoughness = 0.1;
+    O.ToonThreshold = 0.5;
+    O.ToonSoftness = 0.05;
+    O.HairTangent = float3(1.0, 0.0, 0.0);
+    O.HairScatter = 0.0;
+    O.HairBacklit = 1.0;
+    O.ClothMask = 1.0;
+    O.EyeIrisMask = 0.0;
+    O.EyeIrisDistance = 0.0;
+    O.WaterScattering = float3(0.0, 0.0, 0.0);
+    O.WaterAbsorption = float3(0.0, 0.0, 0.0);
+    O.WaterPhaseG = 0.0;
+    O.WaterColorScaleBehindWater = float3(1.0, 1.0, 1.0);
+    O.ThinTransmittance = float3(1.0, 1.0, 1.0);
+    O.ThinSurfaceCoverage = 1.0;
     return O;
 }
 

@@ -1,13 +1,17 @@
 #include "CkUsfEditor/Generator/CkUsf_LookValidator.h"
+#include "CkUsfEditor/Generator/CkUsf_ShadingModelContract.h"
 
 #include "CkUsf/LookDefinition/CkUsf_LookDefinition.h"
 
 #include "CkCore/Macros/CkMacros.h"
 
+#include "DataDrivenShaderPlatformInfo.h"
+#include "Engine/EngineTypes.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "SceneTypes.h"
+#include "RenderUtils.h"
 #include "ShaderCore.h"
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -178,7 +182,8 @@ namespace ck_usf_look_validator
             auto Depth = 0;
             for (auto Index = OpenAt; Index < InStripped.Len(); ++Index)
             {
-                if (InStripped[Index] == TEXT('(')) { ++Depth; }
+                if (InStripped[Index] == TEXT('('))
+                { ++Depth; }
                 else if (InStripped[Index] == TEXT(')'))
                 {
                     --Depth;
@@ -378,6 +383,72 @@ namespace ck::usf_editor
 
         const auto LookName = InDef->Get_EffectiveLookName();
 
+        auto Contract = FShadingModelContract{};
+        if (NOT Resolve_ShadingModelContract(*InDef, Contract, Result.Errors))
+        { return Result; }
+
+        if (Contract.SourceOverride)
+        {
+            const auto Platform = GMaxRHIShaderPlatform;
+            Validate_SubstrateShadingModelSupport(Contract, Get_SubstrateShadingModelSupport(), Result.Errors);
+            if (static_cast<uint32>(Platform) >= static_cast<uint32>(SP_NumPlatforms))
+            { Result.Errors.Add(TEXT("Source shading-model selection requires an initialized desktop deferred shader platform.")); }
+            else if (NOT FDataDrivenShaderPlatformInfo::IsValid(Platform))
+            { Result.Errors.Add(TEXT("Source shading-model selection requires initialized shader-platform metadata.")); }
+            else if (IsMobilePlatform(Platform) || IsForwardShadingEnabled(Platform))
+            { Result.Errors.Add(TEXT("Source shading-model selection currently supports desktop deferred rendering.")); }
+            if (NOT Result.Errors.IsEmpty())
+            { return Result; }
+        }
+
+        if (Contract.Model == ECk_Usf_ShadingModel::Toon)
+        {
+#if !defined(UE_CK_USF_SHADING_MODEL_VERSION) || UE_CK_USF_SHADING_MODEL_VERSION < 1
+            Result.Errors.Add(FString::Printf(
+                TEXT("Look [%s]: Toon requires an engine with UE_CK_USF_SHADING_MODEL_VERSION >= 1"),
+                *LookName.ToString()));
+#endif
+            if (InDef->_Domain != ECk_Usf_Domain::SurfaceLit)
+            {
+                Result.Errors.Add(FString::Printf(
+                    TEXT("Look [%s]: Toon requires the SurfaceLit domain"), *LookName.ToString()));
+            }
+            if (InDef->_BlendMode != ECk_Usf_BlendMode::Inherit
+                && InDef->_BlendMode != ECk_Usf_BlendMode::Opaque)
+            {
+                Result.Errors.Add(FString::Printf(
+                    TEXT("Look [%s]: Toon currently supports only Opaque blending"), *LookName.ToString()));
+            }
+            if (NOT Contract.SourceOverride)
+            { Validate_SubstrateShadingModelSupport(Contract, Get_SubstrateShadingModelSupport(), Result.Errors); }
+            const auto ShaderPlatform = GMaxRHIShaderPlatform;
+            if (static_cast<uint32>(ShaderPlatform) >= static_cast<uint32>(SP_NumPlatforms))
+            {
+                Result.Errors.Add(FString::Printf(
+                    TEXT("Look [%s]: Toon requires an initialized desktop deferred shader platform"),
+                    *LookName.ToString()));
+            }
+            else if (NOT FDataDrivenShaderPlatformInfo::IsValid(ShaderPlatform))
+            {
+                Result.Errors.Add(FString::Printf(
+                    TEXT("Look [%s]: Toon requires initialized shader platform metadata"), *LookName.ToString()));
+            }
+            else if (IsMobilePlatform(ShaderPlatform))
+            {
+                Result.Errors.Add(FString::Printf(
+                    TEXT("Look [%s]: Toon currently supports only desktop deferred rendering; mobile is unsupported"),
+                    *LookName.ToString()));
+            }
+            else if (IsForwardShadingEnabled(ShaderPlatform))
+            {
+                Result.Errors.Add(FString::Printf(
+                    TEXT("Look [%s]: Toon currently supports only desktop deferred rendering; forward shading is unsupported"),
+                    *LookName.ToString()));
+            }
+            if (NOT Result.Errors.IsEmpty())
+            { return Result; }
+        }
+
         if (InDef->_UshFunctionName.IsNone() || InDef->_UshIncludePath.IsEmpty())
         {
             Result.Errors.Add(FString::Printf(
@@ -413,6 +484,23 @@ namespace ck::usf_editor
                     Result.Errors.Add(FString::Printf(
                         TEXT("Look [%s]: param [%s] collides with the generated Custom-node input/output/local of the same name — rename it"),
                         *LookName.ToString(), *Name));
+                    break;
+                }
+            }
+
+            if (Contract.Model == ECk_Usf_ShadingModel::Toon
+                && (Param._Name == FName{TEXT("ToonThreshold")} || Param._Name == FName{TEXT("ToonSoftness")}))
+            {
+                Result.Errors.Add(FString::Printf(
+                    TEXT("Look [%s]: param [%s] collides with the generated Toon output of the same name - rename it"),
+                    *LookName.ToString(), *Name));
+            }
+
+            for (const auto& Output : Get_ShadingModelOutputs(Contract))
+            {
+                if (Output.Name.StartsWith(TEXT("CkUsf_")) && Param._Name == FName{*Output.Name})
+                {
+                    Result.Errors.Add(FString::Printf(TEXT("Look [%s]: parameter [%s] collides with a generated shading-model output."), *LookName.ToString(), *Name));
                     break;
                 }
             }

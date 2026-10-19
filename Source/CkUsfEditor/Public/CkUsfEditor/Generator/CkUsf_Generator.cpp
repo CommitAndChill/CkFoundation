@@ -11,6 +11,7 @@
 #include "MaterialEditingLibrary.h"
 #include "MaterialShaderPrecompileMode.h"
 #include "MaterialShared.h"
+#include "Engine/EngineTypes.h"
 #include "ShaderCompiler.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Materials/Material.h"
@@ -37,9 +38,14 @@
 #include "UObject/SavePackage.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/Package.h"
+#include "UObject/MetaData.h"
+#include "UObject/UObjectIterator.h"
+#include "UObject/StrongObjectPtr.h"
 #include "Misc/App.h"
+#include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
+#include "ShaderCore.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -81,6 +87,13 @@ namespace ck::usf_editor
             case ECk_Usf_ShadingModel::DefaultLit: return MSM_DefaultLit;
             case ECk_Usf_ShadingModel::Subsurface: return MSM_Subsurface;
             case ECk_Usf_ShadingModel::ClearCoat:  return MSM_ClearCoat;
+            case ECk_Usf_ShadingModel::Toon:
+#if defined(UE_CK_USF_SHADING_MODEL_VERSION) && UE_CK_USF_SHADING_MODEL_VERSION >= 1
+                return MSM_CkUsf;
+#else
+                // Validate_LookDefinition rejects this before any material is created or changed.
+                return MSM_NUM;
+#endif
             default:                               return InDomainUnlit ? MSM_Unlit : MSM_DefaultLit;
         }
     }
@@ -140,9 +153,9 @@ namespace ck::usf_editor
     // The Custom node declares all of these; the pin WIRING in Generate_LookMaterial gates them by blend/shading model.
     struct FExtraOutput { const TCHAR* Name; ECustomMaterialOutputType Type; EMaterialProperty Prop; };
 
-    static auto Get_ExtraOutputs() -> TArray<FExtraOutput>
+    static auto Get_ExtraOutputs(bool InToon) -> TArray<FExtraOutput>
     {
-        return {
+        auto Outputs = TArray<FExtraOutput>{
             { TEXT("EmissiveColor"),      CMOT_Float3, MP_EmissiveColor },
             { TEXT("Roughness"),          CMOT_Float1, MP_Roughness },
             { TEXT("Metallic"),           CMOT_Float1, MP_Metallic },
@@ -157,6 +170,12 @@ namespace ck::usf_editor
             { TEXT("ClearCoat"),          CMOT_Float1, MP_CustomData0 },
             { TEXT("ClearCoatRoughness"), CMOT_Float1, MP_CustomData1 },
         };
+        if (InToon)
+        {
+            Outputs.Add({ TEXT("ToonThreshold"), CMOT_Float1, MP_CustomData0 });
+            Outputs.Add({ TEXT("ToonSoftness"), CMOT_Float1, MP_CustomData1 });
+        }
+        return Outputs;
     }
 
     // ---- PostProcess scene-texture wiring: enum -> (ESceneTextureId, Custom-node input / FCkUsf_SurfaceInput field name) ----
@@ -206,7 +225,8 @@ namespace ck::usf_editor
     }
 
     // ---- Build the Custom node Code (assemble FCkUsf_SurfaceInput, call, assign outputs) ----
-    static auto Build_CustomCode(const UCkUsf_LookDefinition* InDef, bool InIsPostProcess) -> FString
+    static auto Build_CustomCode(const UCkUsf_LookDefinition* InDef, bool InIsPostProcess,
+        const FShadingModelContract& InContract) -> FString
     {
         FString Code = TEXT("FCkUsf_SurfaceInput In = CkUsf_DefaultInput();\n");
         Code += TEXT("In.Time = Time;\n");
@@ -279,18 +299,7 @@ namespace ck::usf_editor
             return Code;
         }
 
-        Code += TEXT("EmissiveColor = O.EmissiveColor;\n");
-        Code += TEXT("Roughness = O.Roughness;\n");
-        Code += TEXT("Metallic = O.Metallic;\n");
-        Code += TEXT("Specular = O.Specular;\n");
-        Code += TEXT("AmbientOcclusion = O.AmbientOcclusion;\n");
-        Code += TEXT("Normal = O.Normal;\n");
-        Code += TEXT("Opacity = O.Opacity;\n");
-        Code += TEXT("OpacityMask = O.OpacityMask;\n");
-        Code += TEXT("Refraction = O.Refraction;\n");
-        Code += TEXT("SubsurfaceColor = O.SubsurfaceColor;\n");
-        Code += TEXT("ClearCoat = O.ClearCoat;\n");
-        Code += TEXT("ClearCoatRoughness = O.ClearCoatRoughness;\n");
+        Code += Build_ShadingModelOutputCode(InContract);
         Code += TEXT("return O.BaseColor;");
         return Code;
     }
@@ -436,12 +445,16 @@ namespace ck::usf_editor
             return nullptr;
         }
 
+        auto Contract = FShadingModelContract{};
+        if (NOT Resolve_ShadingModelContract(*InDef, Contract, InOutResult.Errors))
+        { return nullptr; }
+
         const auto LookName = InDef->Get_EffectiveLookName();
         const auto Config = Get_DomainConfig(InDef->_Domain);
         const auto IsSurface = Config.Domain == MD_Surface;
-        const auto EffectiveBlend = IsSurface ? Resolve_BlendMode(InDef->_BlendMode, Config.Blend) : Config.Blend;
+        const auto EffectiveBlend = IsSurface ? Contract.BlendMode : Config.Blend;
         const auto EffectiveShadingModel = IsSurface
-            ? Resolve_ShadingModel(InDef->_ShadingModel, Config.Unlit)
+            ? Contract.NativeModel
             : (Config.Unlit ? MSM_Unlit : MSM_DefaultLit);
         const auto IsTranslucent = Is_TranslucentFamily(EffectiveBlend);
         const auto WantsRefraction = IsSurface && IsTranslucent && EffectiveShadingModel != MSM_Unlit;
@@ -518,9 +531,9 @@ namespace ck::usf_editor
         Custom->AdditionalOutputs.Reset();
         if (NOT IsPostProcess)
         {
-            for (const auto& E : Get_ExtraOutputs())
+            for (const auto& E : Get_ShadingModelOutputs(Contract))
             {
-                Custom->AdditionalOutputs.Add(FCustomOutput{ FName(E.Name), E.Type });
+                Custom->AdditionalOutputs.Add(FCustomOutput{ FName{*E.Name}, E.Type });
             }
         }
 
@@ -569,10 +582,9 @@ namespace ck::usf_editor
             }
         }
 
-        Custom->Code = Build_CustomCode(InDef, IsPostProcess);
+        Custom->Code = Build_CustomCode(InDef, IsPostProcess, Contract);
         Apply_LookDefines(Custom, InDef);
         Custom->RebuildOutputs();
-        Custom->PostEditChange();
 
         // ---- PostProcess scene-texture inputs — also declare the usage that legalizes raw SceneTextureLookup() in the .ush ----
         if (IsPostProcess)
@@ -703,7 +715,8 @@ namespace ck::usf_editor
             UMaterialEditingLibrary::ConnectMaterialProperty(Custom, FString(), MP_BaseColor);
             const auto IsSubsurface = EffectiveShadingModel == MSM_Subsurface;
             const auto IsClearCoat  = EffectiveShadingModel == MSM_ClearCoat;
-            for (const auto& E : Get_ExtraOutputs())
+            const auto IsToon = Contract.Model == ECk_Usf_ShadingModel::Toon;
+            for (const auto& E : Get_ExtraOutputs(IsToon))
             {
                 if (E.Prop == MP_Opacity         && NOT IsTranslucent && NOT IsSubsurface)
                 { continue; }
@@ -713,11 +726,18 @@ namespace ck::usf_editor
                 { continue; }
                 if (E.Prop == MP_SubsurfaceColor && NOT IsSubsurface)
                 { continue; }
-                if (E.Prop == MP_CustomData0     && NOT IsClearCoat)                       { continue; } // ClearCoat
-                if (E.Prop == MP_CustomData1     && NOT IsClearCoat)                       { continue; } // ClearCoatRoughness
+                if (E.Prop == MP_CustomData0 || E.Prop == MP_CustomData1)
+                {
+                    const auto IsToonOutput = FStringView{E.Name}.StartsWith(TEXT("Toon"));
+                    if ((IsToonOutput && NOT IsToon) || (NOT IsToonOutput && NOT IsClearCoat))
+                    { continue; }
+                }
                 UMaterialEditingLibrary::ConnectMaterialProperty(Custom, FString(E.Name), E.Prop);
             }
         }
+
+        if (IsSurface)
+        { Apply_ShadingModelContract(*Material, *Custom, Contract); }
 
         // ---- WorldPositionOffset: a SEPARATE vertex node — the pixel node reads VS-illegal inputs (PixelDepth/SceneTexture) ----
         if (IsSurface && NOT InDef->_WpoFunctionName.IsNone())
@@ -746,7 +766,6 @@ namespace ck::usf_editor
             Wpo->Code = Build_WpoCustomCode(InDef);
             Apply_LookDefines(Wpo, InDef);
             Wpo->RebuildOutputs();
-            Wpo->PostEditChange();
 
             const auto AddWpoInput = [&](UClass* InClass, const TCHAR* InInputName, int32 InRow) -> void
             {
@@ -795,6 +814,9 @@ namespace ck::usf_editor
         }
 
         UMaterialEditingLibrary::LayoutMaterialExpressions(Material);
+        Material->GetOutermost()->GetMetaData().SetValue(Material, TEXT("CkUsf.SourceDefinition.v1"), *InDef->GetPathName());
+        if (Contract.SourceOverride)
+        { Material->GetOutermost()->GetMetaData().SetValue(Material, TEXT("CkUsf.SourceSelection.v1"), TEXT("1")); }
         UMaterialEditingLibrary::RecompileMaterial(Material);
         Material->MarkPackageDirty();
         FAssetRegistryModule::AssetCreated(Material);
@@ -814,6 +836,142 @@ namespace ck::usf_editor
     {
         FGenerateResult DiscardedResult;   // failures are also logged inside the worker
         return DoGenerate_LookMaterial(InDef, DiscardedResult, InPackageRootOverride);
+    }
+
+    auto Prepare_LookShadingModelReload(UMaterial& InMaterial,
+        FPreparedLookShadingModelReload& OutPrepared, TArray<FString>& OutErrors) -> bool
+    {
+        OutPrepared = {};
+        if (InMaterial.MaterialDomain != MD_Surface)
+        { return true; }
+        const auto SourcePath = InMaterial.GetOutermost()->GetMetaData().GetValue(&InMaterial, TEXT("CkUsf.SourceDefinition.v1"));
+        auto Definition = TStrongObjectPtr<UCkUsf_LookDefinition>{};
+        if (NOT SourcePath.IsEmpty())
+        {
+            Definition.Reset(FindObject<UCkUsf_LookDefinition>(nullptr, *SourcePath));
+            if (NOT Definition.IsValid() && FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(SourcePath)))
+            { Definition.Reset(LoadObject<UCkUsf_LookDefinition>(nullptr, *SourcePath)); }
+        }
+        else
+        {
+            for (TObjectIterator<UCkUsf_LookDefinition> It; It; ++It)
+            {
+                if (It->HasAnyFlags(RF_ClassDefaultObject | RF_BeginDestroyed | RF_FinishDestroyed)
+                    || It->Get_GeneratedMasterObjectPath() != InMaterial.GetPathName())
+                { continue; }
+                if (Definition.IsValid())
+                {
+                    OutErrors.Add(FString::Printf(TEXT("Multiple LookDefinitions own [%s]; regenerate with an unambiguous source definition."), *InMaterial.GetPathName()));
+                    return false;
+                }
+                Definition.Reset(*It);
+            }
+        }
+
+        auto Primary = TWeakObjectPtr<UMaterialExpressionCustom>{};
+        for (const auto& Expression : InMaterial.GetExpressions())
+        {
+            const auto Custom = TWeakObjectPtr<UMaterialExpressionCustom>{Cast<UMaterialExpressionCustom>(Expression)};
+            if (NOT Custom.IsValid())
+            { continue; }
+            if (Custom->Code.StartsWith(TEXT("FCkUsf_SurfaceInput In = CkUsf_DefaultInput();"))
+                && Custom->Code.Contains(TEXT("FCkUsf_SurfaceOutput O = ")))
+            {
+                if (Primary.IsValid())
+                { OutErrors.Add(TEXT("Multiple primary CkUsf Custom nodes; regenerate the master.")); return false; }
+                Primary = Custom;
+            }
+        }
+        if (NOT Definition.IsValid())
+        {
+            if (Primary.IsValid())
+            {
+                auto UsesSourceSelection = NOT InMaterial.GetOutermost()->GetMetaData().GetValue(&InMaterial, TEXT("CkUsf.SourceSelection.v1")).IsEmpty();
+                if (NOT Primary->IncludeFilePaths.IsEmpty())
+                {
+                    auto Source = FString{};
+                    auto ParseError = FString{};
+                    auto Declared = TOptional<ECk_Usf_ShadingModel>{};
+                    auto PathErrors = TArray<FShaderCompilerError>{};
+                    const auto DiskPath = GetShaderSourceFilePath(Primary->IncludeFilePaths[0], &PathErrors);
+                    if (DiskPath.IsEmpty() || NOT FFileHelper::LoadFileToString(Source, *DiskPath)
+                        || NOT Parse_ShadingModelDeclaration(Source, Declared, ParseError))
+                    { OutErrors.Add(TEXT("Cannot preflight a source shading-model declaration; restore the entrypoint source.")); return false; }
+                    UsesSourceSelection |= Declared.IsSet();
+                }
+                if (UsesSourceSelection)
+                { OutErrors.Add(FString::Printf(TEXT("No source LookDefinition for [%s]; load it or regenerate this master before reload."), *InMaterial.GetPathName())); return false; }
+            }
+            return true;
+        }
+        if (NOT Primary.IsValid())
+        { OutErrors.Add(TEXT("Generated primary CkUsf Custom node is missing; regenerate the master.")); return false; }
+        auto Prepared = FPreparedLookShadingModelReload{};
+        if (NOT Resolve_ShadingModelContract(*Definition, Prepared.Contract, OutErrors))
+        { return false; }
+        if (NOT Prepared.Contract.SourceOverride
+            && InMaterial.GetOutermost()->GetMetaData().GetValue(&InMaterial, TEXT("CkUsf.SourceSelection.v1")).IsEmpty())
+        { return true; }
+        auto RendererSupport = Get_SubstrateShadingModelSupport();
+        if (RendererSupport.Enabled)
+        {
+            const auto EditorData = TObjectPtr<UMaterialEditorOnlyData>{InMaterial.GetEditorOnlyData()};
+            if (EditorData == nullptr)
+            { OutErrors.Add(TEXT("CkUsf reload requires material editor data; regenerate the master.")); return false; }
+            RendererSupport.LegacyRoot = NOT EditorData->FrontMaterial.IsConnected();
+            RendererSupport.SingleShadingModel = InMaterial.GetShadingModels().CountShadingModels() == 1
+                && NOT InMaterial.IsShadingModelFromMaterialExpression();
+            if (NOT Validate_SubstrateShadingModelSupport(Prepared.Contract, RendererSupport, OutErrors))
+            { return false; }
+        }
+        const auto Validation = Validate_LookDefinition(Definition.Get());
+        OutErrors.Append(Validation.Errors);
+        if (NOT Validation.Get_IsValid())
+        { return false; }
+        auto ExpectedInputs = TArray<FName>{TEXT("WorldPosition"), TEXT("CameraVector"), TEXT("VertexNormal"), TEXT("VertexTangent"), TEXT("PixelDepth"), TEXT("VertexColor")};
+        for (const auto& Param : Definition->_Parameters)
+        { ExpectedInputs.Add(Param._Name); }
+        ExpectedInputs.Append({TEXT("Time"), TEXT("UV")});
+        if (Definition->_PixelDataChannels)
+        { ExpectedInputs.Append({TEXT("UV1"), TEXT("UV2")}); }
+        if (Definition->_ParticleColor)
+        { ExpectedInputs.Append({TEXT("ParticleColor"), TEXT("ParticleAlpha")}); }
+        if (Definition->_ParticleDynamicParameter)
+        {
+            for (auto Channel = 0; Channel < 4; ++Channel)
+            { ExpectedInputs.Add(FName{*FString::Printf(TEXT("DynParam%d"), Channel)}); }
+        }
+        auto InputsMatch = ExpectedInputs.Num() == Primary->Inputs.Num()
+            && Primary->IncludeFilePaths.Contains(Definition->_UshIncludePath);
+        for (auto Index = 0; InputsMatch && Index < ExpectedInputs.Num(); ++Index)
+        { InputsMatch = Primary->Inputs[Index].InputName == ExpectedInputs[Index] && Primary->Inputs[Index].Input.Expression != nullptr; }
+        if (NOT InputsMatch)
+        { OutErrors.Add(TEXT("LookDefinition input layout changed; regenerate the master before shader reload.")); return false; }
+        const auto ExpectedCode = Build_CustomCode(Definition.Get(), false, Prepared.Contract);
+        const auto OutputMarker = FString{TEXT("EmissiveColor = O.EmissiveColor;")};
+        const auto ExistingPrefixEnd = Primary->Code.Find(OutputMarker, ESearchCase::CaseSensitive);
+        const auto ExpectedPrefixEnd = ExpectedCode.Find(OutputMarker, ESearchCase::CaseSensitive);
+        if (ExistingPrefixEnd == INDEX_NONE || ExpectedPrefixEnd == INDEX_NONE
+            || Primary->Code.Left(ExistingPrefixEnd) != ExpectedCode.Left(ExpectedPrefixEnd))
+        { OutErrors.Add(TEXT("Generated input/call contract changed; regenerate the master before shader reload.")); return false; }
+        Prepared.Custom = Primary;
+        Prepared.Code = ExpectedCode;
+        OutPrepared = MoveTemp(Prepared);
+        return true;
+    }
+
+    auto Apply_LookShadingModelReload(UMaterial& InMaterial, const FPreparedLookShadingModelReload& InPrepared) -> void
+    {
+        if (NOT InPrepared.Custom.IsValid())
+        { return; }
+        auto& Custom = *InPrepared.Custom;
+        Custom.AdditionalOutputs.Reset();
+        for (const auto& Output : Get_ShadingModelOutputs(InPrepared.Contract))
+        { Custom.AdditionalOutputs.Add(FCustomOutput{FName{*Output.Name}, Output.Type}); }
+        Custom.Code = InPrepared.Code;
+        Custom.RebuildOutputs();
+        Apply_ShadingModelContract(InMaterial, Custom, InPrepared.Contract);
+        InMaterial.GetOutermost()->GetMetaData().SetValue(&InMaterial, TEXT("CkUsf.SourceSelection.v1"), TEXT("1"));
     }
 
     // Catches HLSL that compiles as a UMaterial object but fails its shader permutations (notably PostProcess).

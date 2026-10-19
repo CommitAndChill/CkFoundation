@@ -1,6 +1,7 @@
 #include "CkUsfEditor/Reload/CkUsf_ShaderReload.h"
 
 #include "CkUsfEditor_Log.h"
+#include "CkUsfEditor/Generator/CkUsf_Generator.h"
 #include "CkCore/Macros/CkMacros.h"
 
 #include "Containers/Ticker.h"
@@ -38,8 +39,12 @@ namespace ck::usf_editor
                 FConsoleCommandDelegate::CreateRaw(this, &FState::RequestMaterialReload));
             _GlobalCommand = MakeUnique<FAutoConsoleCommand>(
                 TEXT("Ck_Usf_ReloadGlobalShaders"),
-                TEXT("Explicit CkUsfRenderer global shader recompilation. Global shader errors can terminate the editor; never runs automatically."),
+                TEXT("Explicit CkUsfRenderer entry-point recompilation with development-mode retries. For shared lighting includes use Ck_Usf_ReloadShadingModels."),
                 FConsoleCommandDelegate::CreateRaw(this, &FState::RequestGlobalReload));
+            _ShadingModelCommand = MakeUnique<FAutoConsoleCommand>(
+                TEXT("Ck_Usf_ReloadShadingModels"),
+                TEXT("Enable shader development-mode retries and recompile changed global/material shader dependencies, including CkUsf lighting HLSL. Explicit only; repair errors before choosing Retry."),
+                FConsoleCommandDelegate::CreateRaw(this, &FState::RequestShadingModelReload));
             _Ticker = FTSTicker::GetCoreTicker().AddTicker(
                 FTickerDelegate::CreateRaw(this, &FState::Tick));
         }
@@ -51,6 +56,7 @@ namespace ck::usf_editor
             FTSTicker::GetCoreTicker().RemoveTicker(_Ticker);
             _Ticker.Reset();
             _GlobalCommand.Reset();
+            _ShadingModelCommand.Reset();
             _ReloadCommand.Reset();
             _AutoReloadVariable.Reset();
             if (FModuleManager::Get().IsModuleLoaded(TEXT("DirectoryWatcher")))
@@ -82,6 +88,43 @@ namespace ck::usf_editor
             -> void
         {
             _GlobalReload = true;
+        }
+
+        auto
+            RequestShadingModelReload()
+            -> void
+        {
+            _ShadingModelReload = true;
+            _ManualReload = true;
+        }
+
+        auto
+            ReloadGlobalShaders(const TCHAR* InCommand)
+            -> void
+        {
+            if (GEngine == nullptr || IConsoleManager::Get().FindConsoleVariable(TEXT("r.ShaderDevelopmentMode")) == nullptr)
+            {
+                Warning(TEXT("CkUsf global reload rejected: engine or shader development mode is unavailable."));
+                return;
+            }
+            IConsoleManager::Get().FindConsoleVariable(TEXT("r.ShaderDevelopmentMode"))->Set(1, ECVF_SetByConsole);
+            if (IConsoleManager::Get().FindConsoleVariable(TEXT("r.ShaderDevelopmentMode"))->GetInt() == 0)
+            {
+                Warning(TEXT("CkUsf global reload rejected: shader development-mode retries could not be enabled."));
+                return;
+            }
+            Log(TEXT("CkUsf explicit global reload [{}], development-mode retries enabled. Repair shader errors on disk before choosing Retry; cancelling a failed global compile can terminate the editor."), InCommand);
+            const auto Started = FPlatformTime::Seconds();
+            const auto Dispatched = GEngine->Exec(nullptr, InCommand);
+            if (NOT Dispatched)
+            {
+                Warning(TEXT("CkUsf global reload command was not handled [{}]."), InCommand);
+                return;
+            }
+            if (GEditor != nullptr)
+            { GEditor->RedrawAllViewports(); }
+            Log(TEXT("CkUsf shading-model reload complete: [{}] seconds; pending material shader compilation may continue asynchronously."),
+                FPlatformTime::Seconds() - Started);
         }
 
         auto
@@ -154,7 +197,8 @@ namespace ck::usf_editor
                 const auto VirtualPath = InVirtualRoot / RelativePath;
                 if (InVirtualRoot == TEXT("/CkUsfRenderer"))
                 {
-                    Log(TEXT("CkUsf global shader changed [{}]. Run Ck_Usf_ReloadGlobalShaders explicitly to apply it."), VirtualPath);
+                    Log(TEXT("CkUsf global shader changed [{}]. Run [{}] explicitly to apply it."), VirtualPath,
+                        RelativePath.StartsWith(TEXT("ShadingModels/")) ? TEXT("Ck_Usf_ReloadShadingModels") : TEXT("Ck_Usf_ReloadGlobalShaders"));
                     continue;
                 }
                 if (_AutoReload == 0)
@@ -222,7 +266,7 @@ namespace ck::usf_editor
 
             FlushShaderFileCache();
             auto Candidates = TArray<TWeakObjectPtr<UMaterial>>{};
-            for (TObjectIterator<UMaterial> It; It; ++It)
+            for (TObjectIterator<UMaterial> It{RF_ClassDefaultObject, true, EInternalObjectFlags::Garbage}; It; ++It)
             {
                 if (It->HasAnyFlags(RF_ClassDefaultObject | RF_BeginDestroyed | RF_FinishDestroyed))
                 { continue; }
@@ -261,14 +305,33 @@ namespace ck::usf_editor
                 Log(TEXT("CkUsf reload: no affected loaded look masters."));
                 return;
             }
+            auto Preparations = TArray<FPreparedLookShadingModelReload>{};
+            auto ContractErrors = TArray<FString>{};
+            for (const auto& Material : Candidates)
+            {
+                auto Prepared = FPreparedLookShadingModelReload{};
+                if (Material.IsValid())
+                { Prepare_LookShadingModelReload(*Material, Prepared, ContractErrors); }
+                else
+                { ContractErrors.Add(TEXT("A reload candidate was destroyed before preflight.")); }
+                Preparations.Add(MoveTemp(Prepared));
+            }
+            if (NOT ContractErrors.IsEmpty())
+            {
+                for (const auto& Error : ContractErrors)
+                { Warning(TEXT("CkUsf reload rejected before material changes: {}"), Error); }
+                return;
+            }
             {
                 FMaterialUpdateContext UpdateContext;
-                for (const auto& Material : Candidates)
+                for (auto Index = 0; Index < Candidates.Num(); ++Index)
                 {
+                    const auto& Material = Candidates[Index];
                     if (NOT Material.IsValid())
                     { continue; }
                     UpdateContext.AddMaterial(Material.Get());
                     Material->PreEditChange(nullptr);
+                    Apply_LookShadingModelReload(*Material, Preparations[Index]);
                     Material->PostEditChange();
                     _ActiveMaterials.Add(Material);
                 }
@@ -346,14 +409,16 @@ namespace ck::usf_editor
             { PollMaterialBatch(); }
             if (NOT _ActiveMaterials.IsEmpty())
             { return true; }
-            if (_GlobalReload)
+            if (_ShadingModelReload)
+            {
+                _ShadingModelReload = false;
+                _GlobalReload = false;
+                ReloadGlobalShaders(TEXT("RecompileShaders Changed"));
+            }
+            else if (_GlobalReload)
             {
                 _GlobalReload = false;
-                Warning(TEXT("CkUsf explicit global reload: recompiling /CkUsfRenderer/ shader types. Global shader errors can terminate the editor."));
-                if (GEngine != nullptr)
-                { GEngine->Exec(nullptr, TEXT("RecompileShaders /CkUsfRenderer/.*")); }
-                else
-                { Warning(TEXT("CkUsf global reload rejected: engine is unavailable.")); }
+                ReloadGlobalShaders(TEXT("RecompileShaders /CkUsfRenderer/.*"));
             }
             if (_ManualReload || (_AutoReload != 0 && NOT _PendingFiles.IsEmpty()
                 && FPlatformTime::Seconds() - _LastSaveTime >= 0.25))
@@ -365,6 +430,7 @@ namespace ck::usf_editor
         bool _WatchesAttempted = false;
         bool _ManualReload = false;
         bool _GlobalReload = false;
+        bool _ShadingModelReload = false;
         bool _PendingRemoval = false;
         bool _TimeoutReported = false;
         double _LastSaveTime = 0.0;
@@ -377,6 +443,7 @@ namespace ck::usf_editor
         TUniquePtr<FAutoConsoleVariableRef> _AutoReloadVariable;
         TUniquePtr<FAutoConsoleCommand> _ReloadCommand;
         TUniquePtr<FAutoConsoleCommand> _GlobalCommand;
+        TUniquePtr<FAutoConsoleCommand> _ShadingModelCommand;
     };
 
     FShaderReload::FShaderReload() = default;

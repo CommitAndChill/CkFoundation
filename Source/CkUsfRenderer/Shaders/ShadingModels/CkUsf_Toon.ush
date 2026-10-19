@@ -1,0 +1,25 @@
+#pragma once
+
+// Engine ShadingModels.ush includes this after DefaultLitBxDF and before IntegrateBxDF.
+#define CK_USF_TOON_ITERATION_GAIN 1.0
+
+float CkUsf_ToonDiffuseGain(float NoL, float Threshold, float Softness)
+{
+    // CustomData is UNorm8: one decoded step also bounds the cosine division at grazing angles.
+    const float MinimumCosine = 1.0 / 255.0;
+    Threshold = saturate(Threshold);
+    Softness = max(saturate(Softness), MinimumCosine);
+    NoL = saturate(NoL);
+    const float Band = smoothstep(Threshold - Softness, Threshold + Softness, NoL);
+    return (Band / max(NoL, MinimumCosine)) * CK_USF_TOON_ITERATION_GAIN;
+}
+
+FDirectLighting CkUsf_ToonBxDF(FGBufferData GBuffer, half3 N, half3 V, FAreaLight AreaLight, FShadowTerms Shadow)
+{
+    FDirectLighting Lighting = DefaultLitBxDF(GBuffer, N, V, AreaLight, Shadow);
+
+    // Keep DefaultLit's attenuation and energy terms; replace only its diffuse cosine response.
+    // At NoL below one decoded step the denominator keeps the gain finite and fades to zero.
+    Lighting.Diffuse *= CkUsf_ToonDiffuseGain(AreaLight.NoL, GBuffer.CustomData.x, GBuffer.CustomData.y);
+    return Lighting;
+}
