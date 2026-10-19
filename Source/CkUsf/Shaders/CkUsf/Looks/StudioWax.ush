@@ -1,0 +1,38 @@
+// @ckusf shading_model Subsurface
+#pragma once
+#include "/CkUsf/Common.ush"
+
+float CkUsf_StudioWax_Noise(float2 P)
+{
+#if PIXELSHADER
+    float Footprint = max(length(ddx(P)), length(ddy(P)));
+    float DetailVisibility = 1.0 - smoothstep(0.15, 0.75, Footprint);
+    return (CkUsf_ValueNoise(P) - 0.5) * DetailVisibility;
+#else
+    // Hit-group permutations have no screen derivatives; use the resolved mean.
+    return 0.0;
+#endif
+}
+
+float CkUsf_StudioWax_Grain(float3 P, float3 N)
+{
+    float3 Weights = abs(N);
+    Weights /= max(Weights.x + Weights.y + Weights.z, 0.0001);
+    return dot(Weights, float3(CkUsf_StudioWax_Noise(P.yz),
+        CkUsf_StudioWax_Noise(P.xz), CkUsf_StudioWax_Noise(P.xy)));
+}
+
+FCkUsf_SurfaceOutput CkUsf_Look_StudioWax(FCkUsf_SurfaceInput In, float3 TintColor, float3 ScatterTint, float ScatterWeight, float FinishBlur, float DetailScale)
+{
+    FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
+
+    float3 P = In.WorldPosition * max(abs(DetailScale), 0.001);
+    float Cloud = CkUsf_StudioWax_Grain(P, In.VertexNormal);
+    float Fine = CkUsf_StudioWax_Grain(P * 8.0, In.VertexNormal);
+    O.BaseColor = saturate(TintColor * (1.0 + Cloud * 0.08));
+    O.Roughness = clamp(FinishBlur + Fine * 0.035, 0.24, 0.75);
+    O.Specular = 0.32;
+    O.SubsurfaceColor = saturate(ScatterTint * (1.0 + Cloud * 0.06));
+    O.Opacity = saturate(ScatterWeight);
+    return O;
+}

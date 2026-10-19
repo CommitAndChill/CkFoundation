@@ -1,0 +1,54 @@
+// @ckusf shading_model ClearCoat
+#pragma once
+#include "/CkUsf/Common.ush"
+
+float CkUsf_StudioLacquer_Noise(float2 P)
+{
+#if PIXELSHADER
+    float Footprint = max(length(ddx(P)), length(ddy(P)));
+    float DetailVisibility = 1.0 - smoothstep(0.15, 0.75, Footprint);
+    return (CkUsf_ValueNoise(P) - 0.5) * DetailVisibility;
+#else
+    // Hit-group permutations have no screen derivatives; use the resolved mean.
+    return 0.0;
+#endif
+}
+
+float CkUsf_StudioLacquer_Grain(float3 P, float3 N)
+{
+    float3 Weights = abs(N);
+    Weights /= max(Weights.x + Weights.y + Weights.z, 0.0001);
+    return dot(Weights, float3(CkUsf_StudioLacquer_Noise(P.yz),
+        CkUsf_StudioLacquer_Noise(P.xz), CkUsf_StudioLacquer_Noise(P.xy)));
+}
+
+float CkUsf_StudioLacquer_Flakes(float2 P)
+{
+#if PIXELSHADER
+    float Footprint = max(length(ddx(P)), length(ddy(P)));
+    float DetailVisibility = 1.0 - smoothstep(0.10, 0.50, Footprint);
+    float Flakes = smoothstep(0.66, 0.84, CkUsf_ValueNoise(P));
+    return (Flakes - 0.10) * DetailVisibility;
+#else
+    return 0.0;
+#endif
+}
+
+FCkUsf_SurfaceOutput CkUsf_Look_StudioLacquer(FCkUsf_SurfaceInput In, float3 TintColor, float CoatBlur, float DetailScale, float FlakeAmount)
+{
+    FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
+
+    float3 P = In.WorldPosition * max(abs(DetailScale), 0.001);
+    float3 Weights = abs(In.VertexNormal);
+    Weights /= max(Weights.x + Weights.y + Weights.z, 0.0001);
+    float Grain = dot(Weights, float3(CkUsf_StudioLacquer_Flakes(P.yz),
+        CkUsf_StudioLacquer_Flakes(P.xz), CkUsf_StudioLacquer_Flakes(P.xy)));
+    float BodyVariation = CkUsf_StudioLacquer_Grain(P * 0.025, In.VertexNormal);
+    float Flakes = Grain * saturate(FlakeAmount);
+    O.BaseColor = saturate(TintColor * (1.0 + BodyVariation * 0.04) + Flakes * 0.12);
+    O.Metallic = saturate(0.22 + Flakes);
+    O.Roughness = clamp(0.30 - Flakes, 0.18, 0.45);
+    O.ClearCoat = 1.0;
+    O.ClearCoatRoughness = clamp(CoatBlur, 0.04, 0.40);
+    return O;
+}

@@ -1,0 +1,43 @@
+// @ckusf shading_model DefaultLit
+#pragma once
+#include "/CkUsf/Common.ush"
+
+float CkUsf_StudioCopper_Noise(float2 P)
+{
+#if PIXELSHADER
+    float Footprint = max(length(ddx(P)), length(ddy(P)));
+    float DetailVisibility = 1.0 - smoothstep(0.15, 0.75, Footprint);
+    return (CkUsf_ValueNoise(P) - 0.5) * DetailVisibility;
+#else
+    // Hit-group permutations have no screen derivatives; use the resolved mean.
+    return 0.0;
+#endif
+}
+
+float CkUsf_StudioCopper_Grain(float3 P, float3 N)
+{
+    float3 Weights = abs(N);
+    Weights /= max(Weights.x + Weights.y + Weights.z, 0.0001);
+    return dot(Weights, float3(CkUsf_StudioCopper_Noise(P.yz),
+        CkUsf_StudioCopper_Noise(P.xz), CkUsf_StudioCopper_Noise(P.xy)));
+}
+
+FCkUsf_SurfaceOutput CkUsf_Look_StudioCopper(FCkUsf_SurfaceInput In, float3 TintColor, float FinishBlur, float DetailScale, float ScratchAmount)
+{
+    FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
+
+    float3 P = In.WorldPosition * max(abs(DetailScale), 0.001);
+    float3 Weights = abs(In.VertexNormal);
+    Weights /= max(Weights.x + Weights.y + Weights.z, 0.0001);
+    float3 Marks = float3(
+        CkUsf_StudioCopper_Noise(P.yz * float2(0.16, 5.0)) + CkUsf_StudioCopper_Noise(P.zy * float2(0.16, 5.0)),
+        CkUsf_StudioCopper_Noise(P.xz * float2(0.16, 5.0)) + CkUsf_StudioCopper_Noise(P.zx * float2(0.16, 5.0)),
+        CkUsf_StudioCopper_Noise(P.xy * float2(0.16, 5.0)) + CkUsf_StudioCopper_Noise(P.yx * float2(0.16, 5.0)));
+    float Scratches = dot(Weights, Marks) * 0.5;
+    float Grain = CkUsf_StudioCopper_Grain(P, In.VertexNormal);
+    float Amount = saturate(ScratchAmount);
+    O.BaseColor = saturate(TintColor * (1.0 + Grain * 0.04));
+    O.Metallic = 1.0;
+    O.Roughness = clamp(FinishBlur + Scratches * Amount + Grain * Amount * 0.3, 0.12, 0.75);
+    return O;
+}

@@ -1,0 +1,37 @@
+// @ckusf shading_model DefaultLit
+#pragma once
+#include "/CkUsf/Common.ush"
+
+float CkUsf_StudioCeramic_Noise(float2 P)
+{
+#if PIXELSHADER
+    float Footprint = max(length(ddx(P)), length(ddy(P)));
+    float DetailVisibility = 1.0 - smoothstep(0.15, 0.75, Footprint);
+    return (CkUsf_ValueNoise(P) - 0.5) * DetailVisibility;
+#else
+    // Hit-group permutations have no screen derivatives; use the resolved mean.
+    return 0.0;
+#endif
+}
+
+float CkUsf_StudioCeramic_Grain(float3 P, float3 N)
+{
+    float3 Weights = abs(N);
+    Weights /= max(Weights.x + Weights.y + Weights.z, 0.0001);
+    return dot(Weights, float3(CkUsf_StudioCeramic_Noise(P.yz),
+        CkUsf_StudioCeramic_Noise(P.xz), CkUsf_StudioCeramic_Noise(P.xy)));
+}
+
+FCkUsf_SurfaceOutput CkUsf_Look_StudioCeramic(FCkUsf_SurfaceInput In, float3 TintColor, float GlazeBlur, float DetailScale, float DetailAmount)
+{
+    FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
+
+    float3 P = In.WorldPosition * max(abs(DetailScale), 0.001);
+    float Fine = CkUsf_StudioCeramic_Grain(P, In.VertexNormal);
+    float Broad = CkUsf_StudioCeramic_Grain(P * 0.08, In.VertexNormal);
+    float Amount = saturate(DetailAmount);
+    O.BaseColor = saturate(TintColor * (1.0 + Broad * Amount * 0.5));
+    O.Roughness = clamp(GlazeBlur + Fine * Amount + Broad * Amount * 0.5, 0.06, 0.65);
+    O.Specular = 0.5;
+    return O;
+}

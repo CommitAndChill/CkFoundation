@@ -1,0 +1,37 @@
+// @ckusf shading_model DefaultLit
+#pragma once
+#include "/CkUsf/Common.ush"
+
+float CkUsf_StudioRubber_Noise(float2 P)
+{
+#if PIXELSHADER
+    float Footprint = max(length(ddx(P)), length(ddy(P)));
+    float DetailVisibility = 1.0 - smoothstep(0.15, 0.75, Footprint);
+    return (CkUsf_ValueNoise(P) - 0.5) * DetailVisibility;
+#else
+    // Hit-group permutations have no screen derivatives; use the resolved mean.
+    return 0.0;
+#endif
+}
+
+float CkUsf_StudioRubber_Grain(float3 P, float3 N)
+{
+    float3 Weights = abs(N);
+    Weights /= max(Weights.x + Weights.y + Weights.z, 0.0001);
+    return dot(Weights, float3(CkUsf_StudioRubber_Noise(P.yz),
+        CkUsf_StudioRubber_Noise(P.xz), CkUsf_StudioRubber_Noise(P.xy)));
+}
+
+FCkUsf_SurfaceOutput CkUsf_Look_StudioRubber(FCkUsf_SurfaceInput In, float3 TintColor, float FinishBlur, float DetailScale, float GrainAmount)
+{
+    FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
+
+    float3 P = In.WorldPosition * max(abs(DetailScale), 0.001);
+    float Grain = CkUsf_StudioRubber_Grain(P, In.VertexNormal);
+    float Moulding = CkUsf_StudioRubber_Grain(P * 0.025, In.VertexNormal);
+    float Amount = saturate(GrainAmount);
+    O.BaseColor = saturate(TintColor * (1.0 + Grain * Amount + Moulding * 0.06));
+    O.Roughness = clamp(FinishBlur + Grain * Amount, 0.45, 0.95);
+    O.Specular = 0.28;
+    return O;
+}
