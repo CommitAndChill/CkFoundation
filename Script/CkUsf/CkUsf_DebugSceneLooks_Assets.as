@@ -24,7 +24,7 @@
 //
 // CkUsf passes vector parameters into a look as `.rgb` (CkUsf_Generator, ECk_Usf_ParamType::Vector),
 // so a vector parameter's alpha never reaches the shader. The hand-authored materials carried
-// opacity in the alpha of their `Color` parameter. These looks therefore expose `Opacity` as its
+// opacity in the alpha of their `Color` parameter. These looks therefore expose `FillOpacity` as its
 // own scalar, and CkDebugScene must set it alongside `Color` when it adopts them - see the
 // adoption notes at the bottom of this file. Without that change the translucent navmesh overlay
 // renders fully opaque.
@@ -40,7 +40,7 @@ namespace CkUsf
         auto Params = TArray<FCk_Usf_ParamDesc>();
 
         Params.Add(CkUsf::Usf_Vector(n"Color", FLinearColor(0.5, 0.5, 0.5, 1.0)));
-        Params.Add(CkUsf::Usf_Scalar(n"Opacity", InDefaultOpacity));
+        Params.Add(CkUsf::Usf_Scalar(n"FillOpacity", InDefaultOpacity));
 
         return Params;
     }
@@ -96,7 +96,7 @@ namespace CkUsf
 //  2. Repoint CkDebugScene_Materials.cpp off
 //     "/CkFoundation/DebugScene/M_CkDebugScene_Opaque.M_CkDebugScene_Opaque" and its translucent
 //     twin, onto the generated look paths (ck::usf::Get_GeneratedMasterPackagePath).
-//  3. Set the Opacity scalar in CkDebugScene_Target.cpp everywhere ColorParameter is set today
+//  3. Set the FillOpacity scalar in CkDebugScene_Target.cpp everywhere ColorParameter is set today
 //     (two call sites: the wire MID and the base MID), sourcing it from the appearance colour's
 //     alpha, which is where that value lives now.
 //  4. Delete AppendTwoSidedTriangle's duplicate emit in CkCrowdDebugger_3dSceneAdapter - the

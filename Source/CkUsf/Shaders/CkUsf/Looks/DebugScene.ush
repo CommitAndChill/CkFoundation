@@ -12,19 +12,19 @@
 // `.rgb` (see CkUsf_Generator's ECk_Usf_ParamType::Vector case), so a vector parameter's alpha
 // never reaches the look function. The hand-authored materials this look replaces carried
 // opacity in the alpha of their Color parameter, which is why the consumer has to be updated to
-// drive Opacity explicitly when it adopts this look.
+// drive FillOpacity explicitly when it adopts this look.
 #pragma once
 #include "/CkUsf/Common.ush"
 
 FCkUsf_SurfaceOutput CkUsf_Look_DebugScene(
     FCkUsf_SurfaceInput In,
     float3              Color,
-    float               Opacity)
+    float               FillOpacity)
 {
     FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
 
     O.EmissiveColor = Color;
-    O.Opacity       = Opacity;
+    O.Opacity       = FillOpacity;
 
     return O;
 }
