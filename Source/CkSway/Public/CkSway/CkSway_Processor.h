@@ -85,13 +85,15 @@ namespace ck
     };
 
     // Runs EVERY frame (no MarkedDirtyBy): a disabled sway still relaxes to rest. Stimulus source: the node's driver
-    // frame (UCk_Utils_SceneNode_UE::Get_DriverWorldTransform).
+    // frame (UCk_Utils_SceneNode_UE::Get_DriverWorldTransform). Stops at destroy initiation, as the SceneNode request
+    // drain does: an offset published after that is never applied, and the next Update would report it as foreign.
     class CKSWAY_API FProcessor_Sway_Update : public ck_exp::TProcessor<
         FProcessor_Sway_Update,
         FCk_Handle_Sway,
         TReadOnly<FFragment_Sway_Tunables>,
         TReadWrite<FFragment_Sway>,
         TExclude<FTag_Sway_NeedsSetup>,
+        TExclude<FTag_DestroyEntity_Initiate>,
         CK_IGNORE_PENDING_KILL>
     {
     public:

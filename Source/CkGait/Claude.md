@@ -186,6 +186,8 @@ write a Transform from Gait or Bob; Bob mutates only its own node's offset.
   the offset.
 - A bob node whose SceneNode fragments were removed (e.g. `Request_Detach`) ensures in Update and stops
   publishing.
+- Update excludes `FTag_DestroyEntity_Initiate`, like the SceneNode request drain: an offset published after the
+  destroy starts is never applied, and the next Update would report Bob's own write as foreign.
 - Not replicated (the SceneNode Transform is `DoesNotReplicate`) and not snapshotable: gait and bob are
   cosmetic and local; composition rebuilds them. No snapshot registrations belong in this module.
 

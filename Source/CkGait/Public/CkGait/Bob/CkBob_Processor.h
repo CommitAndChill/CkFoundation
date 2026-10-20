@@ -63,12 +63,14 @@ namespace ck
 
     // Runs EVERY frame (no MarkedDirtyBy): a disabled bob, or one whose gait is gone, still relaxes to rest. Reads only
     // its gait and its own node, never a transform; runs in FGroup_Gameplay so its offset request drains in this frame's
-    // FGroup_Transform.
+    // FGroup_Transform. Stops at destroy initiation, as the SceneNode request drain does: an offset published after
+    // that is never applied, and the next Update would report it as foreign.
     class CKGAIT_API FProcessor_Bob_Update : public ck_exp::TProcessor<
         FProcessor_Bob_Update,
         FCk_Handle_Bob,
         TReadOnly<FFragment_Bob_Tunables>,
         TReadWrite<FFragment_Bob>,
+        TExclude<FTag_DestroyEntity_Initiate>,
         CK_IGNORE_PENDING_KILL>
     {
     public:
