@@ -1,0 +1,9 @@
+{
+  "resolution": 256,
+  "seeds": [
+    29
+  ],
+  "family": "flipbook",
+  "frames": 16,
+  "density_curve": "perceptual"
+}

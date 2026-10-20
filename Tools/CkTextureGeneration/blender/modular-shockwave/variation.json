@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "seed": 80423,
+  "radius_scale": 1.0,
+  "streak_spread_degrees": 6.0,
+  "streak_width_multiplier": 1.8,
+  "billow_weight": 1.0,
+  "debris_count": 20,
+  "hero_debris_count": 5,
+  "motion_speed": 1.0,
+  "description": "Fresh seeded geometry and radial card composition, retaining accepted scale/weight/timing. No new radial fluid solve."
+}

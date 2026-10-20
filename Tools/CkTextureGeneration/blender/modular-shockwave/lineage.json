@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "source_investigation": "Evaluate procedural texture tools",
+  "source_chat": "01a14825-8804-73e1-afe4-f6d3a2b6cdd6",
+  "original_files": {
+    "streaks.py": "1d76b1efcb8b7ec2ee5d9355f0122737021332ccd06679f88e34f1dfba3c5790",
+    "soil.py": "4095eace90baada2de2d9819b37421947204713ad585633f931cd83dff182552",
+    "billows.py": "f822eefd2286924ac5057491340e977d87c5bf7aa5847714e72a8ff21e054bb6",
+    "normals.py": "a0a9b36d567fa33c69012cf1134628b579dc9ed379e77bf5685ed5e46bce0fd9",
+    "normal_review.py": "8c7731f5db944f69b007174f4d1e3e07d5067969a3b573ff24af6be965e32824",
+    "verify_sources.py": "0794eb33fb6666294899a999ac3cecdd1c4ea2f0a0c99672cfc5303dcdda1a59",
+    "variation.json": "f165849dcbe49ab3bdc42246c386bc2e1e443f837dbd651b78e17d3b76acbd7e",
+    "../../blender_generate.py": "f043ad7ee93b3a1b4e11e4d804d01b6e00fb70e1be9c1db44dff325acd36f347",
+    "review.py": "a735f14e74281321d04450d9a10a4e66f9a1d92ff7c34263dd86d6225a43bc19"
+  },
+  "migration_scope": "Portability and execution/packaging plumbing; native layer math, seeded random behavior, normals and helper functions retained."
+}
