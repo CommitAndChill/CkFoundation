@@ -1,9 +1,17 @@
 ---
 name: ck-vfx-authoring
-description: "Use when authoring or porting a VFX in the CkParticles/CkUsf code-only pipeline: new behaviors, faithful recreations of reference Niagara effects, look shaders, cadence rows, A/B parity work in the VfxExamples gym. Carries the campaign's hard-won incident lessons."
+description: "Use when creating textures, flipbooks or CkUsf materials, or authoring/porting VFX in the CkParticles/CkUsf pipeline: source-asset recipes, new behaviors, reference Niagara effects, look shaders, cadence and A/B parity."
 ---
 
 # ck-vfx-authoring — building VFX in the CkParticles/CkUsf pipeline
+
+## Source textures, flipbooks and material inputs
+
+Read [CkTextureGeneration's workflow](../../../Tools/CkTextureGeneration/WORKFLOW.md) for new source assets, procedural texture/PBR work, Blender simulation, generated source art, technique selection and user visual checkpoints. Its [tool index](../../../Tools/CkTextureGeneration/README.md) locates the portable recipes and reproduction entry points. Resolve those links from the canonical skill directory, including when invoked through a host wrapper.
+
+That workflow owns source-asset production and its approval/data/provenance contracts. This skill retains the particle/material implementation, regeneration and parity rules below. Apply the corpus-first method when porting an existing effect whose source is available; new textures or effects do not need an invented source corpus. Keep accepted art unchanged during integration and distinguish technical checks, visual approval, runtime behavior and measured performance.
+
+Use the plugin's portable tools with explicit external runtimes and new output destinations. No new editor module or backend installation is implied. Follow the current project's editor-execution authorization; the workflow does not override it.
 
 ## Overview
 

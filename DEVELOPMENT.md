@@ -516,7 +516,7 @@ superproject with `.claude/scripts/sync-skills.ps1`).
 | Add a debugger view/overlay/inspector | `ck-gameplaydebugger-extension` (CkGameplayDebugger) |
 | Write or modify any Slate UI (widgets, styles, list rows, editor-viewport interaction) | `ck-slate-tools` (CkGameplayDebugger) |
 | The teardown/unbind lifecycle campaign (live defect: teardown mid-interaction, signals never fire after destroy, unbind leaks) | `ck-lifecycle-teardown-campaign` (CkFoundation) |
-| Author or port a VFX (CkParticles behavior, CkUsf look, cadence row, A/B parity in the gym) | `ck-vfx-authoring` (CkFoundation) |
+| Create textures/flipbooks or CkUsf materials; author/port VFX, cadence or A/B parity | `ck-vfx-authoring` (CkFoundation); source recipes in `Tools/CkTextureGeneration` |
 | Profile/benchmark processors; perf claims | `ck-performance-and-analysis` (CkFoundation) |
 | "What should we build next" — vetted frontier | `ck-feature-frontier` (CkFoundation) |
 | Long/multi-session task discipline; PROMPT/PHASE/PROGRESS docs | `ck-methodology` (CkFoundation) |

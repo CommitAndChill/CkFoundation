@@ -117,3 +117,6 @@ Source/CkWatermark/Public/CkWatermark/Generated/CkWatermark_BuildId.h
 !Source/CkPixelSpriteEditor/Claude.md
 !Tools/CkPixel/README.md
 !Tools/CkPixel/UNREAL.md
+!Tools/CkTextureGeneration/**/*.md
+!Tools/CkTextureGeneration/README.md
+!Tools/CkTextureGeneration/WORKFLOW.md

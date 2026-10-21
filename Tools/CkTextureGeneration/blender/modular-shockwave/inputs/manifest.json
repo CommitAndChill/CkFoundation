@@ -1,0 +1,14 @@
+[
+  {
+    "source": "TextureBackendEvaluation/blender/continuum-smoke/review/r03-opacity-window17/neutral/atlas_4x4.png",
+    "staged": "unlit_atlas_4x4.png",
+    "sha256": "34bd485ffecc33754f9079296ab6da3c33af9febe98bc2ba22f15fd7329008f0",
+    "bytes": 109008
+  },
+  {
+    "source": "TextureBackendEvaluation/blender/continuum-smoke/review/r03-lit-window17/grayscale/atlas_4x4.png",
+    "staged": "lit_atlas_4x4.png",
+    "sha256": "71916c3aa8ff09290609822707cb8a246d92c8fb43d1352a6b05b58d78bf3476",
+    "bytes": 289042
+  }
+]

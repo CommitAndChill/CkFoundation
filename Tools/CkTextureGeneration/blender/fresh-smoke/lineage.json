@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "source_label": "fresh-smoke-20261018",
+  "historical_acceptance": {
+    "date": "2026-10-18",
+    "quote": "This looks good. Let's call the reusable smoke recipe complete. What's next?",
+    "scope": "Demonstrated native seed90341 recipe; not a rerender of this port"
+  },
+  "source_sha256": {
+    "recipe.py": "8518a8540ef0bbbed73dfa8adbff6cf52bdc54418792b0fc0abf905d23299432",
+    "render.py": "0fdf79fedac40e58c2964002c30d15c40f43a833c60931199864d316dc5316cb",
+    "variation.json": "b4ca8379b22f264331331dd32c53de719808d6f8a14ab1a33bc7f4aea816bdcc",
+    "ACCEPTANCE.json": "1b24ec27edba7b8afb4a2ca828a258cd451983c287b4c26e2f6e6498659a14e8"
+  },
+  "migration": "Portable paths and explicit verified GPU selection; no physical recipe changes or historical comparison dependencies."
+}

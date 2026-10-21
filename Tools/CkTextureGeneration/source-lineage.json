@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "sources": [
+    {
+      "original_artifact": "CkTextureGeneration/recipes/blender_erosion.json",
+      "sha256": "34ba50b4c48359d75fef83c34f34281f9d3539a2ef2fd8a92820b5a8545bbaeb",
+      "migration": "Removed machine-specific output_dir only; runtime output is explicit."
+    },
+    {
+      "original_artifact": "CkTextureGeneration/recipes/blender_flow_refined.json",
+      "sha256": "22ca7203628701779e7453aed1eb0648d477c81bd10773a77462c4b446e374ef",
+      "migration": "Removed machine-specific output_dir only; runtime output is explicit."
+    },
+    {
+      "original_artifact": "CkTextureGeneration/recipes/blender_metal.json",
+      "sha256": "e4d0d7ba316ea1e6cc689ccb420b49adacbfe58261f840912e07eb764b1d6c8a",
+      "migration": "Removed machine-specific output_dir only; runtime output is explicit."
+    },
+    {
+      "original_artifact": "CkTextureGeneration/recipes/blender_smoke_billowy_five.json",
+      "sha256": "2fc2b24683fb29a4912728dfc7405d7da0bbf5dd693f40da7c9118f4cd24307e",
+      "migration": "Removed machine-specific output_dir only; runtime output is explicit."
+    },
+    {
+      "original_artifact": "CkTextureGeneration/recipes/blender_flipbook.json",
+      "sha256": "bf448968124f263ae66260e59c9ddbc914bc0c65013d9b379cecef74c1f2f571",
+      "migration": "Removed machine-specific output_dir only; runtime output is explicit."
+    },
+    {
+      "original_artifact": "CkTextureGeneration/recipes/blender_normal_probe.json",
+      "sha256": "0e206073fcddc81b5dff161bbd6769e1db17ad5de5d725b0ffdbf622210e68ca",
+      "migration": "Removed machine-specific output_dir only; runtime output is explicit."
+    },
+    {
+      "original_artifact": "CkTextureGeneration/backends/blender/generate.py",
+      "sha256": "9cb39fa1bfa17b9268afabcffc6371ba842da0e096a3405898638eb2c7bd7750",
+      "migration": "CLI output and admission validation only; shader construction and render/export math retained."
+    },
+    {
+      "original_artifact": "TextureBackendEvaluation/blender_validate.py",
+      "sha256": "ae221c069b19a64a542ceb18e3e0c05070a5c7f488b117b8957ac17bbde69a0b",
+      "migration": "Extracted decode_native_png function without changes; excluded historical report imports and entry point."
+    }
+  ]
+}
