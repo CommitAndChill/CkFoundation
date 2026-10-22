@@ -253,6 +253,13 @@ public:
     static auto
     Get_TransientEntity(
         const HandleType& InHandle) -> HandleType;
+
+private:
+    static auto
+    Get_IsOwnershipChainValid(
+        const FCk_Handle& InHandle,
+        ECk_PendingKill_Policy InPendingKillPolicy,
+        const FCk_Handle& InExcludedEntity = {}) -> bool;
 };
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -266,22 +273,40 @@ auto
         ECk_PendingKill_Policy InPendingKillPolicy)
     -> FCk_Handle
 {
-    if (T_Func(InHandle))
-    { return InHandle; }
-
-    if (InHandle.Has<ck::FFragment_LifetimeOwner>())
+#if NOT CK_DISABLE_ENSURE_CHECKS
+    auto Visited = TSet<FCk_Handle>{};
+#endif
+    auto Current = InHandle;
+    while (true)
     {
-        const auto& LifetimeOwner = Get_LifetimeOwner(InHandle, InPendingKillPolicy);
-
-        CK_ENSURE_IF_NOT(LifetimeOwner != InHandle,
-            TEXT("Entity [{}] is self-owned — Get_EntityInOwnershipChain_If cannot walk a circular ownership chain."),
-            InHandle)
+        CK_ENSURE_IF_NOT(Get_IsOwnershipChainValid(Current, InPendingKillPolicy),
+            TEXT("Lifetime ownership would contain an invalid entity or cycle while traversing [{}]"), Current)
         { return {}; }
 
-        return Get_EntityInOwnershipChain_If(LifetimeOwner, T_Func, InPendingKillPolicy);
-    }
+        CK_ENSURE_IF_NOT(NOT Visited.Contains(Current),
+            TEXT("Lifetime ownership would contain an invalid entity or cycle: revisited [{}] during query"), Current)
+        { return {}; }
 
-    return {};
+#if NOT CK_DISABLE_ENSURE_CHECKS
+        Visited.Add(Current);
+#endif
+
+        const auto Matches = T_Func(Current);
+
+        // The caller may mutate ownership or destroy the current entity. Validate the resulting chain
+        // before returning a match or following the next edge; never pass rejected state to another callback.
+        CK_ENSURE_IF_NOT(Get_IsOwnershipChainValid(Current, InPendingKillPolicy),
+            TEXT("Lifetime ownership would contain an invalid entity or cycle after the predicate for [{}]"), Current)
+        { return {}; }
+
+        if (Matches)
+        { return Current; }
+
+        if (NOT Current.Has<ck::FFragment_LifetimeOwner>())
+        { return {}; }
+
+        Current = Get_LifetimeOwner(Current, InPendingKillPolicy);
+    }
 }
 
 template <typename T_TypeSafeHandle>

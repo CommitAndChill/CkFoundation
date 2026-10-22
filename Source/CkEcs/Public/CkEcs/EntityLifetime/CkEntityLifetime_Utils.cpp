@@ -35,6 +35,9 @@ namespace ck_entity_lifetime_utils
             const FCk_Registry& InRegistry)
         -> bool
     {
+        if (ck::Is_NOT_Valid(InRegistry))
+        { return false; }
+
         const auto TransientEntity = FCk_Handle{InRegistry.Get_TransientEntity(), InRegistry.Get_RegistryHandle()};
         if (NOT TransientEntity.IsValid(ck::IsValid_Policy_IncludePendingKill{})
             || NOT TransientEntity.Has<TWeakObjectPtr<UWorld>>())
@@ -46,6 +49,28 @@ namespace ck_entity_lifetime_utils
 
         const auto* EcsWorld = World->GetSubsystem<UCk_EcsWorld_Subsystem_UE>();
         return ck::Is_NOT_Valid(EcsWorld) || EcsWorld->Get_LoadHold() != ECk_EcsWorld_LoadHold::Teardown;
+    }
+
+    auto
+        Get_HasDependentCount(
+            const FCk_Handle& InOwner,
+            const FCk_Handle& InDependent,
+            int32 InExpectedCount)
+        -> bool
+    {
+        if (ck::Is_NOT_Valid(InOwner, ck::IsValid_Policy_IncludePendingKill{}))
+        { return false; }
+
+        if (NOT InOwner.Has<ck::FFragment_LifetimeDependents>())
+        { return InExpectedCount == 0; }
+
+        auto Count = int32{0};
+        for (const auto& Dependent : InOwner.Get<ck::FFragment_LifetimeDependents>().Get_Entities())
+        {
+            if (Dependent == InDependent)
+            { ++Count; }
+        }
+        return Count == InExpectedCount;
     }
 
     // Entering destruction leaves the hydration quarantine, and that is what makes the 143 destruction-pipeline
@@ -78,6 +103,49 @@ namespace ck_entity_lifetime_utils
         // lifetime — and because the hydration dispatcher is its second caller (an apply that destroys its own
         // entity reaches it re-entrantly, and it defers until the dispatch is off the stack).
         ck::DoAbandon_PendingHydration(InHandle);
+    }
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    UCk_Utils_EntityLifetime_UE::
+    Get_IsOwnershipChainValid(
+        const FCk_Handle& InHandle,
+        ECk_PendingKill_Policy InPendingKillPolicy,
+        const FCk_Handle& InExcludedEntity)
+    -> bool
+{
+    auto Visited = TSet<FCk_Handle>{};
+    auto Current = InHandle;
+    while (true)
+    {
+        switch (InPendingKillPolicy)
+        {
+            case ECk_PendingKill_Policy::ExcludePendingKill:
+            {
+                if (ck::Is_NOT_Valid(Current))
+                { return false; }
+                break;
+            }
+            case ECk_PendingKill_Policy::IncludePendingKill:
+            {
+                if (ck::Is_NOT_Valid(Current, ck::IsValid_Policy_IncludePendingKill{}))
+                { return false; }
+                break;
+            }
+            default:
+            { return false; }
+        }
+
+        if (Current == InExcludedEntity || Visited.Contains(Current))
+        { return false; }
+
+        Visited.Add(Current);
+        if (NOT Current.Has<ck::FFragment_LifetimeOwner>())
+        { return true; }
+
+        Current = Current.Get<ck::FFragment_LifetimeOwner, ck::IsValid_Policy_IncludePendingKill>().Get_Entity();
     }
 }
 
@@ -188,6 +256,13 @@ auto
         ECk_PendingKill_Policy InPendingKillPolicy)
     -> FCk_Handle
 {
+    CK_ENSURE_IF_NOT(
+        (InPendingKillPolicy == ECk_PendingKill_Policy::ExcludePendingKill && ck::IsValid(InHandle)) ||
+        (InPendingKillPolicy == ECk_PendingKill_Policy::IncludePendingKill &&
+            ck::IsValid(InHandle, ck::IsValid_Policy_IncludePendingKill{})),
+        TEXT("Cannot get lifetime ownership for an invalid Entity or pending-kill policy"))
+    { return {}; }
+
     CK_ENSURE_IF_NOT(InHandle.Has<ck::FFragment_LifetimeOwner>(),
         TEXT("The Entity [{}] does NOT have a LifetimeOwner. Was this Entity created by Request_CreateEntity(RegistryType)?"),
         InHandle)
@@ -304,6 +379,10 @@ auto
 {
     SCOPE_CYCLE_COUNTER(STAT_CkEcs_Get_WorldForEntity);
 
+    CK_ENSURE_IF_NOT(ck::IsValid(InHandle, ck::IsValid_Policy_IncludePendingKill{}),
+        TEXT("Cannot resolve World for an invalid Entity"))
+    { return {}; }
+
     if (InHandle.Has<TWeakObjectPtr<UWorld>>())
     { return InHandle.Get<TWeakObjectPtr<UWorld>>().Get(); }
 
@@ -313,15 +392,12 @@ auto
         InHandle)
     {  return {}; }
 
-    const auto& LifeTimeOwner = Get_LifetimeOwner(InHandle);
-
-    if (ck::Is_NOT_Valid(LifeTimeOwner))
+    CK_ENSURE_IF_NOT(Get_IsOwnershipChainValid(InHandle, ECk_PendingKill_Policy::IncludePendingKill),
+        TEXT("Lifetime ownership would contain an invalid entity or cycle while resolving World for [{}]"), InHandle)
     { return {}; }
 
-    CK_ENSURE_IF_NOT(LifeTimeOwner != InHandle,
-        TEXT("Entity [{}] is self-owned — Get_WorldForEntity cannot resolve World by walking a circular ownership chain. "
-             "Self-owned entities must have a TWeakObjectPtr<UWorld> fragment."),
-        InHandle)
+    const auto LifeTimeOwner = Get_LifetimeOwner(InHandle, ECk_PendingKill_Policy::IncludePendingKill);
+    if (ck::Is_NOT_Valid(LifeTimeOwner, ck::IsValid_Policy_IncludePendingKill{}))
     { return {}; }
 
     return Get_WorldForEntity(LifeTimeOwner);
@@ -383,6 +459,10 @@ auto
     if (InEntity.Has<ck::FFragment_Net_Params>())
     { return InEntity.Get<ck::FFragment_Net_Params>().Get_ConnectionSettings().Get_NetRole(); }
 
+    CK_ENSURE_IF_NOT(Get_IsOwnershipChainValid(InEntity, ECk_PendingKill_Policy::IncludePendingKill),
+        TEXT("Lifetime ownership would contain an invalid entity or cycle while resolving net role for [{}]"), InEntity)
+    { return ECk_Net_EntityNetRole::None; }
+
     return Get_EntityNetRole(Get_LifetimeOwner(InEntity));
 }
 
@@ -400,15 +480,11 @@ auto
     if (InEntity.Has<ck::FFragment_Net_Params>())
     { return InEntity.Get<ck::FFragment_Net_Params>().Get_ConnectionSettings().Get_NetMode(); }
 
-    const auto& LifetimeOwner = Get_LifetimeOwner(InEntity);
-
-    CK_ENSURE_IF_NOT(LifetimeOwner != InEntity,
-        TEXT("Entity [{}] is self-owned — Get_EntityNetMode cannot resolve by walking a circular ownership chain. "
-             "Self-owned entities must have FFragment_Net_Params."),
-        InEntity)
+    CK_ENSURE_IF_NOT(Get_IsOwnershipChainValid(InEntity, ECk_PendingKill_Policy::IncludePendingKill),
+        TEXT("Lifetime ownership would contain an invalid entity or cycle while resolving net mode for [{}]"), InEntity)
     { return ECk_Net_NetModeType::Unknown; }
 
-    return Get_EntityNetMode(LifetimeOwner);
+    return Get_EntityNetMode(Get_LifetimeOwner(InEntity));
 }
 
 auto
@@ -441,10 +517,11 @@ auto
 {
     QUICK_SCOPE_CYCLE_COUNTER(Request_Create_Entity)
 
-    const auto IsOwnerValid = ck::IsValid(InHandle);
-    CK_ENSURE_IF_NOT(IsOwnerValid, TEXT("Cannot create Entity with Invalid Handle"))
+    CK_ENSURE_IF_NOT(ck::IsValid(InHandle), TEXT("Cannot create Entity with Invalid Handle"))
     { return {}; }
-    if (NOT IsOwnerValid)
+
+    CK_ENSURE_IF_NOT(Get_IsOwnershipChainValid(InHandle, ECk_PendingKill_Policy::IncludePendingKill),
+        TEXT("Lifetime ownership would contain an invalid entity or cycle while creating a child of [{}]"), InHandle)
     { return {}; }
 
     auto RegistryView = InHandle.Get_RegistryView();
@@ -470,11 +547,8 @@ auto
 {
     QUICK_SCOPE_CYCLE_COUNTER(Request_Create_Entity)
 
-    const auto CanCreateEntity = ck_entity_lifetime_utils::Get_CanCreateEntityInWorld(InRegistry);
-    CK_ENSURE_IF_NOT(CanCreateEntity,
+    CK_ENSURE_IF_NOT(ck_entity_lifetime_utils::Get_CanCreateEntityInWorld(InRegistry),
         TEXT("Request_CreateEntity rejected new world population after ECS world teardown began"))
-    { return {}; }
-    if (NOT CanCreateEntity)
     { return {}; }
 
     const auto& NewEntity = InRegistry.CreateEntity();
@@ -502,11 +576,8 @@ auto
 {
     QUICK_SCOPE_CYCLE_COUNTER(Request_Create_Entity)
 
-    const auto CanCreateEntity = ck_entity_lifetime_utils::Get_CanCreateEntityInWorld(InRegistry);
-    CK_ENSURE_IF_NOT(CanCreateEntity,
+    CK_ENSURE_IF_NOT(ck_entity_lifetime_utils::Get_CanCreateEntityInWorld(InRegistry),
         TEXT("Request_CreateEntity with ID hint rejected new world population after ECS world teardown began"))
-    { return {}; }
-    if (NOT CanCreateEntity)
     { return {}; }
 
     const auto& NewEntity = InRegistry.CreateEntity(InEntityHint.Get_Entity());
@@ -553,20 +624,33 @@ auto
         const FCk_Handle& InLifetimeOwner)
     -> void
 {
+    CK_ENSURE_IF_NOT(ck::IsValid(InNewEntity), TEXT("Cannot setup lifetime ownership for an invalid Entity"))
+    { return; }
+
+    CK_ENSURE_IF_NOT(Get_IsOwnershipChainValid(InLifetimeOwner,
+        ECk_PendingKill_Policy::IncludePendingKill, InNewEntity),
+        TEXT("Lifetime ownership would contain an invalid entity or cycle while setting up [{}] with [{}]"),
+        InNewEntity, InLifetimeOwner)
+    { return; }
+
     if (InNewEntity.Has<ck::FFragment_LifetimeOwner>())
     {
-        const auto& CurrentLifetimeOwner = InNewEntity.Get<ck::FFragment_LifetimeOwner>().Get_Entity();
-        CK_ENSURE
-        (
-            CurrentLifetimeOwner == InLifetimeOwner,
+        CK_ENSURE_IF_NOT(InNewEntity.Get<ck::FFragment_LifetimeOwner>().Get_Entity() == InLifetimeOwner,
             TEXT("Trying to Setup Entity [{}] with LifetimeOwner [{}] but it is already setup with [{}]"),
-            InNewEntity,
-            InLifetimeOwner,
-            CurrentLifetimeOwner
-        );
+            InNewEntity, InLifetimeOwner, InNewEntity.Get<ck::FFragment_LifetimeOwner>().Get_Entity())
+        { return; }
+
+        CK_ENSURE_IF_NOT(ck_entity_lifetime_utils::Get_HasDependentCount(InLifetimeOwner, InNewEntity,
+            InNewEntity.Get_RegistryView().Get_RegistryHandle() == InLifetimeOwner.Get_RegistryView().Get_RegistryHandle() ? 1 : 0),
+            TEXT("Lifetime ownership reverse link is inconsistent for [{}] and [{}]"), InNewEntity, InLifetimeOwner)
+        { return; }
 
         return;
     }
+
+    CK_ENSURE_IF_NOT(ck_entity_lifetime_utils::Get_HasDependentCount(InLifetimeOwner, InNewEntity, 0),
+        TEXT("Lifetime ownership reverse link already exists before setup for [{}] and [{}]"), InNewEntity, InLifetimeOwner)
+    { return; }
 
     InNewEntity.Add<ck::FFragment_LifetimeOwner>(InLifetimeOwner);
 
@@ -631,15 +715,6 @@ auto
     }
 #endif
 
-    if (InLifetimeOwner.Has_Any<ck::FTag_DestroyEntity_Initiate>())
-    {
-        InNewEntity.Add<ck::FTag_DestroyEntity_Initiate>();
-        ck_entity_lifetime_utils::DoEnter_Destruction(InNewEntity);
-    }
-
-    if (InLifetimeOwner.Has_Any<ck::FTag_DestroyEntity_Teardown>())
-    { InNewEntity.Add<ck::FTag_DestroyEntity_Teardown>(); }
-
     if (InLifetimeOwner.Has<ck::FTag_EditorOnlyEntity>())
     { InNewEntity.Add<ck::FTag_EditorOnlyEntity>(); }
 
@@ -648,13 +723,23 @@ auto
     // entity — including the owner itself, forming a self-cycle that stack-overflows the dependents walk.
     const auto SameRegistry =
         InNewEntity.Get_RegistryView().Get_RegistryHandle() == InLifetimeOwner.Get_RegistryView().Get_RegistryHandle();
-
     if (SameRegistry)
     {
         // Not doing something like this because it is undefined behavior: *const_cast<FCk_Handle*>(&InHandle)
         auto NonConstLifetimeOwnerHandle = InLifetimeOwner;
-        NonConstLifetimeOwnerHandle.AddOrGet<ck::FFragment_LifetimeDependents>()._Entities.Emplace(InNewEntity);
+        NonConstLifetimeOwnerHandle.AddOrGet<ck::FFragment_LifetimeDependents,
+            ck::IsValid_Policy_IncludePendingKill>()._Entities.Emplace(InNewEntity);
     }
+
+    // Finish ownership and inherited fragments before Teardown makes the child invalid to regular mutations.
+    if (InLifetimeOwner.Has_Any<ck::FTag_DestroyEntity_Initiate>())
+    {
+        InNewEntity.AddOrGet<ck::FTag_DestroyEntity_Initiate>();
+        ck_entity_lifetime_utils::DoEnter_Destruction(InNewEntity);
+    }
+
+    if (InLifetimeOwner.Has_Any<ck::FTag_DestroyEntity_Teardown>())
+    { InNewEntity.AddOrGet<ck::FTag_DestroyEntity_Teardown>(); }
 }
 
 auto
@@ -664,19 +749,55 @@ auto
         const FCk_Handle& InNewLifetimeOwner)
     -> void
 {
-    CK_ENSURE_IF_NOT(InEntity != InNewLifetimeOwner,
-        TEXT("Cannot TransferLifetimeOwner of Entity [{}] to itself"), InEntity)
+    CK_ENSURE_IF_NOT(ck::IsValid(InEntity), TEXT("Cannot transfer lifetime ownership for an invalid Entity"))
     { return; }
 
-    const auto& CurrentLifetimeOwner = InEntity.Get<ck::FFragment_LifetimeOwner>();
-    auto CurrentLifetimeOwnerEntity = CurrentLifetimeOwner.Get_Entity();
+    CK_ENSURE_IF_NOT(InEntity.Has<ck::FFragment_LifetimeOwner>(),
+        TEXT("Cannot transfer lifetime ownership for [{}] without an existing owner"), InEntity)
+    { return; }
+
+    CK_ENSURE_IF_NOT(Get_IsOwnershipChainValid(InEntity, ECk_PendingKill_Policy::IncludePendingKill),
+        TEXT("Lifetime ownership would contain an invalid entity or cycle in the current chain of [{}]"), InEntity)
+    { return; }
+
+    CK_ENSURE_IF_NOT(Get_IsOwnershipChainValid(InNewLifetimeOwner,
+        ECk_PendingKill_Policy::IncludePendingKill, InEntity),
+        TEXT("Lifetime ownership would contain an invalid entity or cycle while transferring [{}] to [{}]"),
+        InEntity, InNewLifetimeOwner)
+    { return; }
+
+    auto CurrentLifetimeOwnerEntity = InEntity.Get<ck::FFragment_LifetimeOwner>().Get_Entity();
+    const auto OldOwnerSameRegistry =
+        InEntity.Get_RegistryView().Get_RegistryHandle() == CurrentLifetimeOwnerEntity.Get_RegistryView().Get_RegistryHandle();
+    const auto NewOwnerSameRegistry =
+        InEntity.Get_RegistryView().Get_RegistryHandle() == InNewLifetimeOwner.Get_RegistryView().Get_RegistryHandle();
+
+    CK_ENSURE_IF_NOT(ck_entity_lifetime_utils::Get_HasDependentCount(CurrentLifetimeOwnerEntity,
+        InEntity, OldOwnerSameRegistry ? 1 : 0),
+        TEXT("Lifetime ownership reverse link is inconsistent for [{}] and [{}]"), InEntity, CurrentLifetimeOwnerEntity)
+    { return; }
 
     if (InNewLifetimeOwner == CurrentLifetimeOwnerEntity)
     { return; }
 
-    CurrentLifetimeOwnerEntity.Get<ck::FFragment_LifetimeDependents>()._Entities.RemoveSingle(InEntity);
+    CK_ENSURE_IF_NOT(ck_entity_lifetime_utils::Get_HasDependentCount(InNewLifetimeOwner, InEntity, 0),
+        TEXT("Lifetime ownership reverse link already exists before transfer for [{}] and [{}]"), InEntity, InNewLifetimeOwner)
+    { return; }
+
+    if (OldOwnerSameRegistry)
+    {
+        CurrentLifetimeOwnerEntity.Get<ck::FFragment_LifetimeDependents,
+            ck::IsValid_Policy_IncludePendingKill>()._Entities.RemoveSingle(InEntity);
+    }
 
     InEntity.Replace<ck::FFragment_LifetimeOwner>(InNewLifetimeOwner);
+
+    if (NewOwnerSameRegistry)
+    {
+        auto NonConstNewLifetimeOwnerHandle = InNewLifetimeOwner;
+        NonConstNewLifetimeOwnerHandle.AddOrGet<ck::FFragment_LifetimeDependents,
+            ck::IsValid_Policy_IncludePendingKill>()._Entities.Emplace(InEntity);
+    }
 
     if (InNewLifetimeOwner.Has_Any<ck::FTag_DestroyEntity_Initiate>())
     {
@@ -686,11 +807,6 @@ auto
 
     if (InNewLifetimeOwner.Has_Any<ck::FTag_DestroyEntity_Teardown>())
     { InEntity.AddOrGet<ck::FTag_DestroyEntity_Teardown>(); }
-
-    // Not doing something like this because it is undefined behavior: *const_cast<FCk_Handle*>(&InHandle)
-    auto NonConstNewLifetimeOwnerHandle = InNewLifetimeOwner;
-
-    NonConstNewLifetimeOwnerHandle.AddOrGet<ck::FFragment_LifetimeDependents>()._Entities.Emplace(InEntity);
 }
 
 // --------------------------------------------------------------------------------------------------------------------

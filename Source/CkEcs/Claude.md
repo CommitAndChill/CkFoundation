@@ -630,6 +630,16 @@ Destruction is **deferred** until end of frame by default. Never delete fragment
 
 ### `Request_SetupEntityWithLifetimeOwner` — what it stamps
 
+- **Admission and transfer integrity.** Setup and transfer validate the complete proposed owner chain before
+  mutation, rejecting invalid/stale entities and cycles through `CK_ENSURE_IF_NOT`. Transfer checks the
+  current reverse link before removing it and publishes the forward and same-registry reverse links before
+  inheriting destruction tags. Already-tearing-down owners are supported; all regular child mutations finish
+  before Teardown is added. Generic ownership queries validate before invoking the predicate and again after
+  it, so callback-driven reparenting is followed while invalidated matches and cyclic chains are rejected.
+  A query also rejects any repeated visit before invoking the predicate again, even when callback-driven
+  reparenting leaves each individual chain acyclic. The visited set and invariant checks follow the normal
+  Shipping omission policy. World resolution includes pending-kill owners while following the chain,
+  allowing entities to resolve their world through an owner already in Teardown.
 - **`ck::FTag_ConstructSpawned` (save/load provenance).** Stamped when the lifetime owner is inside a construction window, meaning the child is part of the owner's deterministic build and is re-created by the owner's replayed construction on load — so the v3 capture ADOPTS it by identity (owner + label) rather than respawning a recipe. Two windows qualify: (1) an EntityScript still constructing — carries `FFragment_EntityScript` but not `FTag_EntityScript_HasBegunPlay`; (2) a definition-built entity mid-`Request_BuildAndReplicate`, marked `FTag_DefinitionBuild_InProgress` for the synchronous span of its ConstructionInfo execution. A definition-built entity has NO EntityScript fragment, so window (1) never fires for it; window (2) is what lets a Stackable item's labeled stack-count attribute child persist and re-hydrate instead of reverting to definition defaults. Owner already begun-play / build complete (child spawned by later runtime logic, e.g. an SM task) → no stamp → RuntimeSpawned by default. Both tags are TRANSIENT: the writer reads the LIVE tag at capture and records provenance as entity-table metadata, so the tags themselves must never round-trip.
 - **The reverse dependent link — SAME-registry only.** A cross-registry child (e.g. a 2dGridSystem cell, which lives in the grid's private nested `FEcsWorld` yet is lifetime-owned by the main-registry grid) must NOT be added to the owner's `FFragment_LifetimeDependents`: that fragment and its serialization assume same-registry handles. Serialized, a foreign handle keeps only its bare entity-id; on restore it re-homes onto the load registry where its nested id aliases an unrelated entity — including the owner itself, forming a self-cycle that stack-overflows the lifetime-dependents walk. Such children are lifetime-managed by their own nested registry/world, so the forward owner link alone suffices.
 - **Inherited context stamps.** `ck::FFragment_EditorSelectionOwner` and `ck::FTag_EditorOnlyEntity` are inherited by every lifetime-descendant at creation, the same strategy as ContextOwner.
