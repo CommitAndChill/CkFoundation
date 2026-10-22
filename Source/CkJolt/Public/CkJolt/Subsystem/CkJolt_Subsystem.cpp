@@ -16,6 +16,7 @@
 #include "CkJolt/CkJolt_Log.h"
 #include "CkJolt/CkJolt_Stats.h"
 #include "CkJolt/CkJolt_Utils.h"
+#include "CkJolt/CollisionLayers/CkJoltCollisionLayerTable.h"
 #include "CkJolt/Settings/CkJolt_ProjectSettings.h"
 #include "CkJolt/Subsystem/CkJolt_DebugDrawTarget.h"
 #include "CkJolt/Subsystem/CkJolt_DebugRenderer.h"
@@ -44,6 +45,23 @@ DECLARE_CYCLE_STAT(TEXT("Jolt_Subsystem_Tick"), STAT_CkJolt_SubsystemTick, STATG
 
 namespace ck_jolt_contactlistener
 {
+    static auto Apply_PhysicalContactResponse(
+        const ck::jolt::FCk_Jolt_CollisionLayerTable& InLayerTable,
+        const JPH::Body& InBody1,
+        const JPH::Body& InBody2,
+        JPH::ContactSettings& InOutSettings)
+        -> void
+    {
+        const auto Layer1 = InBody1.GetObjectLayer();
+        const auto Layer2 = InBody2.GetObjectLayer();
+        const auto& Signature1 = InLayerTable.Get_Signature(Layer1);
+        const auto& Signature2 = InLayerTable.Get_Signature(Layer2);
+
+        InOutSettings.mIsSensor |= NOT CollisionEnabledHasPhysics(Signature1.Get_CollisionEnabled()) ||
+            NOT CollisionEnabledHasPhysics(Signature2.Get_CollisionEnabled()) ||
+            InLayerTable.Get_PairInteraction(Layer1, Layer2) != ECk_Jolt_PairInteraction::Block;
+    }
+
     static auto Fill_ContactDetail(
         FCk_Jolt_ContactEvent& InOutEvent,
         const JPH::Body& InBody1,
@@ -78,6 +96,9 @@ namespace ck_jolt_contactlistener
 class CkContactListener : public JPH::ContactListener
 {
 public:
+    explicit CkContactListener(const ck::jolt::FCk_Jolt_CollisionLayerTable& InLayerTable)
+        : _LayerTable(InLayerTable) {}
+
     /*
      * The per-step contact-pair counter this listener feeds (P6-D48). The counter itself lives on the Jolt WORLD
      * rather than here, because the world is what owns the step that resets it — this listener only ever knows
@@ -108,6 +129,8 @@ public:
             JPH::ContactSettings& ioSettings)
             -> void override
     {
+        ck_jolt_contactlistener::Apply_PhysicalContactResponse(_LayerTable, inBody1, inBody2, ioSettings);
+
         ck::jolt::VeryVerbose(TEXT("Body [{}] and Body [{}] and SUB-SHAPE [{}] and SUB-SHAPE [{}] NEW Contact"),
             inBody1.GetID().GetIndex(), inBody2.GetID().GetIndex(),
             inManifold.mSubShapeID1.GetValue(), inManifold.mSubShapeID2.GetValue());
@@ -162,6 +185,8 @@ public:
             JPH::ContactSettings& ioSettings)
             -> void override
     {
+        ck_jolt_contactlistener::Apply_PhysicalContactResponse(_LayerTable, inBody1, inBody2, ioSettings);
+
         // Counted before the interest gate below: the debug-draw step stat wants every touching manifold,
         // and this is a lone relaxed atomic increment — none of the build/lock/queue cost the gate exists to skip.
         if (_ContactPairSink != nullptr)
@@ -268,6 +293,7 @@ public:
     }
 
 private:
+    const ck::jolt::FCk_Jolt_CollisionLayerTable& _LayerTable;
     FCriticalSection _QueueLock;
     TArray<FCk_Jolt_ContactEvent> _ContactEventQueue;
 
@@ -685,7 +711,7 @@ auto
     _BodyActivationListener = MakePimpl<CkBodyActivationListener>();
     _PhysicsSystem->SetBodyActivationListener(_BodyActivationListener.Get());
 
-    _ContactListener = MakePimpl<CkContactListener>();
+    _ContactListener = MakePimpl<CkContactListener>(*_LayerTable);
     _PhysicsSystem->SetContactListener(&*_ContactListener);
 
     EcsRegistry.SetContext<TWeakPtr<JPH::PhysicsSystem>>(_PhysicsSystem);
