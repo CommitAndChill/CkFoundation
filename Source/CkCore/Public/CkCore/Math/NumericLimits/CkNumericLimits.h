@@ -44,14 +44,16 @@ struct CKCORE_API FCk_DoubleNumericLimits
 public:
     CK_GENERATED_BODY(FCk_DoubleNumericLimits);
 
+    // UE 5.8 (C4756 is an error): a double limit does not fit a float, so _Min/_Max always held -inf / +inf. Spelled out to
+    // keep that value; storing the double limits would change the property type (follow-up).
 private:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
               meta = (AllowPrivateAccess = true))
-    float _Min = std::numeric_limits<double>().lowest();
+    float _Min = -std::numeric_limits<float>::infinity();
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
               meta = (AllowPrivateAccess = true))
-    float _Max = std::numeric_limits<double>().max();
+    float _Max = std::numeric_limits<float>::infinity();
 
 public:
     CK_PROPERTY_GET(_Min);

@@ -9,7 +9,7 @@
 #include "CkAttribute/CkAttribute_Log.h"    // ck::attribute::Verbose (component-drift skip)
 #include "CkLabel/CkLabel_Utils.h"          // UCk_Utils_GameplayLabel_UE::Get_Label (value-emitting Produce)
 
-#include <InstancedStruct.h>
+#include <StructUtils/InstancedStruct.h>
 #include <Misc/Optional.h>
 
 // --------------------------------------------------------------------------------------------------------------------

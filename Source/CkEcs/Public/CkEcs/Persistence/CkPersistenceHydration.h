@@ -10,7 +10,7 @@
 #include "CkEcs/Tag/CkTag.h"
 #include "CkEcs/Tag/CkTag_HydrationQuarantine.h" // FTag_Hydration_Quarantine / FCtx_HydrationQuarantine
 
-#include <InstancedStruct.h>
+#include <StructUtils/InstancedStruct.h>
 #include "UObject/Object.h"
 #include "UObject/StrongObjectPtr.h"
 
