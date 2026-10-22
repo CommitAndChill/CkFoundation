@@ -10,7 +10,7 @@
 #include "CkEcs/Tag/CkTag.h"
 #include "CkEcs/Persistence/CkPersistenceHandlerRegistry.h" // FastArray callbacks Resolve handlers
 
-#include <InstancedStruct.h>
+#include <StructUtils/InstancedStruct.h>
 #include <Net/Serialization/FastArraySerializer.h>
 #include <Misc/Optional.h>
 
