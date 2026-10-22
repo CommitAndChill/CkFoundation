@@ -37,6 +37,15 @@ namespace ck::ensure
         const FString& InNamespace,
         const FString& InFunctionName) -> bool;
 
+    // The site every log record carries: "[File:<path>] [Line: <n>]" natively, "[Script:<identity>]" from script.
+    CKCORE_API auto Get_EnsureSiteText_ForTesting(
+        const FName& InFile,
+        int32 InLine,
+        const FString& InScriptSiteIdentity) -> FString;
+
+    CKCORE_API auto Request_TrimEngineBoilerplateFrames_ForTesting(
+        const FString& InStackTrace) -> FString;
+
     CKCORE_API auto Ensure_Impl_ForTesting(
         const FString& InMessage,
         const FString& InExpressionText,
