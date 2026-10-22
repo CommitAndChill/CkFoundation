@@ -7,7 +7,7 @@
 #include "CkAttribute/CkAttribute_Fragment.h"      // ck::FTag_IsRefillAttribute
 #include "CkAttribute/CkAttribute_Fragment_Data.h" // ECk_Attribute_RefillState
 
-#include <InstancedStruct.h>
+#include <StructUtils/InstancedStruct.h>
 #include <Misc/Optional.h>
 
 // --------------------------------------------------------------------------------------------------------------------
