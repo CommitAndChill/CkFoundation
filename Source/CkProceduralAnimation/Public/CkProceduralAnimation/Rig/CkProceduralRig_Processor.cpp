@@ -4,6 +4,7 @@
 #include "CkProceduralAnimation/BodyPose/CkProceduralBodyPose_Utils.h"
 #include "CkProceduralAnimation/Core/CkProceduralChainClearance.h"
 #include "CkProceduralAnimation/Core/CkProceduralLegCurve.h"
+#include "CkProceduralAnimation/Core/CkProceduralSegmentFrame.h"
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Fragment.h"
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Utils.h"
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Utils.h"
@@ -77,18 +78,7 @@ namespace ck_procedural_rig
             const FVector& InPole)
         -> FQuat
     {
-        const auto Along = (InTo - InFrom).GetSafeNormal();
-        if (Along.IsNearlyZero())
-        { return FQuat::Identity; }
-
-        auto TowardPole = FVector::VectorPlaneProject(InPole - InFrom, Along).GetSafeNormal();
-        if (TowardPole.IsNearlyZero())
-        { TowardPole = FVector::VectorPlaneProject(FVector::UpVector, Along).GetSafeNormal(); }
-
-        if (TowardPole.IsNearlyZero())
-        { TowardPole = FVector::VectorPlaneProject(FVector::RightVector, Along).GetSafeNormal(); }
-
-        return FRotationMatrix::MakeFromXY(Along, TowardPole).ToQuat();
+        return ck::ComputeProceduralSegmentFrame({InFrom, InTo, InPole, {}});
     }
 
     auto
@@ -728,9 +718,13 @@ namespace ck
                 const auto& From = Chosen.Joints[PartIndex];
                 const auto& To = Chosen.Joints[PartIndex + 1];
                 Parts.Add(Binding.Get_Segments()[PartIndex]);
-                PartPoses.Emplace(ck_procedural_rig::Get_SegmentRotation(From, To, Chosen.Pole),
+                const auto PartTransform = UCk_Utils_Transform_UE::Get_EntityCurrentTransform(Binding.Get_Segments()[PartIndex]);
+                const auto Previous = InSubject.Get<FFragment_ProceduralArticulation_Pose>().Get_SettledRevision() > 0
+                    ? TOptional<FQuat>{PartTransform.GetRotation()}
+                    : TOptional<FQuat>{};
+                PartPoses.Emplace(ck::ComputeProceduralSegmentFrame({From, To, Chosen.Pole, Previous}),
                     (From + To) * 0.5,
-                    UCk_Utils_Transform_UE::Get_EntityCurrentTransform(Binding.Get_Segments()[PartIndex]).GetScale3D());
+                    PartTransform.GetScale3D());
             }
             if (Binding.Get_Terminal() != FCk_Handle_Transform{})
             {
