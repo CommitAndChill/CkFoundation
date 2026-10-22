@@ -164,7 +164,7 @@ Owner entity (NPC)
 | | `Get_PlanCost(Planner)` | Cost of the last plan. |
 | | `Get_PlanAttemptCount(Planner)` | Replan attempt counter. |
 | | `Get_WorldStateSource(Planner)` | The resolved WS handle this Planner consumes. |
-| | `Get_InvalidGoal(Planner)` | Goal conditions referencing unregistered WS keys (populated at Setup time). |
+| | `Get_InvalidGoal(Planner)` | Stored goal-resolution diagnostics; a rejected SetGoal preserves accepted state and reports Failed through completion. |
 | **Requests** | `Request_SetEnableToggle(Planner, Toggle)` | Enable or disable; disabled Planners skip planning and activation. |
 | | `Request_ResetActiveChain(Planner)` | Collapses active chain; fires `OnPlannerDeactivated` per removed node. |
 | | `Request_SetGoal(Planner, Goal)` | Set this Planner's goal. Triggers a replan. |
@@ -416,7 +416,7 @@ Real-game examples: a combat NPC's `WaitForEnemy` (satisfies `EnemyNeutralized` 
 1. **Setup-time static check (`FProcessor_Goap_Planner_Setup`)**: walks the Planner's catalog and asserts at least one Action has empty preconditions AND effects covering every goal condition. If no fallback exists, fires `CK_ENSURE_IF_NOT` with a clear message + suggested fix. Result is cached on `FFragment_Goap_Planner._HasUnconditionalFallback`.
 2. **Runtime check on `PlanFailed`**: when `FProcessor_Goap_Planner_HandleResult` (or `HandleRequests` on the WS-unresolved path) would set status to `PlanFailed`, fires `CK_ENSURE_IF_NOT` unless `_HasUnconditionalFallback || _AllowPlanFailed`. Belt-and-suspenders: catches cases the static check might miss.
 
-**Opt-out via `FCk_Goap_Planner_Spec._AllowPlanFailed = true`**. Only for framework tests, research catalogs, or gym stations that intentionally demonstrate `PlanFailed` (e.g. `CkAutoTest_Goap_Planner_InvalidGoal` — exercises the unregistered-key diagnostic; `CkGoapGym_MakeTea_Station` — demos PlanFailed when ingredients are missing). **Game-content Planners must never set this true.** The flag is greppable in code review.
+**Opt-out via `FCk_Goap_Planner_Spec._AllowPlanFailed = true`**. Only for framework tests, research catalogs, or gym stations that intentionally demonstrate `PlanFailed` (e.g. `CkGoapGym_MakeTea_Station` — demos PlanFailed when ingredients are missing). **Game-content Planners must never set this true.** The flag is greppable in code review.
 
 **`CostThresholdReached` is exempt from the runtime ensure.** It's a deliberate budget-cap signal (the user explicitly set a CostThreshold and the planner respected it), not a catalog misconfiguration. Consumers can still react via `OnPlanFailed`.
 
@@ -479,3 +479,9 @@ Each Planner runs an **iterative** Tarjan SCC over its *direct children* — a p
 - `CkStateMachine/CLAUDE.md` — plan execution / orchestration.
 - `CkEntityScript/CLAUDE.md` (via `CkEcs`) — base class semantics for the Action EntityScript.
 - Design spec: `docs/superpowers/specs/2026-05-21-CkGoap-PlannerActionCollapse-design.md` — full data model, processor pseudocode, lifecycle invariants, migration notes.
+
+## Request admission and runtime tuning
+
+`Request_SetGoal` rejects any goal with an unregistered required key before replacing the accepted authored/resolved goal or scheduling a replan. Its completion reports `Failed`; an intentionally empty goal remains valid. Planning an unresolved initial authored goal reports `PlanFailed`, never `PlanFound` for its resolvable subset.
+
+`Request_SetReplanInterval` and `Request_SetReplanPolicy` update the same planner parameters read by AutoReplan and re-arm its candidate marker. Intervals must be finite and nonnegative; policy values must be declared enum values. Rejection leaves existing tuning unchanged and completes `Failed`. Existing dirtiness/throttle history is retained, so accepted tuning applies on the next AutoReplan pass.

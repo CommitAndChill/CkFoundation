@@ -83,7 +83,7 @@ public:
 class CKGOAP_API FProcessor_Goap_Planner_HandleRequests : public ck_exp::TProcessor<
 	FProcessor_Goap_Planner_HandleRequests,
 	FCk_Handle_Goap_Planner,
-	ck::TReadOnly<FFragment_Goap_Planner_Params>,
+	ck::TReadWrite<FFragment_Goap_Planner_Params>,
 	ck::TReadOnly<FFragment_Goap_Planner>,
 	ck::TReadWrite<FFragment_AStar_Tunables>,
 	ck::TReadWrite<FFragment_Goap_Planner_PlanState>,
@@ -113,7 +113,7 @@ public:
 	ForEachEntity(
 		TimeType InDeltaT,
 		HandleType InHandle,
-		const FFragment_Goap_Planner_Params& InParams,
+		FFragment_Goap_Planner_Params& InParams,
 		const FFragment_Goap_Planner& InPlannerComp,
 		FFragment_AStar_Tunables& InAStarParams,
 		FFragment_Goap_Planner_PlanState& InPlanState,

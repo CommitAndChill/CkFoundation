@@ -381,7 +381,7 @@ auto
 	ForEachEntity(
 		TimeType InDeltaT,
 		HandleType InHandle,
-		const FFragment_Goap_Planner_Params& InParams,
+		FFragment_Goap_Planner_Params& InParams,
 		const FFragment_Goap_Planner& InPlannerComp,
 		FFragment_AStar_Tunables& InAStarParams,
 		FFragment_Goap_Planner_PlanState& InPlanState,
@@ -427,12 +427,6 @@ auto
 		{
 			using T = std::decay_t<decltype(InTypedRequest)>;
 
-			// None of the branches below reject a request — even the "parent plan in flight" defer
-			// and the WS-unresolved PlanFailed path are the Planner engaging with and dispatching
-			// the request, not refusing it (a game-content Planner must always reach PlanFound/
-			// PlanFailed via its fallback Action — see CkGoap CLAUDE.md "Every Planner must always
-			// produce a valid plan"). Several branches below return early, so Result is set up front
-			// rather than after the if-constexpr chain.
 			auto Result = ECk_Request_OperationResult::Succeeded;
 			const auto Guard = MakeCompletionGuard(InTypedRequest, InHandle, Result);
 
@@ -499,6 +493,20 @@ auto
 						InHandle, InParams.Get_PlannerTag())
 					{ /* still proceed — broadcast and let consumers react */ }
 
+					INC_DWORD_STAT(STAT_Goap_PlansFailed);
+					UUtils_Signal_OnGoap_Planner_PlanFailed::Broadcast(
+						InHandle, ck::MakePayload(InHandle, FCk_Goap_Payload_OnPlanFailed{}));
+					return;
+				}
+
+				CK_ENSURE_IF_NOT(InGoal._Goal.Num() == InGoal._GoalAuthored.Num(),
+					TEXT("Cannot plan with an unresolved required GOAP goal key on [{}]"), InHandle)
+				{
+					Result = ECk_Request_OperationResult::Failed;
+					InPlanState._PlanStatus = ECk_GoapPlanStatus::PlanFailed;
+					InPlanState._Plan.Reset();
+					InPlanState._PlanCost = 0.0f;
+					InHandle.Try_Remove<FTag_Goap_Planner_PlanInFlight>();
 					INC_DWORD_STAT(STAT_Goap_PlansFailed);
 					UUtils_Signal_OnGoap_Planner_PlanFailed::Broadcast(
 						InHandle, ck::MakePayload(InHandle, FCk_Goap_Payload_OnPlanFailed{}));
@@ -632,36 +640,38 @@ auto
 			{
 				const auto NewAuthored = InTypedRequest.Get_NewGoal();
 
-				InGoal._GoalAuthored = NewAuthored;
-				InGoal._Goal.Reset();
-				InGoal._InvalidGoal.Reset();
-
 				const auto Source = InWSSource.Get_Resolved();
-				if (ck::Is_NOT_Valid(Source))
+				CK_ENSURE_IF_NOT(NewAuthored.IsEmpty() || ck::IsValid(Source),
+					TEXT("Cannot set a GOAP goal without a valid world state source on [{}]"), InHandle)
 				{
-					for (const auto& Cond : NewAuthored)
-					{
-						InGoal._InvalidGoal.Add(Cond);
-					}
+					Result = ECk_Request_OperationResult::Failed;
 					return;
 				}
 
-				// Use Find (read-only) — goal keys that aren't in the WS registry
-				// are diagnostics (Get_InvalidGoal) rather than silent additions.
-				const auto& Registry = const_cast<FCk_Handle_Goap_WorldState&>(Source)
-					.template Get<FFragment_Goap_WorldState_KeyRegistry>().Get_Registry();
+				CK_ENSURE_IF_NOT(NewAuthored.IsEmpty() || Source.template Has<FFragment_Goap_WorldState_KeyRegistry>(),
+					TEXT("Cannot set a GOAP goal without a world state key registry on [{}]"), InHandle)
+				{
+					Result = ECk_Request_OperationResult::Failed;
+					return;
+				}
+
+				auto ResolvedGoal = TArray<goap::FWorldStateCondition>{};
 				for (const auto& Cond : NewAuthored)
 				{
-					const auto Key = Registry.Find(Cond.Get_Key());
-					if (Key == goap::InvalidGoapKey)
+					const auto& Registry = Source.template Get<FFragment_Goap_WorldState_KeyRegistry>().Get_Registry();
+					CK_ENSURE_IF_NOT(Registry.Find(Cond.Get_Key()) != goap::InvalidGoapKey,
+						TEXT("Cannot set a GOAP goal with an unresolved required key [{}] on [{}]"),
+						Cond.Get_Key(), InHandle)
 					{
-						InGoal._InvalidGoal.Add(Cond);
+						Result = ECk_Request_OperationResult::Failed;
+						return;
 					}
-					else
-					{
-						InGoal._Goal.Add(goap::FWorldStateCondition{Key, Cond.Get_Value()});
-					}
+					ResolvedGoal.Add(goap::FWorldStateCondition{Registry.Find(Cond.Get_Key()), Cond.Get_Value()});
 				}
+
+				InGoal._GoalAuthored = NewAuthored;
+				InGoal._Goal = MoveTemp(ResolvedGoal);
+				InGoal._InvalidGoal.Reset();
 
 				InHandle.AddOrGet<FTag_Goap_Planner_RequiresInitialPlan>();
 				goap::MarkReplanCandidate(InHandle);
@@ -711,13 +721,29 @@ auto
 			}
 			else if constexpr (std::is_same_v<T, FCk_Request_Goap_Planner_SetReplanInterval>)
 			{
-				ck::goap::Warning(
-					TEXT("Request_SetReplanInterval not yet wired for runtime tuning — set in PlannerParams at Add time."));
+				CK_ENSURE_IF_NOT(FMath::IsFinite(InTypedRequest.Get_MinReplanIntervalSeconds()) &&
+					InTypedRequest.Get_MinReplanIntervalSeconds() >= 0.0f,
+					TEXT("GOAP replan interval must be finite and nonnegative"))
+				{
+					Result = ECk_Request_OperationResult::Failed;
+					return;
+				}
+				InParams.Set_MinReplanIntervalSeconds(InTypedRequest.Get_MinReplanIntervalSeconds());
+				goap::MarkReplanCandidate(InHandle);
 			}
 			else if constexpr (std::is_same_v<T, FCk_Request_Goap_Planner_SetReplanPolicy>)
 			{
-				ck::goap::Warning(
-					TEXT("Request_SetReplanPolicy not yet wired for runtime tuning — set in PlannerParams at Add time."));
+				CK_ENSURE_IF_NOT(InTypedRequest.Get_Policy() == ECk_Goap_ReplanPolicy::Explicit ||
+					InTypedRequest.Get_Policy() == ECk_Goap_ReplanPolicy::OnWorldStateDirty ||
+					InTypedRequest.Get_Policy() == ECk_Goap_ReplanPolicy::OnCostDirty ||
+					InTypedRequest.Get_Policy() == ECk_Goap_ReplanPolicy::OnEitherDirty,
+					TEXT("GOAP replan policy must be a supported value"))
+				{
+					Result = ECk_Request_OperationResult::Failed;
+					return;
+				}
+				InParams.Set_ReplanPolicy(InTypedRequest.Get_Policy());
+				goap::MarkReplanCandidate(InHandle);
 			}
 			else if constexpr (std::is_same_v<T, FCk_Request_Goap_Planner_SetSearchBudget>)
 			{
