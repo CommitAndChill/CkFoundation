@@ -111,13 +111,19 @@ public:
         const FCk_Delegate_Request_OnCompleted& InDelegate);
 
 public:
-    // Enqueues ONE composite RestoreSet request that, at drain, SETs the FName tag set to EXACTLY the supplied
-    // {name -> count} map. Deliberately NOT a UFUNCTION — hydration-path plumbing, not a designer-facing verb.
+    // Legacy names-only restore: preserves the exact map and clears explicit gameplay identities.
+    // Deliberately NOT a UFUNCTION — hydration-path plumbing, not a designer-facing verb.
     static auto
     Request_RestoreSet(
         FCk_Handle& InHandle,
         const TArray<FName>& InTagNames,
         const TArray<int32>& InCounts,
+        const FCk_Delegate_Request_OnCompleted& InDelegate) -> void;
+
+    static auto
+    Request_RestoreSet(
+        FCk_Handle& InHandle,
+        const FCk_Request_EntityTag_RestoreSet& InRequest,
         const FCk_Delegate_Request_OnCompleted& InDelegate) -> void;
 
 public:
@@ -257,8 +263,7 @@ private:
     static auto
     DoApply_RestoreSet(
         FCk_Handle& InHandle,
-        const TArray<FName>& InTagNames,
-        const TArray<int32>& InCounts) -> void;
+        const FCk_Request_EntityTag_RestoreSet& InRequest) -> void;
 };
 
 // --------------------------------------------------------------------------------------------------------------------

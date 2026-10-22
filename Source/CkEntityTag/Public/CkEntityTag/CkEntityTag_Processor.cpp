@@ -32,10 +32,15 @@ namespace ck
             ck::algo::ForEachRequest(InRequests.Get_Requests(),
                 ck::Visitor([&](const auto& InEntry)
                 {
-                    // DoHandleRequest is void and has no rejection path, so reaching the line after the
-                    // call IS the success condition.
                     auto Result = ECk_Request_OperationResult::Failed;
                     const auto Guard = MakeCompletionGuard(InEntry, InHandle, Result);
+
+                    if constexpr (std::is_same_v<std::decay_t<decltype(InEntry)>, FCk_Request_EntityTag_RestoreSet>)
+                    {
+                        CK_ENSURE_IF_NOT(InEntry.Get_IsValid(),
+                            TEXT("EntityTag restore request malformed — rejecting the entire set"))
+                        { return; }
+                    }
 
                     DoHandleRequest(InHandle, InEntry);
 
@@ -94,7 +99,7 @@ namespace ck
             const FCk_Request_EntityTag_RestoreSet& InRequest)
         -> void
     {
-        UCk_Utils_EntityTag_UE::DoApply_RestoreSet(InHandle, InRequest.Get_TagNames(), InRequest.Get_Counts());
+        UCk_Utils_EntityTag_UE::DoApply_RestoreSet(InHandle, InRequest);
     }
 
     // --------------------------------------------------------------------------------------------------------------------

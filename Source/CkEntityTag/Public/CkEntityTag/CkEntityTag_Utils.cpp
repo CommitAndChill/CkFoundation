@@ -551,15 +551,34 @@ auto
         const FCk_Delegate_Request_OnCompleted& InDelegate)
     -> void
 {
-    const auto HandleIsValid = ck::IsValid(InHandle);
-    CK_ENSURE_IF_NOT(HandleIsValid,
+    Request_RestoreSet(InHandle, FCk_Request_EntityTag_RestoreSet{InTagNames, InCounts}, InDelegate);
+}
+
+// ----
+
+auto
+    UCk_Utils_EntityTag_UE::
+    Request_RestoreSet(
+        FCk_Handle& InHandle,
+        const FCk_Request_EntityTag_RestoreSet& InRequest,
+        const FCk_Delegate_Request_OnCompleted& InDelegate)
+    -> void
+{
+    CK_ENSURE_IF_NOT(ck::IsValid(InHandle),
         TEXT("Invalid Handle passed. Unable to restore the EntityTag set on the Entity"))
     {
         InDelegate.ExecuteIfBound(InHandle, ECk_Request_OperationResult::Failed_NotEnqueued);
         return;
     }
 
-    const auto Request = FCk_Request_EntityTag_RestoreSet{InTagNames, InCounts};
+    const auto Request = InRequest;
+
+    CK_ENSURE_IF_NOT(Request.Get_IsValid(),
+        TEXT("EntityTag restore request malformed — expected unique valid names with positive parallel counts"))
+    {
+        InDelegate.ExecuteIfBound(InHandle, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return;
+    }
 
     if (InDelegate.IsBound())
     { Request.Set_CompletionDelegate(InDelegate); }
@@ -574,94 +593,62 @@ auto
     UCk_Utils_EntityTag_UE::
     DoApply_RestoreSet(
         FCk_Handle& InHandle,
-        const TArray<FName>& InTagNames,
-        const TArray<int32>& InCounts)
+        const FCk_Request_EntityTag_RestoreSet& InRequest)
     -> void
 {
-    // RestoreSet is the one applier that may run on an entity whose Construct seeded no EntityTag,
-    // so Current can legitimately be absent here.
     auto& Current = InHandle.AddOrGet<ck::FFragment_EntityTag>();
+    const auto PreviousNames = Current._Tags;
+    const auto PreviousGameplay = Current._GameplayTagCounts;
+    const auto& Names = InRequest.Get_TagNames();
+    const auto& Counts = InRequest.Get_Counts();
+    const auto& GameplayTags = InRequest.Get_GameplayTags();
+    const auto& GameplayCounts = InRequest.Get_GameplayCounts();
 
-    const auto Num = FMath::Min(InTagNames.Num(), InCounts.Num());
+    Current._Tags.Reset();
+    Current._GameplayTagCounts.Reset();
+    for (auto Index = 0; Index < Names.Num(); ++Index)
+    { Current._Tags.Emplace(Names[Index], Counts[Index]); }
+    for (auto Index = 0; Index < GameplayTags.Num(); ++Index)
+    { Current._GameplayTagCounts.Emplace(GameplayTags[Index], GameplayCounts[Index]); }
 
-    auto SavedPresent = TSet<FName>{};
-    SavedPresent.Reserve(Num);
+    for (const auto& Previous : PreviousNames)
+    { Set_StoragePresence(InHandle, Previous._Name, Names.Contains(Previous._Name)); }
+    for (const auto& Name : Names)
+    { Set_StoragePresence(InHandle, Name, true); }
 
-    // Raise/add saved tags BEFORE removing any: a transiently empty live set would trip the NowEmpty auto-remove.
-    for (auto Index = 0; Index < Num; ++Index)
+    if (Current._Tags.IsEmpty() && Current._GameplayTagCounts.IsEmpty())
+    { InHandle.Try_Remove<ck::FFragment_EntityTag>(); }
+
+    // Both views and hashed storage have reached the accepted state before any listener observes them.
+    for (const auto& Previous : PreviousNames)
     {
-        const auto SavedName  = InTagNames[Index];
-        const auto SavedCount = InCounts[Index];
-
-        // Not-present in the saved set, so it stays out of SavedPresent and any live copy is stripped below.
-        if (SavedName.IsNone() || SavedCount <= 0)
+        if (Names.Contains(Previous._Name))
         { continue; }
-
-        SavedPresent.Add(SavedName);
-
-        const auto TagIndex = ck::algo::FindIndex(Current._Tags, [SavedName](const ck::FEntityTagCount& InPair)
-        {
-            return InPair._Name == SavedName;
-        });
-
-        const auto AddNew = TagIndex == INDEX_NONE;
-        if (AddNew)
-        {
-            Current._Tags.Emplace(SavedName, SavedCount);
-        }
-        else
-        {
-            Current._Tags[TagIndex]._Count = SavedCount;
-        }
-
-        Set_StoragePresence(InHandle, SavedName, true);
-
-        if (AddNew)
-        {
-            ck::UUtils_Signal_EntityTag_OnTagUpdated::Broadcast(
-                InHandle,
-                ck::MakePayload(InHandle, SavedName, ECk_EntityTagUpdate::Added));
-
-            DoBroadcast_AnyEntityListeners(InHandle, SavedName, ECk_EntityTagUpdate::Added);
-        }
-    }
-
-    // Gather before removing — mutating _Tags while iterating it is unsafe.
-    auto TagsToRemove = TArray<FName>{};
-    for (const auto& TagCount : Current._Tags)
-    {
-        if (NOT SavedPresent.Contains(TagCount._Name))
-        { TagsToRemove.Emplace(TagCount._Name); }
-    }
-
-    for (const auto& TagName : TagsToRemove)
-    {
-        const auto TagIndex = ck::algo::FindIndex(Current._Tags, [TagName](const ck::FEntityTagCount& InPair)
-        {
-            return InPair._Name == TagName;
-        });
-
-        if (TagIndex == INDEX_NONE)
-        { continue; }
-
-        Current._Tags.RemoveAtSwap(TagIndex);
-        Set_StoragePresence(InHandle, TagName, false);
-
         ck::UUtils_Signal_EntityTag_OnTagUpdated::Broadcast(
-            InHandle,
-            ck::MakePayload(InHandle, TagName, ECk_EntityTagUpdate::Removed));
-
-        DoBroadcast_AnyEntityListeners(InHandle, TagName, ECk_EntityTagUpdate::Removed);
+            InHandle, ck::MakePayload(InHandle, Previous._Name, ECk_EntityTagUpdate::Removed));
+        DoBroadcast_AnyEntityListeners(InHandle, Previous._Name, ECk_EntityTagUpdate::Removed);
     }
-
-    // Preserves the "Current exists iff it holds >= 1 tag" invariant. Current MUST NOT be touched after this.
-    const auto NowEmpty =
-        Current._Tags.IsEmpty() &&
-        Current._GameplayTagCounts.IsEmpty();
-
-    if (NowEmpty)
+    for (const auto& Name : Names)
     {
-        InHandle.Try_Remove<ck::FFragment_EntityTag>();
+        if (ck::algo::AnyOf(PreviousNames, [Name](const ck::FEntityTagCount& InEntry) { return InEntry._Name == Name; }))
+        { continue; }
+        ck::UUtils_Signal_EntityTag_OnTagUpdated::Broadcast(
+            InHandle, ck::MakePayload(InHandle, Name, ECk_EntityTagUpdate::Added));
+        DoBroadcast_AnyEntityListeners(InHandle, Name, ECk_EntityTagUpdate::Added);
+    }
+    for (const auto& Previous : PreviousGameplay)
+    {
+        if (GameplayTags.Contains(Previous._Tag))
+        { continue; }
+        ck::UUtils_Signal_EntityTag_OnGameplayTagUpdated::Broadcast(
+            InHandle, ck::MakePayload(InHandle, Previous._Tag, ECk_EntityTagUpdate::Removed));
+    }
+    for (const auto& Tag : GameplayTags)
+    {
+        if (ck::algo::AnyOf(PreviousGameplay, [Tag](const ck::FEntityGameplayTagCount& InEntry) { return InEntry._Tag == Tag; }))
+        { continue; }
+        ck::UUtils_Signal_EntityTag_OnGameplayTagUpdated::Broadcast(
+            InHandle, ck::MakePayload(InHandle, Tag, ECk_EntityTagUpdate::Added));
     }
 }
 
