@@ -188,7 +188,7 @@ public:
         const UObject* InWorldContextObject,
         const FCk_Request_GameSettings_ResetToDefault& InRequest);
 
-    /** Returns how many settings actually changed back to their default. */
+    /** Returns how many settings changed back to their default, or -1 if the atomic batch was rejected. */
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Utils|GameSettings",
               DisplayName = "[Ck][GameSettings] Request Reset All To Defaults",
@@ -329,7 +329,7 @@ public:
     Request_BeginPendingChanges(
         const UObject* InWorldContextObject);
 
-    /** Commits the session: previewed values stay, priors are discarded, storage is flushed. Returns how many settings were committed. */
+    /** Commits the session: previewed values stay, priors are discarded, storage is flushed. Returns how many settings were committed, or -1 on failure; the session is retained. */
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Utils|GameSettings",
               DisplayName = "[Ck][GameSettings] Request Apply Pending Changes",
@@ -338,7 +338,7 @@ public:
     Request_ApplyPendingChanges(
         const UObject* InWorldContextObject);
 
-    /** Reverts the session: every recorded prior is re-applied live. Returns how many settings changed back. */
+    /** Reverts the session: every recorded prior is re-applied live. Returns how many settings changed back, or -1 if the atomic batch was rejected. */
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Utils|GameSettings",
               DisplayName = "[Ck][GameSettings] Request Revert Pending Changes",
@@ -430,14 +430,14 @@ public:
               Category = "Ck|Utils|GameSettings",
               DisplayName = "[Ck][GameSettings] Request Flush Storage",
               meta = (WorldContext = "InWorldContextObject"))
-    static void
+    static bool
     Request_FlushStorage(
         const UObject* InWorldContextObject);
 
     /**
      * Re-runs the boot merge against the storage provider: each stored value applies onto its
      * registered definition, or is retained as an orphan for a definition registered later.
-     * Returns how many stored values were read.
+     * Returns how many stored values were read, or -1 on failure; rejection preserves live state.
      */
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Utils|GameSettings",

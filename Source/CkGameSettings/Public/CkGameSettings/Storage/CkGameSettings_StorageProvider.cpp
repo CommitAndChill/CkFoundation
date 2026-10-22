@@ -1,15 +1,19 @@
 #include "CkGameSettings_StorageProvider.h"
 
+#include "CkCore/Ensure/CkEnsure.h"
+
 // --------------------------------------------------------------------------------------------------------------------
 
 auto
     UCk_GameSettings_StorageProvider_UE::
     Get_StoredValues_Implementation(
         ECk_GameSettings_Scope InScope,
-        int32 InPlatformUserId) const
-    -> TArray<FCk_GameSettings_StoredValue>
+        int32 InPlatformUserId,
+        TArray<FCk_GameSettings_StoredValue>& OutValues) const
+    -> ECk_GameSettings_StorageReadResult
 {
-    return {};
+    OutValues.Reset();
+    return ECk_GameSettings_StorageReadResult::Failed;
 }
 
 auto
@@ -19,8 +23,20 @@ auto
         int32 InPlatformUserId,
         FName InKey,
         const FString& InValue)
-    -> void
+    -> bool
 {
+    return Request_StoreValues({FCk_GameSettings_StoreValue{InScope, InPlatformUserId, InKey, InValue}});
+}
+
+auto
+    UCk_GameSettings_StorageProvider_UE::
+    Request_StoreValues_Implementation(
+        const TArray<FCk_GameSettings_StoreValue>& InValues)
+    -> bool
+{
+    if (InValues.IsEmpty())
+    { return true; }
+    return false;
 }
 
 auto
@@ -29,15 +45,15 @@ auto
         ECk_GameSettings_Scope InScope,
         int32 InPlatformUserId,
         FName InKey)
-    -> void
+    -> bool
 {
+    return false;
 }
 
 auto
     UCk_GameSettings_StorageProvider_UE::
     Request_Flush_Implementation()
-    -> void
+    -> bool
 {
+    return false;
 }
-
-// --------------------------------------------------------------------------------------------------------------------

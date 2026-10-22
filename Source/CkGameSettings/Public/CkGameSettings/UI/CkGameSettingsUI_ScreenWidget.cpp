@@ -171,7 +171,7 @@ auto
     // driven by the wildcard change signal. Auto-apply mode leaves it alone.
     if (_SessionBegun && ck::IsValid(_ApplyButton))
     {
-        _ApplyButton->SetIsEnabled(false);
+        _ApplyButton->SetIsEnabled(UCk_Utils_GameSettings_UE::Get_HasPendingChanges(this));
 
         auto OnChanged = FCk_Delegate_GameSettings_OnSettingChanged{};
         OnChanged.BindDynamic(this, &UCk_GameSettingsUI_ScreenWidget::HandleSettingChangedForApply);
@@ -188,8 +188,8 @@ auto
 {
     if (_SessionBegun)
     {
-        UCk_Utils_GameSettings_UE::Request_RevertPendingChanges(this);
-        _SessionBegun = false;
+        if (UCk_Utils_GameSettings_UE::Request_RevertPendingChanges(this) >= 0)
+        { _SessionBegun = false; }
 
         auto OnChanged = FCk_Delegate_GameSettings_OnSettingChanged{};
         OnChanged.BindDynamic(this, &UCk_GameSettingsUI_ScreenWidget::HandleSettingChangedForApply);
@@ -233,7 +233,8 @@ auto
     if (NOT _SessionBegun)
     { return; }
 
-    UCk_Utils_GameSettings_UE::Request_ApplyPendingChanges(this);
+    if (UCk_Utils_GameSettings_UE::Request_ApplyPendingChanges(this) < 0)
+    { return; }
     _SessionBegun = UCk_Utils_GameSettings_UE::Request_BeginPendingChanges(this);
 
     if (ck::IsValid(_ApplyButton))

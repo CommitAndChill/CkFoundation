@@ -12,8 +12,8 @@
  *
  * Format: [Machine] and [Player.<Id>] sections with Key=Value lines. File order == application
  * order; an existing key keeps its position on update, a new key appends. Unknown lines
- * (comments, blanks, hand-written extras) are preserved verbatim across rewrites. Flush rewrites
- * the whole file atomically (temp file + move) and only when dirty.
+ * (comments, blanks, hand-written extras) are preserved verbatim across rewrites. Flush installs a same-directory temporary file through physical native replacement on Win64/Mac/Linux
+ * only when dirty; failed installation retains accepted dirty values for an explicit retry.
  */
 UCLASS(NotBlueprintable)
 class CKGAMESETTINGS_API UCk_GameSettings_IniStorageProvider_UE : public UCk_GameSettings_StorageProvider_UE
@@ -39,10 +39,10 @@ public:
         const FString& InFilePath);
 
 private:
-    auto Get_StoredValues_Implementation(ECk_GameSettings_Scope InScope, int32 InPlatformUserId) const -> TArray<FCk_GameSettings_StoredValue> override;
-    auto Request_StoreValue_Implementation(ECk_GameSettings_Scope InScope, int32 InPlatformUserId, FName InKey, const FString& InValue) -> void override;
-    auto Request_RemoveValue_Implementation(ECk_GameSettings_Scope InScope, int32 InPlatformUserId, FName InKey) -> void override;
-    auto Request_Flush_Implementation() -> void override;
+    auto Get_StoredValues_Implementation(ECk_GameSettings_Scope InScope, int32 InPlatformUserId, TArray<FCk_GameSettings_StoredValue>& OutValues) const -> ECk_GameSettings_StorageReadResult override;
+    auto Request_StoreValues_Implementation(const TArray<FCk_GameSettings_StoreValue>& InValues) -> bool override;
+    auto Request_RemoveValue_Implementation(ECk_GameSettings_Scope InScope, int32 InPlatformUserId, FName InKey) -> bool override;
+    auto Request_Flush_Implementation() -> bool override;
 
 private:
     struct FIniLine
@@ -58,7 +58,7 @@ private:
     };
 
 private:
-    auto DoEnsureLoaded() const -> void;
+    auto DoEnsureLoaded() const -> ECk_GameSettings_StorageReadResult;
     auto DoFindSection(const FString& InSectionName) const -> const FIniSection*;
     auto DoFindSection(const FString& InSectionName) -> FIniSection*;
     auto DoFindOrAddSection(const FString& InSectionName) -> FIniSection&;
@@ -71,6 +71,7 @@ private:
     mutable TArray<FString> _PreambleLines;
     mutable TArray<FIniSection> _Sections;
     mutable bool _Loaded = false;
+    mutable ECk_GameSettings_StorageReadResult _LoadResult = ECk_GameSettings_StorageReadResult::Failed;
 
     bool _Dirty = false;
 };

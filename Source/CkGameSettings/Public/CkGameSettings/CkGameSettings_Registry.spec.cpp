@@ -8,6 +8,8 @@
 
 #include <Engine/Engine.h>
 #include <Engine/GameInstance.h>
+#include <GameFramework/GameUserSettings.h>
+#include <limits>
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -18,7 +20,9 @@ namespace ck_game_settings_registry_spec
     auto Make_Subsystem() -> UCk_GameSettings_Subsystem_UE*
     {
         auto* GameInstance = NewObject<UGameInstance>(GEngine);
-        return NewObject<UCk_GameSettings_Subsystem_UE>(GameInstance);
+        auto* Subsystem = NewObject<UCk_GameSettings_Subsystem_UE>(GameInstance);
+        FCk_GameSettings_SpecAccess::Request_SetProvider(Subsystem, NewObject<UCk_GameSettings_SpecStorageProvider_UE>(Subsystem));
+        return Subsystem;
     }
 }
 
@@ -114,7 +118,7 @@ bool FCkTest_GameSettings_Registry_AtomicBatchRejectsAll::RunTest(const FString&
 {
     auto* Subsystem = ck_game_settings_registry_spec::Make_Subsystem();
 
-    AddExpectedError(TEXT("registration rejected"), EAutomationExpectedErrorFlags::Contains, 0);
+    AddExpectedErrorPlain(TEXT("Invalid GameSettings definition, nothing was registered"), EAutomationExpectedErrorFlags::Contains, 0);
 
     const auto BatchWithUnparseableDefault = TArray<FCk_GameSettings_SettingDefinition>
     {
@@ -432,5 +436,231 @@ bool FCkTest_GameSettings_Utils_UnbindIsTeardownSafe::RunTest(const FString&)
 }
 
 // --------------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_GameSettings_TenetIntegrity_StorageRejectionIsAtomic,
+    "Ck.CkGameSettings.TenetIntegrity.StorageRejectionIsAtomic",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+auto
+    FCkTest_GameSettings_TenetIntegrity_StorageRejectionIsAtomic::
+    RunTest(
+        const FString&)
+    -> bool
+{
+    auto* Subsystem = ck_game_settings_registry_spec::Make_Subsystem();
+    auto* Provider = CastChecked<UCk_GameSettings_SpecStorageProvider_UE>(Subsystem->Get_StorageProvider());
+    TestTrue(TEXT("two scopes registered"), Subsystem->Request_RegisterSettings({
+        FCk_GameSettings_SettingDefinition{TEXT("atomic.a"), ECk_GameSettings_ValueType::String, TEXT("default.a")},
+        FCk_GameSettings_SettingDefinition{TEXT("atomic.b"), ECk_GameSettings_ValueType::String, TEXT("default.b")}
+            .Set_Scope(ECk_GameSettings_Scope::Player)}));
+    TestTrue(TEXT("first change accepted"), Subsystem->Request_SetSettingValue_String({TEXT("atomic.a"), TEXT("changed.a")}));
+    TestTrue(TEXT("second change accepted"), Subsystem->Request_SetSettingValue_String({TEXT("atomic.b"), TEXT("changed.b")}));
+    TestTrue(TEXT("session begins"), Subsystem->Request_BeginPendingChanges());
+    auto* Listener = NewObject<UCk_GameSettings_SpecListener_UE>();
+    auto Changed = FCk_Delegate_GameSettings_OnSettingChanged{};
+    Changed.BindDynamic(Listener, &UCk_GameSettings_SpecListener_UE::OnSettingChanged);
+    Subsystem->BindTo_OnSettingChanged(NAME_None, Changed);
+    const auto StoredBefore = Provider->Get_Values();
+    Provider->Set_RejectWrites(true);
+    TestFalse(TEXT("single rejected write reports failure"), Subsystem->Request_SetSettingValue_String({TEXT("atomic.a"), TEXT("rejected")}));
+    TestEqual(TEXT("reset-all rejects entire two-scope batch"), Subsystem->Request_ResetAllToDefaults(), -1);
+    TestEqual(TEXT("first live value preserved"), Subsystem->Get_SettingValue_String(TEXT("atomic.a")), TEXT("changed.a"));
+    TestEqual(TEXT("second live value preserved"), Subsystem->Get_SettingValue_String(TEXT("atomic.b")), TEXT("changed.b"));
+    TestEqual(TEXT("provider entry count preserved"), Provider->Get_Values().Num(), StoredBefore.Num());
+    TestEqual(TEXT("no rejected callback"), Listener->Get_FireCount(), 0);
+    TestFalse(TEXT("no rejected pending prior"), Subsystem->Get_HasPendingChanges());
+    Provider->Set_RejectWrites(false);
+    const auto BeforeBatch = Provider->Get_BatchCount();
+    TestEqual(TEXT("reset-all recovery changes both"), Subsystem->Request_ResetAllToDefaults(), 2);
+    TestEqual(TEXT("one provider admission for both scopes"), Provider->Get_BatchCount(), BeforeBatch + 1);
+    Provider->Set_RejectWrites(true);
+    TestEqual(TEXT("revert rejection reports failure"), Subsystem->Request_RevertPendingChanges(), -1);
+    TestTrue(TEXT("revert rejection retains session priors"), Subsystem->Get_HasPendingChanges());
+    TestEqual(TEXT("failed revert preserves first current value"), Subsystem->Get_SettingValue_String(TEXT("atomic.a")), TEXT("default.a"));
+    Provider->Set_RejectWrites(false);
+    TestEqual(TEXT("retry reverts both"), Subsystem->Request_RevertPendingChanges(), 2);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_GameSettings_TenetIntegrity_ReloadAndFlushFailurePreserveState,
+    "Ck.CkGameSettings.TenetIntegrity.ReloadAndFlushFailurePreserveState",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+auto
+    FCkTest_GameSettings_TenetIntegrity_ReloadAndFlushFailurePreserveState::
+    RunTest(
+        const FString&)
+    -> bool
+{
+    auto* Subsystem = ck_game_settings_registry_spec::Make_Subsystem();
+    auto* Provider = CastChecked<UCk_GameSettings_SpecStorageProvider_UE>(Subsystem->Get_StorageProvider());
+    Subsystem->Request_RegisterSetting({TEXT("reload.a"), ECk_GameSettings_ValueType::Int32, TEXT("1")});
+    Subsystem->Request_BeginPendingChanges();
+    TestTrue(TEXT("live change accepted"), Subsystem->Request_SetSettingValue_Int32({TEXT("reload.a"), 2}));
+    Provider->Set_RejectFlush(true);
+    TestFalse(TEXT("flush propagates provider rejection"), Subsystem->Request_FlushStorage());
+    TestEqual(TEXT("apply reports flush failure"), Subsystem->Request_ApplyPendingChanges(), -1);
+    TestTrue(TEXT("apply failure retains session priors"), Subsystem->Get_HasPendingChanges());
+    Provider->Set_Values({
+        FCk_GameSettings_StoreValue{ECk_GameSettings_Scope::Machine, 0, TEXT("reload.a"), TEXT("7")},
+        FCk_GameSettings_StoreValue{ECk_GameSettings_Scope::Player, 0, TEXT("future.orphan"), TEXT("later")}});
+    Provider->Set_RejectPlayerRead(true);
+    TestEqual(TEXT("one failed scope rejects both"), Subsystem->Request_ReloadFromStorage(), -1);
+    TestEqual(TEXT("machine live value preserved"), Subsystem->Get_SettingValue_Int32(TEXT("reload.a"), 0), 2);
+    Provider->Set_RejectPlayerRead(false);
+    auto FixtureValues = Provider->Get_Values();
+    FixtureValues[0] = FCk_GameSettings_StoreValue{ECk_GameSettings_Scope::Machine, 0, TEXT("reload.a"), TEXT("not-an-int")};
+    Provider->Set_Values(FixtureValues);
+    AddExpectedError(TEXT("GameSettings reload rejected invalid stored value"), EAutomationExpectedErrorFlags::Contains, 0);
+    TestEqual(TEXT("invalid known value rejects whole reload"), Subsystem->Request_ReloadFromStorage(), -1);
+    TestEqual(TEXT("invalid reload preserves current value"), Subsystem->Get_SettingValue_Int32(TEXT("reload.a"), 0), 2);
+    FixtureValues[0] = FCk_GameSettings_StoreValue{ECk_GameSettings_Scope::Machine, 0, TEXT("reload.a"), TEXT("7")};
+    Provider->Set_Values(FixtureValues);
+    FixtureValues.Add(FCk_GameSettings_StoreValue{ECk_GameSettings_Scope::Machine, 0, TEXT("reload.a"), TEXT("8")});
+    Provider->Set_Values(FixtureValues);
+    AddExpectedError(TEXT("GameSettings reload contains missing or duplicate key"), EAutomationExpectedErrorFlags::Contains, 0);
+    TestEqual(TEXT("duplicate persisted key rejects whole reload"), Subsystem->Request_ReloadFromStorage(), -1);
+    TestEqual(TEXT("duplicate reload preserves current value"), Subsystem->Get_SettingValue_Int32(TEXT("reload.a"), 0), 2);
+    TestTrue(TEXT("duplicate reload preserves pending priors"), Subsystem->Get_HasPendingChanges());
+    FixtureValues.Pop();
+    Provider->Set_Values(FixtureValues);
+    FixtureValues.Add(FCk_GameSettings_StoreValue{ECk_GameSettings_Scope::Machine, 0, TEXT("reload.bad"), TEXT("orphan")});
+    Provider->Set_Values(FixtureValues);
+    const auto WritesBefore = Provider->Get_BatchCount();
+    TestEqual(TEXT("successful reload reports all values"), Subsystem->Request_ReloadFromStorage(), 3);
+    TestEqual(TEXT("reload never writes back to provider"), Provider->Get_BatchCount(), WritesBefore);
+    TestEqual(TEXT("reloaded value applied"), Subsystem->Get_SettingValue_Int32(TEXT("reload.a"), 0), 7);
+    AddExpectedError(TEXT("Invalid stored value for GameSettings key"), EAutomationExpectedErrorFlags::Contains, 0);
+    TestFalse(TEXT("invalid saved orphan rejects whole registration batch"), Subsystem->Request_RegisterSettings({
+        FCk_GameSettings_SettingDefinition{TEXT("admission.peer"), ECk_GameSettings_ValueType::String, TEXT("default")},
+        FCk_GameSettings_SettingDefinition{TEXT("reload.bad"), ECk_GameSettings_ValueType::Int32, TEXT("0")}}));
+    TestFalse(TEXT("valid definition prefix was not published"), Subsystem->Get_IsSettingRegistered(TEXT("admission.peer")));
+    TestFalse(TEXT("invalid orphan definition was not published"), Subsystem->Get_IsSettingRegistered(TEXT("reload.bad")));
+    TestTrue(TEXT("rejected admission retains saved orphan for corrected schema"), Subsystem->Request_RegisterSetting(
+        {TEXT("reload.bad"), ECk_GameSettings_ValueType::String, TEXT("default")}));
+    TestEqual(TEXT("retained orphan still applies"), Subsystem->Get_SettingValue_String(TEXT("reload.bad")), TEXT("orphan"));
+    Provider->Set_RejectFlush(false);
+    TestEqual(TEXT("apply retry commits retained session"), Subsystem->Request_ApplyPendingChanges(), 1);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_GameSettings_TenetIntegrity_CallbackCannotMutateAdmittedBatch,
+    "Ck.CkGameSettings.TenetIntegrity.CallbackCannotMutateAdmittedBatch",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+auto
+    FCkTest_GameSettings_TenetIntegrity_CallbackCannotMutateAdmittedBatch::
+    RunTest(
+        const FString&)
+    -> bool
+{
+    auto* Subsystem = ck_game_settings_registry_spec::Make_Subsystem();
+    Subsystem->Request_RegisterSettings({
+        FCk_GameSettings_SettingDefinition{TEXT("atomic.a"), ECk_GameSettings_ValueType::String, TEXT("default.a")}
+            .Set_ApplyBindingType(ECk_GameSettings_ApplyBindingType::Handler),
+        FCk_GameSettings_SettingDefinition{TEXT("atomic.b"), ECk_GameSettings_ValueType::String, TEXT("default.b")}});
+    Subsystem->Request_SetSettingValue_String({TEXT("atomic.a"), TEXT("changed.a")});
+    Subsystem->Request_SetSettingValue_String({TEXT("atomic.b"), TEXT("changed.b")});
+    auto* Callback = NewObject<UCk_GameSettings_SpecCallback_UE>();
+    Callback->Set_Subsystem(Subsystem);
+    auto Handler = FCk_Delegate_GameSettings_ApplyHandler_String{};
+    Handler.BindDynamic(Callback, &UCk_GameSettings_SpecCallback_UE::Request_ApplyAndReenter);
+    Subsystem->Request_RegisterApplyHandler_String(TEXT("atomic.a"), Handler);
+    TestTrue(TEXT("callback batch session begins"), Subsystem->Request_BeginPendingChanges());
+    Callback->Set_Reenter(true);
+    AddExpectedError(TEXT("Nested GameSettings mutation from a settings callback is rejected"), EAutomationExpectedErrorFlags::Contains, 0);
+    TestEqual(TEXT("outer atomic batch completes"), Subsystem->Request_ResetAllToDefaults(), 2);
+    TestFalse(TEXT("nested write explicitly rejected"), Callback->Get_NestedAccepted());
+    TestEqual(TEXT("callback sees whole batch admitted"), Callback->Get_ObservedB(), TEXT("default.b"));
+    TestEqual(TEXT("nested write cannot diverge live state"), Subsystem->Get_SettingValue_String(TEXT("atomic.b")), TEXT("default.b"));
+    TestEqual(TEXT("revert accepts both prior values"), Subsystem->Request_RevertPendingChanges(), 2);
+    TestFalse(TEXT("revert callback observes no pending session changes"), Callback->Get_ObservedPending());
+    TestFalse(TEXT("revert callback observes no pending key prior"), Callback->Get_ObservedUnapplied());
+    TestEqual(TEXT("revert callback sees complete restored batch"), Callback->Get_ObservedB(), TEXT("changed.b"));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_GameSettings_TenetIntegrity_ExternalSetterRejectionIsAtomic,
+    "Ck.CkGameSettings.TenetIntegrity.ExternalSetterRejectionIsAtomic",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+auto
+    FCkTest_GameSettings_TenetIntegrity_ExternalSetterRejectionIsAtomic::
+    RunTest(
+        const FString&)
+    -> bool
+{
+    auto* Subsystem = ck_game_settings_registry_spec::Make_Subsystem();
+    Subsystem->Request_RegisterSettings({
+        FCk_GameSettings_SettingDefinition{TEXT("external.bool"), ECk_GameSettings_ValueType::Bool, TEXT("false")}
+            .Set_PersistencePolicy(ECk_GameSettings_PersistencePolicy::External),
+        FCk_GameSettings_SettingDefinition{TEXT("external.int"), ECk_GameSettings_ValueType::Int32, TEXT("0")}
+            .Set_PersistencePolicy(ECk_GameSettings_PersistencePolicy::External),
+        FCk_GameSettings_SettingDefinition{TEXT("external.float"), ECk_GameSettings_ValueType::Float, TEXT("0")}
+            .Set_PersistencePolicy(ECk_GameSettings_PersistencePolicy::External),
+        FCk_GameSettings_SettingDefinition{TEXT("external.string"), ECk_GameSettings_ValueType::String, TEXT("default")}
+            .Set_PersistencePolicy(ECk_GameSettings_PersistencePolicy::External)});
+    auto* Listener = NewObject<UCk_GameSettings_SpecListener_UE>();
+    auto Changed = FCk_Delegate_GameSettings_OnSettingChanged{};
+    Changed.BindDynamic(Listener, &UCk_GameSettings_SpecListener_UE::OnSettingChanged);
+    Subsystem->BindTo_OnSettingChanged(NAME_None, Changed);
+    Subsystem->Request_BeginPendingChanges();
+    AddExpectedError(TEXT("requires a bound getter and setter"), EAutomationExpectedErrorFlags::Contains, 0);
+    TestFalse(TEXT("missing external pair rejects write"), Subsystem->Request_SetSettingValue_Bool({TEXT("external.bool"), true}));
+    TestFalse(TEXT("missing int pair rejects write"), Subsystem->Request_SetSettingValue_Int32({TEXT("external.int"), 1}));
+    TestFalse(TEXT("missing float pair rejects write"), Subsystem->Request_SetSettingValue_Float({TEXT("external.float"), 1.0f}));
+    TestFalse(TEXT("missing string pair rejects write"), Subsystem->Request_SetSettingValue_String({TEXT("external.string"), TEXT("new")}));
+    TestFalse(TEXT("rejected write records no session prior"), Subsystem->Get_HasPendingChanges());
+    TestEqual(TEXT("rejected write emits no notification"), Listener->Get_FireCount(), 0);
+    auto* Callback = NewObject<UCk_GameSettings_SpecCallback_UE>();
+    auto Getter = FCk_Delegate_GameSettings_ExternalGetter_Bool{};
+    Getter.BindDynamic(Callback, &UCk_GameSettings_SpecCallback_UE::Get_ExternalBool_ForDelegate);
+    auto Setter = FCk_Delegate_GameSettings_ApplyHandler_Bool{};
+    Setter.BindDynamic(Callback, &UCk_GameSettings_SpecCallback_UE::Request_SetBool);
+    TestTrue(TEXT("complete pair accepted"), Subsystem->Request_RegisterExternalAccessors_Bool(TEXT("external.bool"), Getter, Setter));
+    AddExpectedError(TEXT("external accessors require a bound getter and setter"), EAutomationExpectedErrorFlags::Contains, 0);
+    TestFalse(TEXT("incomplete replacement rejected"), Subsystem->Request_RegisterExternalAccessors_Bool(TEXT("external.bool"), Getter, {}));
+    TestTrue(TEXT("prior pair remains usable"), Subsystem->Request_SetSettingValue_Bool({TEXT("external.bool"), true}));
+    TestTrue(TEXT("external store receives accepted value"), Callback->Get_ExternalBool());
+    TestTrue(TEXT("idempotent external write succeeds"), Subsystem->Request_SetSettingValue_Bool({TEXT("external.bool"), true}));
+    TestEqual(TEXT("one external write applied"), Callback->Get_ApplyCount(), 1);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_GameSettings_TenetIntegrity_ResolutionConfirmRejectsInvalidWindow,
+    "Ck.CkGameSettings.TenetIntegrity.ResolutionConfirmRejectsInvalidWindow",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+auto
+    FCkTest_GameSettings_TenetIntegrity_ResolutionConfirmRejectsInvalidWindow::
+    RunTest(
+        const FString&)
+    -> bool
+{
+    auto* Subsystem = ck_game_settings_registry_spec::Make_Subsystem();
+    const auto* UserSettings = GEngine->GetGameUserSettings();
+    const auto Prior = UserSettings != nullptr ? UserSettings->GetScreenResolution() : FIntPoint::ZeroValue;
+    auto* Listener = NewObject<UCk_GameSettings_SpecListener_UE>();
+    auto Changed = FCk_Delegate_GameSettings_OnSettingChanged{};
+    Changed.BindDynamic(Listener, &UCk_GameSettings_SpecListener_UE::OnSettingChanged);
+    Subsystem->BindTo_OnSettingChanged(NAME_None, Changed);
+    AddExpectedError(TEXT("Resolution confirmation duration must be finite and positive"), EAutomationExpectedErrorFlags::Contains, 0);
+    for (const auto Duration : {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
+        -std::numeric_limits<float>::infinity(), 0.0f, -1.0f})
+    {
+        TestFalse(TEXT("invalid duration is rejected"), Subsystem->Request_SetResolutionWithConfirmWindow(TEXT("1280x720"), Duration));
+    }
+    TestEqual(TEXT("no rejected resolution notification"), Listener->Get_FireCount(), 0);
+    if (UserSettings != nullptr)
+    { TestTrue(TEXT("actual user resolution unchanged"), UserSettings->GetScreenResolution() == Prior); }
+    AddExpectedError(TEXT("No resolution confirm window is active"), EAutomationExpectedErrorFlags::Contains, 0);
+    TestFalse(TEXT("rejected requests never arm a confirmation window"), Subsystem->Request_ConfirmResolution());
+    return true;
+}
 
 #endif // WITH_DEV_AUTOMATION_TESTS

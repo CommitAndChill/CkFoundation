@@ -271,7 +271,7 @@ auto
     auto* Subsystem = DoGet_Subsystem(InWorldContextObject);
 
     if (ck::Is_NOT_Valid(Subsystem))
-    { return 0; }
+    { return -1; }
 
     return Subsystem->Request_ResetAllToDefaults();
 }
@@ -475,7 +475,7 @@ auto
     auto* Subsystem = DoGet_Subsystem(InWorldContextObject);
 
     if (ck::Is_NOT_Valid(Subsystem))
-    { return 0; }
+    { return -1; }
 
     return Subsystem->Request_ApplyPendingChanges();
 }
@@ -489,7 +489,7 @@ auto
     auto* Subsystem = DoGet_Subsystem(InWorldContextObject);
 
     if (ck::Is_NOT_Valid(Subsystem))
-    { return 0; }
+    { return -1; }
 
     return Subsystem->Request_RevertPendingChanges();
 }
@@ -616,14 +616,14 @@ auto
     UCk_Utils_GameSettings_UE::
     Request_FlushStorage(
         const UObject* InWorldContextObject)
-    -> void
+    -> bool
 {
     auto* Subsystem = DoGet_Subsystem(InWorldContextObject);
 
     if (ck::Is_NOT_Valid(Subsystem))
-    { return; }
+    { return false; }
 
-    Subsystem->Request_FlushStorage();
+    return Subsystem->Request_FlushStorage();
 }
 
 auto
@@ -635,7 +635,7 @@ auto
     auto* Subsystem = DoGet_Subsystem(InWorldContextObject);
 
     if (ck::Is_NOT_Valid(Subsystem))
-    { return 0; }
+    { return -1; }
 
     return Subsystem->Request_ReloadFromStorage();
 }

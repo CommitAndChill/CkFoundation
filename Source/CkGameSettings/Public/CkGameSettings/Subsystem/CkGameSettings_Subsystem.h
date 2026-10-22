@@ -167,7 +167,7 @@ public:
     Request_ResetToDefault(
         const FCk_Request_GameSettings_ResetToDefault& InRequest);
 
-    /** Returns how many settings actually changed back to their default. */
+    /** Returns how many settings changed back to their default, or -1 if the atomic batch was rejected. */
     UFUNCTION(BlueprintCallable,
               Category = "Ck|GameSettings",
               DisplayName = "[Ck][GameSettings] Request Reset All To Defaults")
@@ -279,14 +279,14 @@ public:
     bool
     Request_BeginPendingChanges();
 
-    /** Commits the session: previewed values stay, priors are discarded, storage is flushed. Returns how many settings were committed. */
+    /** Commits the session: previewed values stay, priors are discarded, storage is flushed. Returns how many settings were committed, or -1 on failure; the session is retained. */
     UFUNCTION(BlueprintCallable,
               Category = "Ck|GameSettings",
               DisplayName = "[Ck][GameSettings] Request Apply Pending Changes")
     int32
     Request_ApplyPendingChanges();
 
-    /** Reverts the session: every recorded prior is re-applied live. Returns how many settings changed back. */
+    /** Reverts the session: every recorded prior is re-applied live. Returns how many settings changed back, or -1 if the atomic batch was rejected. */
     UFUNCTION(BlueprintCallable,
               Category = "Ck|GameSettings",
               DisplayName = "[Ck][GameSettings] Request Revert Pending Changes")
@@ -359,13 +359,13 @@ public:
     UFUNCTION(BlueprintCallable,
               Category = "Ck|GameSettings",
               DisplayName = "[Ck][GameSettings] Request Flush Storage")
-    void
+    bool
     Request_FlushStorage();
 
     /**
      * Re-runs the boot merge against the storage provider: each stored value applies onto its
      * registered definition, or is retained as an orphan for a definition registered later.
-     * Returns how many stored values were read.
+     * Returns how many stored values were read, or -1 on failure; rejection preserves live state.
      */
     UFUNCTION(BlueprintCallable,
               Category = "Ck|GameSettings",
@@ -391,16 +391,27 @@ private:
 
 private:
     auto DoFindValidationFailure(const FCk_GameSettings_SettingDefinition& InDefinition) const -> TOptional<FString>;
-    auto DoResetToDefault(FName InKey) -> bool;
+    friend struct FCk_GameSettings_SpecAccess;
+
+    enum class ECommitResult : uint8
+    {
+        Failed,
+        Unchanged,
+        Changed
+    };
+    auto DoResetToDefault(FName InKey) -> ECommitResult;
+    auto DoGet_IsValueValid(const FCk_GameSettings_SettingDefinition& InDefinition, const FString& InValue) const -> bool;
+    auto DoCommitValues(const TArray<TPair<FName, FString>>& InValues, bool InPersist = true, bool InRecordPending = true,
+        const TMap<FName, FString>* InMachineOrphans = nullptr, const TMap<FName, FString>* InPlayerOrphans = nullptr,
+        bool InClosePendingSession = false) -> int32;
     auto DoFireChanged(FName InKey, const FString& InNewValue) -> void;
 
     auto DoGet_CurrentValueString(FName InKey, const FCk_GameSettings_SettingDefinition& InDefinition) const -> FString;
-    auto DoCommitValue(FName InKey, const FCk_GameSettings_SettingDefinition& InDefinition, const FString& InNewValueString) -> bool;
+    auto DoCommitValue(FName InKey, const FCk_GameSettings_SettingDefinition& InDefinition, const FString& InNewValueString) -> ECommitResult;
     auto DoRouteApply(FName InKey, const FCk_GameSettings_SettingDefinition& InDefinition, const FString& InValueString) -> void;
-    auto DoConsumeOrphanOrDefault(FName InKey, const FCk_GameSettings_SettingDefinition& InDefinition) -> void;
-    auto DoAbsorbStoredValues(ECk_GameSettings_Scope InScope) -> int32;
+    auto DoAbsorbStoredValues() -> int32;
     auto DoHandleTick() -> void;
-    auto DoFlush() -> void;
+    auto DoFlush() -> bool;
     auto DoHandlePreLoadMap(const FWorldContext& InWorldContext, const FString& InMapName) -> void;
 
     static auto DoGet_IsPieWorldContext(const UGameInstance* InGameInstance) -> bool;
@@ -432,6 +443,7 @@ private:
     UPROPERTY(Transient)
     TArray<TObjectPtr<UObject>> _PackHandlerObjects;
 
+    bool _MutationInProgress = false;
     bool _PendingSessionActive = false;
     TMap<FName, FString> _PendingPriorValues;
 

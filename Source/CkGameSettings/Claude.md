@@ -67,13 +67,36 @@ from these).
 - Storage provider: `UCk_GameSettings_StorageProvider_UE` (Abstract, BlueprintNativeEvents — AS/BP
   implementable). Default: ordered hand-serialized ini at
   `Saved/Config/<Platform>/CkGameSettings.ini` ([Machine]/[Player.<Id>] sections, unknown lines
-  preserved, atomic flush). Flush is debounced (2s), plus engine-pre-exit /
-  app-deactivate / `Request_FlushStorage`. `Request_ReloadFromStorage` re-runs the boot merge.
+  preserved, atomic flush). Repeated recognized `[Machine]` or canonical `[Player.<Id>]`
+  sections reject the whole load; distinct or duplicate keys do not change that rule. Recognition
+  is case-sensitive, matching section reads and writes. Differently cased names remain opaque. Unknown
+  sections may repeat, and raw handwritten lines such as `=value` remain opaque and preserved.
+  Flush is debounced (2s), plus engine-pre-exit /
+  app-deactivate / `Request_FlushStorage` (bool outcome). `Request_ReloadFromStorage` re-runs the boot merge
+  and returns -1 on rejection. Provider reads return `ECk_GameSettings_StorageReadResult` plus an ordered
+  output array: `NotFound` is authoritative absence; unreadable existing storage is `Failed`, never empty
+  success. Store/remove/flush return bool; `Request_StoreValues` atomically accepts scoped user/key/value
+  rows and rejects duplicates. Custom providers must implement the batch contract; there is no sequential
+  success adapter. The ini cache publishes only after a whole successful read; failed reads remain retryable.
+  Temp writes use UE file I/O; physical installation uses same-directory native replacement on Win64/Mac/Linux
+  (Windows MoveFileExW without cross-volume copy, POSIX rename). This deliberately bypasses move-specific
+  virtual/quota wrappers and makes no power-loss durability promise. Failed installation retains the original
+  and dirty cache; stale temporary files are never promoted at startup. Unreadable storage, disk-full/temp-write
+  failure, native installation failure, and provider rejection are operational/player-facing outcomes: they use
+  ordinary result branches in every configuration, including Shipping, never ensures. Callers receive read
+  status, bool success, or -1 from count APIs and can report the failure. Ensures diagnose programmer invariants
+  such as invalid declarations/request keys/types or forbidden callback reentry. Malformed or duplicate
+  persisted keys and invalid stored values are ordinary whole-load failures in every build, with explicit
+  error diagnostics; live values, orphan maps, and pending session state remain unchanged.
 
 ### Sessions + packs
 - Pending-changes session: `Request_BeginPendingChanges` → sets apply LIVE but record priors →
   `Request_ApplyPendingChanges` (commit + flush) / `Request_RevertPendingChanges` (re-apply
-  priors). Single session at a time.
+  priors). Single session at a time. Reset-all/revert are atomic admissions across keys and scopes; count APIs
+  return -1 on rejection. Failed apply/flush retains the session and dirty state. All Provider-policy current values are
+  admitted before callbacks; external stores receive post-commit commands and are not a cross-system transaction. Apply handlers/external setters are non-failing post-commit commands; checked
+  builds reject nested settings mutation during callbacks through the ensure failure body. This guard is
+  intentionally omitted in Shipping. External accessor registration requires a bound getter/setter pair.
 - `Request_RegisterAudioPack` (config: SoundMix + per-category SoundClass/key/default) — one Float
   volume setting per category driving `SetSoundMixClassOverride`, stamped 0..100 percent for
   display. `Request_RegisterVideoPack` — 12 External `video.*` keys over
@@ -87,7 +110,7 @@ from these).
   means turning the init-time toggle OFF and calling the pack explicitly, so the game registers
   first (BusterBlock's `BB_GameSettings_Video.as` is the reference adopter).
 - `Request_RunHardwareBenchmark` (headless no-op), `Request_SetResolutionWithConfirmWindow` +
-  `Request_ConfirmResolution` (expiry reverts; nothing saved until confirm/revert).
+  `Request_ConfirmResolution` (finite positive window required; expiry reverts; nothing saved until confirm/revert).
 
 ### Widget layer (`UI/`, optional)
 The native widgets own PLUMBING only — the WBP owns every tree (no hidden code-built fallbacks,
@@ -156,6 +179,13 @@ null-guarded in C++:
 no-pattern suite excludes name-based `Ck.*` families) + 9 `Ck_AutoTest_GameSettings_*` AS
 AutoTests in CkTests. Gym: "Game Settings" (CkTests) — plumbing surface; styling verification
 belongs to the consuming game's WBPs.
+
+`Ck.CkGameSettings.TenetIntegrity` adds atomic batch/reload/session, callback rejection, external-pair,
+and invalid confirmation-window regressions. Real-file parser cases reject repeated Machine/Player
+sections without publishing values or changing bytes, retry after correction, and preserve repeated
+unknown sections plus raw handwritten lines during a successful rewrite. Windows-only real-file cases deny initial reads and deny
+replacement of the locked original after proving the separate temporary write completed; they verify
+original bytes and same-provider retry after the destination lock is released.
 
 ## See also
 

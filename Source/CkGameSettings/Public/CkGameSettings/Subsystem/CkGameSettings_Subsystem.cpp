@@ -17,6 +17,7 @@
 #include <Engine/GameInstance.h>
 #include <GameFramework/GameUserSettings.h>
 #include <Misc/CoreDelegates.h>
+#include <Templates/UnrealTemplate.h>
 #include <UObject/UObjectGlobals.h>
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -230,16 +231,13 @@ auto
     _IsPieInstance = DoGet_IsPieWorldContext(GetGameInstance());
 
     auto* ResolvedProviderClass = UCk_Utils_GameSettings_Settings_UE::Get_StorageProviderClass().LoadSynchronous();
-    const auto ProviderClassIsUsable = ck::IsValid(ResolvedProviderClass) && NOT ResolvedProviderClass->HasAnyClassFlags(CLASS_Abstract);
-    CK_ENSURE_IF_NOT(ProviderClassIsUsable, TEXT("GameSettings StorageProviderClass is unset, unloadable, or abstract — falling back to the ini provider"))
+    CK_ENSURE_IF_NOT(ck::IsValid(ResolvedProviderClass) && NOT ResolvedProviderClass->HasAnyClassFlags(CLASS_Abstract), TEXT("GameSettings StorageProviderClass is unset, unloadable, or abstract — falling back to the ini provider"))
     { ResolvedProviderClass = UCk_GameSettings_IniStorageProvider_UE::StaticClass(); }
 
     _StorageProvider = NewObject<UCk_GameSettings_StorageProvider_UE>(this, ResolvedProviderClass);
 
-    const auto MachineValueCount = DoAbsorbStoredValues(ECk_GameSettings_Scope::Machine);
-    const auto PlayerValueCount = DoAbsorbStoredValues(ECk_GameSettings_Scope::Player);
-    ck::game_settings::Display(TEXT("GameSettings boot: loaded [{}] Machine and [{}] Player.0 stored value(s) from the storage provider"),
-        MachineValueCount, PlayerValueCount);
+    const auto LoadedCount = DoAbsorbStoredValues();
+    ck::game_settings::Display(TEXT("GameSettings boot stored-value result [{}] (-1 means rejected)"), LoadedCount);
 
     if (_IsPieInstance)
     {
@@ -334,6 +332,9 @@ auto
         const FCk_GameSettings_SettingDefinition& InDefinition)
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
     return Request_RegisterSettings(TArray<FCk_GameSettings_SettingDefinition>{InDefinition});
 }
 
@@ -343,46 +344,64 @@ auto
         const TArray<FCk_GameSettings_SettingDefinition>& InDefinitions)
     -> bool
 {
-    auto FailureReason = FString{};
-    auto BatchKeys = TSet<FName>{};
-
-    for (const auto& Definition : InDefinitions)
-    {
-        if (const auto ValidationFailure = DoFindValidationFailure(Definition);
-            ValidationFailure.IsSet())
-        {
-            FailureReason = ValidationFailure.GetValue();
-            break;
-        }
-
-        const auto Key = Definition.Get_Key();
-
-        if (_Definitions.Contains(Key) || BatchKeys.Contains(Key))
-        {
-            FailureReason = ck::Format_UE(TEXT("Setting key [{}] is already registered"), Key);
-            break;
-        }
-
-        BatchKeys.Add(Key);
-    }
-
-    const auto AllValid = FailureReason.IsEmpty();
-    CK_ENSURE_IF_NOT(AllValid, TEXT("GameSettings registration rejected, nothing was registered: {}"), FailureReason)
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
     { return false; }
-
-    for (const auto& Definition : InDefinitions)
+#if NOT CK_DISABLE_ENSURE_CHECKS
+    const auto MutationGuard = TGuardValue<bool>{_MutationInProgress, true};
+#endif
+    const auto Definitions = InDefinitions;
+#if NOT CK_DISABLE_ENSURE_CHECKS
+    auto Keys = TSet<FName>{};
+#endif
+    auto InitialValues = TMap<FName, FString>{};
+    for (const auto& Definition : Definitions)
+    {
+#if NOT CK_DISABLE_ENSURE_CHECKS
+        const auto ValidationFailure = DoFindValidationFailure(Definition);
+        CK_ENSURE_IF_NOT(NOT ValidationFailure.IsSet(), TEXT("Invalid GameSettings definition, nothing was registered: {}"), ValidationFailure.GetValue())
+        { return false; }
+#endif
+        const auto Key = Definition.Get_Key();
+        CK_ENSURE_IF_NOT(NOT _Definitions.Contains(Key) && NOT Keys.Contains(Key), TEXT("Setting key [{}] is already registered"), Key)
+        { return false; }
+#if NOT CK_DISABLE_ENSURE_CHECKS
+        Keys.Add(Key);
+#endif
+        if (Definition.Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::Provider)
+        {
+            const auto& Orphans = Definition.Get_Scope() == ECk_GameSettings_Scope::Machine ? _OrphanValues_Machine : _OrphanValues_Player0;
+            if (const auto* Orphan = Orphans.Find(Key))
+            {
+                if (NOT DoGet_IsValueValid(Definition, *Orphan))
+                {
+                    ck::game_settings::Error(TEXT("Invalid stored value for GameSettings key [{}], nothing was registered"), Key);
+                    return false;
+                }
+                InitialValues.Add(Key, *Orphan);
+            }
+        }
+    }
+    for (const auto& Definition : Definitions)
     {
         const auto Key = Definition.Get_Key();
-
         _Definitions.Add(Key, Definition);
-        _CurrentValues.Add(Key, Definition.Get_DefaultValue());
+        _CurrentValues.Add(Key, InitialValues.Contains(Key) ? InitialValues.FindChecked(Key) : Definition.Get_DefaultValue());
         _RegistrationOrder.Add(Key);
-
-        DoConsumeOrphanOrDefault(Key, Definition);
+        if (InitialValues.Contains(Key))
+        {
+            auto& Orphans = Definition.Get_Scope() == ECk_GameSettings_Scope::Machine ? _OrphanValues_Machine : _OrphanValues_Player0;
+            Orphans.Remove(Key);
+        }
     }
-
+    for (const auto& Definition : Definitions)
+    {
+        if (const auto* Initial = InitialValues.Find(Definition.Get_Key()))
+        { DoRouteApply(Definition.Get_Key(), Definition, *Initial); }
+    }
     return true;
 }
+
+// --------------------------------------------------------------------------------------------------------------------
 
 auto
     UCk_GameSettings_Subsystem_UE::
@@ -390,8 +409,10 @@ auto
         const UCk_GameSettings_Collection_PDA* InCollection)
     -> bool
 {
-    const auto CollectionIsValid = ck::IsValid(InCollection);
-    CK_ENSURE_IF_NOT(CollectionIsValid, TEXT("Invalid GameSettings Collection, nothing was registered"))
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
+    CK_ENSURE_IF_NOT(ck::IsValid(InCollection), TEXT("Invalid GameSettings Collection, nothing was registered"))
     { return false; }
 
     return Request_RegisterSettings(InCollection->Get_Settings());
@@ -408,19 +429,16 @@ auto
 {
     const auto* Definition = _Definitions.Find(InKey);
 
-    const auto IsRegistered = Definition != nullptr;
-    CK_ENSURE_IF_NOT(IsRegistered, TEXT("Cannot read GameSettings key [{}], it is not registered"), InKey)
+    CK_ENSURE_IF_NOT(Definition != nullptr, TEXT("Cannot read GameSettings key [{}], it is not registered"), InKey)
     { return InFallback; }
 
-    const auto TypeMatches = Definition->Get_ValueType() == ECk_GameSettings_ValueType::Bool;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot read GameSettings key [{}] as Bool, its value type is [{}]"), InKey, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition->Get_ValueType() == ECk_GameSettings_ValueType::Bool, TEXT("Cannot read GameSettings key [{}] as Bool, its value type is [{}]"), InKey, Definition->Get_ValueType())
     { return InFallback; }
 
     if (Definition->Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::External)
     {
         const auto* Getter = _ExternalGetters_Bool.Find(InKey);
-        const auto GetterIsBound = Getter != nullptr && Getter->IsBound();
-        CK_ENSURE_IF_NOT(GetterIsBound, TEXT("External GameSettings key [{}] has no registered external getter"), InKey)
+        CK_ENSURE_IF_NOT(Getter != nullptr && Getter->IsBound(), TEXT("External GameSettings key [{}] has no registered external getter"), InKey)
         { return InFallback; }
 
         return Getter->Execute();
@@ -443,19 +461,16 @@ auto
 {
     const auto* Definition = _Definitions.Find(InKey);
 
-    const auto IsRegistered = Definition != nullptr;
-    CK_ENSURE_IF_NOT(IsRegistered, TEXT("Cannot read GameSettings key [{}], it is not registered"), InKey)
+    CK_ENSURE_IF_NOT(Definition != nullptr, TEXT("Cannot read GameSettings key [{}], it is not registered"), InKey)
     { return InFallback; }
 
-    const auto TypeMatches = Definition->Get_ValueType() == ECk_GameSettings_ValueType::Int32;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot read GameSettings key [{}] as Int32, its value type is [{}]"), InKey, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition->Get_ValueType() == ECk_GameSettings_ValueType::Int32, TEXT("Cannot read GameSettings key [{}] as Int32, its value type is [{}]"), InKey, Definition->Get_ValueType())
     { return InFallback; }
 
     if (Definition->Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::External)
     {
         const auto* Getter = _ExternalGetters_Int32.Find(InKey);
-        const auto GetterIsBound = Getter != nullptr && Getter->IsBound();
-        CK_ENSURE_IF_NOT(GetterIsBound, TEXT("External GameSettings key [{}] has no registered external getter"), InKey)
+        CK_ENSURE_IF_NOT(Getter != nullptr && Getter->IsBound(), TEXT("External GameSettings key [{}] has no registered external getter"), InKey)
         { return InFallback; }
 
         return Getter->Execute();
@@ -478,19 +493,16 @@ auto
 {
     const auto* Definition = _Definitions.Find(InKey);
 
-    const auto IsRegistered = Definition != nullptr;
-    CK_ENSURE_IF_NOT(IsRegistered, TEXT("Cannot read GameSettings key [{}], it is not registered"), InKey)
+    CK_ENSURE_IF_NOT(Definition != nullptr, TEXT("Cannot read GameSettings key [{}], it is not registered"), InKey)
     { return InFallback; }
 
-    const auto TypeMatches = Definition->Get_ValueType() == ECk_GameSettings_ValueType::Float;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot read GameSettings key [{}] as Float, its value type is [{}]"), InKey, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition->Get_ValueType() == ECk_GameSettings_ValueType::Float, TEXT("Cannot read GameSettings key [{}] as Float, its value type is [{}]"), InKey, Definition->Get_ValueType())
     { return InFallback; }
 
     if (Definition->Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::External)
     {
         const auto* Getter = _ExternalGetters_Float.Find(InKey);
-        const auto GetterIsBound = Getter != nullptr && Getter->IsBound();
-        CK_ENSURE_IF_NOT(GetterIsBound, TEXT("External GameSettings key [{}] has no registered external getter"), InKey)
+        CK_ENSURE_IF_NOT(Getter != nullptr && Getter->IsBound(), TEXT("External GameSettings key [{}] has no registered external getter"), InKey)
         { return InFallback; }
 
         return Getter->Execute();
@@ -513,19 +525,16 @@ auto
 {
     const auto* Definition = _Definitions.Find(InKey);
 
-    const auto IsRegistered = Definition != nullptr;
-    CK_ENSURE_IF_NOT(IsRegistered, TEXT("Cannot read GameSettings key [{}], it is not registered"), InKey)
+    CK_ENSURE_IF_NOT(Definition != nullptr, TEXT("Cannot read GameSettings key [{}], it is not registered"), InKey)
     { return InFallback; }
 
-    const auto TypeMatches = Definition->Get_ValueType() == ECk_GameSettings_ValueType::String;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot read GameSettings key [{}] as String, its value type is [{}]"), InKey, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition->Get_ValueType() == ECk_GameSettings_ValueType::String, TEXT("Cannot read GameSettings key [{}] as String, its value type is [{}]"), InKey, Definition->Get_ValueType())
     { return InFallback; }
 
     if (Definition->Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::External)
     {
         const auto* Getter = _ExternalGetters_String.Find(InKey);
-        const auto GetterIsBound = Getter != nullptr && Getter->IsBound();
-        CK_ENSURE_IF_NOT(GetterIsBound, TEXT("External GameSettings key [{}] has no registered external getter"), InKey)
+        CK_ENSURE_IF_NOT(Getter != nullptr && Getter->IsBound(), TEXT("External GameSettings key [{}] has no registered external getter"), InKey)
         { return InFallback; }
 
         return Getter->Execute();
@@ -592,24 +601,23 @@ auto
         const FCk_Request_GameSettings_SetValue_Bool& InRequest)
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
     const auto Key = InRequest.Get_Key();
     const auto* Definition = _Definitions.Find(Key);
 
-    const auto IsRegistered = Definition != nullptr;
-    CK_ENSURE_IF_NOT(IsRegistered, TEXT("Cannot set GameSettings key [{}], it is not registered"), Key)
+    CK_ENSURE_IF_NOT(Definition != nullptr, TEXT("Cannot set GameSettings key [{}], it is not registered"), Key)
     { return false; }
 
-    const auto TypeMatches = Definition->Get_ValueType() == ECk_GameSettings_ValueType::Bool;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot set GameSettings key [{}] as Bool, its value type is [{}]"), Key, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition->Get_ValueType() == ECk_GameSettings_ValueType::Bool, TEXT("Cannot set GameSettings key [{}] as Bool, its value type is [{}]"), Key, Definition->Get_ValueType())
     { return false; }
 
-    const auto MatchesOptions = Definition->Get_Options().IsEmpty() ||
-        ck_game_settings_subsystem::Get_MatchesAnyOption(Definition->Get_Options(), InRequest.Get_Value(), &ck_game_settings_subsystem::TryParse_Bool);
-    CK_ENSURE_IF_NOT(MatchesOptions, TEXT("Cannot set GameSettings key [{}], value [{}] is not one of the allowed options"), Key, InRequest.Get_Value())
+    CK_ENSURE_IF_NOT(Definition->Get_Options().IsEmpty() ||
+        ck_game_settings_subsystem::Get_MatchesAnyOption(Definition->Get_Options(), InRequest.Get_Value(), &ck_game_settings_subsystem::TryParse_Bool), TEXT("Cannot set GameSettings key [{}], value [{}] is not one of the allowed options"), Key, InRequest.Get_Value())
     { return false; }
 
-    DoCommitValue(Key, *Definition, LexToString(InRequest.Get_Value()));
-    return true;
+    return DoCommitValue(Key, *Definition, LexToString(InRequest.Get_Value())) != ECommitResult::Failed;
 }
 
 auto
@@ -618,19 +626,21 @@ auto
         const FCk_Request_GameSettings_SetValue_Int32& InRequest)
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
     const auto Key = InRequest.Get_Key();
     const auto* Definition = _Definitions.Find(Key);
 
-    const auto IsRegistered = Definition != nullptr;
-    CK_ENSURE_IF_NOT(IsRegistered, TEXT("Cannot set GameSettings key [{}], it is not registered"), Key)
+    CK_ENSURE_IF_NOT(Definition != nullptr, TEXT("Cannot set GameSettings key [{}], it is not registered"), Key)
     { return false; }
 
-    const auto TypeMatches = Definition->Get_ValueType() == ECk_GameSettings_ValueType::Int32;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot set GameSettings key [{}] as Int32, its value type is [{}]"), Key, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition->Get_ValueType() == ECk_GameSettings_ValueType::Int32, TEXT("Cannot set GameSettings key [{}] as Int32, its value type is [{}]"), Key, Definition->Get_ValueType())
     { return false; }
 
     const auto NewValue = InRequest.Get_Value();
 
+#if NOT CK_DISABLE_ENSURE_CHECKS
     auto MinValue = int32{};
     const auto BelowMin = NOT Definition->Get_MinValue().IsEmpty() &&
         ck_game_settings_subsystem::TryParse_Int32(Definition->Get_MinValue(), MinValue) &&
@@ -645,14 +655,13 @@ auto
     CK_ENSURE_IF_NOT(InRange, TEXT("Cannot set GameSettings key [{}], value [{}] is outside the allowed range [{} .. {}]"),
         Key, NewValue, Definition->Get_MinValue(), Definition->Get_MaxValue())
     { return false; }
+#endif
 
-    const auto MatchesOptions = Definition->Get_Options().IsEmpty() ||
-        ck_game_settings_subsystem::Get_MatchesAnyOption(Definition->Get_Options(), NewValue, &ck_game_settings_subsystem::TryParse_Int32);
-    CK_ENSURE_IF_NOT(MatchesOptions, TEXT("Cannot set GameSettings key [{}], value [{}] is not one of the allowed options"), Key, NewValue)
+    CK_ENSURE_IF_NOT(Definition->Get_Options().IsEmpty() ||
+        ck_game_settings_subsystem::Get_MatchesAnyOption(Definition->Get_Options(), NewValue, &ck_game_settings_subsystem::TryParse_Int32), TEXT("Cannot set GameSettings key [{}], value [{}] is not one of the allowed options"), Key, NewValue)
     { return false; }
 
-    DoCommitValue(Key, *Definition, LexToString(NewValue));
-    return true;
+    return DoCommitValue(Key, *Definition, LexToString(NewValue)) != ECommitResult::Failed;
 }
 
 auto
@@ -661,19 +670,21 @@ auto
         const FCk_Request_GameSettings_SetValue_Float& InRequest)
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
     const auto Key = InRequest.Get_Key();
     const auto* Definition = _Definitions.Find(Key);
 
-    const auto IsRegistered = Definition != nullptr;
-    CK_ENSURE_IF_NOT(IsRegistered, TEXT("Cannot set GameSettings key [{}], it is not registered"), Key)
+    CK_ENSURE_IF_NOT(Definition != nullptr, TEXT("Cannot set GameSettings key [{}], it is not registered"), Key)
     { return false; }
 
-    const auto TypeMatches = Definition->Get_ValueType() == ECk_GameSettings_ValueType::Float;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot set GameSettings key [{}] as Float, its value type is [{}]"), Key, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition->Get_ValueType() == ECk_GameSettings_ValueType::Float, TEXT("Cannot set GameSettings key [{}] as Float, its value type is [{}]"), Key, Definition->Get_ValueType())
     { return false; }
 
     const auto NewValue = InRequest.Get_Value();
 
+#if NOT CK_DISABLE_ENSURE_CHECKS
     auto MinValue = float{};
     const auto BelowMin = NOT Definition->Get_MinValue().IsEmpty() &&
         ck_game_settings_subsystem::TryParse_Float(Definition->Get_MinValue(), MinValue) &&
@@ -688,14 +699,13 @@ auto
     CK_ENSURE_IF_NOT(InRange, TEXT("Cannot set GameSettings key [{}], value [{}] is outside the allowed range [{} .. {}]"),
         Key, NewValue, Definition->Get_MinValue(), Definition->Get_MaxValue())
     { return false; }
+#endif
 
-    const auto MatchesOptions = Definition->Get_Options().IsEmpty() ||
-        ck_game_settings_subsystem::Get_MatchesAnyOption(Definition->Get_Options(), NewValue, &ck_game_settings_subsystem::TryParse_Float);
-    CK_ENSURE_IF_NOT(MatchesOptions, TEXT("Cannot set GameSettings key [{}], value [{}] is not one of the allowed options"), Key, NewValue)
+    CK_ENSURE_IF_NOT(Definition->Get_Options().IsEmpty() ||
+        ck_game_settings_subsystem::Get_MatchesAnyOption(Definition->Get_Options(), NewValue, &ck_game_settings_subsystem::TryParse_Float), TEXT("Cannot set GameSettings key [{}], value [{}] is not one of the allowed options"), Key, NewValue)
     { return false; }
 
-    DoCommitValue(Key, *Definition, LexToString(NewValue));
-    return true;
+    return DoCommitValue(Key, *Definition, LexToString(NewValue)) != ECommitResult::Failed;
 }
 
 auto
@@ -704,33 +714,31 @@ auto
         const FCk_Request_GameSettings_SetValue_String& InRequest)
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
     const auto Key = InRequest.Get_Key();
     const auto* Definition = _Definitions.Find(Key);
 
-    const auto IsRegistered = Definition != nullptr;
-    CK_ENSURE_IF_NOT(IsRegistered, TEXT("Cannot set GameSettings key [{}], it is not registered"), Key)
+    CK_ENSURE_IF_NOT(Definition != nullptr, TEXT("Cannot set GameSettings key [{}], it is not registered"), Key)
     { return false; }
 
-    const auto TypeMatches = Definition->Get_ValueType() == ECk_GameSettings_ValueType::String;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot set GameSettings key [{}] as String, its value type is [{}]"), Key, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition->Get_ValueType() == ECk_GameSettings_ValueType::String, TEXT("Cannot set GameSettings key [{}] as String, its value type is [{}]"), Key, Definition->Get_ValueType())
     { return false; }
 
     const auto& NewValue = InRequest.Get_Value();
 
-    const auto ValueHasNewline = NewValue.Contains(TEXT("\n")) || NewValue.Contains(TEXT("\r"));
-    CK_ENSURE_IF_NOT(NOT ValueHasNewline, TEXT("Cannot set GameSettings key [{}], the value contains a newline"), Key)
+    CK_ENSURE_IF_NOT(NOT NewValue.Contains(TEXT("\n")) && NOT NewValue.Contains(TEXT("\r")), TEXT("Cannot set GameSettings key [{}], the value contains a newline"), Key)
     { return false; }
 
-    const auto MatchesOptions = Definition->Get_Options().IsEmpty() ||
+    CK_ENSURE_IF_NOT(Definition->Get_Options().IsEmpty() ||
         ck::algo::AnyOf(Definition->Get_Options(), [&](const FCk_GameSettings_SettingOption& InOption)
         {
             return InOption.Get_Value().Equals(NewValue);
-        });
-    CK_ENSURE_IF_NOT(MatchesOptions, TEXT("Cannot set GameSettings key [{}], value [{}] is not one of the allowed options"), Key, NewValue)
+        }), TEXT("Cannot set GameSettings key [{}], value [{}] is not one of the allowed options"), Key, NewValue)
     { return false; }
 
-    DoCommitValue(Key, *Definition, NewValue);
-    return true;
+    return DoCommitValue(Key, *Definition, NewValue) != ECommitResult::Failed;
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -741,20 +749,20 @@ auto
         const FCk_Request_GameSettings_ResetToDefault& InRequest)
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
     const auto Key = InRequest.Get_Key();
 
-    const auto IsRegistered = _Definitions.Contains(Key);
-    CK_ENSURE_IF_NOT(IsRegistered, TEXT("Cannot reset GameSettings key [{}], it is not registered"), Key)
+    CK_ENSURE_IF_NOT(_Definitions.Contains(Key), TEXT("Cannot reset GameSettings key [{}], it is not registered"), Key)
     { return false; }
 
     // External values live in their external store (e.g. GameUserSettings); the schema default is
     // a placeholder, and "resetting" to it would destroy real user configuration.
-    const auto IsProviderPolicy = _Definitions.FindChecked(Key).Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::Provider;
-    CK_ENSURE_IF_NOT(IsProviderPolicy, TEXT("Cannot reset External GameSettings key [{}], its value is owned by the external store"), Key)
+    CK_ENSURE_IF_NOT(_Definitions.FindChecked(Key).Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::Provider, TEXT("Cannot reset External GameSettings key [{}], its value is owned by the external store"), Key)
     { return false; }
 
-    DoResetToDefault(Key);
-    return true;
+    return DoResetToDefault(Key) != ECommitResult::Failed;
 }
 
 auto
@@ -762,21 +770,20 @@ auto
     Request_ResetAllToDefaults()
     -> int32
 {
-    auto ResetCount = int32{0};
-
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return -1; }
+    auto Values = TArray<TPair<FName, FString>>{};
     for (const auto& Key : _RegistrationOrder)
     {
-        if (_Definitions.FindChecked(Key).Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::External)
-        { continue; }
-
-        if (DoResetToDefault(Key))
-        { ++ResetCount; }
+        const auto& Definition = _Definitions.FindChecked(Key);
+        if (Definition.Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::Provider)
+        { Values.Emplace(Key, Definition.Get_DefaultValue()); }
     }
-
-    return ResetCount;
+    return DoCommitValues(Values);
 }
 
 // --------------------------------------------------------------------------------------------------------------------
+
 
 auto
     UCk_GameSettings_Subsystem_UE::
@@ -859,7 +866,7 @@ auto
     UCk_GameSettings_Subsystem_UE::
     DoResetToDefault(
         FName InKey)
-    -> bool
+    -> ECommitResult
 {
     const auto& Definition = _Definitions.FindChecked(InKey);
     return DoCommitValue(InKey, Definition, Definition.Get_DefaultValue());
@@ -872,11 +879,13 @@ auto
         const FString& InNewValue)
     -> void
 {
-    if (auto* PerKeyBindings = _ChangeBindings.Find(InKey))
-    { PerKeyBindings->Broadcast(InKey, InNewValue); }
-
-    if (auto* WildcardBindings = _ChangeBindings.Find(NAME_None))
-    { WildcardBindings->Broadcast(InKey, InNewValue); }
+#if NOT CK_DISABLE_ENSURE_CHECKS
+    const auto Guard = TGuardValue<bool>{_MutationInProgress, true};
+#endif
+    const auto PerKeyBindings = _ChangeBindings.FindRef(InKey);
+    const auto WildcardBindings = _ChangeBindings.FindRef(NAME_None);
+    PerKeyBindings.Broadcast(InKey, InNewValue);
+    WildcardBindings.Broadcast(InKey, InNewValue);
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -888,10 +897,12 @@ auto
         const FCk_Delegate_GameSettings_ApplyHandler_Bool& InHandler)
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
     const auto* Definition = _Definitions.Find(InKey);
 
-    const auto TypeMatches = Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::Bool;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot register a Bool apply handler for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::Bool, TEXT("Cannot register a Bool apply handler for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
     { return false; }
 
     _ApplyHandlers_Bool.Add(InKey, InHandler);
@@ -902,7 +913,13 @@ auto
     {
         auto Value = false;
         if (ck_game_settings_subsystem::TryParse_Bool(_CurrentValues.FindChecked(InKey), Value))
-        { InHandler.ExecuteIfBound(Value); }
+        {
+            auto Callback = InHandler;
+#if NOT CK_DISABLE_ENSURE_CHECKS
+            const auto Guard = TGuardValue<bool>{_MutationInProgress, true};
+#endif
+            Callback.ExecuteIfBound(Value);
+        }
     }
 
     return true;
@@ -915,10 +932,12 @@ auto
         const FCk_Delegate_GameSettings_ApplyHandler_Int32& InHandler)
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
     const auto* Definition = _Definitions.Find(InKey);
 
-    const auto TypeMatches = Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::Int32;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot register an Int32 apply handler for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::Int32, TEXT("Cannot register an Int32 apply handler for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
     { return false; }
 
     _ApplyHandlers_Int32.Add(InKey, InHandler);
@@ -929,7 +948,13 @@ auto
     {
         auto Value = int32{};
         if (ck_game_settings_subsystem::TryParse_Int32(_CurrentValues.FindChecked(InKey), Value))
-        { InHandler.ExecuteIfBound(Value); }
+        {
+            auto Callback = InHandler;
+#if NOT CK_DISABLE_ENSURE_CHECKS
+            const auto Guard = TGuardValue<bool>{_MutationInProgress, true};
+#endif
+            Callback.ExecuteIfBound(Value);
+        }
     }
 
     return true;
@@ -942,10 +967,12 @@ auto
         const FCk_Delegate_GameSettings_ApplyHandler_Float& InHandler)
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
     const auto* Definition = _Definitions.Find(InKey);
 
-    const auto TypeMatches = Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::Float;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot register a Float apply handler for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::Float, TEXT("Cannot register a Float apply handler for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
     { return false; }
 
     _ApplyHandlers_Float.Add(InKey, InHandler);
@@ -956,7 +983,13 @@ auto
     {
         auto Value = float{};
         if (ck_game_settings_subsystem::TryParse_Float(_CurrentValues.FindChecked(InKey), Value))
-        { InHandler.ExecuteIfBound(Value); }
+        {
+            auto Callback = InHandler;
+#if NOT CK_DISABLE_ENSURE_CHECKS
+            const auto Guard = TGuardValue<bool>{_MutationInProgress, true};
+#endif
+            Callback.ExecuteIfBound(Value);
+        }
     }
 
     return true;
@@ -969,10 +1002,12 @@ auto
         const FCk_Delegate_GameSettings_ApplyHandler_String& InHandler)
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
     const auto* Definition = _Definitions.Find(InKey);
 
-    const auto TypeMatches = Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::String;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot register a String apply handler for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::String, TEXT("Cannot register a String apply handler for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
     { return false; }
 
     _ApplyHandlers_String.Add(InKey, InHandler);
@@ -981,7 +1016,12 @@ auto
         Definition->Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::Provider &&
         Definition->Get_ApplyBindingType() == ECk_GameSettings_ApplyBindingType::Handler)
     {
-        InHandler.ExecuteIfBound(_CurrentValues.FindChecked(InKey));
+        auto Callback = InHandler;
+        const auto Value = _CurrentValues.FindChecked(InKey);
+#if NOT CK_DISABLE_ENSURE_CHECKS
+        const auto Guard = TGuardValue<bool>{_MutationInProgress, true};
+#endif
+        Callback.ExecuteIfBound(Value);
     }
 
     return true;
@@ -997,10 +1037,16 @@ auto
         const FCk_Delegate_GameSettings_ApplyHandler_Bool& InSetter)
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
     const auto* Definition = _Definitions.Find(InKey);
 
-    const auto TypeMatches = Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::Bool;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot register Bool external accessors for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::Bool, TEXT("Cannot register Bool external accessors for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
+    { return false; }
+
+    CK_ENSURE_IF_NOT(InGetter.IsBound() && InSetter.IsBound(),
+        TEXT("GameSettings external accessors require a bound getter and setter for [{}]"), InKey)
     { return false; }
 
     _ExternalGetters_Bool.Add(InKey, InGetter);
@@ -1016,10 +1062,16 @@ auto
         const FCk_Delegate_GameSettings_ApplyHandler_Int32& InSetter)
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
     const auto* Definition = _Definitions.Find(InKey);
 
-    const auto TypeMatches = Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::Int32;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot register Int32 external accessors for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::Int32, TEXT("Cannot register Int32 external accessors for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
+    { return false; }
+
+    CK_ENSURE_IF_NOT(InGetter.IsBound() && InSetter.IsBound(),
+        TEXT("GameSettings external accessors require a bound getter and setter for [{}]"), InKey)
     { return false; }
 
     _ExternalGetters_Int32.Add(InKey, InGetter);
@@ -1035,10 +1087,16 @@ auto
         const FCk_Delegate_GameSettings_ApplyHandler_Float& InSetter)
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
     const auto* Definition = _Definitions.Find(InKey);
 
-    const auto TypeMatches = Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::Float;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot register Float external accessors for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::Float, TEXT("Cannot register Float external accessors for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
+    { return false; }
+
+    CK_ENSURE_IF_NOT(InGetter.IsBound() && InSetter.IsBound(),
+        TEXT("GameSettings external accessors require a bound getter and setter for [{}]"), InKey)
     { return false; }
 
     _ExternalGetters_Float.Add(InKey, InGetter);
@@ -1054,10 +1112,16 @@ auto
         const FCk_Delegate_GameSettings_ApplyHandler_String& InSetter)
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
     const auto* Definition = _Definitions.Find(InKey);
 
-    const auto TypeMatches = Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::String;
-    CK_ENSURE_IF_NOT(TypeMatches, TEXT("Cannot register String external accessors for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
+    CK_ENSURE_IF_NOT(Definition == nullptr || Definition->Get_ValueType() == ECk_GameSettings_ValueType::String, TEXT("Cannot register String external accessors for GameSettings key [{}], its value type is [{}]"), InKey, Definition->Get_ValueType())
+    { return false; }
+
+    CK_ENSURE_IF_NOT(InGetter.IsBound() && InSetter.IsBound(),
+        TEXT("GameSettings external accessors require a bound getter and setter for [{}]"), InKey)
     { return false; }
 
     _ExternalGetters_String.Add(InKey, InGetter);
@@ -1072,8 +1136,10 @@ auto
     Request_BeginPendingChanges()
     -> bool
 {
-    const auto NoSessionActive = NOT _PendingSessionActive;
-    CK_ENSURE_IF_NOT(NoSessionActive, TEXT("A GameSettings pending-changes session is already active"))
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
+    CK_ENSURE_IF_NOT(NOT _PendingSessionActive, TEXT("A GameSettings pending-changes session is already active"))
     { return false; }
 
     _PendingSessionActive = true;
@@ -1086,46 +1152,37 @@ auto
     Request_ApplyPendingChanges()
     -> int32
 {
-    const auto SessionActive = _PendingSessionActive;
-    CK_ENSURE_IF_NOT(SessionActive, TEXT("Cannot apply pending GameSettings changes, no session is active"))
-    { return 0; }
-
-    const auto CommittedCount = _PendingPriorValues.Num();
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return -1; }
+    CK_ENSURE_IF_NOT(_PendingSessionActive, TEXT("Cannot apply pending GameSettings changes, no session is active"))
+    { return -1; }
+    if (NOT DoFlush())
+    { return -1; }
+    const auto Count = _PendingPriorValues.Num();
     _PendingPriorValues.Reset();
     _PendingSessionActive = false;
-
-    DoFlush();
-    return CommittedCount;
+    return Count;
 }
+
 
 auto
     UCk_GameSettings_Subsystem_UE::
     Request_RevertPendingChanges()
     -> int32
 {
-    const auto SessionActive = _PendingSessionActive;
-    CK_ENSURE_IF_NOT(SessionActive, TEXT("Cannot revert pending GameSettings changes, no session is active"))
-    { return 0; }
-
-    const auto PriorValues = _PendingPriorValues;
-    _PendingPriorValues.Reset();
-    _PendingSessionActive = false;
-
-    auto RevertedCount = int32{0};
-
-    for (const auto& Prior : PriorValues)
-    {
-        const auto* Definition = _Definitions.Find(Prior.Key);
-
-        if (Definition == nullptr)
-        { continue; }
-
-        if (DoCommitValue(Prior.Key, *Definition, Prior.Value))
-        { ++RevertedCount; }
-    }
-
-    return RevertedCount;
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return -1; }
+    CK_ENSURE_IF_NOT(_PendingSessionActive, TEXT("Cannot revert pending GameSettings changes, no session is active"))
+    { return -1; }
+    auto Values = TArray<TPair<FName, FString>>{};
+    for (const auto& Prior : _PendingPriorValues)
+    { Values.Emplace(Prior.Key, Prior.Value); }
+    const auto Count = DoCommitValues(Values, true, false, nullptr, nullptr, true);
+    if (Count < 0)
+    { return -1; }
+    return Count;
 }
+
 
 auto
     UCk_GameSettings_Subsystem_UE::
@@ -1161,6 +1218,9 @@ auto
     Request_RegisterAudioPack()
     -> int32
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return -1; }
+
     return ck::game_settings::RegisterAudioPack(
         *this,
         UCk_Utils_GameSettings_Settings_UE::Get_AudioMix(),
@@ -1173,6 +1233,9 @@ auto
     Request_RegisterVideoPack()
     -> int32
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return -1; }
+
     return ck::game_settings::RegisterVideoPack(*this, _PackHandlerObjects);
 }
 
@@ -1181,6 +1244,9 @@ auto
     Request_RunHardwareBenchmark()
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
     if (ck::game_settings::Get_IsHeadlessPresentation())
     {
         ck::game_settings::Display(TEXT("GameSettings: hardware benchmark skipped (headless presentation)"));
@@ -1188,8 +1254,7 @@ auto
     }
 
     auto* UserSettings = ck::IsValid(GEngine) ? GEngine->GetGameUserSettings() : nullptr;
-    const auto UserSettingsAreValid = ck::IsValid(UserSettings);
-    CK_ENSURE_IF_NOT(UserSettingsAreValid, TEXT("GEngine->GetGameUserSettings() returned null, cannot run the hardware benchmark"))
+    CK_ENSURE_IF_NOT(ck::IsValid(UserSettings), TEXT("GEngine->GetGameUserSettings() returned null, cannot run the hardware benchmark"))
     { return false; }
 
     UserSettings->RunHardwareBenchmark();
@@ -1217,18 +1282,23 @@ auto
         float InWindowSeconds)
     -> bool
 {
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
+    CK_ENSURE_IF_NOT(FMath::IsFinite(InWindowSeconds) && InWindowSeconds > 0.0f,
+        TEXT("Resolution confirmation duration must be finite and positive"))
+    { return false; }
+
     auto NewResolution = FIntPoint{};
     const auto ResolutionParses = ck::game_settings::TryParse_Resolution(InNewResolution, NewResolution);
     CK_ENSURE_IF_NOT(ResolutionParses, TEXT("Resolution [{}] is not of the form WIDTHxHEIGHT"), InNewResolution)
     { return false; }
 
-    const auto NoWindowActive = NOT _ResolutionConfirmActive;
-    CK_ENSURE_IF_NOT(NoWindowActive, TEXT("A resolution confirm window is already active"))
+    CK_ENSURE_IF_NOT(NOT _ResolutionConfirmActive, TEXT("A resolution confirm window is already active"))
     { return false; }
 
     auto* UserSettings = ck::IsValid(GEngine) ? GEngine->GetGameUserSettings() : nullptr;
-    const auto UserSettingsAreValid = ck::IsValid(UserSettings);
-    CK_ENSURE_IF_NOT(UserSettingsAreValid, TEXT("GEngine->GetGameUserSettings() returned null, cannot change the resolution"))
+    CK_ENSURE_IF_NOT(ck::IsValid(UserSettings), TEXT("GEngine->GetGameUserSettings() returned null, cannot change the resolution"))
     { return false; }
 
     _ResolutionConfirmPriorResolution = UserSettings->GetScreenResolution();
@@ -1252,8 +1322,10 @@ auto
     Request_ConfirmResolution()
     -> bool
 {
-    const auto WindowActive = _ResolutionConfirmActive;
-    CK_ENSURE_IF_NOT(WindowActive, TEXT("No resolution confirm window is active"))
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
+    CK_ENSURE_IF_NOT(_ResolutionConfirmActive, TEXT("No resolution confirm window is active"))
     { return false; }
 
     _ResolutionConfirmActive = false;
@@ -1272,9 +1344,12 @@ auto
 auto
     UCk_GameSettings_Subsystem_UE::
     Request_FlushStorage()
-    -> void
+    -> bool
 {
-    DoFlush();
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return false; }
+
+    return DoFlush();
 }
 
 auto
@@ -1282,12 +1357,11 @@ auto
     Request_ReloadFromStorage()
     -> int32
 {
-    const auto MachineValueCount = DoAbsorbStoredValues(ECk_GameSettings_Scope::Machine);
-    const auto PlayerValueCount = DoAbsorbStoredValues(ECk_GameSettings_Scope::Player);
-    ck::game_settings::Display(TEXT("GameSettings reload: read [{}] Machine and [{}] Player.0 stored value(s) from the storage provider"),
-        MachineValueCount, PlayerValueCount);
-    return MachineValueCount + PlayerValueCount;
+    CK_ENSURE_IF_NOT(NOT _MutationInProgress, TEXT("Nested GameSettings mutation from a settings callback is rejected"))
+    { return -1; }
+    return DoAbsorbStoredValues();
 }
+
 
 auto
     UCk_GameSettings_Subsystem_UE::
@@ -1347,38 +1421,153 @@ auto
 
 auto
     UCk_GameSettings_Subsystem_UE::
+    DoGet_IsValueValid(
+        const FCk_GameSettings_SettingDefinition& InDefinition,
+        const FString& InValue) const
+    -> bool
+{
+    const auto Type = InDefinition.Get_ValueType();
+    if (NOT ck_game_settings_subsystem::Get_IsParseableAs(InValue, Type))
+    { return false; }
+    if (NOT InDefinition.Get_Options().IsEmpty() && NOT ck::algo::AnyOf(InDefinition.Get_Options(),
+        [&](const FCk_GameSettings_SettingOption& InOption)
+        { return ck_game_settings_subsystem::Get_ValuesEqual(Type, InValue, InOption.Get_Value()); }))
+    { return false; }
+    if (Type == ECk_GameSettings_ValueType::Int32 || Type == ECk_GameSettings_ValueType::Float)
+    {
+        const auto Value = FCString::Atod(*InValue);
+        if (NOT FMath::IsFinite(Value))
+        { return false; }
+        if (NOT InDefinition.Get_MinValue().IsEmpty() && Value < FCString::Atod(*InDefinition.Get_MinValue()))
+        { return false; }
+        if (NOT InDefinition.Get_MaxValue().IsEmpty() && Value > FCString::Atod(*InDefinition.Get_MaxValue()))
+        { return false; }
+    }
+    return true;
+}
+
+auto
+    UCk_GameSettings_Subsystem_UE::
     DoCommitValue(
         FName InKey,
         const FCk_GameSettings_SettingDefinition& InDefinition,
         const FString& InNewValueString)
-    -> bool
+    -> ECommitResult
 {
-    const auto PreviousValue = DoGet_CurrentValueString(InKey, InDefinition);
-    const auto ActuallyChanged = NOT ck_game_settings_subsystem::Get_ValuesEqual(InDefinition.Get_ValueType(), PreviousValue, InNewValueString);
-
-    if (NOT ActuallyChanged)
-    { return false; }
-
-    if (_PendingSessionActive && NOT _PendingPriorValues.Contains(InKey))
-    { _PendingPriorValues.Add(InKey, PreviousValue); }
-
-    if (InDefinition.Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::Provider)
-    {
-        _CurrentValues.Add(InKey, InNewValueString);
-
-        if (ck::IsValid(_StorageProvider))
-        {
-            constexpr auto PlatformUserId = 0;
-            _StorageProvider->Request_StoreValue(InDefinition.Get_Scope(), PlatformUserId, InKey, InNewValueString);
-            _FlushPending = true;
-            _LastDirtyTimeSeconds = FPlatformTime::Seconds();
-        }
-    }
-
-    DoRouteApply(InKey, InDefinition, InNewValueString);
-    DoFireChanged(InKey, InNewValueString);
-    return true;
+    const auto Count = DoCommitValues({TPair<FName, FString>{InKey, InNewValueString}});
+    return Count < 0 ? ECommitResult::Failed : Count == 0 ? ECommitResult::Unchanged : ECommitResult::Changed;
 }
+
+auto
+    UCk_GameSettings_Subsystem_UE::
+    DoCommitValues(
+        const TArray<TPair<FName, FString>>& InValues,
+        bool InPersist,
+        bool InRecordPending,
+        const TMap<FName, FString>* InMachineOrphans,
+        const TMap<FName, FString>* InPlayerOrphans,
+        bool InClosePendingSession)
+    -> int32
+{
+#if NOT CK_DISABLE_ENSURE_CHECKS
+    const auto MutationGuard = TGuardValue<bool>{_MutationInProgress, true};
+#endif
+    struct FChange
+    {
+        FName _Key;
+        FString _Value;
+        FString _Previous;
+        FCk_GameSettings_SettingDefinition _Definition;
+    };
+    auto Changes = TArray<FChange>{};
+    auto Writes = TArray<FCk_GameSettings_StoreValue>{};
+#if NOT CK_DISABLE_ENSURE_CHECKS
+    auto Keys = TSet<FName>{};
+#endif
+    for (const auto& Entry : InValues)
+    {
+        CK_ENSURE_IF_NOT(_Definitions.Contains(Entry.Key) && NOT Keys.Contains(Entry.Key),
+            TEXT("GameSettings batch contains missing or duplicate key [{}]"), Entry.Key)
+        { return -1; }
+#if NOT CK_DISABLE_ENSURE_CHECKS
+        Keys.Add(Entry.Key);
+#endif
+        const auto Definition = _Definitions.FindChecked(Entry.Key);
+        CK_ENSURE_IF_NOT(DoGet_IsValueValid(Definition, Entry.Value),
+            TEXT("GameSettings batch contains invalid value [{}] for [{}]"), Entry.Value, Entry.Key)
+        { return -1; }
+#if NOT CK_DISABLE_ENSURE_CHECKS
+        if (Definition.Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::External)
+        {
+            auto Bound = false;
+            switch (Definition.Get_ValueType())
+            {
+                case ECk_GameSettings_ValueType::Bool:
+                    Bound = _ExternalGetters_Bool.Contains(Entry.Key) && _ExternalGetters_Bool.FindChecked(Entry.Key).IsBound()
+                        && _ApplyHandlers_Bool.Contains(Entry.Key) && _ApplyHandlers_Bool.FindChecked(Entry.Key).IsBound();
+                    break;
+                case ECk_GameSettings_ValueType::Int32:
+                    Bound = _ExternalGetters_Int32.Contains(Entry.Key) && _ExternalGetters_Int32.FindChecked(Entry.Key).IsBound()
+                        && _ApplyHandlers_Int32.Contains(Entry.Key) && _ApplyHandlers_Int32.FindChecked(Entry.Key).IsBound();
+                    break;
+                case ECk_GameSettings_ValueType::Float:
+                    Bound = _ExternalGetters_Float.Contains(Entry.Key) && _ExternalGetters_Float.FindChecked(Entry.Key).IsBound()
+                        && _ApplyHandlers_Float.Contains(Entry.Key) && _ApplyHandlers_Float.FindChecked(Entry.Key).IsBound();
+                    break;
+                case ECk_GameSettings_ValueType::String:
+                    Bound = _ExternalGetters_String.Contains(Entry.Key) && _ExternalGetters_String.FindChecked(Entry.Key).IsBound()
+                        && _ApplyHandlers_String.Contains(Entry.Key) && _ApplyHandlers_String.FindChecked(Entry.Key).IsBound();
+                    break;
+                default: break;
+            }
+            CK_ENSURE_IF_NOT(Bound, TEXT("External GameSettings key [{}] requires a bound getter and setter"), Entry.Key)
+            { return -1; }
+        }
+#endif
+        const auto Previous = DoGet_CurrentValueString(Entry.Key, Definition);
+        if (ck_game_settings_subsystem::Get_ValuesEqual(Definition.Get_ValueType(), Previous, Entry.Value))
+        { continue; }
+        Changes.Add(FChange{Entry.Key, Entry.Value, Previous, Definition});
+        if (InPersist && Definition.Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::Provider)
+        { Writes.Emplace(Definition.Get_Scope(), 0, Entry.Key, Entry.Value); }
+    }
+    CK_ENSURE_IF_NOT(Writes.IsEmpty() || ck::IsValid(_StorageProvider), TEXT("GameSettings has no storage provider to accept the batch"))
+    { return -1; }
+    if (NOT Writes.IsEmpty())
+    {
+        const auto Accepted = _StorageProvider->Request_StoreValues(Writes);
+        if (NOT Accepted)
+        { return -1; }
+    }
+    for (const auto& Change : Changes)
+    {
+        if (InRecordPending && _PendingSessionActive && NOT _PendingPriorValues.Contains(Change._Key))
+        { _PendingPriorValues.Add(Change._Key, Change._Previous); }
+        if (Change._Definition.Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::Provider)
+        { _CurrentValues.Add(Change._Key, Change._Value); }
+    }
+    if (InMachineOrphans != nullptr)
+    { _OrphanValues_Machine = *InMachineOrphans; }
+    if (InPlayerOrphans != nullptr)
+    { _OrphanValues_Player0 = *InPlayerOrphans; }
+    if (InClosePendingSession)
+    {
+        _PendingPriorValues.Reset();
+        _PendingSessionActive = false;
+    }
+    if (NOT Writes.IsEmpty() && ck::IsValid(_StorageProvider))
+    {
+        _FlushPending = true;
+        _LastDirtyTimeSeconds = FPlatformTime::Seconds();
+    }
+    for (const auto& Change : Changes)
+    {
+        DoRouteApply(Change._Key, Change._Definition, Change._Value);
+        DoFireChanged(Change._Key, Change._Value);
+    }
+    return Changes.Num();
+}
+
 
 auto
     UCk_GameSettings_Subsystem_UE::
@@ -1400,8 +1589,8 @@ auto
                 const auto* Handler = _ApplyHandlers_Bool.Find(InKey);
                 const auto HandlerIsBound = Handler != nullptr && Handler->IsBound();
                 CK_ENSURE_IF_NOT(NOT IsExternal || HandlerIsBound, TEXT("External GameSettings key [{}] has no registered external setter"), InKey)
-                {}
-                if (NOT HandlerIsBound)
+                { return; }
+                if (NOT IsExternal && NOT HandlerIsBound)
                 { return; }
 
                 auto Value = false;
@@ -1414,8 +1603,8 @@ auto
                 const auto* Handler = _ApplyHandlers_Int32.Find(InKey);
                 const auto HandlerIsBound = Handler != nullptr && Handler->IsBound();
                 CK_ENSURE_IF_NOT(NOT IsExternal || HandlerIsBound, TEXT("External GameSettings key [{}] has no registered external setter"), InKey)
-                {}
-                if (NOT HandlerIsBound)
+                { return; }
+                if (NOT IsExternal && NOT HandlerIsBound)
                 { return; }
 
                 auto Value = int32{};
@@ -1428,8 +1617,8 @@ auto
                 const auto* Handler = _ApplyHandlers_Float.Find(InKey);
                 const auto HandlerIsBound = Handler != nullptr && Handler->IsBound();
                 CK_ENSURE_IF_NOT(NOT IsExternal || HandlerIsBound, TEXT("External GameSettings key [{}] has no registered external setter"), InKey)
-                {}
-                if (NOT HandlerIsBound)
+                { return; }
+                if (NOT IsExternal && NOT HandlerIsBound)
                 { return; }
 
                 auto Value = float{};
@@ -1442,8 +1631,8 @@ auto
                 const auto* Handler = _ApplyHandlers_String.Find(InKey);
                 const auto HandlerIsBound = Handler != nullptr && Handler->IsBound();
                 CK_ENSURE_IF_NOT(NOT IsExternal || HandlerIsBound, TEXT("External GameSettings key [{}] has no registered external setter"), InKey)
-                {}
-                if (NOT HandlerIsBound)
+                { return; }
+                if (NOT IsExternal && NOT HandlerIsBound)
                 { return; }
 
                 Handler->Execute(InValueString);
@@ -1482,68 +1671,57 @@ auto
 
 auto
     UCk_GameSettings_Subsystem_UE::
-    DoConsumeOrphanOrDefault(
-        FName InKey,
-        const FCk_GameSettings_SettingDefinition& InDefinition)
-    -> void
-{
-    if (InDefinition.Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::External)
-    { return; }
-
-    auto& OrphanMap = InDefinition.Get_Scope() == ECk_GameSettings_Scope::Machine ? _OrphanValues_Machine : _OrphanValues_Player0;
-    const auto* FoundOrphan = OrphanMap.Find(InKey);
-
-    if (FoundOrphan == nullptr)
-    { return; }
-
-    const auto OrphanValue = *FoundOrphan;
-    OrphanMap.Remove(InKey);
-
-    const auto OrphanParses = ck_game_settings_subsystem::Get_IsParseableAs(OrphanValue, InDefinition.Get_ValueType());
-    CK_ENSURE_IF_NOT(OrphanParses, TEXT("Stored value [{}] for GameSettings key [{}] does not parse as [{}], keeping the default"), OrphanValue, InKey, InDefinition.Get_ValueType())
-    { return; }
-
-    _CurrentValues.Add(InKey, OrphanValue);
-    DoRouteApply(InKey, InDefinition, OrphanValue);
-}
-
-auto
-    UCk_GameSettings_Subsystem_UE::
-    DoAbsorbStoredValues(
-        ECk_GameSettings_Scope InScope)
+    DoAbsorbStoredValues()
     -> int32
 {
-    if (ck::Is_NOT_Valid(_StorageProvider))
-    { return 0; }
-
-    constexpr auto PlatformUserId = 0;
-    const auto StoredValues = _StorageProvider->Get_StoredValues(InScope, PlatformUserId);
-
-    for (const auto& StoredValue : StoredValues)
+    CK_ENSURE_IF_NOT(ck::IsValid(_StorageProvider), TEXT("GameSettings has no storage provider"))
+    { return -1; }
+#if NOT CK_DISABLE_ENSURE_CHECKS
+    const auto MutationGuard = TGuardValue<bool>{_MutationInProgress, true};
+#endif
+    auto Machine = TArray<FCk_GameSettings_StoredValue>{};
+    auto Player = TArray<FCk_GameSettings_StoredValue>{};
+    const auto MachineResult = _StorageProvider->Get_StoredValues(ECk_GameSettings_Scope::Machine, 0, Machine);
+    const auto PlayerResult = _StorageProvider->Get_StoredValues(ECk_GameSettings_Scope::Player, 0, Player);
+    if (MachineResult == ECk_GameSettings_StorageReadResult::Failed || PlayerResult == ECk_GameSettings_StorageReadResult::Failed)
+    { return -1; }
+    auto MachineOrphans = _OrphanValues_Machine;
+    auto PlayerOrphans = _OrphanValues_Player0;
+    auto Values = TArray<TPair<FName, FString>>{};
+    for (const auto Scope : {ECk_GameSettings_Scope::Machine, ECk_GameSettings_Scope::Player})
     {
-        const auto Key = StoredValue.Get_Key();
-        const auto* Definition = _Definitions.Find(Key);
+        const auto& Stored = Scope == ECk_GameSettings_Scope::Machine ? Machine : Player;
+        auto& Orphans = Scope == ECk_GameSettings_Scope::Machine ? MachineOrphans : PlayerOrphans;
 
-        const auto AppliesHere = Definition != nullptr &&
-            Definition->Get_Scope() == InScope &&
-            Definition->Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::Provider;
-
-        if (NOT AppliesHere)
+        auto Keys = TSet<FName>{};
+        for (const auto& Value : Stored)
         {
-            auto& OrphanMap = InScope == ECk_GameSettings_Scope::Machine ? _OrphanValues_Machine : _OrphanValues_Player0;
-            OrphanMap.Add(Key, StoredValue.Get_Value());
-            continue;
+            const auto Key = Value.Get_Key();
+            if (Key.IsNone() || Keys.Contains(Key))
+            {
+                ck::game_settings::Error(TEXT("GameSettings reload contains missing or duplicate key [{}]"), Key);
+                return -1;
+            }
+            Keys.Add(Key);
+            const auto* Definition = _Definitions.Find(Key);
+            if (Definition != nullptr && Definition->Get_Scope() == Scope && Definition->Get_PersistencePolicy() == ECk_GameSettings_PersistencePolicy::Provider)
+            {
+                if (NOT DoGet_IsValueValid(*Definition, Value.Get_Value()))
+                {
+                    ck::game_settings::Error(TEXT("GameSettings reload rejected invalid stored value [{}] for [{}]"), Value.Get_Value(), Key);
+                    return -1;
+                }
+                Values.Emplace(Key, Value.Get_Value());
+            }
+            else
+            { Orphans.Add(Key, Value.Get_Value()); }
         }
-
-        const auto StoredValueParses = ck_game_settings_subsystem::Get_IsParseableAs(StoredValue.Get_Value(), Definition->Get_ValueType());
-        CK_ENSURE_IF_NOT(StoredValueParses, TEXT("Stored value [{}] for GameSettings key [{}] does not parse as [{}], keeping the current value"), StoredValue.Get_Value(), Key, Definition->Get_ValueType())
-        { continue; }
-
-        DoCommitValue(Key, *Definition, StoredValue.Get_Value());
     }
-
-    return StoredValues.Num();
+    if (DoCommitValues(Values, false, false, &MachineOrphans, &PlayerOrphans) < 0)
+    { return -1; }
+    return Machine.Num() + Player.Num();
 }
+
 
 auto
     UCk_GameSettings_Subsystem_UE::
@@ -1551,7 +1729,9 @@ auto
     -> void
 {
     const auto NowSeconds = FPlatformTime::Seconds();
+#if NOT CK_DISABLE_ENSURE_CHECKS
     const auto TimeoutSeconds = ck_game_settings_cvars::DeferredApplyTimeoutSecs;
+#endif
 
     for (auto Index = _DeferredCVarApplies.Num() - 1; Index >= 0; --Index)
     {
@@ -1566,12 +1746,15 @@ auto
             continue;
         }
 
+#if NOT CK_DISABLE_ENSURE_CHECKS
         const auto TimedOut = NowSeconds - Entry._EnqueuedAtSeconds > TimeoutSeconds;
         CK_ENSURE_IF_NOT(NOT TimedOut, TEXT("GameSettings deferred apply for key [{}] timed out, CVar [{}] never registered within [{}] seconds. The stored value is retained and will apply next boot."),
             Entry._Key, Entry._CVar.Get_Name(), TimeoutSeconds)
-        {}
-        if (TimedOut)
-        { _DeferredCVarApplies.RemoveAt(Index); }
+        {
+            _DeferredCVarApplies.RemoveAt(Index);
+            continue;
+        }
+#endif
     }
 
     if (_ResolutionConfirmActive && NowSeconds >= _ResolutionConfirmDeadlineSeconds)
@@ -1606,13 +1789,23 @@ auto
 auto
     UCk_GameSettings_Subsystem_UE::
     DoFlush()
-    -> void
+    -> bool
 {
+#if NOT CK_DISABLE_ENSURE_CHECKS
+    const auto MutationGuard = TGuardValue<bool>{_MutationInProgress, true};
+#endif
+    CK_ENSURE_IF_NOT(ck::IsValid(_StorageProvider), TEXT("GameSettings cannot flush without a storage provider"))
+    { return false; }
+    const auto Flushed = _StorageProvider->Request_Flush();
+    if (NOT Flushed)
+    {
+        _LastDirtyTimeSeconds = FPlatformTime::Seconds();
+        return false;
+    }
     _FlushPending = false;
-
-    if (ck::IsValid(_StorageProvider))
-    { _StorageProvider->Request_Flush(); }
+    return true;
 }
+
 
 auto
     UCk_GameSettings_Subsystem_UE::
