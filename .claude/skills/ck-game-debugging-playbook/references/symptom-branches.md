@@ -133,9 +133,15 @@ cascades — repair the registry, don't chase the individual errors.
 The deep half (define gates, cook stripping mechanics, config diffs, the 6-axis checklist) is
 `ck-debugging-playbook` §6. The consumer-side facts that repeatedly bite game teams:
 
-1. **Ensures are silent in Test/Shipping and log-only under `-unattended`** — your guard "fired"
-   and nobody saw it. Before claiming "the ensure never triggers in packaged", grep the packaged
-   log for it. Matrix: `ck-debugging-playbook` §6.5.
+1. **Inspect ensure execution separately from diagnostics.** Non-Shipping checks stay enabled;
+   Test currently runs predicate/body silently (`CK_DISABLE_ENSURE_CHECKS=0`,
+   `CK_DISABLE_ENSURE_DEBUGGING=1`). Intended Shipping removes both for speed
+   (`CK_DISABLE_ENSURE_CHECKS=1`), so an unfixed invariant may crash. Current Shipping retains
+   silent checks (`CK_DISABLE_ENSURE_CHECKS=0`, `CK_DISABLE_ENSURE_DEBUGGING=1`), an exception
+   requiring explicit release approval. Diagnostic-enabled unattended runs log without dialogs;
+   missing output in a silent or removed mode proves nothing. Keep return/rollback/completion
+   inside the macro, without duplicate guards or validation-only work hoisted outside it.
+   Matrix: `ck-debugging-playbook` §6.5.
 2. **Test/dev script content must not stage into Shipping.** Corpus incident (BusterBlock,
    `e0de34899`, verified): test + gym AngelScript staged into a packaged Shipping build; their base
    classes (CkTests) are disabled in Shipping, so 431 "unknown super type" errors aborted AS

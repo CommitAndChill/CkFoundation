@@ -93,10 +93,15 @@ never the culprit.
 **A feature is not done until it has been exercised in a packaged or Test-config build, at
 minimum at boot level.** PIE structurally cannot represent the packaged runtime:
 
-- **Ensure visibility differs.** In Test/Shipping the ensure predicate still evaluates and the
-  recovery block still runs — with zero logging/dialog. "No ensure fired" in a packaged Test run
-  means nothing without the log-grep discipline. Matrix and consequences:
-  `ck-debugging-playbook` §6.5; define matrix: `ck-macros-and-codegen` §2.4.
+- **Ensure execution differs.** Every non-Shipping configuration retains checks; Test currently
+  evaluates predicate/body without ensure diagnostics (`CK_DISABLE_ENSURE_CHECKS=0`,
+  `CK_DISABLE_ENSURE_DEBUGGING=1`). Intended Shipping removes both for speed
+  (`CK_DISABLE_ENSURE_CHECKS=1`), so an unfixed invariant may crash. Current Shipping retains
+  silent checks (`CK_DISABLE_ENSURE_CHECKS=0`, `CK_DISABLE_ENSURE_DEBUGGING=1`), an exception
+  requiring explicit release approval. Verify actual flags; missing logs do not prove a check
+  passed. Keep return/rollback/completion in the macro body, without duplicate guards or
+  validation-only work hoisted outside it. Matrix: `ck-macros-and-codegen` §2.4; consequences:
+  `ck-debugging-playbook` §6.5.
 - **GC verifier behavior differs**, and the packaged-only 0xC0000005 GC crash class does not
   reproduce in PIE at all. Symptoms and the discriminating experiment
   (`Ck.Diag.VerifyGCAssumptions`): `ck-debugging-playbook` §5; game-side symptom routing:
@@ -150,7 +155,7 @@ residue and are not part of this skill's contract.
 - Re-staging with `-skipcook` after content edits and wondering why the build is old (§5).
 - Building (or cooking) while an editor for the same project is open — LNK1104 now, corrupted
   hot-reload state later (§6).
-- Calling a feature done on PIE evidence alone. PIE ≠ packaged: four defines, ensure silence, GC
+- Calling a feature done on PIE evidence alone. PIE ≠ packaged: four defines, ensure execution/diagnostics, GC
   verifiers, cook stripping (§7).
 - Citing a green run whose binaries predate your last edit — stale-green (§5).
 

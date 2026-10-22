@@ -95,13 +95,12 @@ Section numbers cited elsewhere in this skill (`§2.7`, `§3.4`, …) point into
    identifier". Move `CK_GENERATED_BODY` up.
 3. **`CK_DEFINE_CONSTRUCTORS` on a UCLASS/AActor** → default-ctor redeclaration errors and (in AS
    builds) placement-new codegen on a UObject. Structs only (§2.3).
-4. **Empty `CK_ENSURE_IF_NOT` body followed by a duplicate ordinary `if`** → the macro owns the
-   failure branch. Put rejection, required rollback, failure completion, or approved recovery in
-   its body. Skipping that body with checks disabled is intentional.
-5. **Confusing Shipping policy with current flags** → the intended Shipping policy skips checks
-   and recovery; keeping checks to avoid crashes under delivery constraints is an explicit
-   exception. Current Shipping flags retain checks with diagnostics disabled. Verify Build.cs;
-   do not change flags or duplicate the guard as part of a validation fix.
+4. **Empty ensure plus ordinary `if`, or hoisted validation-only work** -> forbidden. Put a total,
+   side-effect-safe predicate directly in `CK_ENSURE_IF_NOT` (evaluated once), or under the same
+   compile policy. Its body owns rejection, rollback, failure completion, and immediate termination.
+5. **Treating retained Shipping checks as the coding contract** -> intended Shipping omits BOTH
+   predicate and body for speed; unfixed violations may crash. Retention needs an explicit temporary
+   delivery exception. The observed matrix records definitions, not approval.
 6. **`CK_REGISTER_SNAPSHOTABLE(ck::FFoo)`** → token-paste error on `::`. File-scope alias first.
 7. **Copying `CK_DEFINE_RECORD_OF_ENTITIES(...)` from an old doc** → `static_assert(false)`
    tombstone. Pick `_ROUNDTRIP` or `_TRANSIENT` (§2.9).

@@ -124,8 +124,8 @@ calls (44+ entries and growing) — check it first; do not re-litigate them.
 | Mistake | Why it burns you |
 |---|---|
 | Trusting a green run from a binary older than your last edit | Global registrations (`CK_REGISTER_SNAPSHOTABLE`/`_PROCESSOR`) baked old code into that binary. Rebuild, re-run. |
-| `ensureMsgf`/`check` for validation | Review rejection; compiled out (or crash-only) exactly where the Ck ensure would still guard. |
-| Ensure recovery block that does work | Runs silently in Test/Shipping and is compiled out under Profile. Pure bail-out only. |
+| `ensureMsgf`/`check` for validation | Use `CK_ENSURE_IF_NOT` for recoverable validation in non-Shipping builds. Intended Shipping omits its predicate and body. |
+| Empty ensure plus ordinary `if`, or hoisted validation-only work | Let the macro evaluate a total, side-effect-safe predicate once and own rejection, rollback, completion, and return. Intended Shipping omits all of it; retention needs an explicit temporary delivery exception. |
 | Ensuring inside `TryGet_*` on legitimate absence | Absence is not an error; the TryGet contract returns an invalid handle quietly. |
 | Claiming BP/AS parity from a C++ compile | Reflection/registration failures surface only at editor boot or node placement. Run env checks 4-5. |
 | Hand-editing `Script/Generated/*.as` | Regenerated at editor startup; edits vanish (the "DO NOT EDIT" header — 273 of 274 files as of 2026-07-02). |

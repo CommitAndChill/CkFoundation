@@ -12,17 +12,18 @@ the evidence, so you can defend the rule instead of just obeying it.
 Compile modes, verified at `Source/CkCore/Public/CkCore/Ensure/CkEnsure.h:62-81` + the define
 matrix in `Source/CkBuildConfig/CkBuildConfig.Build.cs`:
 
-The full define matrix and expansion mechanics are owned by `ck-macros-and-codegen` §2.4. In the
-current `CkBuildConfig.Build.cs`, `CK_DISABLE_ENSURE_CHECKS=0` in every standard configuration,
-including Shipping. Test and Shipping also set `_DEBUGGING=1`, so the predicate and recovery run
-silently. This is the current configuration, not the intended Shipping policy: Shipping should omit
-the ensure branch unless a documented crash or deadline exception explicitly enables it.
+The full observed define matrix and expansion mechanics are owned by `ck-macros-and-codegen`
+section 2.4. Every non-Shipping build must retain checks. Intended Shipping omits BOTH predicate evaluation
+and the entire failure body for speed; unfixed violations may therefore crash. Retaining checks
+in Shipping requires an explicit temporary delivery exception. Existing definitions are not
+proof of approval and do not establish a coding contract. The observed Shipping flag currently
+retains checks.
 
 Why this macro is the mandate:
 
-- **It owns the failure branch.** The predicate and recovery belong to the same inverted `if`.
-  Current Shipping configuration retains that branch; the intended default is to omit it unless
-  a documented crash or deadline exception calls for a shipped guard.
+- **It owns validation and failure flow in non-Shipping builds.** The macro is an inverted
+  `if`; its body performs rejection, rollback, failure completion, and immediate termination.
+  Shipping intentionally removes predicate and body together; never duplicate the guard to retain recovery.
 - **It is loud with context.** fmt-style message with the failing values, plus C++ AND Blueprint
   AND AngelScript callstacks, frame number, PIE-ID, server/client attribution
   (`CkEnsure.cpp:92+`). `PLATFORM_BREAK()` is expanded textually at the call site so the debugger
@@ -33,19 +34,19 @@ Why this macro is the mandate:
 - **It fails your test gate.** The AutoTest runner forces LogOnly display
   (comment `CkEnsure.cpp:217-219`), so a fired ensure logs at **Error** severity — which the
   automation framework reports as a test failure. Ensures are visible in CI; warnings are not.
-- **Deliberate shipped tripwires can catch real bugs.** The packaged-build GC crash was diagnosed
-  (`d77810096`), root-caused (`feb08ee94` — pre-GC rooting pass), and then fenced with a tripwire
-  ensure that stays in the build (`a8a93baac`). Detection survived the fix.
+- **Tripwires help where checks are enabled.** The packaged-build GC incident was diagnosed
+  (`d77810096`), root-caused (`feb08ee94` - pre-GC rooting pass), and fenced with a tripwire
+  (`a8a93baac`). Historical retention is not authorization for a Shipping exception.
 
-The `{ ... }` body owns rejection and recovery: roll back partial state, complete a rejected
-request, or perform another approved recovery before returning as the operation requires. Compute
-a side-effect-safe predicate once. Never use an empty ensure body followed by an ordinary `if`
-that repeats the predicate merely to keep recovery enabled. In the current Test and Shipping
-configuration the body runs silently; with checks disabled it is omitted. Simple bail-out shape
-(`Source/CkEcs/Public/CkEcs/EntityLifetime/CkEntityLifetime_Utils.cpp:114-117`):
+`CK_ENSURE_IF_NOT` owns the inverted `if`. Put a total, side-effect-safe predicate directly
+in the macro, which evaluates it once when checks are enabled. Do not hoist validation-only work
+outside its compile policy; a named predicate is allowed only under that same policy. Put
+rejection, rollback, failure completion, and immediate termination directly in its body. Never
+leave an empty ensure followed by an ordinary `if` repeating its condition or preserving recovery.
+Shipping intentionally omits predicate AND body; do not change the macro to preserve that work.
 
 ```cpp
-CK_ENSURE_IF_NOT(InHandle.Has<ck::FFragment_LifetimeOwner>(),
+CK_ENSURE_IF_NOT(ck::IsValid(InHandle) && InHandle.Has<ck::FFragment_LifetimeOwner>(),
     TEXT("The Entity [{}] does NOT have a LifetimeOwner. Was this Entity created by Request_CreateEntity(RegistryType)?"),
     InHandle)
 { return {}; }
@@ -74,7 +75,8 @@ Decision table when a check fails:
 
 | Situation | Do |
 |---|---|
-| Recoverable precondition violation (bad handle, missing fragment, invalid params) | `CK_ENSURE_IF_NOT` with rollback, completion, or approved recovery in its body, then terminate the rejected operation |
+| Recoverable precondition violation (bad handle, missing fragment, invalid params) | `CK_ENSURE_IF_NOT` with total, side-effect-safe predicate; rejection/rollback/failure completion and immediate termination in its body |
+| Expected operational failure (disk full, denied file access, provider rejection) | Ordinary result branches that remain in Shipping, never ensures; propagate explicit failure and preserve pending state or perform documented recovery |
 | Unreachable branch (switch default on an enum) | `CK_INVALID_ENUM` / `CK_TRIGGER_ENSURE` |
 | Legitimate, expected absence | `TryGet_*` contract: return the invalid handle quietly, **no ensure** — absence is not an error. (`Get_*` must not fail; `TryGet_*` may. Root `DEVELOPMENT.md` naming rules.) |
 | "Log a warning and use a default" | Never, unless the maintainer explicitly requested a fallback |

@@ -15,7 +15,8 @@ The shared requirements are described in DEVELOPMENT.md.
 ## CK_ENSURE_IF_NOT
 
 - The macro is an inverted `if`: put the failure return, rollback, completion notification,
-  or approved recovery directly in its body. Evaluate a side-effect-safe condition once.
+  or approved recovery directly in its body. Evaluate a total, side-effect-safe predicate once.
+  Keep validation-only computation inside the predicate or under the same compilation policy.
 - Never write an empty ensure body followed by a separate ordinary `if` repeating the
   same condition. Older history, memory, or skills recommending that shape are superseded.
 - Checks belong in all non-Shipping builds. The intended Shipping policy skips both the
@@ -24,12 +25,15 @@ The shared requirements are described in DEVELOPMENT.md.
 - Current build flags retain checks in Shipping with diagnostics disabled. Verify the flags
   in `Source/CkBuildConfig/CkBuildConfig.Build.cs`; change Shipping policy only on an explicit
   maintainer decision. Do not add unconditional recovery or alter the macro to defeat omission.
+  Existing retained checks are not evidence that a release exception was approved.
 - Validate prerequisites one at a time. Every evaluated predicate must be safe for malformed,
   default, stale, and partially initialized input; an ensure does not make its expression safe.
+- Expected operational failures, such as a full disk or denied file access, are player-facing
+  outcomes. Use explicit results and ordinary branches that remain in Shipping, never ensures,
+  preserving pending state or performing documented recovery through one result branch.
 
 ```cpp
-const auto IsVelocityFinite = NOT Motion.Get_Velocity().ContainsNaN();
-CK_ENSURE_IF_NOT(IsVelocityFinite, TEXT("Sampled a non-finite velocity"))
+CK_ENSURE_IF_NOT(NOT Motion.Get_Velocity().ContainsNaN(), TEXT("Sampled a non-finite velocity"))
 { Motion = gait::Get_RestMotion(); }
 ```
 
@@ -47,5 +51,6 @@ in DEVELOPMENT.md and read the relevant `.claude/skills/<name>/SKILL.md` explici
 - Reject an empty `CK_ENSURE_IF_NOT` body followed by an ordinary `if` repeating its condition.
 - Confirm rejection/recovery and request failure completion share the macro's body.
 - Confirm evaluated prerequisites are safe before dereferencing or accessing deeper state.
+- Confirm validation-only work disappears with the ensure and operational failure paths remain.
 - Distinguish the intended Shipping policy from the current flags; no build-policy changes
   are implied by a validation fix.

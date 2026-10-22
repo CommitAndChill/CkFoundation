@@ -94,10 +94,15 @@ in `CkCore/Public/CkCore/Ensure/CkEnsure.cpp`.
 | `CK_DISABLE_ENSURE_DEBUGGING=1` | `if (NOT (InExpression))` | predicate evaluated, recovery block runs, zero logging/dialog |
 | both 0 | `if (NOT CK_ENSURE(...))` | full diagnostics + recovery block |
 
+The matrix below records observed definitions in this checkout, not intended Shipping policy.
+Every non-Shipping build must retain checks. Intended Shipping omits BOTH predicate evaluation
+and the entire failure body for speed; unfixed violations may therefore crash. Retaining checks
+in Shipping requires an explicit temporary delivery exception. Existing definitions are not
+proof of approval and do not establish a coding contract. This documentation change does not alter flags.
+
 The flags are injected per-config by `CkModuleRules.SetBuildConfiguration`
-(`CkBuildConfig/CkBuildConfig.Build.cs:65-198`) — NOT declared in any header (the Ensure README's
-claims of `CkBuild_Macros.h` + `ensureAlwaysMsgf` at `CkCore/Public/CkCore/Ensure/README.md:37,56`
-are both stale; trust the Build.cs). **This skill owns the full define matrix** — sibling skills
+(`CkBuildConfig/CkBuildConfig.Build.cs:65-198`) — NOT declared in any header.
+**This skill owns the full define matrix** — sibling skills
 (`ck-build-and-env`, `ck-debugging-playbook`, `ck-change-control`) carry one-line summaries and
 point here. Most are `CK_DISABLE_*` flags — **0 means the feature is ON**. Per-config Build.cs
 blocks: Debug/DebugGame `:87-91`, Dev-editor `:109-113`, Dev-game `:122-126`, Test `:145-149`,
@@ -138,18 +143,19 @@ Decision-changing notes:
 - `CK_DISABLE_ABILITY_SCRIPT_DEBUGGING` has zero consumers outside CkBuildConfig — vestigial
   since the Ability modules were removed (DECISIONS.md #41).
 
-Current flags, verified 2026-10-02: Debug/DebugGame/Development (editor or game) = full diagnostics;
-Test/Shipping = silent guard — the block still runs; Profile override = guards vanish entirely.
+Observed expansion with the table above: Debug/DebugGame/Development (editor or game) = full
+diagnostics; Test = silent guard; Shipping currently retains a silent guard, which differs from
+intended policy and requires an explicit temporary delivery exception; Profile override = guards
+vanish entirely.
 
-**Intended policy:** checks belong in every non-Shipping build. Shipping skips both the predicate
-and recovery body. Checks may explicitly remain enabled in Shipping when needed to avoid crashes
-under delivery constraints; the table above describes today's retained-checks configuration.
-Changing that configuration is a maintainer decision, not part of a validation fix.
+Authoring contract:
 
-**The macro owns the failure branch.** Compute a side-effect-safe condition once and put the
-return, required rollback, failure completion notification, or approved recovery directly in its
-body. Disabling checks intentionally removes that whole branch. Never add an empty ensure followed
-by a duplicate ordinary `if`, or change the disabled expansion to keep the body running.
+`CK_ENSURE_IF_NOT` owns the inverted `if`. Put a total, side-effect-safe predicate directly
+in the macro, which evaluates it once when checks are enabled. Do not hoist validation-only work
+outside its compile policy; a named predicate is allowed only under that same policy. Put
+rejection, rollback, failure completion, and immediate termination directly in its body. Never
+leave an empty ensure followed by an ordinary `if` repeating its condition or preserving recovery.
+Shipping intentionally omits predicate AND body; do not change the macro to preserve that work.
 
 Siblings: `CK_TRIGGER_ENSURE(fmt, ...)` = `CK_ENSURE(false, ...)` (:68-69) — unconditional fire,
 use in unreachable paths; `CK_TRIGGER_ENSURE_IF(expr, ...)` fires when expr is TRUE (:73-74);
@@ -253,9 +259,11 @@ canonical reference `CkTimer`):
 Two rules that are easy to get wrong:
 - **`Succeeded` means the caller's intent holds afterwards.** An idempotent no-op succeeds. Reserve
   `Failed` for an intent that does not hold and that retrying will not fix.
-- **Complete a rejected request inside the `CK_ENSURE_IF_NOT` body before returning.** Fire
-  `Failed_NotEnqueued` in that same body. Checks disabled means the rejection branch is intentionally
-  skipped; do not split completion into a duplicate ordinary `if` to preserve it in Shipping.
+- **Complete rejection inside the `CK_ENSURE_IF_NOT` body**, then return immediately.
+  Fire `Failed_NotEnqueued` in that same body when rejecting before enqueue.
+  Keep validation-only predicate work under the macro's compile policy. Never use an empty body
+  followed by an ordinary `if` to repeat/preserve recovery. Intended Shipping omits both predicate
+  and body; current retained checks require an explicit temporary delivery exception.
 
 **Vtable-variance constraint (:46, :95-103):** the bases' `virtual Get_RequestDebugName` +
 `virtual ~FCk_Request_Base()` exist ONLY when handle debugging is on. Cross-reference the config

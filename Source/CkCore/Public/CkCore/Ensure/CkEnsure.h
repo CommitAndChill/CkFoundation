@@ -68,13 +68,12 @@ namespace ck::ensure
             ? (PLATFORM_BREAK(), false)                                                                                                    \
             : false))
 
-// CK_ENSURE_IF_NOT is an inverted if: the body IS the failure path, and the recovery belongs in it. Evaluate a
-// side-effect-safe condition once (hoist it to a local) so the message and the branch share one evaluation.
-//
-// CK_DISABLE_ENSURE_CHECKS intentionally skips both the predicate and recovery body. Non-Shipping builds retain
-// checks; the intended Shipping policy omits them, with checks retained only by an explicit shipping decision.
-// Current Build.cs flags keep Shipping checks enabled and diagnostics disabled. Do not repeat the condition in
-// a separate ordinary if or change the disabled expansion to force the recovery to run.
+// CK_ENSURE_IF_NOT owns the failure branch. Keep its predicate total and side-effect-safe, with rejection,
+// rollback, failure completion, and termination in the body; never repeat that guard in a separate if.
+// Shipping intentionally omits predicate evaluation and the entire body for performance. Validation-only work
+// must stay inside the predicate or under the same compilation policy. Unfixed invariant violations may crash
+// when checks are omitted. Retaining Shipping checks requires an explicit delivery exception and does not change
+// this call-site contract; current retained flags are not authorization to preserve recovery unconditionally.
 #if CK_DISABLE_ENSURE_CHECKS
 #define CK_ENSURE_IF_NOT(InExpression, InFormat, ...)\
 if constexpr(false)

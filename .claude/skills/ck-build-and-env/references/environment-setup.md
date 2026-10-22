@@ -132,10 +132,14 @@ ctor body could flip it, and no module touches it), plus `WITH_ANGELSCRIPT_CK` p
 **The full 17-define × 5-config matrix is owned by `ck-macros-and-codegen` §2.4** (with the
 decision notes) — load it there; this skill keeps only the environment facts you must not forget:
 
-- Current `CkBuildConfig.Build.cs` sets `CK_DISABLE_ENSURE_CHECKS=0` in every standard configuration,
-  including Shipping, so the ensure branch still runs silently there. Intended policy is to omit
-  that branch in Shipping unless a documented crash or deadline exception explicitly enables it;
-  changing the policy requires a separate build-configuration change.
+- **Policy:** every non-Shipping configuration retains checks. Intended Shipping uses
+  `CK_DISABLE_ENSURE_CHECKS=1`: `CK_ENSURE_IF_NOT` removes predicate and failure body for speed,
+  so an unfixed invariant may crash. Keep return/rollback/completion in that body; never duplicate
+  the guard or hoist validation-only work outside the macro to retain it in Shipping.
+- **Observed flags:** `MatchWithUnreal` currently emits `CK_DISABLE_ENSURE_CHECKS=0` everywhere;
+  Test and Shipping emit `CK_DISABLE_ENSURE_DEBUGGING=1`, retaining predicate/body without ensure
+  diagnostics. Current Shipping retention is an exception requiring explicit release approval,
+  not the default policy. Verify the actual target flags.
 - **Development-Editor ≠ Development-game** (split on `Target.bBuildEditor`, `:107`; four defines
   differ) — PIE and a packaged Development build legitimately behave differently. Check the matrix
   before treating a packaged-only difference as a bug (then load `ck-debugging-playbook`).

@@ -13,7 +13,7 @@ maintainer ruling recorded 2026-07-03. `<Prefix>` = your game's class prefix (Bu
 |---|---|---|---|
 | 1 | Mutate ECS state outside the request pipeline | Utility functions enqueue; processors mutate — direct mutation breaks iteration safety, replication capture, and frame ordering | Root CLAUDE.md non-negotiable **#5**; `ckecs-architecture-contract` §3 "Requests — the deferred-mutation contract" |
 | 2 | Touch fragment members directly / bypass the Utils surface | Fragments are friend-gated by design; Utils is the ONLY public API of a feature — everything else is an implementation detail free to change under you | Root CLAUDE.md "Lingo" (Utils row) + "Encapsulation" block; `ckecs-architecture-contract` §4 |
-| 3 | Swallow errors — log-and-continue where validation failed, or use stock `ensure`/`ensureMsgf`/`check` | Maintainer rationale, verbatim: "logs get ignored, ensures do not"; stock ensures also compile out in Shipping while `CK_ENSURE_IF_NOT` stays active | Root CLAUDE.md non-negotiables **#2/#3**; decision table in `ck-change-control` "Never silently handle an error" |
+| 3 | Swallow errors — log-and-continue where validation failed, or use stock `ensure`/`ensureMsgf`/`check` | Use the CK failure path in every non-Shipping build; intended Shipping removes predicate/body for speed. Current Shipping retention is an exception requiring explicit release approval | Root CLAUDE.md non-negotiables **#2/#3**; decision table in `ck-change-control` "Never silently handle an error" |
 | 4 | Ship a public C++ API verified in fewer than three environments (C++, Blueprint, AngelScript) | "Works in C++" is one third of done — AS is a first-class consumer of every public API on this engine fork | Root CLAUDE.md non-negotiable **#4**; verification recipe in `ck-angelscript-interop` §4 |
 | 5 | Depend on Tier-5 / editor modules from runtime code | Editor modules don't exist in packaged builds; the link succeeds in-editor and the packaged game fails to boot | `Source/ARCHITECTURE.md` §"T5 — editor modules (… runtime code must NEVER depend on these)" + "Module-authoring rules" |
 | 6 | Author gameplay `AActor` subclasses when an EntityScript serves | EntityScripts are the placeable unit (~95% Actor replacement); the Actor path forfeits ECS lifetime, composition, and test harness support | Maintainer ruling 2026-07-03 (settled doctrine); exceptions in §1.6 below; archetypes in `ck-game-entity-composition-patterns` |
@@ -59,9 +59,15 @@ CK_ENSURE_IF_NOT(ck::IsValid(InHandle), TEXT("Invalid <Feature> Handle [{}]"), I
 { return {}; }
 ```
 
-The recovery block must be a *correct* silent-failure path — not a fallback that hides the
-problem. Expected, non-error absence is different: use `TryGet_*` (returns an invalid handle)
-and branch on `ck::IsValid`. The ensure-vs-TryGet decision table: `ck-change-control`,
+Keep failure return, rollback and completion directly inside the C++ macro body. Never use an
+empty ensure followed by a duplicate ordinary guard, or hoist validation-only work outside it.
+Every non-Shipping configuration retains checks; diagnostics depend on its flags. Intended
+Shipping removes predicate/body for speed (`CK_DISABLE_ENSURE_CHECKS=1`), so an unfixed invariant
+may crash. Current Shipping retains silent checks (`CK_DISABLE_ENSURE_CHECKS=0`,
+`CK_DISABLE_ENSURE_DEBUGGING=1`); this exception requires explicit release approval, not
+unconditional recovery or a macro/flag change. Executed recovery must reject the failed operation
+correctly without hiding its cause. For expected, non-error absence, use `TryGet_*` (returns an
+invalid handle) and branch on `ck::IsValid`. The ensure-vs-TryGet decision table: `ck-change-control`,
 "Never silently handle an error".
 
 ### 1.4 Three environments — for YOUR public APIs too

@@ -13,7 +13,7 @@ CK_ENSURE(InExpression, InFormat, ...)            // returns bool; true if expre
 CK_ENSURE_IF_NOT(InExpression, InFormat, ...)     // use inside control flow
 ```
 
-`CK_ENSURE_IF_NOT` is the one you'll call 99% of the time. It evaluates `InExpression`; on failure it calls `ck::ensure::Ensure_Impl`, which talks to the `CkEnsure_Subsystem` to decide whether to break in code, break in script, log, or silence the site. The macro is `if (NOT CK_ENSURE(...))`, so pair it with an early-return block:
+`CK_ENSURE_IF_NOT` is the primary precondition macro. In diagnostic-enabled configurations, it evaluates `InExpression`; on failure it calls `ck::ensure::Ensure_Impl`, which talks to the `CkEnsure_Subsystem` to decide whether to break in code, break in script, log, or silence the site. That configuration expands to `if (NOT CK_ENSURE(...))`; the build-time table below describes the other expansions. Put failure handling directly in its body:
 
 ```cpp
 CK_ENSURE_IF_NOT(ck::IsValid(Handle), TEXT("Invalid handle in function [{}]"), __FUNCTION__)
@@ -34,15 +34,30 @@ CK_ENSURE_IF_NOT(ck::IsValid(Handle), TEXT("Invalid handle in function [{}]"), _
 
 ## Build-time control
 
-Two compile-time switches gate the behavior (declared in `CkCore/Build/CkBuild_Macros.h`):
+Two compile-time switches gate the behavior (set by `Source/CkBuildConfig/CkBuildConfig.Build.cs`):
 
 | Flag | Effect on `CK_ENSURE_IF_NOT` |
 |---|---|
-| `CK_DISABLE_ENSURE_CHECKS` = 1 | Expands to `if constexpr (false)`. Block body is compiled out. |
+| `CK_DISABLE_ENSURE_CHECKS` = 1 | Expands to `if constexpr (false)`. Neither predicate nor body executes. |
 | `CK_DISABLE_ENSURE_DEBUGGING` = 1 | Expands to `if (NOT expr)`. Still branches on failure, but skips the subsystem call. |
 | both 0 | Full behavior: subsystem + debug break. |
 
-Set these in your target's `.Target.cs` for shipping / test builds.
+Checks belong in every non-Shipping build. The intended Shipping policy omits both the predicate
+and the failure body for performance; an unfixed invariant violation may consequently crash.
+Retaining Shipping checks requires an explicit maintainer-approved delivery exception for that
+release. The current Shipping flags retain checks and disable diagnostics; they describe the
+current configuration, not approval or the call-site contract. Do not change the flags or macro
+without an explicit maintainer decision.
+
+Put rejection, rollback, failure completion, and termination in the macro body. Never follow it
+with an ordinary `if` repeating its validation or preserving recovery. Keep validation-only work
+inside the predicate or under the same compilation policy so Shipping omits that work too.
+
+Expected operational errors, such as a full disk or denied file access, are user/player-facing
+failures rather than programmer invariant violations. They must not use an ensure: propagate
+their explicit results through ordinary branches that remain in Shipping, preserving pending
+state or performing documented recovery. This is a single result branch, never an ensure plus
+a duplicate guard.
 
 ## Behavior
 
@@ -84,7 +99,7 @@ auto
 ## Pitfalls
 
 1. Don't call `ensure()` or `check()` directly in CkFoundation code. You lose per-site silencing, logging, and AS integration.
-2. `CK_ENSURE` evaluates `InExpression` **once** (via `const auto ExpressionResult = InExpression;`), so side-effects in the expression are safe — but keep them out anyway.
+2. An enabled `CK_ENSURE_IF_NOT` evaluates its predicate **once**. Keep it total and side-effect-safe; disabled checks omit that evaluation, so required side effects must never live there.
 3. Pass a **format string** (fmt syntax: `{}`), not `TEXT("%s")`. The macro runs `ck::Format_UE`, which is fmt-based, not printf-based.
 4. `CK_ENSURE_IF_NOT` is not a statement — it's the head of an `if`. You must follow it with a `{ ... }` block.
 5. The block body runs only on failure; don't put success-path code in it.
@@ -97,5 +112,5 @@ Every module. `_Utils.h` entry points typically start with a `CK_ENSURE_VALID_IF
 
 ## See also
 - `Validation/README.md` — the `ck::IsValid` predicate most ensures run against.
-- `Build/CkBuild_Macros.h` — the flags that gate this whole system.
+- `Source/CkBuildConfig/CkBuildConfig.Build.cs` — the actual build-flag matrix; see the Shipping policy above.
 - `CkEnsure_Subsystem.h` — the runtime subsystem that tracks per-site mute state.

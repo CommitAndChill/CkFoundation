@@ -51,7 +51,7 @@ failure mode of incoming engineers and models — read them twice.
    predicate and body; retaining checks in Shipping is an explicit exception when avoiding
    crashes under delivery constraints. Current build flags retain Shipping checks; verify
    `Source/CkBuildConfig/CkBuildConfig.Build.cs` before describing a particular build.
-3. **Never silently handle an error.** A `Warning`/`Error` log-and-continue where validation failed
+3. **Never silently handle a programmer error.** A `Warning`/`Error` log-and-continue where validation failed
    is a review rejection: logs get ignored, ensures do not. Fire `CK_ENSURE_IF_NOT` with a
    diagnostic and put the *correct* recovery in its body. No fallbacks that hide problems, ever,
    unless explicitly requested.
@@ -62,13 +62,18 @@ failure mode of incoming engineers and models — read them twice.
    Never access invalid state, continue through a mutable failure sentinel, or leave accepted
    partial state runnable. Registration, admission, composition, and
    configuration are atomic: one rejected required declaration invalidates the whole sequence.
-   Compute a side-effect-safe validity value once and put the failure or recovery directly in
-   the `CK_ENSURE_IF_NOT` body. The macro owns the inverted `if`; never add an empty ensure body
-   followed by a separate ordinary `if` repeating its condition. Disabling checks intentionally
-   skips both the predicate and recovery. Do not duplicate the guard to defeat that policy.
+   Evaluate a total, side-effect-safe predicate once through `CK_ENSURE_IF_NOT`, with rejection,
+   rollback, failure completion, and termination directly in its body. Never add an empty ensure
+   followed by a separate ordinary `if` repeating the condition or preserving its failure path.
+   Keep validation-only computation inside the predicate or under the same compilation policy
+   so Shipping omits that work too. Do not duplicate the guard to defeat omission.
    Every new validation boundary requires a focused invalid-input test proving rejection, zero
    downstream callbacks or mutation, no partial state, and no crash; also inspect a fresh startup
    log for ensures and script errors instead of relying only on process completion.
+   Expected operational failures, such as a full disk or denied file access, are user/player-facing
+   errors, not developer invariant violations. Do not use an ensure for them. Use ordinary result
+   branches that remain in Shipping, report explicit failure to the caller, and preserve pending
+   state or perform documented recovery. Do not add an ensure plus a duplicate failure branch.
 4. **Three environments.** Every public API must work — and be verified — in C++, Blueprint, AND
    AngelScript. "Works in C++" is one third of done.
 5. **Requests are deferred.** Mutations to ECS state go through request fragments handled by
@@ -156,12 +161,11 @@ auto
 indent, CRLF, `#pragma once`; includes ordered own-header → Ck module paths → engine → `*.generated.h` last.
 `// ----…----` separator lines between top-level declarations.
 
-**Validation & flow.** Compute a side-effect-safe condition once, then diagnose AND recover in the
-ensure macro's own body — it is an inverted `if`, so that body IS the failure path:
+**Validation & flow.** The macro evaluates its total, side-effect-safe predicate once and owns the
+failure branch. Put rejection, rollback, failure completion, and termination directly in its body:
 
 ```cpp
-const auto HandleIsValid = ck::IsValid(InHandle);
-CK_ENSURE_IF_NOT(HandleIsValid, TEXT("Invalid Timer Handle [{}]"), InHandle)
+CK_ENSURE_IF_NOT(ck::IsValid(InHandle), TEXT("Invalid Timer Handle [{}]"), InHandle)
 { return {}; }
 
 if (InParams.Get_CountDirection() == ECk_Timer_CountDirection::CountUp)
@@ -169,6 +173,8 @@ if (InParams.Get_CountDirection() == ECk_Timer_CountDirection::CountUp)
 ```
 
 Do **not** write `{}` followed by a separate `if (NOT Cond)` repeating the ensure condition.
+Keep validation-only work inside the predicate or under the same compilation policy; hoisting
+it outside the macro can retain that work even when checks are omitted.
 `CK_DISABLE_ENSURE_CHECKS=1` intentionally expands the macro to `if constexpr(false)`: neither
 the predicate nor the recovery body runs. Checks are required in non-Shipping builds; the
 intended Shipping policy omits them. Keeping checks in a shipped build is an explicit exception
@@ -178,7 +184,8 @@ when needed to avoid crashes under delivery constraints.
 (`CK_DISABLE_ENSURE_CHECKS=0`) and disables diagnostics (`CK_DISABLE_ENSURE_DEBUGGING=1`). The
 `Profile` override disables checks and is currently unreachable because
 `BuildConfigurationOverride` is fixed to `MatchWithUnreal`. This describes the current flags,
-not a requirement to keep Shipping checks forever. Changing the flags is a maintainer decision;
+not approval of a release exception or a requirement to keep Shipping checks forever.
+Changing the flags is a maintainer decision;
 do not alter the macro or add a duplicate guard to preserve its body when checks are disabled.
 
 Failure completion notifications and required rollback belong inside the same ensure body as
@@ -392,8 +399,8 @@ Canonical reference: `CkTimer`. Every feature module carries the contract.
 `Succeeded`, not `Failed`. Reserve `Failed` for an intent that does not hold afterwards and that
 retrying will not fix (a terminal-state target, a missing asset, a rejected transition).
 
-**Never strand a caller.** A `Request_*` that early-returns must still complete: hoist the condition
-to a local and fire `Failed_NotEnqueued` from inside the `CK_ENSURE_IF_NOT` body before returning.
+**Never strand a caller.** When an ensure failure body runs, a rejected `Request_*` must fire
+`Failed_NotEnqueued` inside that body before returning. Keep validation-only work under the macro's policy.
 Disabling ensure checks intentionally skips this rejection branch, including its completion
 notification. The intended Shipping policy permits that omission; do not repeat the condition in
 an ordinary `if` to preserve completion when checks are disabled. See *Validation & flow* above.
@@ -482,7 +489,7 @@ Full expansions, constraints, and add-a-new-X checklists: `ck-macros-and-codegen
 | `CK_GENERATED_BODY(T)` | ThisType alias + formatter/AS plumbing | Must precede macros that need `ThisType` |
 | `CK_PROPERTY(_X)` / `CK_PROPERTY_GET(_X)` | Accessor generation (`Get`+`_X` by token-paste) | Member MUST start with `_` or names break |
 | `CK_DEFINE_CONSTRUCTORS(T, ...)` | Default + essential-param ctors | Structs only — never UObjects; max 9 params; 1-arg ctor is `explicit` |
-| `CK_ENSURE_IF_NOT(expr, fmt, ...)` | Diagnostic inverted-if syntax | Body IS the failure path — put the recovery in it; hoist `expr` to a local so it evaluates once |
+| `CK_ENSURE_IF_NOT(expr, fmt, ...)` | Diagnostic inverted-if syntax | Evaluates `expr` once; recovery belongs in its body; validation-only work must disappear with the macro in Shipping |
 | `CK_DEFINE_ECS_TAG(_COUNTED)` | Tag fragment | Counted variant tracks add/remove depth |
 | `CK_DEFINE_SIGNAL_AND_UTILS_WITH_DELEGATE` | Signal + BP delegate + Bind/Unbind utils | PostFire `Unbind` is a distinct generated fragment type |
 | `CK_SIGNAL_BIND / CK_SIGNAL_UNBIND` | (Un)subscribe | Unbind + replay never connects — order matters |

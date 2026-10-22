@@ -38,7 +38,7 @@ set** = UE's permanent object pool, closed once at boot (`GUObjectArray.CloseDis
 | 12 | Packaged client crashes 0xC0000005; PIE always clean | disregard-for-GC pool violation (AS-born owners referencing normal-pool objects) | cooked client + `Ck.Diag.VerifyGCAssumptions` | §5 runbook | §5 |
 | 13 | Standalone / `-nullrhi`: actor (e.g. PlayerController) destroyed seconds after spawn; fine in net play | UObject with no strong GC root — fragments/weak chains only; a live netdriver was masking it | reproduce with no netdriver; audit "who roots this object?" | give the owning fragment a `TStrongObjectPtr` | §5 |
 | 14 | Works in PIE, silently different in packaged (no crash) | cook stripping, editor-only module, define gate, config diff | walk the §6 checklist | per axis | §6 |
-| 15 | "My ensure never fired" in headless / Test / Shipping | 1. `-unattended`/commandlet → LogOnly, no dialog 2. Test/Shipping → ensures are SILENT by design | grep the log; know the flag matrix | expected behavior — read §6.2 before "fixing" | §6 |
+| 15 | "My ensure never fired" in headless / Test / Shipping | Diagnostic-enabled unattended runs log without dialogs; Test checks run silently; intended Shipping removes predicate/body; current Shipping retention requires release approval | inspect actual flags and evidence appropriate to the mode | read §6.5 before changing guards | §6 |
 | 16 | Module DLLs vanish mid-build; rebuild storms; generated-file ping-pong with two sessions | multi-session traps | `Get-Process` sweep; check the generator lock | §7 rules | §7 |
 
 
@@ -63,7 +63,10 @@ Section numbers cited elsewhere in this skill point into these files.
 - Declaring the first AS boot's error wall a failure — or its eventual silence a success — without the
   second-boot discriminator (§4.1).
 - Deleting `Saved/`, `DerivedDataCache/`, or `Script/Generated/` to "fix" a C++ build problem (§1.3, §7.5).
-- Reading "no ensure dialog" as "no ensure fired" in `-unattended`, Test, or Shipping (§6.5).
+- Inferring ensure execution from missing dialogs or logs: Test checks run silently; intended
+  Shipping removes predicate/body; current Shipping retention requires explicit release approval.
+  Inspect actual flags and follow §6.5. Never duplicate recovery outside the macro or hoist
+  validation-only work outside it to preserve Shipping checks.
 - Patching a packaged GC crash at the crash site instead of answering "who roots this object?" (§5.4).
 - Re-running a flaky build until green instead of sweeping for the concurrent process holding it hostage (§7.1).
 - **Piping a build or test command through `tail`/`head`/`grep` and then trusting the exit code** —

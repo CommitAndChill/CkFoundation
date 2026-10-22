@@ -35,8 +35,13 @@ the editor binary lands project-named under `<Project>/Binaries/Win64/<Game>Edit
 ```
 
 Per-configuration `CK_*` defines change framework behavior — **PIE (Development-Editor) and a
-packaged Development game differ by exactly four defines**, and Test/Shipping silence ensure
-output while still evaluating predicates and running recovery blocks. The full 17-define ×
+packaged Development game differ by exactly four defines**. Every non-Shipping config retains
+ensure checks; Test currently runs predicate/body silently (`CK_DISABLE_ENSURE_CHECKS=0`,
+`CK_DISABLE_ENSURE_DEBUGGING=1`). Intended Shipping removes both for speed
+(`CK_DISABLE_ENSURE_CHECKS=1`), so an unfixed invariant may crash. Current Shipping retains
+silent checks (`CK_DISABLE_ENSURE_CHECKS=0`, `CK_DISABLE_ENSURE_DEBUGGING=1`), an exception
+requiring explicit release approval. Keep recovery inside the macro without duplicate guards or
+validation-only work hoisted outside it. The full 17-define ×
 5-config matrix is owned by `ck-macros-and-codegen` §2.4; the packaged-divergence consequences by
 `ck-debugging-playbook` §6.4–6.5. Practical rule: a config you never built is a config you never
 tested (§6 below).

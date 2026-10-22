@@ -261,25 +261,33 @@ Walk every axis; each has a verified precedent.
    when cooked.
 4. **Define gates flip per configuration.** The full 17-define × 5-config matrix is owned by
    `ck-macros-and-codegen` §2.4 (source of truth: `CkBuildConfig.Build.cs`, `SetBuildConfiguration`
-   :65-198). The current matrix keeps ensure checks on everywhere (`CK_DISABLE_ENSURE_CHECKS=0`
-   incl. Shipping) but silences diagnostics in Test/Shipping (`_DEBUGGING=1`). Intended Shipping
-   policy is to omit the branch unless a documented crash or deadline exception enables it; this
-   requires a build-configuration change. The other relevant flags are
-   `CK_DISABLE_ECS_HANDLE_DEBUGGING=1` outside Debug/Dev-editor and `CK_BUILD_DEBUG_DRAW=0`
+   :65-198). Current `MatchWithUnreal` flags retain checks everywhere
+   (`CK_DISABLE_ENSURE_CHECKS=0`) and suppress ensure diagnostics in Test/Shipping
+   (`CK_DISABLE_ENSURE_DEBUGGING=1`). Shipping retention is an exception requiring explicit release
+   approval: intended Shipping removes predicate/body (`CK_DISABLE_ENSURE_CHECKS=1`), while every
+   non-Shipping configuration retains checks. Other relevant gates:
+   `CK_DISABLE_ECS_HANDLE_DEBUGGING=1` outside Debug/Dev-editor, and `CK_BUILD_DEBUG_DRAW=0`
    only in Shipping.
    Same-pattern plugin gate: `WITH_CK_DEBUG_OVERLAY` = 0 only in Shipping
    (`Plugins/CkGameplayDebugger/Source/CkEntityDebugOverlay/CkEntityDebugOverlay.Build.cs:36-39`).
    `WITH_ANGELSCRIPT_CK` flips on engine-plugin presence, not configuration (CkBuildConfig.Build.cs:53-61).
 5. **Ensure behavior differs by config AND run mode** (`CK_ENSURE_IF_NOT` expansion,
    `Source/CkCore/Public/CkCore/Ensure/CkEnsure.h:62-81`):
-   - Current Test/Shipping (`CK_DISABLE_ENSURE_CHECKS=0`, `_DEBUGGING=1`): the predicate is evaluated
-     and the recovery block runs without logging/dialog. An ensure "not firing" in Test may be silent.
-   - `-unattended` / commandlet runs: full Error log, but never a dialog (`CkEnsure.cpp:221-222`,
-     `0eb3208aa`) — grep the log, don't wait for UI.
-   - The macro body owns rejection, rollback, completion, and approved recovery where needed. Do not
-     follow an empty ensure body with a duplicate ordinary condition. When checks are disabled, as
-     intended by default for Shipping, the body is omitted (`if constexpr(false)`); currently only
-     the opt-in Profile override sets `CK_DISABLE_ENSURE_CHECKS=1` (CkBuildConfig.Build.cs:190-195).
+   - Test currently uses `CK_DISABLE_ENSURE_CHECKS=0` and `CK_DISABLE_ENSURE_DEBUGGING=1`:
+     predicate/body execute without ensure logging/dialogs. Missing output cannot establish that
+     a check passed or was never reached.
+   - Intended Shipping uses `CK_DISABLE_ENSURE_CHECKS=1`: `if constexpr(false)` removes predicate
+     and failure body for speed. An unfixed invariant may crash. Current Shipping instead emits
+     `CK_DISABLE_ENSURE_CHECKS=0` / `CK_DISABLE_ENSURE_DEBUGGING=1`, retaining silent checks; this
+     exception requires explicit release approval and is not the default policy. The Profile
+     override also emits `CK_DISABLE_ENSURE_CHECKS=1`; it does not define Shipping policy.
+   - In diagnostic-enabled configurations, `-unattended` / commandlet runs emit Error logs without
+     dialogs (`CkEnsure.cpp:221-222`, `0eb3208aa`). Establish actual flags before log-grepping:
+     suppressed or removed diagnostics cannot establish check execution.
+   - Keep failure return, rollback and completion directly inside `CK_ENSURE_IF_NOT`. Never use
+     an empty ensure followed by a duplicate ordinary guard, or hoist validation-only work outside
+     the macro. Intentional Shipping omission does not authorize unconditional recovery or a
+     macro/flag change to preserve it.
    - `CK_DISABLE_ECS_HANDLE_DEBUGGING=1` also strips request debug names and the request vtable —
      request structs change `sizeof` across configs (CkRequest_Data.h; depth: `ck-macros-and-codegen`).
 6. **Config file differences.** Cooked targets read cooked/staged ini layers; a `[/Script/...]` setting
