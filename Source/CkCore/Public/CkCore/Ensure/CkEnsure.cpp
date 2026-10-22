@@ -182,9 +182,37 @@ namespace ck::ensure
         return FString{TEXT("Script::Unknown")};
     }
 
+    auto Get_EnsureSiteText(
+        const FName& InFile,
+        int32 InLine,
+        const FString& InScriptSiteIdentity)
+        -> FString
+    {
+        // A script-raised ensure's native site is always the ck::Ensure wrapper in CkEnsure_Utils.cpp, so the
+        // script identity is the only site worth naming.
+        if (NOT InScriptSiteIdentity.IsEmpty())
+        { return ck::Format_UE(TEXT("[Script:{}]"), InScriptSiteIdentity); }
+
+        // Same shape as the native ensure/check header. It comes from __FILE__/__LINE__, so unlike the frames of a
+        // resolved stack it survives every debug-symbols level, and it is the only site a game-thread log record has.
+        return ck::Format_UE(TEXT("[File:{}] [Line: {}]"), InFile, InLine);
+    }
+
+#if WITH_DEV_AUTOMATION_TESTS
+    auto Get_EnsureSiteText_ForTesting(
+        const FName& InFile,
+        int32 InLine,
+        const FString& InScriptSiteIdentity)
+        -> FString
+    {
+        return Get_EnsureSiteText(InFile, InLine, InScriptSiteIdentity);
+    }
+#endif
+
     auto Request_ReportFirstOccurrenceFromWorkerThread(
         const FString& InMessage,
         const FString& InExpressionText,
+        const FString& InSiteText,
         TFunctionRef<void(const FString&)> InReportEmitter) -> void
     {
         constexpr auto FramesToSkip_GetStackTrace_EnsureImpl_HandleFail = 3;
@@ -192,8 +220,9 @@ namespace ck::ensure
             FramesToSkip_GetStackTrace_EnsureImpl_HandleFail);
 
         InReportEmitter(ck::Format_UE(
-            TEXT("[Worker] {}\n{}\n\n == CallStack ==\n{}"),
+            TEXT("[Worker] {} {}\n{}\n\n == CallStack ==\n{}"),
             InExpressionText,
+            InSiteText,
             InMessage,
             StackTrace));
     }
@@ -219,26 +248,40 @@ namespace ck::ensure
             TEXT("LaunchWindowsStartup"),
             TEXT("WinMain"),
             TEXT("__scrt_common_main_seh"),
-            TEXT("UnknownFunction"),
         };
 
         auto Lines = TArray<FString>{};
         InStackTrace.ParseIntoArrayLines(Lines, false);
 
-        for (auto i = 0; i < Lines.Num(); ++i)
+        auto KeptLineCount = Lines.Num();
+        for (auto i = 0; i < Lines.Num() && KeptLineCount == Lines.Num(); ++i)
         {
             for (const auto& Pattern : TailPatterns)
             {
                 if (Lines[i].Contains(Pattern))
                 {
-                    Lines.SetNum(i);
-                    return FString::Join(Lines, TEXT("\n"));
+                    KeptLineCount = i;
+                    break;
                 }
             }
         }
 
-        return InStackTrace;
+        // Unsymbolized frames are boilerplate only at the tail (KERNEL32/ntdll). A module built without a PDB puts
+        // them at the TOP, so cutting at the first one would empty the stack; keep them and trim only the tail run.
+        while (KeptLineCount > 0
+            && (Lines[KeptLineCount - 1].Contains(TEXT("UnknownFunction")) || Lines[KeptLineCount - 1].TrimStartAndEnd().IsEmpty()))
+        { --KeptLineCount; }
+
+        Lines.SetNum(KeptLineCount);
+        return FString::Join(Lines, TEXT("\n"));
     }
+
+#if WITH_DEV_AUTOMATION_TESTS
+    auto Request_TrimEngineBoilerplateFrames_ForTesting(const FString& InStackTrace) -> FString
+    {
+        return Request_TrimEngineBoilerplateFrames(InStackTrace);
+    }
+#endif
 
     auto Request_WrapMultilineTextWithRichTextTags(const FString& InText, const FString& InTagName) -> FString
     {
@@ -288,13 +331,14 @@ namespace ck::ensure
         { return; }
 
         const auto IsEnsureFromScript = Get_IsEnsureFromScript();
+        const auto& ScriptSiteIdentity = IsEnsureFromScript ? Request_GetCurrentScriptSiteIdentity() : FString{};
         const auto& Record = UCk_Utils_Ensure_UE::Request_RecordEnsureOccurrence(
             FCk_EnsureSignature
             {
                 InFile,
                 InLine,
                 InExpressionText,
-                IsEnsureFromScript ? Request_GetCurrentScriptSiteIdentity() : FString{},
+                ScriptSiteIdentity,
             });
 
         // Automation asserts on per-occurrence log lines (AddExpectedError exact counts), and the
@@ -304,11 +348,14 @@ namespace ck::ensure
         if (NOT Record.IsFirstOccurrence && NOT GIsAutomationTesting)
         { return; }
 
+        const auto& SiteText = Get_EnsureSiteText(InFile, InLine, ScriptSiteIdentity);
+
         if (NOT IsInGameThread())
         {
             Request_ReportFirstOccurrenceFromWorkerThread(
                 InMessage,
                 InExpressionText,
+                SiteText,
                 InWorkerReportEmitter);
             return;
         }
@@ -338,9 +385,10 @@ namespace ck::ensure
         const auto* const ServerClientText = PieId - 1 < 0 ? TEXT("Server") : TEXT("Client");
 
         const auto& MessagePlusBpCallStack = ck::Format_UE(
-            TEXT("[{}] {}\n{}\n\n == BP CallStack ==\n{}\n\n == AS CallStack ==\n{}"),
+            TEXT("[{}] {} {}\n{}\n\n == BP CallStack ==\n{}\n\n == AS CallStack ==\n{}"),
             ServerClientText,
             InExpressionText,
+            SiteText,
             InMessage,
             BpStackTrace,
             AsStackTrace);
@@ -355,9 +403,10 @@ namespace ck::ensure
             CleanScriptSections += ck::Format_UE(TEXT("\n\n == AS CallStack ==\n{}"), AsStackTrace);
         }
         const auto& CleanMessagePlusBpCallStack = ck::Format_UE(
-            TEXT("[{}] {}\n{}{}"),
+            TEXT("[{}] {} {}\n{}{}"),
             ServerClientText,
             InExpressionText,
+            SiteText,
             InMessage,
             CleanScriptSections);
 

@@ -216,6 +216,8 @@ bool FCkTest_Ensure_WorkerFirstReport::RunTest(const FString&)
     TestFalse(TEXT("Worker reporting never requests a script debug break"), BreakInScript);
     TestTrue(TEXT("The report emitter runs on the originating worker"), ReportEmitterRanOnWorker.load());
     TestTrue(TEXT("The worker report retains the expression"), WorkerReport.Contains(TEXT("[Worker] WorkerTestExpression")));
+    TestTrue(TEXT("The worker report names the ensure site, independent of debug symbols"),
+        WorkerReport.Contains(FString::Printf(TEXT("[File:%s] [Line: 731]"), *UniqueFile.ToString())));
     TestTrue(TEXT("The worker report includes a native call stack"), WorkerReport.Contains(TEXT("== CallStack ==")));
     TestFalse(TEXT("The worker report does not request a Blueprint stack"), WorkerReport.Contains(TEXT("== BP CallStack ==")));
     TestFalse(TEXT("The worker report does not request an AngelScript stack"), WorkerReport.Contains(TEXT("== AS CallStack ==")));
@@ -320,6 +322,107 @@ bool FCkTest_Ensure_GameThreadRepeatSuppressionInteractiveOnly::RunTest(const FS
         UniqueBefore + 2);
     TestFalse(TEXT("Unattended game-thread reporting does not request a native break"), BreakInCode);
     TestFalse(TEXT("Unattended game-thread reporting does not request a script break"), BreakInScript);
+
+    return true;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_Ensure_GameThreadLogNamesSite,
+    "Ck.CkCore.Ensure.Site.GameThreadLogRecord",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCkTest_Ensure_GameThreadLogNamesSite::RunTest(const FString&)
+{
+    const auto PreviousDisplayPolicy = UCk_Utils_Core_UserSettings_UE::Get_EnsureDisplayPolicy();
+    ON_SCOPE_EXIT
+    {
+        UCk_Utils_Core_UserSettings_UE::Set_EnsureDisplayPolicy(PreviousDisplayPolicy);
+    };
+    UCk_Utils_Core_UserSettings_UE::Set_EnsureDisplayPolicy(ECk_EnsureDisplay_Policy::LogOnly);
+
+    const auto UniqueFile = FName{*FString::Printf(
+        TEXT("CkEnsureSiteTest-%s.cpp"),
+        *FGuid::NewGuid().ToString(EGuidFormats::Digits))};
+    auto BreakInCode = false;
+    auto BreakInScript = false;
+
+    // The game-thread record carries no native stack, so this header is the only site it has. The expectation
+    // matches the exact text once: a record without it fails the test as an unexpected error. Plain, because the
+    // default regex form would read the brackets as character classes.
+    AddExpectedErrorPlain(
+        FString::Printf(TEXT("[File:%s] [Line: 1207]"), *UniqueFile.ToString()),
+        EAutomationExpectedErrorFlags::Contains,
+        1);
+
+    ck::ensure::Ensure_Impl_ForTesting(
+        TEXT("Game-thread ensure site test"),
+        TEXT("SiteTestExpression"),
+        UniqueFile,
+        1207,
+        BreakInCode,
+        BreakInScript,
+        [](const FString&)
+        {
+        },
+        [](const FCk_Utils_EditorOnly_PushNewEditorMessage_Params&)
+        {
+        });
+
+    return true;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_Ensure_SiteText,
+    "Ck.CkCore.Ensure.Site.Text",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCkTest_Ensure_SiteText::RunTest(const FString&)
+{
+    TestEqual(TEXT("A native site uses the native ensure header shape"),
+        ck::ensure::Get_EnsureSiteText_ForTesting(TEXT("D:\\Src\\Native.cpp"), 42, {}),
+        FString{TEXT("[File:D:\\Src\\Native.cpp] [Line: 42]")});
+
+    TestEqual(TEXT("A script site names the script frame, not the ck::Ensure wrapper"),
+        ck::ensure::Get_EnsureSiteText_ForTesting(TEXT("CkEnsure_Utils.cpp"), 68, TEXT("AS:UExample::Tick@Example.as:17:3")),
+        FString{TEXT("[Script:AS:UExample::Tick@Example.as:17:3]")});
+
+    return true;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_Ensure_TrimEngineBoilerplateFrames,
+    "Ck.CkCore.Ensure.TrimEngineBoilerplateFrames",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCkTest_Ensure_TrimEngineBoilerplateFrames::RunTest(const FString&)
+{
+    const auto Trim = [](const TCHAR* InStack)
+    {
+        return ck::ensure::Request_TrimEngineBoilerplateFrames_ForTesting(InStack);
+    };
+
+    TestEqual(TEXT("Symbolized frames are cut at the first engine tail frame"),
+        Trim(TEXT("Leaf() [Probe.cpp:33]\nMid() [Probe.cpp:43]\nUWorld::Tick() [World.cpp:1]\nGuardedMain() []\nUnknownFunction []\n")),
+        FString{TEXT("Leaf() [Probe.cpp:33]\nMid() [Probe.cpp:43]")});
+
+    // A module built without a PDB: its frames lead the stack. Cutting at the first UnknownFunction emptied it.
+    TestEqual(TEXT("Leading unsymbolized project frames are kept"),
+        Trim(TEXT("UnknownFunction []\nUnknownFunction []\nFAutomationTestFramework::InternalStartTest() [AutomationTest.cpp:1311]\nFEngineLoop::Tick() []\n")),
+        FString{TEXT("UnknownFunction []\nUnknownFunction []\nFAutomationTestFramework::InternalStartTest() [AutomationTest.cpp:1311]")});
+
+    TestEqual(TEXT("A trailing unsymbolized run is trimmed when no engine tail frame is present"),
+        Trim(TEXT("Leaf() [Probe.cpp:33]\nUnknownFunction []\nUnknownFunction []\n")),
+        FString{TEXT("Leaf() [Probe.cpp:33]")});
+
+    TestEqual(TEXT("A wholly unsymbolized stack trims to nothing"),
+        Trim(TEXT("UnknownFunction []\nUnknownFunction []\n")),
+        FString{});
 
     return true;
 }
