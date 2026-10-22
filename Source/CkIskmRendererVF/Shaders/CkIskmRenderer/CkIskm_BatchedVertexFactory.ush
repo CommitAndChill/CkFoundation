@@ -470,5 +470,7 @@ float4 VertexFactoryGetInstanceHitProxyId(FVertexFactoryInput Input, FVertexFact
 {
     return (float4) 0;
 }
+// UE 5.8's VertexFactoryDefaultInterface.ush defines this too, unless the VF says it already has one.
+#define VF_IMPLEMENTED_GET_INSTANCE_HIT_PROXY_ID
 
 #include "/Engine/Private/VertexFactoryDefaultInterface.ush"
