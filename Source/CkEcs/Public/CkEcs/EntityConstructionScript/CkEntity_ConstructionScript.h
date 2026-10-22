@@ -67,8 +67,8 @@ public:
         const UCk_Entity_ConstructionScript_PDA* InConstructionScript,
         const FCk_Delegate_Request_OnCompleted& InDelegate);
 
-    // Immediate mutator — see Request_Construct. Completion reports that the batch was walked, not that
-    // every individual script was valid.
+    // Immediate mutator — see Request_Construct. Rejects an invalid entity or any invalid script before
+    // running any entry. Construct/DoConstruct are void and expose no internal failure result.
     UFUNCTION(BlueprintCallable,
               Category = "Ck|ConstructionScript",
               DisplayName = "[Ck] Request Construct Sub-ConstructionScript (Multiple)",

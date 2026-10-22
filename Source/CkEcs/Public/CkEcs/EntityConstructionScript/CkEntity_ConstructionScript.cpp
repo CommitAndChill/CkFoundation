@@ -50,8 +50,7 @@ auto
         const FCk_Delegate_Request_OnCompleted& InDelegate)
     -> FCk_Handle
 {
-    const auto ConstructionScriptIsValid = ck::IsValid(InConstructionScript);
-    CK_ENSURE_IF_NOT(ConstructionScriptIsValid,
+    CK_ENSURE_IF_NOT(ck::IsValid(InConstructionScript),
         TEXT("Unable to proceed with Entity Construction as the Construction Script [{}] is INVALID."), InConstructionScript)
     {
         InDelegate.ExecuteIfBound(InHandle, ECk_Request_OperationResult::Failed_NotEnqueued);
@@ -74,13 +73,46 @@ auto
         const FCk_Delegate_Request_OnCompleted& InDelegate)
     -> FCk_Handle
 {
-    for (const auto& ConstructionScript : InConstructionScript)
+    CK_ENSURE_IF_NOT(ck::IsValid(InHandle),
+        TEXT("Unable to construct a script batch on an invalid entity"))
     {
-        Request_Construct(InHandle, ConstructionScript, {});
+        InDelegate.ExecuteIfBound(InHandle, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return InHandle;
     }
 
-    // Immediate mutation — nothing is enqueued, so completion is synchronous on this stack. Per-script
-    // rejections are reported by the individual ensures; this reports only that the batch was walked.
+#if NOT CK_DISABLE_ENSURE_CHECKS
+    for (const auto& ConstructionScript : InConstructionScript)
+    {
+        CK_ENSURE_IF_NOT(ck::IsValid(ConstructionScript),
+            TEXT("Unable to construct script batch: every construction script class must be valid"))
+        {
+            InDelegate.ExecuteIfBound(InHandle, ECk_Request_OperationResult::Failed_NotEnqueued);
+            return InHandle;
+        }
+    }
+#endif
+
+    auto ConstructionScripts = TArray<const UCk_Entity_ConstructionScript_PDA*>{};
+    ConstructionScripts.Reserve(InConstructionScript.Num());
+    for (const auto& ConstructionScript : InConstructionScript)
+    {
+        // Resolving a CDO can construct it. Resolve once as required execution data, outside validation.
+        const auto* ConstructionScriptCDO = ConstructionScript.GetDefaultObject();
+        CK_ENSURE_IF_NOT(ck::IsValid(ConstructionScriptCDO),
+            TEXT("Unable to construct script batch: every construction script CDO must be valid"))
+        {
+            InDelegate.ExecuteIfBound(InHandle, ECk_Request_OperationResult::Failed_NotEnqueued);
+            return InHandle;
+        }
+        ConstructionScripts.Emplace(ConstructionScriptCDO);
+    }
+
+    for (const auto* ConstructionScript : ConstructionScripts)
+    {
+        Request_Construct_Instanced(InHandle, ConstructionScript, {});
+    }
+
+    // All entries are admitted before the first script runs; Construct itself has no failure result.
     InDelegate.ExecuteIfBound(InHandle, ECk_Request_OperationResult::Succeeded);
 
     return InHandle;
