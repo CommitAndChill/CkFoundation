@@ -13,6 +13,30 @@
 
 #if WITH_ANGELSCRIPT_CK
 
+class UStruct;
+
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace ck::angelscript
+{
+    // With editor scripts off (commandlets, -as-simulate-cooked) AngelScript leaves classes from editor-only packages
+    // unbound but still binds structs from them, so a Ck accessor or constructor naming such a class fails to register,
+    // and a commandlet exits 1 on the logged errors. Mirrors the engine's IsEditorOnlyClass package rule for structs.
+    CKCORE_API auto
+    Get_IsEditorOnlyStructHiddenFromScript(
+        const UStruct* InStruct) -> bool;
+
+    template <typename T>
+    auto
+    Get_IsEditorOnlyStructHiddenFromScript() -> bool
+    {
+        if constexpr (requires { T::StaticStruct(); })
+        { return Get_IsEditorOnlyStructHiddenFromScript(T::StaticStruct()); }
+        else
+        { return false; }
+    }
+}
+
 // --------------------------------------------------------------------------------------------------------------------
 
 #define CK_ANGELSCRIPT_BIND_OPERATOR_EQUALS(_Type_)                                                                                        \
@@ -205,6 +229,8 @@ AS_FORCE_LINK const FAngelscriptBinds::FBind _AS_Op_Name_##_##_Type_##_Other_Typ
         /* Skip if type not registered in AngelScript */\
         if (ExistingClass.GetTypeInfo() == nullptr)\
         { return; }\
+        if (ck::angelscript::Get_IsEditorOnlyStructHiddenFromScript<_ClassType_>())\
+        { return; }\
         \
         /* Get runtime type strings for each parameter */\
         CK_ANGELSCRIPT_GET_TYPES(__VA_ARGS__)\
@@ -312,6 +338,8 @@ private:
         /* Skip if type not registered in AngelScript */\
         if (ExistingClass.GetTypeInfo() == nullptr)\
         { return; }\
+        if (ck::angelscript::Get_IsEditorOnlyStructHiddenFromScript<ClassType>())\
+        { return; }\
         \
         /* Get runtime type string for the property */\
         auto PropertyTypeStr = ck::Get_RuntimeTypeToString_AngelScript<decltype(_InVar_)>();\
@@ -382,6 +410,8 @@ private:
         /* Skip if type not registered in AngelScript */\
         if (ExistingClass.GetTypeInfo() == nullptr)\
         { return; }\
+        if (ck::angelscript::Get_IsEditorOnlyStructHiddenFromScript<ClassType>())\
+        { return; }\
         \
         /* Get runtime type string for the property */\
         auto PropertyTypeStr = ck::Get_RuntimeTypeToString_AngelScript<decltype(_InVar_)>();\
@@ -436,6 +466,8 @@ private:
         auto ExistingClass = FAngelscriptBinds::ExistingClass(FBindString(ClassTypeStr));\
         /* Skip if type not registered in AngelScript */\
         if (ExistingClass.GetTypeInfo() == nullptr)\
+        { return; }\
+        if (ck::angelscript::Get_IsEditorOnlyStructHiddenFromScript<ClassType>())\
         { return; }\
         \
         /* Get runtime type string for the property */\

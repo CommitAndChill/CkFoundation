@@ -5,6 +5,28 @@
 #if WITH_ANGELSCRIPT_CK
 
 #include "AngelscriptCodeModule.h"
+#include "AngelscriptSettings.h"
+
+auto
+    ck::angelscript::
+    Get_IsEditorOnlyStructHiddenFromScript(
+        const UStruct* InStruct)
+    -> bool
+{
+#if WITH_EDITOR
+    if (FAngelscriptManager::bUseEditorScripts || InStruct == nullptr)
+    { return false; }
+
+    const auto* Package = InStruct->GetOutermost();
+    if (Package->HasAnyPackageFlags(PKG_EditorOnly | PKG_UncookedOnly))
+    { return true; }
+
+    const auto* Settings = FAngelscriptManager::ConfigSettings;
+    return Settings != nullptr && Settings->AdditionalEditorOnlyScriptPackageNames.Contains(Package->GetFName());
+#else
+    return false;
+#endif
+}
 
 auto
     FCkAngelScriptCtorFunctionRegistration::
