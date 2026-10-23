@@ -197,8 +197,16 @@ auto
         return;
     }
 
-    NavSys->Build();
-    ck::nav::Verbose(TEXT("Request_NavigationRebuild_ForTesting kicked off Build() on world [{}]"), World);
+    // UE 5.8 Build() warns "Navigation NOT building because navigation build is locked" when there is nothing to build.
+    if (NOT NavSys->IsThereAnywhereToBuildNavigation())
+    {
+        ck::nav::Verbose(TEXT("Request_NavigationRebuild_ForTesting skipped Build() on world [{}]: no navigation bounds to build"), World);
+    }
+    else
+    {
+        NavSys->Build();
+        ck::nav::Verbose(TEXT("Request_NavigationRebuild_ForTesting kicked off Build() on world [{}]"), World);
+    }
 
     // Immediate mutation — nothing is enqueued, so completion is synchronous on this stack.
     InDelegate.ExecuteIfBound(InHandle, ECk_Request_OperationResult::Succeeded);
