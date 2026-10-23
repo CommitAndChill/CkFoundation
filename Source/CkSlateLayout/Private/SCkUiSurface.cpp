@@ -2166,6 +2166,7 @@ auto FCkUiView::StageNode(const FCkUiNode& InNode, FStagedDocument& InOutStaged,
             const TWeakPtr<FCkUiView> WeakView = const_cast<FCkUiView*>(this)->AsShared();
             const FString Id = InNode.Id;
             const FOnTextChanged TextChanged = _Data.TextChanged.FindRef(InNode.Binding);
+            const TAttribute<FText> BoundText = _Data.Text.FindRef(InNode.Binding);
             const TSharedRef<bool> SuppressInitialWrite = MakeShared<bool>(true);
             Search = SNew(SSearchBox).Tag(FName(*Id))
                 .HintText_Lambda([WeakView, Id]()
@@ -2174,8 +2175,10 @@ auto FCkUiView::StageNode(const FCkUiNode& InNode, FStagedDocument& InOutStaged,
                     return View.IsValid() ? View->_CommittedSearchHints.FindRef(Id).Get(FText::GetEmpty()) : FText::GetEmpty();
                 })
                 .InitialText(_Data.Text.FindRef(InNode.Binding))
-                .OnTextChanged_Lambda([WeakView, SuppressInitialWrite, TextChanged](const FText& InText)
+                .OnTextChanged_Lambda([WeakView, SuppressInitialWrite, TextChanged, BoundText](const FText& InText)
                 {
+                    // UE 5.8 broadcasts OnTextChanged when a bound getter's value changes; drop that model echo.
+                    if (BoundText.IsBound() && InText.ToString().Equals(BoundText.Get().ToString(), ESearchCase::CaseSensitive)) { return; }
                     const TSharedPtr<FCkUiView> View = WeakView.Pin();
                     if (!*SuppressInitialWrite && View.IsValid() && View->CanDispatchEvents()) { TextChanged.ExecuteIfBound(InText); }
                 });
