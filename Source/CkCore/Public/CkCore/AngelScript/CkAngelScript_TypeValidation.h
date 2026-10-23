@@ -4,6 +4,8 @@
 
 #if WITH_ANGELSCRIPT_CK
 
+class UStruct;
+
 // --------------------------------------------------------------------------------------------------------------------
 // AngelScript cannot parse certain C++ type patterns; detecting them BEFORE registration avoids
 // asINVALID_DECLARATION errors.
@@ -152,6 +154,25 @@ IsTypeValidForAngelScript(
     const FString& InTypeString) -> bool
 {
     return NOT ContainsUnsupportedTypePattern(InTypeString);
+}
+
+// AngelScript binds editor-only structs but not editor-only classes, so with editor scripts off an accessor naming such a class can't register.
+CKCORE_API auto
+IsEditorOnlyStructHiddenFromAngelScript(
+    const UStruct* InStruct) -> bool;
+
+template <typename T>
+auto
+IsEditorOnlyStructHiddenFromAngelScript() -> bool
+{
+    if constexpr (requires { T::StaticStruct(); })
+    {
+        return IsEditorOnlyStructHiddenFromAngelScript(T::StaticStruct());
+    }
+    else
+    {
+        return false;
+    }
 }
 
 } // namespace ck::angelscript

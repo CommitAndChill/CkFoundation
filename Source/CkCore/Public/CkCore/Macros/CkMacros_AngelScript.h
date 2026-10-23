@@ -205,6 +205,8 @@ AS_FORCE_LINK const FAngelscriptBinds::FBind _AS_Op_Name_##_##_Type_##_Other_Typ
         /* Skip if type not registered in AngelScript */\
         if (ExistingClass.GetTypeInfo() == nullptr)\
         { return; }\
+        if (ck::angelscript::IsEditorOnlyStructHiddenFromAngelScript<_ClassType_>())\
+        { return; }\
         \
         /* Get runtime type strings for each parameter */\
         CK_ANGELSCRIPT_GET_TYPES(__VA_ARGS__)\
@@ -312,6 +314,8 @@ private:
         /* Skip if type not registered in AngelScript */\
         if (ExistingClass.GetTypeInfo() == nullptr)\
         { return; }\
+        if (ck::angelscript::IsEditorOnlyStructHiddenFromAngelScript<ClassType>())\
+        { return; }\
         \
         /* Get runtime type string for the property */\
         auto PropertyTypeStr = ck::Get_RuntimeTypeToString_AngelScript<decltype(_InVar_)>();\
@@ -382,6 +386,8 @@ private:
         /* Skip if type not registered in AngelScript */\
         if (ExistingClass.GetTypeInfo() == nullptr)\
         { return; }\
+        if (ck::angelscript::IsEditorOnlyStructHiddenFromAngelScript<ClassType>())\
+        { return; }\
         \
         /* Get runtime type string for the property */\
         auto PropertyTypeStr = ck::Get_RuntimeTypeToString_AngelScript<decltype(_InVar_)>();\
@@ -436,6 +442,8 @@ private:
         auto ExistingClass = FAngelscriptBinds::ExistingClass(FBindString(ClassTypeStr));\
         /* Skip if type not registered in AngelScript */\
         if (ExistingClass.GetTypeInfo() == nullptr)\
+        { return; }\
+        if (ck::angelscript::IsEditorOnlyStructHiddenFromAngelScript<ClassType>())\
         { return; }\
         \
         /* Get runtime type string for the property */\
