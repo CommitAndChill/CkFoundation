@@ -74,7 +74,7 @@ if (State == ECk_ProceduralAction_State::Finished)
 }
 ```
 
-The executable helpers in `Script/CkProceduralAnimation/Examples/CkProceduralAction_Noncombat.as` play a clip with Auto delivery and an OnFinished completion using these namespaces. A valid created handle means an instance exists; clip playback reaches Playing on its own.
+The executable helpers in `Script/CkProceduralAnimation/Samples/CkProceduralAction_Noncombat.as` play a clip with Auto delivery and an OnFinished completion using these namespaces. A valid created handle means an instance exists; clip playback reaches Playing on its own.
 
 ## 3. Struct essentials and groups
 

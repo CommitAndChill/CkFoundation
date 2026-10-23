@@ -70,7 +70,7 @@ Disjoint limb actions can coexist. An action claiming body presentation is subje
 - Failed locomotor return leaves the limb `Unplanted` (`Get_UnplantedLimbIds`); restore usable ground, then `Request_RecoverUnplantedLimbs`.
 - `Get_ResultText` explains a result and its failure context (a deadline or a budget measurement) for a person; branch on the outcome and recovery fields instead.
 
-Framework examples live under `Script/CkProceduralAnimation/Examples/` (`CkProceduralAction_Noncombat.as`, `CkProceduralAction_Builder.as`, `CkProceduralAction_Sweep.as`) with the assets `/CkFoundation/ProceduralAnimation/Examples/Ck_ProceduralAction_BodyPulse_DA` and `Ck_ProceduralAction_LimbNod_DA`.
+Framework examples live under `Script/CkProceduralAnimation/Samples/` (`CkProceduralAction_Noncombat.as`, `CkProceduralAction_Builder.as`, `CkProceduralAction_Sweep.as`) with the assets `/CkFoundation/ProceduralAnimation/Examples/Ck_ProceduralAction_BodyPulse_DA` and `Ck_ProceduralAction_LimbNod_DA`. CkTests compiles against those namespaces, so the folder must not be named `Examples`, `Dev`, `Developers` or `Editor`: AngelScript skips those folders in commandlets and packaged builds, and a CI cook then fails with "Namespace doesn't exist".
 
 ## Chain clearance
 

@@ -24,7 +24,7 @@ and `NEW FAILURES` (must be empty) into PROGRESS.md.
 
 - C++: the suites above.
 - AngelScript: the host compiles (`Script/ECS/Crawler/*.as`, `Script/Editor/Mars_CrawlerAttackClips.as`)
-  and the three `Plugins/CkFoundation/Script/CkProceduralAnimation/Examples/*.as` compile against the
+  and the three `Plugins/CkFoundation/Script/CkProceduralAnimation/Samples/*.as` compile against the
   new `Add_Walker` spec; `utils_procedural_articulation::Request_ClearFault` and
   `utils_procedural_action_editor::Get_EditorData` exist in `Script/Generated`.
 - Blueprint `[EDITOR-VERIFY]`: in a Blueprint graph, place `Add Walker` (one Spec pin),
