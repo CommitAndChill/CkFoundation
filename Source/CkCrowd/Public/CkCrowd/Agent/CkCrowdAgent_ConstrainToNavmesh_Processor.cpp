@@ -241,7 +241,13 @@ namespace ck
         const auto StartProjection = UCk_Utils_NavSurface_UE::Try_ProjectPoint(
             World, FCk_NavSurface_ProjectionQuery{From}.Set_SearchHalfExtents(ProjectionExtent));
 
-        if (StartProjection.Get_Status() != ECk_NavSurface_QueryStatus::Success)
+        const auto MaxRecoveryStepUp = UCk_Utils_Crowd_Settings_UE::Get_GroundingRecoveryMaxStepUpCm();
+        const auto StartProjectionAccepted =
+            StartProjection.Get_Status() == ECk_NavSurface_QueryStatus::Success &&
+            NOT Get_RecoveryExceedsStepUp(
+                static_cast<float>(StartProjection.Get_Location().Z - From.Z), MaxRecoveryStepUp);
+
+        if (NOT StartProjectionAccepted)
         {
             using namespace ck_crowd_agent_constrain_to_navmesh;
 
@@ -264,8 +270,26 @@ namespace ck
                 RecoveryOffset = ResolveSurfaceOffset(From, RecoveryProjection.Get_Location());
                 RecoveryRejectedForLift = Get_RecoveryExceedsStepUp(
                     static_cast<float>(RecoveryOffset.Z),
-                    UCk_Utils_Crowd_Settings_UE::Get_GroundingRecoveryMaxStepUpCm());
+                    MaxRecoveryStepUp);
                 RecoveryAccepted = NOT RecoveryRejectedForLift;
+
+                if (RecoveryRejectedForLift)
+                {
+                    const auto DownProjection = UCk_Utils_NavSurface_UE::Try_ProjectPoint(
+                        World, FCk_NavSurface_ProjectionQuery{From}
+                            .Set_SearchHalfExtents(RecoveryExtent)
+                            .Set_Mode(ECk_NavSurface_ProjectionMode::Down));
+
+                    if (DownProjection.Get_Status() == ECk_NavSurface_QueryStatus::Success)
+                    {
+                        const auto DownOffset = ResolveSurfaceOffset(From, DownProjection.Get_Location());
+                        if (NOT Get_RecoveryExceedsStepUp(static_cast<float>(DownOffset.Z), MaxRecoveryStepUp))
+                        {
+                            RecoveryOffset = DownOffset;
+                            RecoveryAccepted = true;
+                        }
+                    }
+                }
             }
 
             if (RecoveryAccepted)

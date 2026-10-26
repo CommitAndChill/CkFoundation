@@ -1407,7 +1407,15 @@ and teardown cancel or complete it on their own paths.
   navmesh islands (foliage tops, berms) it could never have walked onto — each snap raising the
   feet into reach of the next island, a ratchet measured climbing Z 3→319 in 16s;
   `_GroundingRecoveryMaxStepUpCm` (default 50) refuses lifts beyond a step (`[RECOVERY-REJECT]`),
-  while downward recovery stays unlimited. A stranded agent also re-reports every 30s
+  while downward recovery has no step cap but remains inside the original ±Height search extent.
+  Primary Closest admission observes the same lift cap before idle correction or a surface walk.
+  A failed or excessive primary answer enters the existing 4×radius recovery; if that Closest
+  answer succeeds but lifts too far, a Down query at the same actual feet position and the same
+  wider XY/body-height extent can recover lower ground. Accepted recovery applies its full offset
+  and ends the pass without walking the staged displacement; accepted primary idle correction
+  remains Z-only. The cap does not constrain ascent along a connected surface walk. These queries
+  do not promise the nearest admissible candidate: an excessive Closest answer can still mask a
+  legal positive-height candidate when Down finds none. A stranded agent also re-reports every 30s
   (`still OFF the navmesh after ...`), so a long session's log names its floaters without having
   caught the transition edge.
 - **The constraint is also where a shadow run's CONTAINMENT question is answered.** While
