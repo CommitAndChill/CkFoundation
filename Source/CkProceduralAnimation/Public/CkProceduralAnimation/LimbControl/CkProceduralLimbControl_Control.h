@@ -88,11 +88,13 @@ public:
         -> bool;
 
     // The player's sampling limits, for a return in progress. No action entity is required.
+    // Optional advance is the actual Physics proposal span used by AppendReturnCandidates.
     static auto
         Get_ReturnMotionBudget(
             const FCk_Handle_ProceduralArticulation& InSubject,
             FCk_ArticulationControlToken InToken,
-            FCk_ProceduralAction_Sampling& OutBudget)
+            FCk_ProceduralAction_Sampling& OutBudget,
+            FCk_Time* OutProposedAdvance = nullptr)
         -> bool;
 
     // The deadline a failed return missed and how long it had run then; false unless a deadline failed the return.

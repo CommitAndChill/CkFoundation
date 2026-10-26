@@ -289,11 +289,6 @@ namespace ck
         const ck_procedural_action_player_service::FClipStepResult& InAccepted)
         -> void
     {
-        // Refinement may have last probed a rejected fraction. Return settlement must use
-        // the proposal for the exact accepted fraction that is staged.
-        auto FinalReturnScratch = TArray<FCk_ArticulationTokenCandidate>{};
-        FCk_ProceduralLimbControl_Control::AppendReturnCandidates(InCtx.Subject, InCtx.DefaultPose,
-            FinalReturnScratch, InAccepted.Fraction);
         for (auto PlanIndex = 0; PlanIndex < InCtx.ClipPlans.Num(); ++PlanIndex)
         {
             auto& Plan = InCtx.ClipPlans[PlanIndex];

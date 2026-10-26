@@ -346,10 +346,13 @@ auto
     Get_ReturnMotionBudget(
         const FCk_Handle_ProceduralArticulation& InSubject,
         FCk_ArticulationControlToken InToken,
-        FCk_ProceduralAction_Sampling& OutBudget)
+        FCk_ProceduralAction_Sampling& OutBudget,
+        FCk_Time* OutProposedAdvance)
     -> bool
 {
     OutBudget = {};
+    if (OutProposedAdvance != nullptr)
+    { *OutProposedAdvance = {}; }
     if (NOT ck::procedural_limb_control::IsLive(InSubject)
         || NOT InSubject.Has<ck::FFragment_ProceduralLimbControl>()
         || NOT InSubject.Has<ck::FFragment_ProceduralActionPlayer_Params>())
@@ -360,6 +363,8 @@ auto
     if (Controller == nullptr || Controller->Get_ReturnState() != ECk_ProceduralLimbControl_ReturnState::Returning)
     { return false; }
     OutBudget = InSubject.Get<ck::FFragment_ProceduralActionPlayer_Params>().Get_Tuning().Get_Sampling();
+    if (OutProposedAdvance != nullptr)
+    { *OutProposedAdvance = InSubject.Get<ck::FFragment_ProceduralLimbControl>()._LastDeltaTime; }
     return true;
 }
 
