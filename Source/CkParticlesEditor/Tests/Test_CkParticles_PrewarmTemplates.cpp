@@ -240,7 +240,7 @@ namespace ck_particles_prewarm_test
         if (_LastHeartbeatTime < 0.0 || (FPlatformTime::Seconds() - _LastHeartbeatTime) > 15.0)
         {
             _LastHeartbeatTime = FPlatformTime::Seconds();
-            UE_LOG(LogTemp, Display, TEXT("[PrewarmTemplates] %.0fs elapsed — %d/%d system(s) still compiling: [%s]"),
+            UE_LOG(LogTemp, Display, TEXT("[PrewarmTemplates] %.0fs elapsed — %d/%d system(s) not ready to run: [%s]"),
                 Elapsed, StillCold.Num(), _Systems.Num(), *FString::Join(StillCold, TEXT(", ")));
         }
 
@@ -249,7 +249,7 @@ namespace ck_particles_prewarm_test
         if (Elapsed < _TimeoutSeconds)
         { return false; }
 
-        _Test->AddError(FString::Printf(TEXT("timed out after %.0fs with %d system(s) still compiling: [%s]"),
+        _Test->AddError(FString::Printf(TEXT("timed out after %.0fs with %d system(s) not ready to run: [%s]"),
             _TimeoutSeconds, StillCold.Num(), *FString::Join(StillCold, TEXT(", "))));
 
         return true;
@@ -259,7 +259,7 @@ namespace ck_particles_prewarm_test
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FCk_Particles_PrewarmTemplates_Test,
     "Ck.Particles.PrewarmTemplates",
-    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter | EAutomationTestFlags::NonNullRHI)
 
 bool FCk_Particles_PrewarmTemplates_Test::RunTest(const FString& Parameters)
 {
