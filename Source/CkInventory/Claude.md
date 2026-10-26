@@ -9,6 +9,14 @@
 
 ## Type-safe handle hierarchy
 
+Replicated removal preflights its complete removal set before changing records, grid cells, parents,
+or notifying listeners. Duplicate identities and live/Initiate entries missing their connection
+are invariant failures. EndPlay removals may precede or follow RecordEntry cleanup; Teardown and
+reclaimed entries must already be structurally disconnected. Accepted removals preserve one delta
+notification and never dereference a reclaimed item. Spatial cleanup always clears source cells by
+stored identity, but changes an item's placement or rotation only while its parent still names the
+source inventory, preserving destination-first transfers.
+
 ```
 FCk_Handle_Inventory                  // shared base; queries that work for both shapes
 ├── FCk_Handle_Inventory_Spatial      // grid placement; FIntPoint + ECk_CardinalRotation per item

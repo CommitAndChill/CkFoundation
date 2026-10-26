@@ -42,8 +42,7 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
-    // Per-entry order is load-bearing for replication correctness: removes happen first (per-shape
-    // cleanup → record disconnect → parent ref clear), then adds (connect → parent ref → setup).
+    // Preflight the complete removal set before disconnecting records, clearing shape state, or publishing deltas.
     template <typename T_Derived, typename TInventoryHandle, typename TSyncFragment, typename TInventoryTypeTag, typename TEntry>
     class TProcessor_Inventory_SyncReplication_Base : public ck_exp::TProcessor<
             T_Derived,
@@ -95,13 +94,63 @@ namespace ck
 
             FCk_Handle_Inventory BaseHandle = InHandle;
 
+            using RecordUtils = UCk_Utils_Inventory_UE::RecordOfInventoryItems_Utils;
+            using ConnectionState = RecordUtils::EConnectionState;
+            CK_ENSURE_IF_NOT([&EntriesRemoved]()
+            {
+                auto Identities = TSet<FCk_Handle_Item>{};
+                for (const auto& Entry : EntriesRemoved)
+                {
+                    if (Identities.Contains(Entry.Get_ItemHandle()))
+                    { return false; }
+                    Identities.Add(Entry.Get_ItemHandle());
+                }
+                return true;
+            }(), TEXT("Inventory [{}] replication removal repeats an item identity"), BaseHandle)
+            {
+                InHandle.template Remove<TSyncFragment>();
+                return;
+            }
+            auto RemovalStates = TArray<ConnectionState>{};
+            RemovalStates.Reserve(EntriesRemoved.Num());
             for (const auto& Entry : EntriesRemoved)
             {
-                auto ItemHandle = Entry.Get_ItemHandle();
+                const auto ItemHandle = Entry.Get_ItemHandle();
+                const auto State = RecordUtils::INTERNAL__Get_ConnectionState(BaseHandle, ItemHandle);
+                CK_ENSURE_IF_NOT(
+                    State == ConnectionState::Connected
+                        ? ck::IsValid(ItemHandle)
+                        : State == ConnectionState::Disconnected
+                            && NOT ItemHandle.Get_Entity().Get_IsTombstone()
+                            && ItemHandle.Get_Entity().Get_ID() != entt::null
+                            && (ck::Is_NOT_Valid(ItemHandle)
+                                || ItemHandle.template Has<ck::FTag_DestroyEntity_EndPlay>()),
+                    TEXT("Inventory [{}] replication removal found an inconsistent item connection [{}]. "
+                        "Does the RecordEntry exist in the Record? Live items must remain connected until removal; "
+                        "destroyed items must be fully disconnected."), BaseHandle, ItemHandle)
+                {
+                    InHandle.template Remove<TSyncFragment>();
+                    return;
+                }
+                RemovalStates.Add(State);
+            }
+
+            for (auto Index = int32{0}; Index < EntriesRemoved.Num(); ++Index)
+            {
+                auto ItemHandle = EntriesRemoved[Index].Get_ItemHandle();
+
+                if (RemovalStates[Index] == ConnectionState::Connected)
+                {
+                    const auto Disconnected = RecordUtils::Request_Disconnect(BaseHandle, ItemHandle);
+                    CK_ENSURE_IF_NOT(Disconnected,
+                        TEXT("Inventory [{}] replication removal lost its admitted connection [{}]"), BaseHandle, ItemHandle)
+                    {
+                        InHandle.template Remove<TSyncFragment>();
+                        return;
+                    }
+                }
 
                 T_Derived::OnEntryRemoved(InHandle, ItemHandle);
-
-                UCk_Utils_Inventory_UE::RecordOfInventoryItems_Utils::Request_Disconnect(BaseHandle, ItemHandle);
 
                 // Order-safe for transfers: only clear parent if it still points to this inventory.
                 if (ck::IsValid(ItemHandle) && TUtils_Item_ParentInventory::Has(ItemHandle))

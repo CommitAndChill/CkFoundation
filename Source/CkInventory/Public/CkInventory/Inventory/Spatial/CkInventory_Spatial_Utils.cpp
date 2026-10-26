@@ -535,8 +535,14 @@ auto
         }
     });
 
-    // ---- Drop the placement decision record ----
+    if (ck::Is_NOT_Valid(InItem))
+    { return; }
+    if (NOT ck::TUtils_Item_ParentInventory::Has(InItem))
+    { return; }
+    if (ck::TUtils_Item_ParentInventory::Get_StoredEntity(InItem) != InInventory)
+    { return; }
 
+    // ---- Drop the placement decision record ----
     {
         auto Item = InItem;
         Item.Try_Remove<ck::FFragment_Item_SpatialPlacement>();
