@@ -2036,6 +2036,18 @@ namespace ck
             InHandle.Add<FFragment_ProceduralGait_Failure>(ECk_ProceduralGait_Failure::SolverStep);
             return;
         }
+        for (auto& Lease : InGaitComp._ParticipationLeases)
+        {
+            if (NOT Lease._Recovering || Lease._HasPreparedTrajectory || Lease._LandingProbePending
+                || Lease._LandingWorld.Num() != Lease._LimbIds.Num()
+                || Lease._LandingNormalWorld.Num() != Lease._LimbIds.Num()
+                || Lease._LatestInputs.Num() != Lease._LimbIds.Num())
+            { continue; }
+            Lease._RecoverySettings = InGaitComp._Solver.Get_Settings();
+            Lease._RecoveryBasis = Basis;
+            Lease._RecoveryCadenceScale = InGaitComp._Solver.Get_LastCadenceScale();
+            Lease._HasPreparedTrajectory = true;
+        }
         if (InDeltaT > FCk_Time{})
         {
             auto SupportSnapshot = FCk_ProceduralGaitParticipation_Snapshot{};

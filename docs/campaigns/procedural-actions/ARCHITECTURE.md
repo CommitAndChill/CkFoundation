@@ -103,6 +103,7 @@ Returning a walking limb:
 2. Recovery remains owned by the articulation, beginning at its last settled endpoint and orientation. At entry it captures return policy/tuning revision, source pose, remaining retries, destination/reservation and an absolute deadline in service time. Cancelling again, releasing an action or destroying its scope cannot reset that deadline or discard that payload.
 3. Use the existing foothold queries, reach checks and reservations to choose a valid landing.
 4. Blend through a bounded return path; publish it through the same solver/publisher.
+   A prepared landing seals its trajectory settings, cadence multiplier, support basis and probe inputs after the successful gait solve. Evaluating the same elapsed time in that generation must not change its target geometry when live cadence or presets change. Explicit reattachment rebases the source and origin from actual settled geometry while preserving this prepared shape and the original deadline; a landing retry prepares a new trajectory. Articulation admission, current reach/clearance, settlement and touchdown checks remain live.
 5. Commit gait ownership only after verified touchdown; initialize solver from that accepted contact, phase and trust. Do not restore the stale pre-attack plant.
 6. If return fails, publish RecoveryFailed, release claims, and retain an explicitly Unplanted limb excluded from support. Get_RecoveryState remains observable; explicit Request_Recover can retry after the world changes.
 

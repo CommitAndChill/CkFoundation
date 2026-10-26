@@ -161,6 +161,10 @@ namespace ck
             TArray<FTransform> _StartWorld;
             TArray<FTransform> _AcceptedWorld;
             TArray<FProceduralGaitLegInput> _LatestInputs;
+            FProceduralGaitSettings _RecoverySettings;
+            FQuat _RecoveryBasis = FQuat::Identity;
+            float _RecoveryCadenceScale = 1.0f;
+            bool _HasPreparedTrajectory = false;
             TArray<FVector> _LandingWorld;
             TArray<FVector> _LandingNormalWorld;
             TArray<bool> _ContactTrusted;

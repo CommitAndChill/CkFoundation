@@ -439,6 +439,7 @@ auto
     Lease->_StartWorld = Start;
     Lease->_AcceptedWorld = MoveTemp(Start);
     Lease->_ReturnPolicy = InPinnedPolicy;
+    Lease->_HasPreparedTrajectory = false;
     Lease->_AcceptedElapsed = FCk_Time{};
     Lease->_RecoveryOrigin = FCk_Time{};
     Lease->_Recovering = true;
@@ -483,6 +484,7 @@ auto
     Lease->_LandingWorld.Reset();
     Lease->_LandingNormalWorld.Reset();
     Lease->_LandingProbePending = true;
+    Lease->_HasPreparedTrajectory = false;
     for (const auto Index : Lease->_LegIndices)
     { Fragment._Footholds[Index] = ck::FProceduralFootholdState{}; }
     Lease->_ContactTrusted.Init(false, Lease->_LimbIds.Num());
@@ -548,12 +550,14 @@ auto
     if (InAcceptedElapsed < Lease->_AcceptedElapsed || InProposedElapsed < InAcceptedElapsed
         || InAcceptedElapsed < Lease->_RecoveryOrigin)
     { return ECk_ProceduralGaitParticipation_Result::Stale; }
-    if (Lease->_LandingWorld.Num() != Lease->_LimbIds.Num()
+    if (NOT Lease->_HasPreparedTrajectory || Lease->_LandingWorld.Num() != Lease->_LimbIds.Num()
         || Lease->_LandingNormalWorld.Num() != Lease->_LimbIds.Num()
         || Lease->_LatestInputs.Num() != Lease->_LimbIds.Num()
         || Lease->_StartWorld.Num() != Lease->_LimbIds.Num())
     { return ECk_ProceduralGaitParticipation_Result::NotReady; }
-    const auto Basis = Gait._Basis;
+    const auto Basis = Lease->_RecoveryBasis;
+    auto Sampler = ck::FProceduralGaitSolver{};
+    Sampler.Set_Settings(Lease->_RecoverySettings);
     const auto InverseBasis = Basis.Inverse();
     const auto Phase = static_cast<float>(FMath::Clamp(
         (InProposedElapsed - Lease->_RecoveryOrigin) / Lease->_ReturnPolicy.Get_Duration(), 0.0, 1.0));
@@ -575,7 +579,7 @@ auto
         auto State = ck::FProceduralGaitLegState{};
         State.Set_Swing(Swing);
         auto Output = ck::FProceduralGaitLegOutput{};
-        if (NOT Gait._Solver.SamplePreparedSwingPose(State, Input, Gait._Solver.Get_LastCadenceScale(), Output))
+        if (NOT Sampler.SamplePreparedSwingPose(State, Input, Lease->_RecoveryCadenceScale, Output))
         { return ECk_ProceduralGaitParticipation_Result::Faulted; }
         const auto Endpoint = FTransform{(Basis * Output.Get_Rotation()).GetNormalized(),
             Basis.RotateVector(Output.Get_Position())};
