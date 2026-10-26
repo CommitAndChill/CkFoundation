@@ -41,8 +41,9 @@ namespace ck
         using RecordsListType = TArray<EntityType>;
 
         using DestructionCleanupFuncType = TFunction<void(FCk_Handle, FCk_Handle)>;
-        using DestructionCleanupFuncMap = TMap<EntityType, DestructionCleanupFuncType>;
-        using DestructionCleanupFuncPair = TPair<EntityType, DestructionCleanupFuncType>;
+        using DestructionCleanupKeyType = TPair<EntityType, entt::id_type>;
+        using DestructionCleanupFuncMap = TMap<DestructionCleanupKeyType, DestructionCleanupFuncType>;
+        using DestructionCleanupFuncPair = TPair<DestructionCleanupKeyType, DestructionCleanupFuncType>;
 
     private:
         RecordsListType _Records;

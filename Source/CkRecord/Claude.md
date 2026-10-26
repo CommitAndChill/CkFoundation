@@ -95,6 +95,15 @@ A "Meta Fragment" is a fragment that is itself a Record entry — the entry has 
 
 ## Implementation notes
 
+- **Connection integrity.** A connection owns forward membership, identity-based label-index rows,
+  one reverse owner reference, and a teardown callback keyed by the full owner handle **and record
+  type**. Different record types on the same owner therefore retain independent cleanup. Strict
+  disconnect validates both sides before mutation; entry destruction snapshots callbacks and
+  removes the same complete connection. Stored owner handles retain their registry identity.
+  `INTERNAL__Get_ConnectionState` is read-only C++ plumbing for direct structural membership,
+  including stale entry identities; it does not search entity extensions. `Disconnected` describes
+  absent structural edges, rather than proving that an entry was previously admitted.
+
 - **Snapshot round-trip.** `TFragment_RecordOfEntities::SerializeSnapshot` remaps *every* entry through
   `FSnapshotContext::Snapshot_Handle` — each entry is an entity handle. `_RecordEntriesTagNamePairs` is the
   persistent label→entry index (maintained imperatively as labeled entries are added/removed, NOT lazily

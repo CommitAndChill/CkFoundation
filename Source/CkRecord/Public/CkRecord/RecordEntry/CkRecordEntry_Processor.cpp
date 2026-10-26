@@ -18,26 +18,30 @@ namespace ck
         ForEachEntity(
             TimeType,
             HandleType InHandle,
-            const FFragment_RecordEntry& InRecordEntry) const
+            FFragment_RecordEntry& InRecordEntry) const
         -> void
     {
-        for (const auto& Kvp : InRecordEntry._DisconnectionFuncs)
+        const auto Disconnections = InRecordEntry._DisconnectionFuncs;
+        for (const auto& Kvp : Disconnections)
         {
-            const auto& RecordEntity = Kvp.Key;
+            const auto& RecordEntity = Kvp.Key.Key;
 
-            // If our Record is in the process of getting destroyed, ignore
             if (ck::Is_NOT_Valid(RecordEntity))
-            { continue; }
-
-            const auto& RecordEntityHandle = MakeHandle(RecordEntity, InHandle);
-
-            if (ck::Is_NOT_Valid(RecordEntityHandle))
             { continue; }
 
             const auto& DestructionCleanupFunc = Kvp.Value;
 
-            DestructionCleanupFunc(RecordEntityHandle, InHandle);
+            DestructionCleanupFunc(RecordEntity, InHandle);
         }
+        InRecordEntry._Records.RemoveAll([](const auto& InRecord) { return ck::Is_NOT_Valid(InRecord); });
+        for (auto It = InRecordEntry._DisconnectionFuncs.CreateIterator(); It; ++It)
+        {
+            if (ck::Is_NOT_Valid(It.Key().Key))
+            { It.RemoveCurrent(); }
+        }
+        CK_ENSURE_IF_NOT(InRecordEntry._Records.IsEmpty() && InRecordEntry._DisconnectionFuncs.IsEmpty(),
+            TEXT("RecordEntry [{}] teardown left connections to live records"), InHandle)
+        { return; }
     }
 }
 

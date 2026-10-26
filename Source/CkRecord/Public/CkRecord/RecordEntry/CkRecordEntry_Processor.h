@@ -11,7 +11,7 @@ namespace ck
 {
     class CKRECORD_API FProcessor_RecordEntry_Destructor : public TProcessor<
         FProcessor_RecordEntry_Destructor,
-        ck::TReadOnly<FFragment_RecordEntry>,
+        ck::TReadWrite<FFragment_RecordEntry>,
         CK_IF_END_PLAY>
     {
     public:
@@ -22,7 +22,7 @@ namespace ck
         auto ForEachEntity(
             TimeType InDeltaT,
             HandleType InHandle,
-            const FFragment_RecordEntry& InRecordEntry) const -> void;
+            FFragment_RecordEntry& InRecordEntry) const -> void;
     };
 }
 

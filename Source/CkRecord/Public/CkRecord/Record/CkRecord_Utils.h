@@ -15,6 +15,8 @@
 
 #include "CkRecord/CkRecord_Stats.h"
 
+#include <entt/core/type_info.hpp>
+
 #include "CkRecord_Utils.generated.h"
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -48,6 +50,18 @@ namespace ck
         using RecordEntryEntityType = typename T_DerivedRecord::EntityType;
         using RecordEntryMaybeTypeSafeHandle = MaybeTypeSafeHandle;
         using RecordEntryListType   = typename RecordType::RecordEntriesType;
+
+        enum class EConnectionState : uint8
+        {
+            Connected,
+            Disconnected,
+            Inconsistent
+        };
+
+        static auto
+        INTERNAL__Get_ConnectionState(
+            const FCk_Handle& InRecordHandle,
+            const MaybeTypeSafeHandle& InRecordEntry) -> EConnectionState;
 
     public:
         static auto
@@ -250,6 +264,12 @@ namespace ck
         Sort(
             FCk_Handle& InRecordHandle,
             T_BinaryPredicate InBinaryPredicate) -> void;
+
+    private:
+        static auto
+        DoUnlink(
+            FCk_Handle InRecordHandle,
+            MaybeTypeSafeHandle InRecordEntry) -> void;
     };
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -930,6 +950,68 @@ namespace ck
     template <typename T_DerivedRecord>
     auto
         TUtils_RecordOfEntities<T_DerivedRecord>::
+        INTERNAL__Get_ConnectionState(
+            const FCk_Handle& InRecordHandle,
+            const MaybeTypeSafeHandle& InRecordEntry)
+        -> EConnectionState
+    {
+        if (ck::Is_NOT_Valid(InRecordHandle) || InRecordEntry.Get_Entity().Get_IsTombstone()
+            || InRecordEntry.Get_Entity().Get_ID() == entt::null)
+        { return EConnectionState::Inconsistent; }
+        if (NOT InRecordHandle.Has<RecordType>())
+        { return EConnectionState::Inconsistent; }
+
+        const auto& Record = InRecordHandle.Get<RecordType>();
+        auto ForwardCount = int32{0};
+        for (const auto& Entry : Record._RecordEntries)
+        { ForwardCount += Entry == InRecordEntry ? 1 : 0; }
+        const auto Indexed = Record._RecordEntriesTagNamePairs.ContainsByPredicate(
+            [&InRecordEntry](const auto& InPair) { return InPair.Value == InRecordEntry; });
+        auto ReverseCount = int32{0};
+        auto CallbackCount = int32{0};
+        auto HasCallback = false;
+        if (ck::IsValid(InRecordEntry, ck::IsValid_Policy_IncludePendingKill{}))
+        {
+            if (InRecordEntry.template Has<ck::FFragment_RecordEntry>())
+            {
+                const auto& Entry = InRecordEntry.template Get<ck::FFragment_RecordEntry, ck::IsValid_Policy_IncludePendingKill>();
+                for (const auto& Owner : Entry._Records)
+                { ReverseCount += Owner == InRecordHandle ? 1 : 0; }
+                for (const auto& Callback : Entry._DisconnectionFuncs)
+                { CallbackCount += Callback.Key.Key == InRecordHandle ? 1 : 0; }
+                HasCallback = Entry._DisconnectionFuncs.Contains(
+                    {InRecordHandle, entt::type_hash<RecordType>::value()});
+            }
+        }
+        if (ReverseCount != CallbackCount)
+        { return EConnectionState::Inconsistent; }
+        if (ForwardCount == 1 && HasCallback)
+        { return EConnectionState::Connected; }
+        if (ForwardCount == 0 && NOT Indexed && NOT HasCallback)
+        { return EConnectionState::Disconnected; }
+        return EConnectionState::Inconsistent;
+    }
+
+    template <typename T_DerivedRecord>
+    auto
+        TUtils_RecordOfEntities<T_DerivedRecord>::
+        DoUnlink(
+            FCk_Handle InRecordHandle,
+            MaybeTypeSafeHandle InRecordEntry)
+        -> void
+    {
+        auto& Record = InRecordHandle.Get<RecordType>();
+        auto& Entry = InRecordEntry.template Get<ck::FFragment_RecordEntry>();
+        Record._RecordEntries.RemoveSingle(InRecordEntry);
+        Record._RecordEntriesTagNamePairs.RemoveAll(
+            [&InRecordEntry](const auto& InPair) { return InPair.Value == InRecordEntry; });
+        Entry._Records.RemoveSingle(InRecordHandle);
+        Entry._DisconnectionFuncs.Remove({InRecordHandle, entt::type_hash<RecordType>::value()});
+    }
+
+    template <typename T_DerivedRecord>
+    auto
+        TUtils_RecordOfEntities<T_DerivedRecord>::
         Request_Connect(
             FCk_Handle& InRecordHandle,
             MaybeTypeSafeHandle& InRecordEntry,
@@ -1008,10 +1090,14 @@ namespace ck
         auto& RecordEntryFragment = InRecordEntry.template Get<ck::FFragment_RecordEntry>();
         RecordEntryFragment._Records.Emplace(InRecordHandle);
 
-        RecordEntryFragment._DisconnectionFuncs.Add(InRecordHandle,
+        RecordEntryFragment._DisconnectionFuncs.Add({InRecordHandle, entt::type_hash<RecordType>::value()},
         [](FCk_Handle InRecordEntity, FCk_Handle InRecordEntryEntity)
         {
-            InRecordEntity.Get<T_DerivedRecord>()._RecordEntries.Remove(ck::StaticCast<MaybeTypeSafeHandle>(InRecordEntryEntity));
+            const auto Entry = ck::StaticCast<MaybeTypeSafeHandle>(InRecordEntryEntity);
+            CK_ENSURE_IF_NOT(INTERNAL__Get_ConnectionState(InRecordEntity, Entry) == EConnectionState::Connected,
+                TEXT("RecordEntry [{}] teardown found an inconsistent connection to Record [{}]"), Entry, InRecordEntity)
+            { return; }
+            DoUnlink(InRecordEntity, Entry);
         });
 
         // Immediate mutation — nothing is enqueued, so completion is synchronous on this stack.
@@ -1028,66 +1114,47 @@ namespace ck
         -> bool
     {
         QUICK_SCOPE_CYCLE_COUNTER(Request_Disconnect)
+        CK_ENSURE_IF_NOT(ck::IsValid(InRecordHandle), TEXT("Invalid Record handle [{}] passed to disconnect"), InRecordHandle)
+        {
+            InDelegate.ExecuteIfBound(InRecordHandle, ECk_Request_OperationResult::Failed_NotEnqueued);
+            return false;
+        }
         if (NOT Ensure(InRecordHandle))
         {
             InDelegate.ExecuteIfBound(InRecordHandle, ECk_Request_OperationResult::Failed_NotEnqueued);
             return {};
         }
 
+        CK_ENSURE_IF_NOT(ck::IsValid(InRecordEntry), TEXT("Invalid RecordEntry handle [{}] passed to disconnect"), InRecordEntry)
+        {
+            InDelegate.ExecuteIfBound(InRecordHandle, ECk_Request_OperationResult::Failed_NotEnqueued);
+            return false;
+        }
         if (NOT UCk_Utils_RecordEntry_UE::Ensure(InRecordEntry))
         {
             InDelegate.ExecuteIfBound(InRecordHandle, ECk_Request_OperationResult::Failed_NotEnqueued);
             return {};
         }
 
+        CK_ENSURE_IF_NOT(InRecordHandle.Get<RecordType>()._RecordEntries.Contains(InRecordEntry),
+            TEXT("The Record [{}] couldn't remove the RecordEntry [{}]. Does the RecordEntry exist in the Record?"),
+            InRecordHandle, InRecordEntry)
         {
-            auto& RecordFragment = InRecordHandle.Get<RecordType>();
-
-            if (UCk_Utils_GameplayLabel_UE::Has(InRecordEntry))
-            {
-                if (const auto& RecordEntryLabel = UCk_Utils_GameplayLabel_UE::Get_Label(InRecordEntry);
-                    ck::IsValid(RecordEntryLabel))
-                {
-                    RecordFragment._RecordEntriesTagNamePairs.Remove({RecordEntryLabel.GetTagName(), InRecordEntry});
-                }
-            }
-
-            const auto& RemovalSuccess = RecordFragment._RecordEntries.RemoveSingle(InRecordEntry);
-
-            CK_ENSURE_IF_NOT(RemovalSuccess,
-                TEXT("The Record [{}] couldn't remove the RecordEntry [{}]. Does the RecordEntry exist in the Record?"),
-                InRecordHandle,
-                InRecordEntry)
-            {
-                // The entry was already absent from the record — the caller's intent (disconnected)
-                // already holds, and retrying would never do more.
-                InDelegate.ExecuteIfBound(InRecordHandle, ECk_Request_OperationResult::Succeeded);
-                return {};
-            }
+            const auto Result = INTERNAL__Get_ConnectionState(InRecordHandle, InRecordEntry) == EConnectionState::Disconnected
+                ? ECk_Request_OperationResult::Succeeded : ECk_Request_OperationResult::Failed;
+            InDelegate.ExecuteIfBound(InRecordHandle, Result);
+            return false;
+        }
+        CK_ENSURE_IF_NOT(INTERNAL__Get_ConnectionState(InRecordHandle, InRecordEntry) == EConnectionState::Connected,
+            TEXT("The RecordEntry [{}] does NOT have a consistent connection to Record [{}]. "
+                "The forward record, reverse references, or teardown callbacks are out of sync."),
+            InRecordEntry, InRecordHandle)
+        {
+            InDelegate.ExecuteIfBound(InRecordHandle, ECk_Request_OperationResult::Failed);
+            return false;
         }
 
-        {
-            auto& RecordEntryFragment = InRecordEntry.template Get<ck::FFragment_RecordEntry>();
-            const auto& RemovalSuccess = RecordEntryFragment._Records.RemoveSingle(InRecordHandle);
-
-            if (NOT RecordEntryFragment._Records.Contains(InRecordHandle))
-            {
-                RecordEntryFragment._DisconnectionFuncs.Remove(InRecordHandle);
-            }
-
-            CK_ENSURE_IF_NOT(RemovalSuccess,
-                TEXT("The RecordEntry [{}] does NOT have the Record [{}] even though the Record had the RecordEntry. "
-                    "Somehow the RecordEntry was out of sync with the Record."),
-                InRecordEntry,
-                InRecordHandle)
-            {
-                // The record-side unlink above already succeeded, so this is a genuine bidirectional
-                // desync rather than an idempotent already-disconnected state — the operation could not
-                // fully honor its consistency contract.
-                InDelegate.ExecuteIfBound(InRecordHandle, ECk_Request_OperationResult::Failed);
-                return {};
-            }
-        }
+        DoUnlink(InRecordHandle, InRecordEntry);
 
         // Immediate mutation — nothing is enqueued, so completion is synchronous on this stack.
         InDelegate.ExecuteIfBound(InRecordHandle, ECk_Request_OperationResult::Succeeded);
