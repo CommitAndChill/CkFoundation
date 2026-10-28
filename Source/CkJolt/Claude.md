@@ -184,7 +184,9 @@ resolve their soft mesh through a rooted batch, consumer id `JoltBody.Setup`), `
   editor keeps serving the pre-cook answer until it restarts. The cook already does.
 - `UCk_Utils_JoltStaticActor_UE` — typesafe-handle BPFL over the attribution entity: `Has`,
   `Cast`/`DoCast`/`DoCastChecked`, `Get_SourceActor` (may be null after the actor dies),
-  `Get_SourceActorName` (cached, survives actor death), `Get_NumBodies`, and the C++-only
+  `Get_SourceComponent` (component-path entities only; null for an actor bake - for a component bake the
+  source actor is just its host, which may own many baked components), `Get_SourceActorName` (cached,
+  survives actor death), `Get_NumBodies`, and the C++-only
   `Get_BodyPhysicalMaterial(Entity, BodyIndexAndSequence)`.
 - **Per-body phys mats.** The bake records the phys mat each body's friction came from (component
   `PhysMaterialOverride`, else the BodySetup's, else the engine default; landscape: the proxy's default).
