@@ -13,6 +13,7 @@
 
 class AActor;
 class UPhysicalMaterial;
+class UPrimitiveComponent;
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -66,6 +67,15 @@ public:
               DisplayName="[Ck][JoltStaticActor] Get Source Actor")
     static AActor*
     Get_SourceActor(
+        const FCk_Handle_JoltStaticActor& InJoltStaticActor);
+
+    // The primitive component a component-path entity was baked from. Null for an actor bake and once the component is
+    // destroyed; Get_SourceActor names only its host, which can own many baked components.
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|JoltStaticActor",
+              DisplayName="[Ck][JoltStaticActor] Get Source Component")
+    static UPrimitiveComponent*
+    Get_SourceComponent(
         const FCk_Handle_JoltStaticActor& InJoltStaticActor);
 
     // The FName of the source actor, cached at bake time so it survives the actor's death.

@@ -4,6 +4,7 @@
 
 #include "CkCore/Ensure/CkEnsure.h"
 
+#include <Components/PrimitiveComponent.h>
 #include <GameFramework/Actor.h>
 #include <PhysicalMaterials/PhysicalMaterial.h>
 
@@ -20,6 +21,15 @@ auto
     -> AActor*
 {
     return const_cast<AActor*>(InJoltStaticActor.Get<ck::FFragment_JoltStaticActor>().Get_SourceActor().Get());
+}
+
+auto
+    UCk_Utils_JoltStaticActor_UE::
+    Get_SourceComponent(
+        const FCk_Handle_JoltStaticActor& InJoltStaticActor)
+    -> UPrimitiveComponent*
+{
+    return const_cast<UPrimitiveComponent*>(InJoltStaticActor.Get<ck::FFragment_JoltStaticActor>().Get_SourceComponent().Get());
 }
 
 auto
