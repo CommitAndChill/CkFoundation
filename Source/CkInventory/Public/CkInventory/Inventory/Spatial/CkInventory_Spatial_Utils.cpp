@@ -17,7 +17,9 @@
 #include "CkEcsExt/Transform/CkTransform_Utils.h"
 
 #include "CkGrid/2dGridSystem/Grid/Ck2dGridSystem_Utils.h"
+#include "CkGrid/2dGridSystem/Grid/Ck2dGridSystem_Fragment.h"
 #include "CkGrid/2dGridSystem/Cell/Ck2dGridCell_Utils.h"
+#include "CkGrid/2dGridSystem/Cell/Ck2dGridCell_Fragment.h"
 #include "CkGrid/CkGrid_Utils.h"
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -259,12 +261,40 @@ auto
 {
     const auto GridHandle = Get_Grid(InInventory);
 
+    const auto IsGridValid = ck::IsValid(GridHandle);
+    CK_ENSURE_IF_NOT(IsGridValid, TEXT("Get_NumFreeCells: grid handle is invalid"))
+    { return 0; }
+
+    const auto CellRegistry = GridHandle.Get<ck::FFragment_2dGridSystem>().Get_CellRegistry();
+    const auto IsCellRegistryValid = ck::IsValid(CellRegistry);
+    CK_ENSURE_IF_NOT(IsCellRegistryValid, TEXT("Get_NumFreeCells: grid cell registry is invalid"))
+    { return 0; }
+
     auto FreeCount = 0;
 
-    UCk_Utils_2dGridSystem_UE::ForEach_Cell(GridHandle, ECk_2dGridSystem_CellFilter::OnlyActiveCells,
-        [&](const FCk_Handle_2dGridCell& InCell)
+    // Match ForEach_Cell's active-cell filter and default handle validity without
+    // constructing/casting a handle for every cell. EndPlay cells remain valid;
+    // teardown, await and finalize cells do not. Never retain this registry view.
+    CellRegistry.View<ck::FFragment_2dGridCell_Params, ck::FFragment_InventorySlot_ItemRef,
+        ck::TExclude<ck::FTag_2dGridCell_Disabled>, ck::TExclude<ck::FTag_DestroyEntity_Teardown>,
+        ck::TExclude<ck::FTag_DestroyEntity_Await>, ck::TExclude<ck::FTag_DestroyEntity_Finalize>>().ForEach(
+        [&](FCk_Entity, const ck::FFragment_2dGridCell_Params&,
+            const ck::FFragment_InventorySlot_ItemRef& InItemRef)
     {
-        if (ck::Is_NOT_Valid(ck::TUtils_InventorySlot_ItemRef::Get_StoredEntity(InCell)))
+        if (ck::Is_NOT_Valid(InItemRef.Get_Entity()))
+        { ++FreeCount; }
+    });
+
+    // Malformed cells retain the legacy holder getter's diagnostic and result.
+    // Only this exceptional path needs to construct a cell handle.
+    CellRegistry.View<ck::FFragment_2dGridCell_Params,
+        ck::TExclude<ck::FFragment_InventorySlot_ItemRef>, ck::TExclude<ck::FTag_2dGridCell_Disabled>,
+        ck::TExclude<ck::FTag_DestroyEntity_Teardown>, ck::TExclude<ck::FTag_DestroyEntity_Await>,
+        ck::TExclude<ck::FTag_DestroyEntity_Finalize>>().ForEach(
+        [&](FCk_Entity InEntity, const ck::FFragment_2dGridCell_Params&)
+    {
+        const auto CellHandle = ck::MakeHandle(InEntity, CellRegistry);
+        if (ck::Is_NOT_Valid(ck::TUtils_InventorySlot_ItemRef::Get_StoredEntity(CellHandle)))
         { ++FreeCount; }
     });
 

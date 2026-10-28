@@ -345,6 +345,12 @@ version-compare + zero-visit accounting already defuse stranded markers there.
 
 The pacer's marker is whatever fragment the consumer declares as `MarkedDirtyBy` (never with `SkipPump`). Simple case — the marker IS `ck::FFragment_PacedWork`; `Add` it to the work entity to start. Existing-queue case — the marker is a work-queue fragment every enqueue path already touches (so each enqueue re-marks dirty): pass that type as `RunPacedSteps<TMarkerFragment>` and keep the `FFragment_PacedWork` pacer separate (`AddOrGet` internally, budget only).
 
+### Shared frame pacing (`Pacing/CkSharedPacedWork.h`, `Pacing/CkPacing_Utils.h`)
+
+Use `FSharedFrameBudget` for multiple native consumers sharing a frame allowance. Explicit frame identity refills only on advancement; active pump time accumulates across consumers and idle time is excluded. Time uses a monotonic clock, independent of gameplay DeltaT/pause. Use `FSharedPacedWork` for synchronous bounded discovery and fair opaque-ID continuations. Discovery and execution share the permit/time allowance and alternate when both are pending. A callback is indivisible, so the time limit is soft.
+
+`UCk_Utils_Pacing_UE::Create_SharedWork` exposes session-owned shared queue/ledger values to Blueprint and AngelScript (`utils_pacing`). Copies alias the same state; default/invalid configurations are invalid. Pump at most once per engine frame. Delegates are borrowed for the call only; consumers own work-ID lifetimes and must validate/cancel stale work. Clear invalidates queued generations without refilling the frame. Reentrant pumping is rejected; callback cancellation/re-enqueue cannot complete a replacement generation. Do not serialize these session handles or recreate them to refill mid-frame. Existing marker-based `RunPacedSteps` remains unchanged.
+
 ### Empty-view skip (`EmptyViewPolicy`)
 
 The scheduler's main pass skips dispatching any eligible processor whose view is **provably empty** — some required fragment/tag type of its view has zero live entities — bypassing the Tick call, view construction, tombstone walk, and per-processor trace/stat overhead. Tracking mirrors the pump short-circuit: per-include-type mutation version counters + a per-node cached verdict; the tombstone-aware storage scan re-runs only on change. The check runs at the node's dispatch position, so an include added earlier in the same frame wakes the processor the same frame.
