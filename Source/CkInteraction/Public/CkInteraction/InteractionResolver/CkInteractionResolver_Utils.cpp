@@ -216,6 +216,7 @@ auto
     }
 
     const auto DistanceSorting = IntentMapping->Get_DistanceSorting();
+    const auto ChannelPrecedence = IntentMapping->Get_ChannelPrecedence();
     const auto MaxConcurrentInteractions = IntentMapping->Get_MaxConcurrentInteractions();
 
     CK_ENSURE_IF_NOT(MaxConcurrentInteractions > 0,
@@ -227,6 +228,10 @@ auto
     // The mapping's channel order IS the priority order.
     for (const auto& Channel : IntentMapping->Get_Channels())
     {
+        // Valid targets offered on this channel, usable or not: under ByOfferedTargets the first channel with any
+        // claims the intent, and the channels after it are not consulted.
+        auto OfferedOnChannel = 0;
+
         for (const auto& Target : InAvailableTargets)
         {
             if (ck::Is_NOT_Valid(Target))
@@ -234,6 +239,8 @@ auto
 
             if (NOT UCk_Utils_InteractTarget_UE::Get_InteractionChannel(Target).MatchesTagExact(Channel))
             { continue; }
+
+            ++OfferedOnChannel;
 
             // The three non-CanInteractWith results below are accepted so a target with an ACTIVE
             // interaction stays in the resolved set — otherwise a re-evaluation drops it and the
@@ -253,6 +260,13 @@ auto
 
         if (ValidTargets.Num() >= MaxConcurrentInteractions)
         { break; }
+
+        if (ChannelPrecedence == ECk_InteractionResolver_ChannelPrecedence::ByOfferedTargets && OfferedOnChannel > 0)
+        {
+            ck::interaction::VeryVerbose(TEXT("Channel [{}] of intent [{}] is claimed by [{}] offered target(s); later channels are not consulted"),
+                Channel, InIntent, OfferedOnChannel);
+            break;
+        }
     }
 
     if (DistanceSorting == ECk_InteractionResolver_DistanceSorting::Enabled && ValidTargets.Num() > 1)

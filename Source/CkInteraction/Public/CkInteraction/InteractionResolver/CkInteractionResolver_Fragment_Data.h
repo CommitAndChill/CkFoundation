@@ -31,6 +31,24 @@ CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_InteractionResolver_DistanceSorting);
 
 // --------------------------------------------------------------------------------------------------------------------
 
+// How a channel earlier in a mapping's order takes precedence over the channels after it.
+UENUM(BlueprintType)
+enum class ECk_InteractionResolver_ChannelPrecedence : uint8
+{
+    // A channel counts through the targets the resolver can interact with now. When it has none, the next channel is
+    // consulted: an offered target that is disabled or rejects the source is as if it were absent.
+    ByUsableTargets,
+
+    // The first channel with any offered target decides, usable or not. A channel that holds only a disabled or
+    // rejecting target still claims the intent, so it resolves to nothing rather than falling through to a later
+    // channel (a focused world prompt that is blocked outranks a held item's own use on the same key).
+    ByOfferedTargets
+};
+
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_InteractionResolver_ChannelPrecedence);
+
+// --------------------------------------------------------------------------------------------------------------------
+
 USTRUCT(BlueprintType)
 struct CKINTERACTION_API FCk_InteractionResolver_IntentChannelMapping
 {
@@ -49,6 +67,9 @@ private:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
     ECk_InteractionResolver_DistanceSorting _DistanceSorting = ECk_InteractionResolver_DistanceSorting::Enabled;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+    ECk_InteractionResolver_ChannelPrecedence _ChannelPrecedence = ECk_InteractionResolver_ChannelPrecedence::ByUsableTargets;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true, UIMin = 1, ClampMin = 1))
     int32 _MaxConcurrentInteractions = 1;
 
@@ -56,6 +77,7 @@ public:
     CK_PROPERTY_GET(_Intent);
     CK_PROPERTY_GET(_Channels);
     CK_PROPERTY(_DistanceSorting);
+    CK_PROPERTY(_ChannelPrecedence);
     CK_PROPERTY(_MaxConcurrentInteractions);
 
 public:

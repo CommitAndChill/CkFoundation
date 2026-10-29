@@ -50,6 +50,15 @@ Interactable entities have an Interaction fragment; interactor entities hold a r
   Both in-tree consumers satisfy it (the resolver is composed on the same entity the bridge passes
   as the source).
 
+- **A mapping's channel order is its priority, and `ChannelPrecedence` says what a channel counts through.**
+  `ByUsableTargets` (the default) consults the next channel whenever a channel has no target the resolver can
+  interact with now, so a disabled or rejecting target is as if absent. `ByOfferedTargets` lets the first channel
+  with any offered target claim the intent: a channel holding only a blocked target resolves to nothing instead of
+  falling through. Use it where a later channel is a fallback the player must be able to rely on *not* firing while
+  something earlier is in front of them (a held item's own use behind a focused world prompt on the same key).
+  Enabling or disabling a target does not re-resolve a held intent (only intent edges and target add/remove stamp
+  `ResolveDirty`); the claim is read at the next resolve.
+
 ## Anti-patterns
 
 Don't poll for nearby interactables every frame in a Processor — use the spatial query (`CkSpatialQuery`) results as the input to the interaction system.
