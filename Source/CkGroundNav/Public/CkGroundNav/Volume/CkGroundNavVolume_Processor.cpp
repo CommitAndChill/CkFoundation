@@ -1119,6 +1119,8 @@ namespace ck
     {
         using namespace ck_groundnav_volume_processor;
 
+        InRequest.Set_BuildAdmission(ECk_GroundNav_BuildAdmission::Rejected);
+
         const auto& RequestedSelectorInput =
             InRequest.Get_OverrideDataLayerSelector() == ECk_EnableDisable::Enable
                 ? InRequest.Get_DataLayerSelector()
@@ -1191,6 +1193,7 @@ namespace ck
 
         if (ExistingBuildSatisfiesRequest && InRequest.Get_ForceRestart() == ECk_EnableDisable::Disable)
         {
+            InRequest.Set_BuildAdmission(ECk_GroundNav_BuildAdmission::AlreadyInProgress);
             InRequest.TryFireCompletion(InVolumeEntity, ECk_Request_OperationResult::Succeeded);
             return;
         }
@@ -1203,6 +1206,7 @@ namespace ck
         DoCancel_RepairInFlight(InVolumeEntity, InRepairState);
 
         InBuildState._Backend.Reset();
+        InRequest.Set_BuildAdmission(ECk_GroundNav_BuildAdmission::Accepted, ++InBuildState._NextBuildAttemptSequence);
         InBuildState._PendingRequest = InRequest;
         InBuildState._PendingRequest.Set_DataLayerSelector(RequestedSelector);
         InBuildState._HasPendingBuildRequest = true;
@@ -1837,6 +1841,9 @@ namespace ck
 
         InVolumeEntity.Remove<MarkedDirtyBy>();
 
+        if (NOT InBuildState._HasPendingBuildRequest)
+        { InBuildState._PendingRequest = FCk_Request_GroundNavVolume_Build{}; }
+
         // Every dirty region waiting on a repair is inside the ground this build re-bakes from live
         // geometry under the records it snapshots below, so those regions are answered by it - and
         // answered better. They are taken over HERE, at the snapshot, and not at the publish: a region
@@ -1953,7 +1960,7 @@ namespace ck
             InBuildState._Backend.Reset();
 
             InBuildState._PendingRequest.TryFireCompletion(
-                InVolumeEntity, ECk_Request_OperationResult::Failed);
+                InVolumeEntity, ECk_Request_OperationResult::Failed, BeginResult.Get_Status());
 
             // On the same terms as the backend refusal above: nothing began, so nothing will publish
             // the ground these regions named.
@@ -2034,7 +2041,7 @@ namespace ck
                 InVolumeEntity, SliceResult.Get_Status());
 
             InBuildState._PendingRequest.TryFireCompletion(
-                InVolumeEntity, ECk_Request_OperationResult::Failed);
+                InVolumeEntity, ECk_Request_OperationResult::Failed, SliceResult.Get_Status());
 
             // The regions that rode this build were never baked by it. They fail with it rather than
             // being put back: a build is what bakes that ground, and their callers are told so now
@@ -2063,7 +2070,7 @@ namespace ck
             InVolumeEntity, CompletedFieldCount, ExpectedFieldCount)
         {
             InBuildState._PendingRequest.TryFireCompletion(
-                InVolumeEntity, ECk_Request_OperationResult::Failed);
+                InVolumeEntity, ECk_Request_OperationResult::Failed, SliceResult.Get_Status());
 
             for (const auto& RidingRepairRequest : InRepairState._RidingBuildRequests)
             { RidingRepairRequest.TryFireCompletion(InVolumeEntity, ECk_Request_OperationResult::Failed); }
@@ -2085,7 +2092,7 @@ namespace ck
             {}
             if (NOT ProducerIsUsable)
             {
-                InBuildState._PendingRequest.TryFireCompletion(InVolumeEntity, ECk_Request_OperationResult::Failed);
+                InBuildState._PendingRequest.TryFireCompletion(InVolumeEntity, ECk_Request_OperationResult::Failed, SliceResult.Get_Status());
                 return;
             }
 
@@ -2151,7 +2158,7 @@ namespace ck
             {}
             if (NOT BundleIsComplete)
             {
-                InBuildState._PendingRequest.TryFireCompletion(InVolumeEntity, ECk_Request_OperationResult::Failed);
+                InBuildState._PendingRequest.TryFireCompletion(InVolumeEntity, ECk_Request_OperationResult::Failed, SliceResult.Get_Status());
                 return;
             }
             groundnav::DoDerive_SeamPortals(ProducerBundle._DefaultField);
@@ -2176,7 +2183,7 @@ namespace ck
                 // No local mask or desired publication is committed on a refused transaction. Reset
                 // to the last registry-confirmed mask so the next aggregation retries this target.
                 InInvokerState._DesiredTileIndices = InInvokerState._EnabledTileIndices;
-                InBuildState._PendingRequest.TryFireCompletion(InVolumeEntity, ECk_Request_OperationResult::Failed);
+                InBuildState._PendingRequest.TryFireCompletion(InVolumeEntity, ECk_Request_OperationResult::Failed, SliceResult.Get_Status());
                 return;
             }
 
@@ -2195,7 +2202,7 @@ namespace ck
             nav_surface::Request_NotifySurfaceRebuilt(
                 UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InVolumeEntity), Result._ChangedBounds);
             InVolumeEntity.AddOrGet<FTag_GroundNavVolume_Built>();
-            InBuildState._PendingRequest.TryFireCompletion(InVolumeEntity, ECk_Request_OperationResult::Succeeded);
+            InBuildState._PendingRequest.TryFireCompletion(InVolumeEntity, ECk_Request_OperationResult::Succeeded, SliceResult.Get_Status());
             return;
         }
 
@@ -2229,7 +2236,7 @@ namespace ck
             groundnav::world_fields::FCk_GroundNav_PublishClaim::Geometry()))
         {
             InBuildState._PendingRequest.TryFireCompletion(
-                InVolumeEntity, ECk_Request_OperationResult::Failed);
+                InVolumeEntity, ECk_Request_OperationResult::Failed, SliceResult.Get_Status());
             for (const auto& RidingRepairRequest : InRepairState._RidingBuildRequests)
             { RidingRepairRequest.TryFireCompletion(InVolumeEntity, ECk_Request_OperationResult::Failed); }
             InRepairState._RidingBuildRequests.Reset();
@@ -2275,7 +2282,7 @@ namespace ck
         InRepairState._InFlightRequests.Reset();
 
         InBuildState._PendingRequest.TryFireCompletion(
-            InVolumeEntity, ECk_Request_OperationResult::Succeeded);
+            InVolumeEntity, ECk_Request_OperationResult::Succeeded, SliceResult.Get_Status());
     }
 
     // ----------------------------------------------------------------------------------------------------------------

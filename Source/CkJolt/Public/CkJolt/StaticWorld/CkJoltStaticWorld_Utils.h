@@ -103,6 +103,15 @@ public:
     Get_NumStaticBodies(
         const UObject* InWorldContextObject);
 
+    /// Returns bodies currently added for InComponent's component-path bake registration. Does not include
+    /// actor or level-sweep bodies; zero does not prove that no other registration contributes its collision.
+    UFUNCTION(BlueprintCallable,
+              Category = "Ck|Jolt",
+              DisplayName="[Ck][Jolt] Get Num Component Bodies In Static World")
+    static int32
+    Get_NumComponentBodiesInScene(
+        UPrimitiveComponent* InComponent);
+
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Jolt",
               meta = (WorldContext = "InWorldContextObject"),

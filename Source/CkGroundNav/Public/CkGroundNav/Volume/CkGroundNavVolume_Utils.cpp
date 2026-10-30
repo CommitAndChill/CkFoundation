@@ -100,19 +100,21 @@ auto
 {
     CK_CALLSTACK_RECORD(ck::FFragment_GroundNavVolume_Requests, InVolume);
 
+    auto Submission = InRequest.Make_Submission();
+    if (InDelegate.IsBound())
+    { Submission.Set_CompletionDelegate(InDelegate); }
+
     const auto VolumeIsValid = ck::IsValid(InVolume);
 
     CK_ENSURE_IF_NOT(VolumeIsValid,
         TEXT("Invalid GroundNav Volume Handle [{}] supplied to Request_Build"), InVolume)
     {
-        InDelegate.ExecuteIfBound(InVolume, ECk_Request_OperationResult::Failed_NotEnqueued);
+        Submission.Set_BuildAdmission(ECk_GroundNav_BuildAdmission::Rejected);
+        Submission.TryFireCompletion(InVolume, ECk_Request_OperationResult::Failed_NotEnqueued);
         return InVolume;
     }
 
-    if (InDelegate.IsBound())
-    { InRequest.Set_CompletionDelegate(InDelegate); }
-
-    InVolume.AddOrGet<ck::FFragment_GroundNavVolume_Requests>()._Requests.Emplace(InRequest);
+    InVolume.AddOrGet<ck::FFragment_GroundNavVolume_Requests>()._Requests.Emplace(MoveTemp(Submission));
 
     return InVolume;
 }

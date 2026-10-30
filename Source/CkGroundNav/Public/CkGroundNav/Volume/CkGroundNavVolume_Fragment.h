@@ -191,6 +191,7 @@ namespace ck
         TUniquePtr<groundnav::FCk_GroundNav_GeometryBackend_Jolt> _Backend;
         FCk_Request_GroundNavVolume_Build _PendingRequest;
         bool _HasPendingBuildRequest = false;
+        int64 _NextBuildAttemptSequence = 0;
 
         // Snapshotted at StartBuild and retained through every slice. The request object is completion
         // state, while this value is part of the bake identity and must not be inferred from mutable

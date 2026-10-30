@@ -111,6 +111,22 @@ auto
 
 auto
     UCk_Utils_JoltStaticWorld_UE::
+    Get_NumComponentBodiesInScene(
+        UPrimitiveComponent* InComponent)
+    -> int32
+{
+    if (ck::Is_NOT_Valid(InComponent))
+    { return 0; }
+
+    const auto* Subsystem = ck_jolt_static_world_utils::Get_Subsystem(InComponent);
+    if (ck::Is_NOT_Valid(Subsystem))
+    { return 0; }
+
+    return Subsystem->Get_NumComponentBodiesInScene(*InComponent);
+}
+
+auto
+    UCk_Utils_JoltStaticWorld_UE::
     Get_NumUniqueShapes(
         const UObject* InWorldContextObject)
     -> int32

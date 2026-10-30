@@ -207,6 +207,60 @@ public:
 
 // --------------------------------------------------------------------------------------------------------------------
 
+UENUM(BlueprintType)
+enum class ECk_GroundNav_BuildAdmission : uint8
+{
+    NotEvaluated,
+    Rejected,
+    Accepted,
+    AlreadyInProgress
+};
+
+USTRUCT(BlueprintType)
+struct CKGROUNDNAV_API FCk_GroundNavVolume_BuildOutcome
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(FCk_GroundNavVolume_BuildOutcome);
+
+private:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = true))
+    int64 _RequestSequence = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = true))
+    int64 _AttemptSequence = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = true))
+    ECk_GroundNav_BuildAdmission _Admission = ECk_GroundNav_BuildAdmission::NotEvaluated;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = true))
+    ECk_Request_OperationResult _OperationResult = ECk_Request_OperationResult::Failed;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = true))
+    bool _HasBakeStatus = false;
+
+    // Unavailable unless HasBakeStatus: a no-bake rejection must not impersonate Completed.
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = true))
+    ECk_GroundNav_BakeStatus _BakeStatus = ECk_GroundNav_BakeStatus::Completed;
+
+public:
+    CK_PROPERTY_GET(_RequestSequence);
+    CK_PROPERTY_GET(_AttemptSequence);
+    CK_PROPERTY_GET(_Admission);
+    CK_PROPERTY_GET(_OperationResult);
+    CK_PROPERTY_GET(_HasBakeStatus);
+    CK_PROPERTY_GET(_BakeStatus);
+
+    CK_DEFINE_CONSTRUCTORS(FCk_GroundNavVolume_BuildOutcome,
+        _RequestSequence, _AttemptSequence, _Admission, _OperationResult, _HasBakeStatus, _BakeStatus);
+};
+
+DECLARE_DYNAMIC_DELEGATE_TwoParams(
+    FCk_Delegate_GroundNavVolume_OnBuildResolved,
+    FCk_Handle_GroundNavVolume, InVolume,
+    const FCk_GroundNavVolume_BuildOutcome&, InOutcome);
+
 USTRUCT(BlueprintType)
 struct CKGROUNDNAV_API FCk_Request_GroundNavVolume_Build : public FCk_Request_Base
 {
@@ -232,10 +286,36 @@ private:
               meta = (AllowPrivateAccess = true))
     FCk_GroundNav_DataLayerSelector _DataLayerSelector;
 
+    // Caller correlation within the owning entity lifetime. Zero retains legacy untracked requests.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+    int64 _RequestSequence = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+    mutable FCk_Delegate_GroundNavVolume_OnBuildResolved _OnBuildResolved;
+
+    mutable ECk_GroundNav_BuildAdmission _Admission = ECk_GroundNav_BuildAdmission::NotEvaluated;
+    mutable int64 _AttemptSequence = 0;
+    mutable bool _HasResolved = false;
+
 public:
     CK_PROPERTY(_ForceRestart);
     CK_PROPERTY(_OverrideDataLayerSelector);
     CK_PROPERTY(_DataLayerSelector);
+    CK_PROPERTY(_RequestSequence);
+    CK_PROPERTY(_OnBuildResolved);
+
+    // Authored values are reusable; terminal bookkeeping belongs to the submitted copy.
+    auto Make_Submission() const -> ThisType;
+    auto Set_BuildAdmission(ECk_GroundNav_BuildAdmission InAdmission, int64 InAttemptSequence = 0) const -> void;
+
+    // Hides the base wrapper so concrete-request cancellation also claims this request before notifying.
+    auto TryFireCompletion(const FCk_Handle& InOwner, ECk_Request_OperationResult InResult) const -> void;
+    auto TryFireCompletion(const FCk_Handle& InOwner, ECk_Request_OperationResult InResult,
+        ECk_GroundNav_BakeStatus InBakeStatus) const -> void;
+
+private:
+    auto DoFireCompletion(const FCk_Handle& InOwner, ECk_Request_OperationResult InResult,
+        TOptional<ECk_GroundNav_BakeStatus> InBakeStatus) const -> void;
 };
 
 // --------------------------------------------------------------------------------------------------------------------

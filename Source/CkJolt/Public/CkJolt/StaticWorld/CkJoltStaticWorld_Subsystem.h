@@ -103,6 +103,11 @@ public:
     auto
     Get_NumStaticBodies() const -> int32;
 
+    /// Returns bodies currently added for the exact component-path registration, excluding level/actor sweep bodies.
+    auto
+    Get_NumComponentBodiesInScene(
+        const UPrimitiveComponent& InComponent) const -> int32;
+
     auto
     Get_NumUniqueShapes() const -> int32;
 

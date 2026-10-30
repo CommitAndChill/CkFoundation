@@ -400,6 +400,41 @@ auto
 
 auto
     UCk_JoltStaticWorld_Subsystem_UE::
+    Get_NumComponentBodiesInScene(
+        const UPrimitiveComponent& InComponent) const
+    -> int32
+{
+    const auto* World = GetWorld();
+    if (ck::Is_NOT_Valid(World) || InComponent.GetWorld() != World)
+    { return 0; }
+
+    const auto* ComponentEntity = _ManualComponentEntities.Find(&InComponent);
+    if (ComponentEntity == nullptr || ck::Is_NOT_Valid(*ComponentEntity))
+    { return 0; }
+    if (NOT ComponentEntity->Has<ck::FFragment_JoltStaticActor>())
+    { return 0; }
+
+    const auto& Fragment = ComponentEntity->Get<ck::FFragment_JoltStaticActor>();
+    if (Fragment.Get_SourceComponent().Get() != &InComponent || NOT Fragment.Get_BodiesInScene())
+    { return 0; }
+
+    auto* BodyInterface = Get_BodyInterface();
+    if (BodyInterface == nullptr)
+    { return 0; }
+
+    auto NumBodiesInScene = int32{0};
+    for (const auto RawBodyId : Fragment.Get_BodyIds())
+    {
+        const auto BodyId = JPH::BodyID{RawBodyId};
+        if (NOT BodyId.IsInvalid() && BodyInterface->IsAdded(BodyId))
+        { ++NumBodiesInScene; }
+    }
+
+    return NumBodiesInScene;
+}
+
+auto
+    UCk_JoltStaticWorld_Subsystem_UE::
     Get_NumUniqueShapes() const
     -> int32
 {
