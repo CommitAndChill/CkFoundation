@@ -115,6 +115,9 @@ public:
     {
         ModeTools->SetDefaultMode(FAssetEdModes::EM_AssetDefault);
         ModeTools->ActivateDefaultMode();
+        // Dragging is handled by the legacy widget through InputWidgetDelta.
+        // Opt out of ITF viewport interactions so their next tick cannot replace it.
+        ModeTools->SetSupportsViewportITF(false);
     }
 
     auto GetWidgetMode() const -> UE::Widget::EWidgetMode override
