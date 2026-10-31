@@ -7,6 +7,7 @@
 
 #include <Engine/TextureRenderTarget2D.h>
 #include <Misc/App.h>
+#include <RHICommandList.h>
 #include <RHIGPUReadback.h>
 #include <RenderingThread.h>
 #include <Tasks/Task.h>
@@ -52,7 +53,9 @@ auto
                 return;
             }
 
+            RHICmdList.Transition(FRHITransitionInfo{TextureRHI.GetReference(), ERHIAccess::Unknown, ERHIAccess::CopySrc});
             Readback->EnqueueCopy(RHICmdList, TextureRHI.GetReference());
+            RHICmdList.Transition(FRHITransitionInfo{TextureRHI.GetReference(), ERHIAccess::CopySrc, ERHIAccess::SRVMask});
             Copy->_EnqueueDone = true;
         });
 
