@@ -1,7 +1,7 @@
 #pragma once
 
 #include <NativeGameplayTags.h>
-#include <InstancedStruct.h>
+#include <StructUtils/InstancedStruct.h>
 
 #include "CkCore/Macros/CkMacros.h"
 

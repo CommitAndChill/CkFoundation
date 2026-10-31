@@ -7,7 +7,7 @@
 #include "CkEcs/Handle/CkHandle.h"
 #include "CkEcs/Snapshot/CkSnapshot_Posture.h" // ECk_Snapshot_Posture — declared, never inferred
 
-#include <InstancedStruct.h>
+#include <StructUtils/InstancedStruct.h>
 #include <Misc/Optional.h>
 
 #include <type_traits>

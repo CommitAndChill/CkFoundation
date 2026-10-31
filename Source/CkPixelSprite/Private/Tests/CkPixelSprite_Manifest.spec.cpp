@@ -94,12 +94,13 @@ auto
                     TestEqual(TEXT("Anchor count"), Frame._Anchors.Num(), ExpectedAnchors->Values.Num());
                     for (const auto& Anchor : ExpectedAnchors->Values)
                     {
-                        if (NOT TestTrue(TEXT("Anchor name"), Frame._Anchors.Contains(Anchor.Key)))
+                        const auto AnchorName = FString::ConstructFromPtrSize(*Anchor.Key, Anchor.Key.Len());
+                        if (NOT TestTrue(TEXT("Anchor name"), Frame._Anchors.Contains(AnchorName)))
                         {
                             continue;
                         }
                         const auto& Coordinates = Anchor.Value->AsArray();
-                        TestEqual(TEXT("Anchor position"), Frame._Anchors.FindChecked(Anchor.Key),
+                        TestEqual(TEXT("Anchor position"), Frame._Anchors.FindChecked(AnchorName),
                             FIntPoint{static_cast<int32>(Coordinates[0]->AsNumber()), static_cast<int32>(Coordinates[1]->AsNumber())});
                     }
                 }

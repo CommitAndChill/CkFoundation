@@ -20,7 +20,7 @@ These rules ship with CkFoundation; CkTests supplies optional examples and evide
 
 ## Identity (verified 2026-07-02)
 
-- **Engine:** UnrealEngine-Angelscript **5.7.x** (Hazelight AngelScript fork; 5.7.4 on disk). NOT
+- **Engine (updated 2026-10-26):** UnrealEngine-Angelscript **5.8.4** (`main-ck`, Hazelight AngelScript fork). NOT
   stock UE — AngelScript is a first-class consumer of every public API.
 - **ECS backend:** EnTT **3.16.0**, vendored at `Source/CkThirdParty/Public/CkThirdParty/entt-3.16.0/`
   (also vendored: JoltPhysics, fmt, cleantype, ctti, delegate, bitwise-enum). Note: `CkHandle.h:71-77`
