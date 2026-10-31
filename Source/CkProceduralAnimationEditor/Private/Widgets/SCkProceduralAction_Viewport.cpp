@@ -113,6 +113,8 @@ public:
         : FEditorViewportClient(nullptr, InScene, InWidget)
         , _Widget(InWidget)
     {
+        // This viewport routes the legacy FWidget hit proxies and drag callbacks itself.
+        ModeTools->SetSupportsViewportITF(false);
         ModeTools->SetDefaultMode(FAssetEdModes::EM_AssetDefault);
         ModeTools->ActivateDefaultMode();
     }
