@@ -14,12 +14,21 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionCustom.h"
 #include "MaterialShared.h"
-#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/SecureHash.h"
 #include "Modules/ModuleManager.h"
 #include "ShaderCore.h"
+#include "ShaderCompilerCore.h"
+#if __has_include("ShaderSourceDependencies.h")
+#include "ShaderSourceDependencies.h"
+#endif
 #include "UObject/UObjectIterator.h"
+
+#if defined(UE_SHADER_SOURCE_DEPENDENCIES_API_VERSION) && UE_SHADER_SOURCE_DEPENDENCIES_API_VERSION >= 1
+#define CK_USF_HAS_SHADER_SOURCE_DEPENDENCIES 1
+#else
+#define CK_USF_HAS_SHADER_SOURCE_DEPENDENCIES 0
+#endif
 
 namespace ck::usf_editor
 {
@@ -72,14 +81,33 @@ namespace ck::usf_editor
             }
             _Watches.Reset();
             _ActiveMaterials.Reset();
+            _ActiveHashes.Reset();
+            _ActiveRoots.Reset();
+            _ActivePendingFiles.Reset();
             _PendingFiles.Reset();
+            _RejectedFiles.Reset();
+            _RejectedRoots.Reset();
+            _DependencyEdges.Reset();
+            _FileHashes.Reset();
         }
 
     private:
+        static auto
+            Validate_ReloadSupport()
+            -> bool
+        {
+            if (FShaderReload::Get_IsSupported())
+            { return true; }
+            Warning(TEXT("CkUsf shader reload rejected: this engine lacks ShaderSourceDependencies API v1. Update the engine to reload safely; no shader reload was started."));
+            return false;
+        }
+
         auto
             RequestMaterialReload()
             -> void
         {
+            if (NOT Validate_ReloadSupport())
+            { return; }
             _ManualReload = true;
         }
 
@@ -87,6 +115,8 @@ namespace ck::usf_editor
             RequestGlobalReload()
             -> void
         {
+            if (NOT Validate_ReloadSupport())
+            { return; }
             _GlobalReload = true;
         }
 
@@ -94,6 +124,8 @@ namespace ck::usf_editor
             RequestShadingModelReload()
             -> void
         {
+            if (NOT Validate_ReloadSupport())
+            { return; }
             _ShadingModelReload = true;
             _ManualReload = true;
         }
@@ -131,6 +163,12 @@ namespace ck::usf_editor
             RegisterWatches()
             -> void
         {
+            if (NOT FShaderReload::Get_IsSupported())
+            {
+                Log(TEXT("CkUsf shader watching unavailable: this engine lacks ShaderSourceDependencies API v1. Reload commands will explicitly reject requests."));
+                _WatchesAttempted = true;
+                return;
+            }
             auto& WatcherModule = FModuleManager::LoadModuleChecked<FDirectoryWatcherModule>(TEXT("DirectoryWatcher"));
             if (WatcherModule.Get() == nullptr)
             {
@@ -203,9 +241,8 @@ namespace ck::usf_editor
                 }
                 if (_AutoReload == 0)
                 { continue; }
-                _PendingFiles.Add(VirtualPath, PhysicalPath);
+                _PendingFiles.Add(VirtualPath);
                 _LastSaveTime = FPlatformTime::Seconds();
-                _PendingRemoval |= Change.Action == FFileChangeData::FCA_Removed;
             }
         }
 
@@ -229,75 +266,195 @@ namespace ck::usf_editor
             return IsLook ? Includes : TSet<FString>{};
         }
 
+#if CK_USF_HAS_SHADER_SOURCE_DEPENDENCIES
         auto
             StartMaterialBatch()
             -> void
         {
             const auto Manual = _ManualReload;
-            const auto Removal = _PendingRemoval;
             _ManualReload = false;
-            _PendingRemoval = false;
-            const auto PendingFiles = MoveTemp(_PendingFiles);
+            auto PendingFiles = MoveTemp(_PendingFiles);
             _PendingFiles.Reset();
-            auto ChangedFiles = TSet<FString>{};
-            auto MissingSource = false;
-            for (const auto& Pending : PendingFiles)
+            auto RetriedFiles = TSet<FString>{};
+            for (const auto& Rejected : _RejectedFiles)
             {
-                auto Contents = TArray<uint8>{};
-                if (NOT FFileHelper::LoadFileToArray(Contents, *Pending.Value))
-                {
-                    _FileHashes.Remove(Pending.Key);
-                    Warning(TEXT("CkUsf reload rejected: shader source is absent or unreadable [{}]. Restore it and save again, or use Ck_Usf_ReloadShaders."), Pending.Key);
-                    MissingSource = true;
-                    ChangedFiles.Add(Pending.Key);
-                    continue;
-                }
-                const auto Hash = FSHA1::HashBuffer(Contents.GetData(), Contents.Num());
-                if (NOT _FileHashes.Contains(Pending.Key) || _FileHashes.FindChecked(Pending.Key) != Hash)
-                {
-                    _FileHashes.Add(Pending.Key, Hash);
-                    ChangedFiles.Add(Pending.Key);
-                }
+                PendingFiles.Add(Rejected);
+                RetriedFiles.Add(Rejected);
             }
-            if (NOT Manual && ChangedFiles.IsEmpty())
-            { return; }
-            if (MissingSource)
-            { return; }
+            _RejectedFiles.Reset();
 
+            // Refresh source-local edges before attributing a file event. A missing parent keeps
+            // its previous edges; a readable parent replaces its edges even if a sibling is absent.
             FlushShaderFileCache();
-            auto Candidates = TArray<TWeakObjectPtr<UMaterial>>{};
+            auto MaterialRoots = TMap<TWeakObjectPtr<UMaterial>, TSet<FString>>{};
+            auto Roots = TSet<FString>{};
             for (TObjectIterator<UMaterial> It{RF_ClassDefaultObject, true, EInternalObjectFlags::Garbage}; It; ++It)
             {
                 if (It->HasAnyFlags(RF_ClassDefaultObject | RF_BeginDestroyed | RF_FinishDestroyed))
                 { continue; }
-                const auto Includes = GetLookIncludes(**It);
+                auto Includes = GetLookIncludes(**It);
                 if (Includes.IsEmpty())
                 { continue; }
-                auto Affected = Manual || Removal;
-                auto SourcesValid = true;
-                for (const auto& Include : Includes)
+                Roots.Append(Includes);
+                MaterialRoots.Add(TWeakObjectPtr<UMaterial>{*It}, MoveTemp(Includes));
+            }
+            auto UnavailableSources = TSet<FString>{};
+            auto IncompleteSources = TSet<FString>{};
+            auto CompleteSources = TSet<FString>{};
+            auto InvalidRoots = TSet<FString>{};
+            auto RootErrors = TMap<FString, FString>{};
+            for (const auto& Root : Roots)
+            {
+                auto Dependencies = FShaderSourceDependencies{};
+                auto Error = FString{};
+                const auto Complete = TryGetShaderSourceDependencies(*Root, Dependencies, GMaxRHIShaderPlatform, &Error);
+                if (NOT Dependencies.RootVirtualFilePath.IsEmpty() && Dependencies.RootVirtualFilePath != Root)
+                { _DependencyEdges.Add(Root, TArray<FString>{Dependencies.RootVirtualFilePath}); }
+                for (const auto& Source : Dependencies.DirectIncludes)
                 {
-                    auto Error = FString{};
-                    if (TryGetShaderFileHash(*Include, GMaxRHIShaderPlatform, &Error) == nullptr)
+                    if (Dependencies.IncompleteSources.Contains(Source.Key))
                     {
-                        Warning(TEXT("CkUsf reload rejected material [{}], include [{}]: {}"), It->GetPathName(), Include, Error);
-                        SourcesValid = false;
-                        break;
-                    }
-                    if (NOT Affected)
-                    {
-                        auto Dependencies = TArray<FString>{};
-                        GetShaderIncludes(*Include, *Include, Dependencies, GMaxRHIShaderPlatform);
-                        Dependencies.Add(Include);
-                        for (const auto& Dependency : Dependencies)
+                        if (NOT CompleteSources.Contains(Source.Key))
                         {
-                            if (ChangedFiles.Contains(Dependency))
-                            { Affected = true; break; }
+                            auto& Edges = _DependencyEdges.FindOrAdd(Source.Key);
+                            for (const auto& Child : Source.Value)
+                            { Edges.AddUnique(Child); }
                         }
                     }
+                    else
+                    {
+                        _DependencyEdges.Add(Source.Key, Source.Value);
+                        CompleteSources.Add(Source.Key);
+                    }
                 }
-                if (SourcesValid && Affected)
-                { Candidates.Add(TWeakObjectPtr<UMaterial>{*It}); }
+                UnavailableSources.Append(Dependencies.UnavailableSources);
+                IncompleteSources.Append(Dependencies.IncompleteSources);
+                if (NOT Complete && Dependencies.UnavailableSources.IsEmpty() && Dependencies.IncompleteSources.IsEmpty())
+                {
+                    RootErrors.Add(Root, MoveTemp(Error));
+                    InvalidRoots.Add(Root);
+                }
+            }
+            // A shared parent may hit a limit through a deep root and be fully scanned through
+            // a shallower root. Its complete current edges win independently of root iteration order.
+            for (const auto& Source : CompleteSources)
+            {
+                IncompleteSources.Remove(Source);
+                UnavailableSources.Remove(Source);
+            }
+            const auto CollectDependencies = [this](const TSet<FString>& InRoots)
+            {
+                auto Result = TSet<FString>{};
+                auto Pending = InRoots.Array();
+                while (NOT Pending.IsEmpty())
+                {
+                    const auto Source = Pending.Pop(EAllowShrinking::No);
+                    if (Result.Contains(Source))
+                    { continue; }
+                    Result.Add(Source);
+                    if (const auto Children = _DependencyEdges.Find(Source))
+                    { Pending.Append(*Children); }
+                }
+                return Result;
+            };
+            const auto OwnedSources = CollectDependencies(Roots);
+            const auto InvalidSources = CollectDependencies(InvalidRoots);
+            for (auto It = _RejectedRoots.CreateIterator(); It; ++It)
+            {
+                if (NOT Roots.Contains(*It))
+                { It.RemoveCurrent(); }
+            }
+            const auto RejectedSources = CollectDependencies(_RejectedRoots);
+            for (auto It = _DependencyEdges.CreateIterator(); It; ++It)
+            {
+                if (NOT OwnedSources.Contains(It.Key()))
+                { It.RemoveCurrent(); }
+            }
+            for (auto It = _FileHashes.CreateIterator(); It; ++It)
+            {
+                if (NOT OwnedSources.Contains(It.Key()))
+                { It.RemoveCurrent(); }
+            }
+            auto ChangedFiles = TSet<FString>{};
+            auto ProposedHashes = TMap<FString, FSHAHash>{};
+            auto MissingChangedSources = TSet<FString>{};
+            auto OwnedPendingFiles = TSet<FString>{};
+            auto SourcesToHash = PendingFiles;
+            if (Manual)
+            { SourcesToHash.Append(OwnedSources); }
+            for (const auto& Pending : SourcesToHash)
+            {
+                if (NOT OwnedSources.Contains(Pending))
+                { continue; }
+                if (PendingFiles.Contains(Pending))
+                { OwnedPendingFiles.Add(Pending); }
+                if (InvalidSources.Contains(Pending))
+                {
+                    // The scan may have rejected a platform/path prerequisite needed by the loader.
+                    ChangedFiles.Add(Pending);
+                    continue;
+                }
+                // Deduplication must describe the same cached source snapshot used by dependency
+                // preflight and compilation, rather than a later disk save racing this batch.
+                auto Contents = FString{};
+                auto Errors = TArray<FShaderCompilerError>{};
+                if (NOT LoadShaderSourceFile(*Pending, GMaxRHIShaderPlatform, &Contents, &Errors))
+                {
+                    Warning(TEXT("CkUsf reload rejected: shader source is absent or unreadable [{}]. Restore it and save again, or use Ck_Usf_ReloadShaders."), Pending);
+                    MissingChangedSources.Add(Pending);
+                    ChangedFiles.Add(Pending);
+                    continue;
+                }
+                const auto Hash = FSHA1::HashBuffer(*Contents, Contents.Len() * sizeof(TCHAR));
+                if (NOT _FileHashes.Contains(Pending) || _FileHashes.FindChecked(Pending) != Hash)
+                {
+                    ProposedHashes.Add(Pending, Hash);
+                    ChangedFiles.Add(Pending);
+                }
+                else if (RetriedFiles.Contains(Pending) || RejectedSources.Contains(Pending))
+                {
+                    // Retried rejected work must dispatch even when a restored file has its old bytes.
+                    // The dependency graph can also have changed without this file's bytes changing.
+                    ChangedFiles.Add(Pending);
+                }
+            }
+            if (NOT Manual && ChangedFiles.IsEmpty())
+            { return; }
+            auto Candidates = TArray<TWeakObjectPtr<UMaterial>>{};
+            auto CandidateRoots = TSet<FString>{};
+            auto SourceErrors = TArray<FString>{};
+            for (const auto& Material : MaterialRoots)
+            {
+                const auto Dependencies = CollectDependencies(Material.Value);
+                auto Affected = Manual;
+                for (const auto& Changed : ChangedFiles)
+                { Affected |= Dependencies.Contains(Changed); }
+                if (NOT Affected)
+                { continue; }
+                CandidateRoots.Append(Material.Value);
+                for (const auto& Root : Material.Value)
+                {
+                    if (const auto Error = RootErrors.Find(Root))
+                    { SourceErrors.AddUnique(*Error); }
+                }
+                for (const auto& Dependency : Dependencies)
+                {
+                    if (UnavailableSources.Contains(Dependency) && NOT MissingChangedSources.Contains(Dependency))
+                    {
+                        SourceErrors.AddUnique(FString::Printf(TEXT("shader source is absent or unreadable [%s]"), *Dependency));
+                    }
+                    if (IncompleteSources.Contains(Dependency))
+                    { SourceErrors.AddUnique(FString::Printf(TEXT("dependency scan is incomplete [%s]"), *Dependency)); }
+                }
+                Candidates.Add(Material.Key);
+            }
+            if (NOT MissingChangedSources.IsEmpty() || NOT SourceErrors.IsEmpty())
+            {
+                _RejectedFiles = MoveTemp(OwnedPendingFiles);
+                _RejectedRoots.Append(CandidateRoots);
+                for (const auto& Error : SourceErrors)
+                { Warning(TEXT("CkUsf reload rejected before material changes: {}. Restore the source and save again, or use Ck_Usf_ReloadShaders."), Error); }
+                return;
             }
 
             if (Candidates.IsEmpty())
@@ -318,10 +475,15 @@ namespace ck::usf_editor
             }
             if (NOT ContractErrors.IsEmpty())
             {
+                _RejectedFiles = MoveTemp(OwnedPendingFiles);
+                _RejectedRoots.Append(CandidateRoots);
                 for (const auto& Error : ContractErrors)
                 { Warning(TEXT("CkUsf reload rejected before material changes: {}"), Error); }
                 return;
             }
+            _ActiveHashes = MoveTemp(ProposedHashes);
+            _ActiveRoots = MoveTemp(CandidateRoots);
+            _ActivePendingFiles = MoveTemp(OwnedPendingFiles);
             {
                 FMaterialUpdateContext UpdateContext;
                 for (auto Index = 0; Index < Candidates.Num(); ++Index)
@@ -333,6 +495,7 @@ namespace ck::usf_editor
                     Material->PreEditChange(nullptr);
                     Apply_LookShadingModelReload(*Material, Preparations[Index]);
                     Material->PostEditChange();
+                    Material->CacheShaders(EMaterialShaderPrecompileMode::Default);
                     _ActiveMaterials.Add(Material);
                 }
             }
@@ -341,6 +504,8 @@ namespace ck::usf_editor
             Log(TEXT("CkUsf reload started: [{}] loaded master(s), [{}] changed source(s). Existing material and MID identities are preserved."),
                 _ActiveMaterials.Num(), ChangedFiles.Num());
         }
+
+#endif
 
         auto
             PollMaterialBatch()
@@ -362,7 +527,8 @@ namespace ck::usf_editor
                 {
                     const auto& Resource = *Material->GetMaterialResource(GMaxRHIShaderPlatform);
                     if (NOT Resource.IsCompilationFinished()
-                        || (NOT TimedOut && Resource.GetCompileErrors().IsEmpty() && Resource.GetGameThreadShaderMap() == nullptr))
+                        || (NOT TimedOut && Resource.GetCompileErrors().IsEmpty()
+                            && (Resource.GetGameThreadShaderMap() == nullptr || NOT Resource.IsGameThreadShaderMapComplete())))
                     { return; }
                 }
             }
@@ -383,7 +549,8 @@ namespace ck::usf_editor
                 }
                 const auto& Resource = *Material->GetMaterialResource(GMaxRHIShaderPlatform);
                 if (TimedOut || Material->IsCompiling() || NOT Resource.IsCompilationFinished()
-                    || NOT Resource.GetCompileErrors().IsEmpty() || Resource.GetGameThreadShaderMap() == nullptr)
+                    || NOT Resource.GetCompileErrors().IsEmpty() || Resource.GetGameThreadShaderMap() == nullptr
+                    || NOT Resource.IsGameThreadShaderMapComplete())
                 {
                     ++Failed;
                     Warning(TEXT("CkUsf reload failed [{}]: [{}] compile error(s), applied shader map [{}], timed out [{}]."),
@@ -394,7 +561,22 @@ namespace ck::usf_editor
             }
             Log(TEXT("CkUsf reload complete: [{}] master(s), [{}] failed, [{}] seconds. No assets saved."),
                 _ActiveMaterials.Num(), Failed, FPlatformTime::Seconds() - _BatchStarted);
+            if (Failed == 0)
+            {
+                for (const auto& Proposed : _ActiveHashes)
+                { _FileHashes.Add(Proposed.Key, Proposed.Value); }
+                for (const auto& Root : _ActiveRoots)
+                { _RejectedRoots.Remove(Root); }
+            }
+            else
+            {
+                _RejectedFiles.Append(_ActivePendingFiles);
+                _RejectedRoots.Append(_ActiveRoots);
+            }
             _ActiveMaterials.Reset();
+            _ActiveHashes.Reset();
+            _ActiveRoots.Reset();
+            _ActivePendingFiles.Reset();
             if (GEditor != nullptr)
             { GEditor->RedrawAllViewports(); }
         }
@@ -420,9 +602,11 @@ namespace ck::usf_editor
                 _GlobalReload = false;
                 ReloadGlobalShaders(TEXT("RecompileShaders /CkUsfRenderer/.*"));
             }
+#if CK_USF_HAS_SHADER_SOURCE_DEPENDENCIES
             if (_ManualReload || (_AutoReload != 0 && NOT _PendingFiles.IsEmpty()
                 && FPlatformTime::Seconds() - _LastSaveTime >= 0.25))
             { StartMaterialBatch(); }
+#endif
             return true;
         }
 
@@ -431,14 +615,19 @@ namespace ck::usf_editor
         bool _ManualReload = false;
         bool _GlobalReload = false;
         bool _ShadingModelReload = false;
-        bool _PendingRemoval = false;
         bool _TimeoutReported = false;
         double _LastSaveTime = 0.0;
         double _BatchStarted = 0.0;
         FTSTicker::FDelegateHandle _Ticker;
         TMap<FString, FDelegateHandle> _Watches;
-        TMap<FString, FString> _PendingFiles;
+        TSet<FString> _PendingFiles;
+        TSet<FString> _RejectedFiles;
+        TSet<FString> _RejectedRoots;
+        TMap<FString, TArray<FString>> _DependencyEdges;
         TMap<FString, FSHAHash> _FileHashes;
+        TMap<FString, FSHAHash> _ActiveHashes;
+        TSet<FString> _ActiveRoots;
+        TSet<FString> _ActivePendingFiles;
         TArray<TWeakObjectPtr<UMaterial>> _ActiveMaterials;
         TUniquePtr<FAutoConsoleVariableRef> _AutoReloadVariable;
         TUniquePtr<FAutoConsoleCommand> _ReloadCommand;
@@ -448,6 +637,14 @@ namespace ck::usf_editor
 
     FShaderReload::FShaderReload() = default;
     FShaderReload::~FShaderReload() { Shutdown(); }
+
+    auto
+        FShaderReload::
+        Get_IsSupported()
+        -> bool
+    {
+        return CK_USF_HAS_SHADER_SOURCE_DEPENDENCIES != 0;
+    }
 
     auto
         FShaderReload::Startup()
@@ -470,3 +667,5 @@ namespace ck::usf_editor
         }
     }
 }
+
+#undef CK_USF_HAS_SHADER_SOURCE_DEPENDENCIES

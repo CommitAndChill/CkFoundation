@@ -119,6 +119,24 @@ of all of it.
    LookDefinition/signature changes still require generation. New C++ shader types and parameter
    layouts require a rebuild. Set `r.ShaderDevelopmentMode=1` in ConsoleVariables.ini for the
    engine's shader development diagnostics and retry dialogs.
+
+   Foundation remains buildable on engines without `ShaderSourceDependencies.h` API v1. On those
+   engines, `FShaderReload::Get_IsSupported()` is false, shader watches are not registered, and all
+   three reload commands explicitly reject requests before queuing work or executing engine commands.
+   Update the engine to enable reload; no incomplete dependency scanner is used as a fallback.
+
+   Automatic material reload attributes each event to currently loaded look roots before opening
+   the changed file. Foreign sources and retired include roots cannot trigger reload or missing-file
+   warnings. The engine's `ShaderSourceDependencies.h` scanner reports source-local edges, including
+   unavailable children. Readable complete parents replace their cached edges; unavailable parents
+   retain their previous edges. Incomplete parents retain and merge known edges conservatively and
+   reject affected work. This preserves deletion ownership without keeping removed sibling branches.
+   The whole affected batch passes dependency and material-contract preflight before mutation or hash
+   acceptance. A rejected batch retains its owned file work until another save or explicit material
+   reload retries it; it does not poll or repeatedly warn while idle. Restoring identical bytes still
+   retries rejected work. Manual reloads snapshot the entire owned dependency closure. Accepted hashes
+   are published only after every admitted material has an error-free, complete shader map; failed
+   compilation retains recovery intent. Compilation after admission remains asynchronous.
 5. **Apply** — `Create_MID_ForLook` + assign to a mesh slot, or the post-process helpers.
 
 ## Native Toon shading model (initial slice)

@@ -10,6 +10,9 @@ namespace ck::usf_editor
         FShaderReload();
         ~FShaderReload();
 
+        // Reload requires the engine's complete shader dependency ownership API.
+        static auto Get_IsSupported() -> bool;
+
         auto Startup() -> void;
         auto Shutdown() -> void;
 
