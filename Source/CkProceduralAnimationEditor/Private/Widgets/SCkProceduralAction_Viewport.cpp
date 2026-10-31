@@ -12,6 +12,7 @@
 #include "AdvancedPreviewScene.h"
 #include "Components/StaticMeshComponent.h"
 #include "EditorModeManager.h"
+#include "Misc/EngineVersionComparison.h"
 #include "EditorViewportClient.h"
 #include "Engine/AssetManager.h"
 #include "Engine/StaticMesh.h"
@@ -117,7 +118,10 @@ public:
         ModeTools->ActivateDefaultMode();
         // Dragging is handled by the legacy widget through InputWidgetDelta.
         // Opt out of ITF viewport interactions so their next tick cannot replace it.
+        // UE 5.7 has no viewport ITF to opt out of; drop the guard once no consumer builds on 5.7.
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
         ModeTools->SetSupportsViewportITF(false);
+#endif
     }
 
     auto GetWidgetMode() const -> UE::Widget::EWidgetMode override
