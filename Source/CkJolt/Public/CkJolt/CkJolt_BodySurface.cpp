@@ -29,7 +29,12 @@ auto
     }
 
     if (const auto StaticActor = UCk_Utils_JoltStaticActor_UE::Cast(InEntity); ck::IsValid(StaticActor))
-    { return UCk_Utils_JoltStaticActor_UE::Get_BodyPhysicalMaterial(StaticActor, InBodyIndexAndSequence); }
+    {
+        // A queued contact can outlive a static rebake while its attribution entity is still live.
+        if (NOT StaticActor.Get<ck::FFragment_JoltStaticActor>().Get_BodyIds().Contains(InBodyIndexAndSequence))
+        { return nullptr; }
+        return UCk_Utils_JoltStaticActor_UE::Get_BodyPhysicalMaterial(StaticActor, InBodyIndexAndSequence);
+    }
 
     return nullptr;
 }

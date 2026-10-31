@@ -2,7 +2,7 @@
 
 #include "CkCore/Macros/CkMacros.h"
 
-#include <Engine/UserDefinedStruct.h>
+#include <StructUtils/UserDefinedStruct.h>
 #include <Engine/EngineTypes.h>
 #include "Templates/SharedPointer.h"
 #include "Async/Future.h"
