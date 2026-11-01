@@ -3,8 +3,10 @@
 #include "CkProceduralAnimation/ActionPlayer/CkProceduralActionPlayer_Fragment.h"
 
 #include "CkProceduralAnimation/Core/CkProceduralBodySupport.h"
+#include "CkProceduralAnimation/Core/CkProceduralBodyEnvelope.h"
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Utils.h"
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Fragment.h"
+#include "CkProceduralAnimation/SurfaceMotion/CkSurfaceMotion_Fragment.h"
 
 #include "CkCore/Algorithms/CkAlgorithms.h"
 #include "CkCore/Ensure/CkEnsure.h"
@@ -17,6 +19,7 @@
 #include "CkEcsExt/Transform/CkTransform_Utils.h"
 
 #include <Kismet/KismetMathLibrary.h>
+#include <Engine/World.h>
 
 CK_REGISTER_PROCESSOR(ck::FProcessor_ProceduralBodyPose_Update);
 
@@ -196,6 +199,16 @@ namespace ck
             ConformTarget = ConformState._AppliedTarget;
         }
 
+        if (InHandle.Has<FFragment_SurfaceMotion_Support>())
+        {
+            const auto& MotionSupport = InHandle.Get<FFragment_SurfaceMotion_Support>();
+            const auto PreparesAdaptiveHeight = MotionSupport.Get_EvaluatedFrame() == GFrameCounter
+                && MotionSupport.Get_EvaluatedBody().Equals(Body, 1.0e-3)
+                && (MotionSupport.Get_AdaptiveHeightPreparing() || MotionSupport.Get_AdaptiveHeightActive());
+            if (PreparesAdaptiveHeight)
+            { ConformTarget = FTransform::Identity; }
+        }
+
         const auto TargetRotation = ConformTarget.GetRotation() * SupportTarget->GetRotation();
         const auto TargetLocation = SupportTarget->GetLocation() + ConformTarget.GetLocation();
         InPoseComp._TargetOffset = FTransform{TargetRotation, TargetLocation};
@@ -224,8 +237,8 @@ namespace ck
             TargetVelocityAmount);
         const auto ProposedOffset = FTransform{Rotation.GetNormalized(), Location};
 
-        // Gait ran earlier in this group. Current trusted plants and published swinging feet bound presentation reach;
-        // the latter already fit their simulation hips. SurfaceMotion continues to pace only trusted stance contacts.
+        // Gait ran earlier in this group. Current plants, emitted feet and proven committed landings bound presentation
+        // reach; pending landings remain separate from the gait's physical support classification.
         auto ReachAnchors = TArray<FProceduralBodyPoseReachAnchor, TInlineAllocator<64>>{};
         const auto& Stance = InGaitComp._ReachStance;
         if (Stance.Get_HasSample() && Stance.Get_SolveSequence() == InGaitComp._SolveSequence
@@ -269,16 +282,58 @@ namespace ck
             }
         }
 
-        InPoseComp._BaseOffset = ProposedOffset;
-        if (NOT ReachAnchors.IsEmpty())
+        for (const auto& Landing : Get_ProceduralGaitLandingConstraints(
+                 UCk_Utils_ProceduralGait_UE::Cast(InHandle), Body, EProceduralGaitLandingConsumer::BodyPose))
         {
-            const auto Projected = ProjectProceduralBodyPoseToReach(Body, PreviousOffset, ProposedOffset,
+            const auto& Constraint = Landing.Get_Constraint();
+            ReachAnchors.Emplace(Constraint.Get_HipLocal(), Constraint.Get_PointWorld(), Constraint.Get_Reach());
+        }
+
+        auto EnvelopeQueries = int32{0};
+        auto Admission = TFunction<bool(const FTransform&)>{};
+        if (InHandle.Has<FFragment_SurfaceMotion_Params>())
+        {
+            const auto& MotionParams = InHandle.Get<FFragment_SurfaceMotion_Params>();
+            const auto& AdaptiveHeight = MotionParams.Get_AdaptiveHeight();
+            if (AdaptiveHeight.Get_Enabled())
+            {
+                auto* World = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InHandle);
+                const auto PreviousPosed = InPoseComp._Offset * Body;
+                // SurfaceMotion already transported the simulation root. The path starts at the actual prior drawn
+                // offset on that body, rather than assuming the simulation frame is also a clear presentation frame.
+                Admission = [&, World, PreviousPosed](const FTransform& InOffset) -> bool
+                {
+                    // At most 11 projection callbacks, each with three path queries and one endpoint overlap.
+                    constexpr auto EnvelopeQueryLimit = 64;
+                    return Get_IsProceduralBodyEnvelopePathClear(World, AdaptiveHeight,
+                        MotionParams.Get_Contact().Get_QueryFilter(), PreviousPosed, InOffset * Body,
+                        EnvelopeQueries, EnvelopeQueryLimit, nullptr, nullptr,
+                        EProceduralBodyEnvelopeEndpointValidation::ExactStationaryEndpoint);
+                };
+            }
+        }
+
+        InPoseComp._BaseOffset = ProposedOffset;
+        if (NOT ReachAnchors.IsEmpty() || Admission)
+        {
+            auto Projected = ProjectProceduralBodyPoseToReach(Body, PreviousOffset, ProposedOffset,
                 TArrayView<const FProceduralBodyPoseReachAnchor>{ReachAnchors});
             CK_ENSURE_IF_NOT(Projected.IsSet(),
                 TEXT("Procedural body pose [{}] received malformed leg reach; feature is failed."), InHandle)
             {
                 InHandle.Add<FFragment_ProceduralBodyPose_Failure>(ECk_ProceduralBodyPose_Failure::MalformedSupport);
                 return;
+            }
+            if (Admission)
+            {
+                Projected = ProjectProceduralBodyPoseToReach(Body, PreviousOffset, ProposedOffset,
+                    TArrayView<const FProceduralBodyPoseReachAnchor>{ReachAnchors}, MoveTemp(Admission));
+                if (NOT Projected.IsSet())
+                {
+                    InPoseComp._BaseOffset = PreviousOffset;
+                    InHandle.Add<FFragment_ProceduralBodyPose_Failure>(ECk_ProceduralBodyPose_Failure::BodyObstructed);
+                    return;
+                }
             }
             InPoseComp._BaseOffset = Projected->Get_Offset();
             if (Projected->Get_Fraction() < 1.0f)

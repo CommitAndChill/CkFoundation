@@ -130,6 +130,57 @@ public:
     Get_ContactSource(
         const FCk_Handle_SurfaceMotion& InHandle);
 
+    // Adaptive-height diagnostics from the latest physics update; false/zero unless Ready. Goal is a world-space
+    // body-centre goal, not an accepted foothold or permission to translate. Query counts exclude ordinary contact rays.
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|SurfaceMotion",
+              DisplayName="[Ck][SurfaceMotion] Has Current Adaptive Height Sample")
+    static bool
+    Get_HasCurrentAdaptiveHeightSample(
+        const FCk_Handle_SurfaceMotion& InHandle);
+
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|SurfaceMotion",
+              DisplayName="[Ck][SurfaceMotion] Get Adaptive Height Active")
+    static bool
+    Get_AdaptiveHeightActive(
+        const FCk_Handle_SurfaceMotion& InHandle);
+
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|SurfaceMotion",
+              DisplayName="[Ck][SurfaceMotion] Get Adaptive Height Preparing")
+    static bool
+    Get_AdaptiveHeightPreparing(
+        const FCk_Handle_SurfaceMotion& InHandle);
+
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|SurfaceMotion",
+              DisplayName="[Ck][SurfaceMotion] Get Adaptive Height Goal")
+    static FVector
+    Get_AdaptiveHeightGoal(
+        const FCk_Handle_SurfaceMotion& InHandle);
+
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|SurfaceMotion",
+              DisplayName="[Ck][SurfaceMotion] Get Height Planning Trials")
+    static int32
+    Get_HeightPlanningTrials(
+        const FCk_Handle_SurfaceMotion& InHandle);
+
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|SurfaceMotion",
+              DisplayName="[Ck][SurfaceMotion] Get Height Planning Rays")
+    static int32
+    Get_HeightPlanningRays(
+        const FCk_Handle_SurfaceMotion& InHandle);
+
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|SurfaceMotion",
+              DisplayName="[Ck][SurfaceMotion] Get Height Envelope Queries")
+    static int32
+    Get_HeightEnvelopeQueries(
+        const FCk_Handle_SurfaceMotion& InHandle);
+
     // The height source the Spec composed the surface motion with; Rays for an invalid handle.
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|SurfaceMotion",

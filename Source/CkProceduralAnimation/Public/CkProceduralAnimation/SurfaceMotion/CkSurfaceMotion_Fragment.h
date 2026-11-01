@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CkProceduralAnimation/SurfaceMotion/CkSurfaceMotion_Fragment_Data.h"
+#include "CkProceduralAnimation/SurfaceMotion/CkSurfaceContactStaging.h"
 
 #include "CkProceduralAnimation/Core/CkProceduralSurfaceMotion.h"
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Fragment_Data.h"
@@ -51,6 +52,10 @@ namespace ck
     private:
         FVector _Direction = FVector::ForwardVector;
         float _Speed = 0.0f;
+
+    public:
+        CK_PROPERTY_GET(_Direction);
+        CK_PROPERTY_GET(_Speed);
     };
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -79,6 +84,35 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
+    // A current native top ray proposes ordinary gait search work only; it grants no support or landing admission.
+    struct FProceduralSurfaceAdaptiveTopReceipt
+    {
+        CK_GENERATED_BODY(FProceduralSurfaceAdaptiveTopReceipt);
+
+    private:
+        FVector _Point = FVector::ZeroVector;
+        FVector _Normal = FVector::UpVector;
+        FTransform _Body = FTransform::Identity;
+        FVector _Direction = FVector::ZeroVector;
+        FVector _Up = FVector::UpVector;
+        float _Speed = 0.0f;
+        uint64 _Frame = 0;
+
+    public:
+        CK_PROPERTY_GET(_Point);
+        CK_PROPERTY_GET(_Normal);
+        CK_PROPERTY_GET(_Body);
+        CK_PROPERTY_GET(_Direction);
+        CK_PROPERTY_GET(_Up);
+        CK_PROPERTY_GET(_Speed);
+        CK_PROPERTY_GET(_Frame);
+
+    public:
+        CK_DEFINE_CONSTRUCTORS(FProceduralSurfaceAdaptiveTopReceipt, _Point, _Normal, _Body, _Direction, _Up, _Speed, _Frame);
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
     // The accepted support frame, the pending contact that would replace it and the body's integrated motion, rewritten
     // every substep.
     struct CKPROCEDURALANIMATION_API FFragment_SurfaceMotion_Support
@@ -103,6 +137,21 @@ namespace ck
         int32 _ReachPaceRays = 0;
         float _AttemptedStanceSpeed = 0.0f;
         TArray<FProceduralSurfaceReachPaceFeedback, TInlineAllocator<8>> _ReachPaceFeedback;
+        bool _AdaptiveHeightActive = false;
+        bool _AdaptiveHeightPreparing = false;
+        FVector _AdaptiveHeightUp = FVector::UpVector;
+        FVector _AdaptiveHeightGoal = FVector::ZeroVector;
+        int32 _HeightPlanningTrials = 0;
+        int32 _HeightPlanningRays = 0;
+        int32 _HeightEnvelopeQueries = 0;
+        FProceduralContactStagingState _ContactStaging;
+        TOptional<FVector> _HeightObstructionPoint;
+        FVector _HeightObstructionNormal = FVector::ZeroVector;
+        FVector _HeightObstructionDirection = FVector::ZeroVector;
+        FVector _HeightObstructionUp = FVector::UpVector;
+        FTransform _HeightObstructionBody = FTransform::Identity;
+        uint64 _HeightObstructionFrame = 0;
+        TOptional<FProceduralSurfaceAdaptiveTopReceipt> _AdaptiveTopAcquisition;
 
     public:
         CK_PROPERTY_GET(_EvaluatedFrame);
@@ -113,6 +162,13 @@ namespace ck
         CK_PROPERTY_GET(_ReachPaceRays);
         CK_PROPERTY_GET(_AttemptedStanceSpeed);
         CK_PROPERTY_GET(_ReachPaceFeedback);
+        CK_PROPERTY_GET(_AdaptiveHeightActive);
+        CK_PROPERTY_GET(_AdaptiveHeightPreparing);
+        CK_PROPERTY_GET(_AdaptiveHeightGoal);
+        CK_PROPERTY_GET(_HeightPlanningTrials);
+        CK_PROPERTY_GET(_HeightPlanningRays);
+        CK_PROPERTY_GET(_HeightEnvelopeQueries);
+        CK_PROPERTY_GET(_ContactStaging);
     };
 
     // --------------------------------------------------------------------------------------------------------------------

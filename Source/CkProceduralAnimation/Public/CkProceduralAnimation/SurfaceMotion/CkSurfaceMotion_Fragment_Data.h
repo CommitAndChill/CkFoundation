@@ -97,7 +97,8 @@ enum class ECk_SurfaceMotion_ReachPaceState : uint8
     Free,
     Pacing,
     Blocked,
-    PhysicalOverride
+    PhysicalOverride,
+    ContactStaging
 };
 
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_SurfaceMotion_ReachPaceState);
@@ -106,7 +107,8 @@ UENUM(BlueprintType)
 enum class ECk_SurfaceMotion_Failure : uint8
 {
     None,
-    NanBody
+    NanBody,
+    BodyObstructed
 };
 
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_SurfaceMotion_Failure);
@@ -252,6 +254,43 @@ CK_DEFINE_CUSTOM_IS_VALID_INLINE(FCk_SurfaceMotion_Movement, IsValid_Policy_Defa
 // --------------------------------------------------------------------------------------------------------------------
 
 USTRUCT(BlueprintType)
+struct CKPROCEDURALANIMATION_API FCk_SurfaceMotion_AdaptiveHeight
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(FCk_SurfaceMotion_AdaptiveHeight);
+
+private:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+    bool _Enabled = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true, EditCondition = "_Enabled"))
+    FVector _BodyHalfExtents = FVector::ZeroVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true, EditCondition = "_Enabled"))
+    float _CollisionMargin = 1.0f;
+
+public:
+    CK_PROPERTY(_Enabled);
+    CK_PROPERTY(_BodyHalfExtents);
+    CK_PROPERTY(_CollisionMargin);
+};
+
+CK_DEFINE_CUSTOM_IS_VALID_INLINE(FCk_SurfaceMotion_AdaptiveHeight, IsValid_Policy_Default,
+[=](const FCk_SurfaceMotion_AdaptiveHeight& InHeight)
+{
+    if (NOT InHeight.Get_Enabled())
+    { return true; }
+    const auto& Extents = InHeight.Get_BodyHalfExtents();
+    return NOT Extents.ContainsNaN() && Extents.X > 0.0 && Extents.Y > 0.0 && Extents.Z > 0.0
+        && FMath::IsFinite(InHeight.Get_CollisionMargin()) && InHeight.Get_CollisionMargin() > 0.0f
+        && Extents.GetMax() + InHeight.Get_CollisionMargin() + 0.05 <= static_cast<double>(TNumericLimits<float>::Max());
+});
+
+// --------------------------------------------------------------------------------------------------------------------
+
+USTRUCT(BlueprintType)
 struct CKPROCEDURALANIMATION_API FCk_SurfaceMotion_Spec
 {
     GENERATED_BODY()
@@ -268,15 +307,21 @@ private:
               meta = (AllowPrivateAccess = true))
     FCk_SurfaceMotion_Movement _Movement;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    FCk_SurfaceMotion_AdaptiveHeight _AdaptiveHeight;
+
 public:
     CK_PROPERTY(_Contact);
     CK_PROPERTY(_Movement);
+    CK_PROPERTY(_AdaptiveHeight);
 };
 
 CK_DEFINE_CUSTOM_IS_VALID_INLINE(FCk_SurfaceMotion_Spec, IsValid_Policy_Default,
 [=](const FCk_SurfaceMotion_Spec& InParams)
 {
-    return ck::IsValid(InParams.Get_Contact()) && ck::IsValid(InParams.Get_Movement());
+    return ck::IsValid(InParams.Get_Contact()) && ck::IsValid(InParams.Get_Movement())
+        && ck::IsValid(InParams.Get_AdaptiveHeight());
 });
 
 // --------------------------------------------------------------------------------------------------------------------

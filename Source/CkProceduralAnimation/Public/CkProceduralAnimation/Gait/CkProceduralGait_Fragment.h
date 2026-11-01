@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Fragment_Data.h"
+#include "CkProceduralAnimation/Gait/CkProceduralGait_HeightPlanning.h"
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Fragment_Data.h"
 #include "CkProceduralAnimation/Core/CkProceduralFootProbe.h"
 #include "CkProceduralAnimation/Core/CkProceduralFoothold.h"
@@ -83,6 +84,61 @@ namespace ck
         CK_PROPERTY_GET(_HasSample);
     };
 
+    // A native query receipt for the solver's actual ordinary landing, separate from physical planted support.
+    struct CKPROCEDURALANIMATION_API FProceduralGaitCommittedLanding
+    {
+        CK_GENERATED_BODY(FProceduralGaitCommittedLanding);
+
+    private:
+        FCk_Handle_ProceduralLeg _Leg;
+        FProceduralSurfaceLandingConstraint _Constraint;
+        FVector _NormalWorld = FVector::UpVector;
+        EProceduralFootholdCast _Cast = EProceduralFootholdCast::Down;
+
+    public:
+        CK_PROPERTY_GET(_Leg);
+        CK_PROPERTY_GET(_Constraint);
+        CK_PROPERTY_GET(_NormalWorld);
+        CK_PROPERTY_GET(_Cast);
+        CK_DEFINE_CONSTRUCTORS(FProceduralGaitCommittedLanding, _Leg, _Constraint, _NormalWorld, _Cast);
+    };
+
+    struct CKPROCEDURALANIMATION_API FProceduralGaitLandingPlanning
+    {
+        CK_GENERATED_BODY(FProceduralGaitLandingPlanning);
+
+        friend class FProcessor_ProceduralGait_Update;
+
+    private:
+        FTransform _BodyAtSolve = FTransform::Identity;
+        uint64 _SolveSequence = 0;
+        uint64 _Frame = 0;
+        TOptional<uint64> _ClaimsRevision;
+        TArray<FProceduralGaitCommittedLanding> _Landings;
+        bool _HasSample = false;
+
+    public:
+        CK_PROPERTY_GET(_BodyAtSolve);
+        CK_PROPERTY_GET(_SolveSequence);
+        CK_PROPERTY_GET(_Frame);
+        CK_PROPERTY_GET(_ClaimsRevision);
+        CK_PROPERTY_GET(_Landings);
+        CK_PROPERTY_GET(_HasSample);
+    };
+
+    enum class EProceduralGaitLandingConsumer : uint8
+    {
+        SurfaceMotion,
+        BodyPose
+    };
+
+    CKPROCEDURALANIMATION_API auto
+        Get_ProceduralGaitLandingConstraints(
+            FCk_Handle_ProceduralGait InGait,
+            const FTransform& InBody,
+            EProceduralGaitLandingConsumer InConsumer)
+        -> TArray<FProceduralGaitCommittedLanding>;
+
     // --------------------------------------------------------------------------------------------------------------------
 
     // Presence excludes the gait from Update; the reason is the diagnostic. Never removed: gait failure latches.
@@ -135,6 +191,15 @@ namespace ck
         friend class FProcessor_ProceduralGait_Setup;
         friend class FProcessor_ProceduralGait_HandleRequests;
         friend class FProcessor_ProceduralGait_Update;
+        friend CKPROCEDURALANIMATION_API auto Get_ProceduralGaitLandingConstraints(FCk_Handle_ProceduralGait,
+            const FTransform&, EProceduralGaitLandingConsumer) -> TArray<FProceduralGaitCommittedLanding>;
+        friend CKPROCEDURALANIMATION_API auto Get_IsProceduralHeightPlanAdmitted(FCk_Handle_ProceduralGait, const FTransform&,
+            const TOptional<FTransform>&, const FProceduralGaitHeightCandidate&, int32&, int32,
+            EProceduralHeightPlanStage, TOptional<FProceduralGaitHeightRetryWitness>*, TArray<FProceduralContactStagingBoundary>*) -> bool;
+        friend CKPROCEDURALANIMATION_API auto Get_ProceduralContactStagingLegs(FCk_Handle_ProceduralGait,
+            const TArray<FProceduralContactStagingBoundary>&) -> TArray<FProceduralContactStagingLeg>;
+        friend CKPROCEDURALANIMATION_API auto Get_IsProceduralContactStagingBodyAdmitted(FCk_Handle_ProceduralGait,
+            const FTransform&, const TOptional<FTransform>&, int32&, int32) -> bool;
         friend class FProcessor_SurfaceMotion_Update;
         friend class FProcessor_ProceduralBodyPose_Update;
         friend class FProcessor_ProceduralRig_Update;
@@ -196,12 +261,17 @@ namespace ck
         FQuat _Basis = FQuat::Identity;
         uint64 _SolveSequence = 0;
         FProceduralGaitReachStance _ReachStance;
+        FProceduralGaitLandingPlanning _LandingPlanning;
+        FProceduralGaitHeightPlanning _HeightPlanning;
         TArray<FParticipationLease> _ParticipationLeases;
         uint64 _UnplantedMask = 0;
         TArray<FName> _UnplantedReasons;
 
     public:
         CK_PROPERTY_GET(_SolveSequence);
+        CK_PROPERTY_GET(_ReachStance);
+        CK_PROPERTY_GET(_LandingPlanning);
+        CK_PROPERTY_GET(_HeightPlanning);
     };
 
     // --------------------------------------------------------------------------------------------------------------------

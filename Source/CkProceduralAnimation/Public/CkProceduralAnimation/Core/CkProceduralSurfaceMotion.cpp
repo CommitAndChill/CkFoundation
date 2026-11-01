@@ -603,12 +603,14 @@ namespace ck_procedural_surface_motion
             double InStep,
             float InVoluntaryScale,
             FTransform& InOutBody,
-            ck::FProceduralSurfaceMotionState& InOutState)
+            ck::FProceduralSurfaceMotionState& InOutState,
+            TOptional<FVector>* OutContactCorrection)
         -> void
     {
         const auto Normal = InContact.Hit.Get_Normal().GetSafeNormal();
         const auto TargetForward = FQuat::FindBetweenNormals(InUp, Normal).RotateVector(InForward);
         InOutState.Set_SupportNormal(Normal);
+        InOutState.Set_SupportPoint(InContact.Hit.Get_Position());
         InOutState.Set_TravelTangent(TargetForward);
         InOutState.Set_ContactSource(InContact.Source);
 
@@ -616,8 +618,16 @@ namespace ck_procedural_surface_motion
 
         const auto Height = FVector::DotProduct(InCandidate - InContact.Hit.Get_Position(), Normal);
         const auto MaxCorrection = InSettings.Get_ClearanceSpeed() * InVoluntaryScale * InStep;
-        const auto Correction = FMath::Clamp(InSettings.Get_Clearance() - Height, -MaxCorrection, MaxCorrection);
+        const auto DesiredCorrection = InSettings.Get_HeightPlane().IsSet()
+            ? FVector::DotProduct(InSettings.Get_HeightPlane().GetValue() - InCandidate, Normal)
+            : InSettings.Get_Clearance() - Height;
+        const auto Correction = FMath::Clamp(DesiredCorrection, -MaxCorrection, MaxCorrection);
         InOutBody.SetLocation(InCandidate + Normal * Correction);
+        if (OutContactCorrection)
+        {
+            const auto ContactLimit = InSettings.Get_ClearanceSpeed() * InStep;
+            *OutContactCorrection = Normal * FMath::Clamp(DesiredCorrection, -ContactLimit, ContactLimit);
+        }
     }
 
     auto
@@ -637,8 +647,8 @@ namespace ck_procedural_surface_motion
 
 namespace ck
 {
-    auto
-        StepProceduralSurfaceMotion(
+    static auto
+        DoStepProceduralSurfaceMotion(
             const FProceduralSurfaceMotionSettings& InSettings,
             const FVector& InSteerDirection,
             float InSpeed,
@@ -648,9 +658,12 @@ namespace ck
             FTransform& InOutBody,
             FProceduralSurfaceMotionState& InOutState,
             float InVoluntaryScale,
-            const TOptional<TArrayView<const FProceduralSurfacePlantedContact>>& InPlantedContacts)
+            const TOptional<TArrayView<const FProceduralSurfacePlantedContact>>& InPlantedContacts,
+            TOptional<FVector>* OutContactCorrection)
         -> void
     {
+        if (OutContactCorrection)
+        { OutContactCorrection->Reset(); }
         const auto Step = InStep.Get_Seconds();
         const auto Clearance = InSettings.Get_Clearance();
         const auto OldRotation = InOutBody.GetRotation();
@@ -702,7 +715,7 @@ namespace ck
             else
             {
                 ck_procedural_surface_motion::DoAdopt(InSettings, Pending ? *Contacts.Down : Proposal, Up, Forward, Candidate, Step,
-                    InVoluntaryScale, InOutBody, InOutState);
+                    InVoluntaryScale, InOutBody, InOutState, OutContactCorrection);
             }
             InOutState.Set_Velocity((InOutBody.GetLocation() - OldPosition) / Step);
             return;
@@ -760,8 +773,199 @@ namespace ck
         InOutState.Set_Velocity(FVector::ZeroVector);
         InOutState.Set_Grounded(true);
         InOutState.Set_SupportNormal(Normal);
+        InOutState.Set_SupportPoint(FallHit.Get_Position());
         InOutState.Set_TravelTangent(InOutBody.GetRotation().GetAxisX());
         InOutState.Set_MissingContact(FCk_Time{});
+    }
+
+    auto
+        StepProceduralSurfaceMotion(
+            const FProceduralSurfaceMotionSettings& InSettings,
+            const FVector& InSteerDirection,
+            float InSpeed,
+            FCk_Time InStep,
+            FProceduralSurfaceRayCast InRayCast,
+            const TOptional<FProceduralSurfaceFeetSupport>& InFeetSupport,
+            FTransform& InOutBody,
+            FProceduralSurfaceMotionState& InOutState,
+            float InVoluntaryScale,
+            const TOptional<TArrayView<const FProceduralSurfacePlantedContact>>& InPlantedContacts)
+        -> void
+    {
+        DoStepProceduralSurfaceMotion(InSettings, InSteerDirection, InSpeed, InStep, InRayCast, InFeetSupport,
+            InOutBody, InOutState, InVoluntaryScale, InPlantedContacts, nullptr);
+    }
+
+    static auto
+        DoGet_IsLandingConstraintValid(
+            const FProceduralSurfaceLandingConstraint& InConstraint)
+        -> bool
+    {
+        return NOT InConstraint.Get_PointWorld().ContainsNaN() && NOT InConstraint.Get_HipLocal().ContainsNaN()
+            && FMath::IsFinite(InConstraint.Get_AdmissionReach()) && InConstraint.Get_AdmissionReach() > 0.0f
+            && FMath::IsFinite(InConstraint.Get_Reach()) && InConstraint.Get_Reach() > 0.0f
+            && InConstraint.Get_AdmissionReach() <= InConstraint.Get_Reach();
+    }
+
+    // Scalar magnitude bounds run before Unreal vector/transform arithmetic, whose NaN diagnostics may ensure
+    // on overflow. Overflow in these scalar bounds simply rejects malformed evidence; no world-size cutoff is used.
+    static auto
+        DoGet_LandingVectorMagnitude(
+            const FVector& InVector)
+        -> double
+    {
+        return FMath::Abs(InVector.X) + FMath::Abs(InVector.Y) + FMath::Abs(InVector.Z);
+    }
+
+    static auto
+        DoGet_LandingQuatMagnitude(
+            const FQuat& InQuat)
+        -> double
+    {
+        return FMath::Abs(InQuat.X) + FMath::Abs(InQuat.Y) + FMath::Abs(InQuat.Z) + FMath::Abs(InQuat.W);
+    }
+
+    static auto
+        DoGet_IsLandingTransformValid(
+            const FTransform& InTransform)
+        -> bool
+    {
+        if (InTransform.ContainsNaN())
+        { return false; }
+        const auto QuatMagnitude = DoGet_LandingQuatMagnitude(InTransform.GetRotation());
+        // IsNormalized itself squares quaternion components; establish finite intermediate bounds first.
+        return FMath::IsFinite(QuatMagnitude * QuatMagnitude) && InTransform.GetRotation().IsNormalized();
+    }
+
+    static auto
+        DoGet_LandingRotatedMagnitude(
+            double InScaledMagnitude,
+            double InQuatMagnitude)
+        -> double
+    {
+        // RotateVector: V + W * (2 * cross(Q.xyz,V)) + cross(Q.xyz,2 * cross(Q.xyz,V)).
+        return InScaledMagnitude * (1.0 + 2.0 * InQuatMagnitude * InQuatMagnitude);
+    }
+
+    static auto
+        DoGet_LandingTransformMagnitude(
+            const FTransform& InTransform,
+            const FVector& InLocal)
+        -> double
+    {
+        const auto& Scale = InTransform.GetScale3D();
+        const auto ScaledMagnitude = FMath::Abs(Scale.X) * FMath::Abs(InLocal.X)
+            + FMath::Abs(Scale.Y) * FMath::Abs(InLocal.Y) + FMath::Abs(Scale.Z) * FMath::Abs(InLocal.Z);
+        return DoGet_LandingRotatedMagnitude(ScaledMagnitude, DoGet_LandingQuatMagnitude(InTransform.GetRotation()))
+            + DoGet_LandingVectorMagnitude(InTransform.GetTranslation());
+    }
+
+    static auto
+        DoGet_IsLandingMathSafe(
+            const FTransform& InBody,
+            const TOptional<FTransform>& InPoseOffset,
+            const FProceduralSurfaceLandingConstraint& InConstraint)
+        -> bool
+    {
+        if (NOT DoGet_IsLandingTransformValid(InBody)
+            || (InPoseOffset.IsSet() && NOT DoGet_IsLandingTransformValid(InPoseOffset.GetValue())))
+        { return false; }
+        const auto PointMagnitude = DoGet_LandingVectorMagnitude(InConstraint.Get_PointWorld());
+        const auto HipMagnitude = DoGet_LandingTransformMagnitude(InBody, InConstraint.Get_HipLocal());
+        const auto DifferenceMagnitude = HipMagnitude + PointMagnitude;
+        // Bounds subtraction, squared components and their sum before TransformPosition or FVector::Dist.
+        if (NOT FMath::IsFinite(DifferenceMagnitude * DifferenceMagnitude))
+        { return false; }
+        if (NOT InPoseOffset.IsSet())
+        { return true; }
+
+        const auto& Offset = InPoseOffset.GetValue();
+        const auto& BodyScale = InBody.GetScale3D();
+        const auto& OffsetScale = Offset.GetScale3D();
+        // Offset * Body transports Offset's translation through Body, multiplies scales and composes rotations.
+        const auto TranslationMagnitude = DoGet_LandingTransformMagnitude(InBody, Offset.GetTranslation());
+        const auto ScaledHipMagnitude = FMath::Abs(BodyScale.X) * FMath::Abs(OffsetScale.X) * FMath::Abs(InConstraint.Get_HipLocal().X)
+            + FMath::Abs(BodyScale.Y) * FMath::Abs(OffsetScale.Y) * FMath::Abs(InConstraint.Get_HipLocal().Y)
+            + FMath::Abs(BodyScale.Z) * FMath::Abs(OffsetScale.Z) * FMath::Abs(InConstraint.Get_HipLocal().Z);
+        const auto ScaleMagnitude = FMath::Abs(BodyScale.X) * FMath::Abs(OffsetScale.X)
+            + FMath::Abs(BodyScale.Y) * FMath::Abs(OffsetScale.Y) + FMath::Abs(BodyScale.Z) * FMath::Abs(OffsetScale.Z);
+        auto QuatMagnitude = DoGet_LandingQuatMagnitude(InBody.GetRotation()) * DoGet_LandingQuatMagnitude(Offset.GetRotation());
+        if (BodyScale.X < 0.0 || BodyScale.Y < 0.0 || BodyScale.Z < 0.0
+            || OffsetScale.X < 0.0 || OffsetScale.Y < 0.0 || OffsetScale.Z < 0.0)
+        {
+            // Negative-scale composition uses matrices and extracts squared basis lengths. Bound all matrix entries
+            // and products as well; a normalized extracted quaternion has component sum at most two (four is loose).
+            const auto BodyMatrixMagnitude = 4.0 * (DoGet_LandingTransformMagnitude(InBody, FVector::OneVector) + 1.0);
+            const auto OffsetMatrixMagnitude = 4.0 * (DoGet_LandingTransformMagnitude(Offset, FVector::OneVector) + 1.0);
+            const auto ProductMagnitude = BodyMatrixMagnitude * OffsetMatrixMagnitude;
+            const auto ProductSquared = ProductMagnitude * ProductMagnitude;
+            // Squared basis lengths and determinant products are bounded before matrix extraction/normalization.
+            if (NOT FMath::IsFinite(ProductSquared * ProductSquared))
+            { return false; }
+            // The upper bounds and normalized input quaternions make raw matrix construction safe. Inspect
+            // exactly the engine's product before RemoveScaling or TQuat can diagnose an unnormalizable row.
+            const auto Matrix = Offset.ToMatrixWithScale() * InBody.ToMatrixWithScale();
+            auto AnyZeroRow = false;
+            auto AllUnitRows = true;
+            for (auto Row = 0; Row < 3; ++Row)
+            {
+                const auto X = Matrix.M[Row][0];
+                const auto Y = Matrix.M[Row][1];
+                const auto Z = Matrix.M[Row][2];
+                const auto SquareSum = X * X + Y * Y + Z * Z;
+                if (NOT FMath::IsFinite(SquareSum))
+                { return false; }
+                const auto InvScale = SquareSum > 0.0 ? FMath::InvSqrt(SquareSum) : 1.0;
+                const auto NormalX = X * InvScale;
+                const auto NormalY = Y * InvScale;
+                const auto NormalZ = Z * InvScale;
+                if (NOT FMath::IsFinite(NormalX) || NOT FMath::IsFinite(NormalY) || NOT FMath::IsFinite(NormalZ))
+                { return false; }
+                // VectorSign on desired scale changes only signs, so the ctor's magnitude checks are unchanged.
+                AnyZeroRow |= FMath::Abs(NormalX) <= UE_KINDA_SMALL_NUMBER
+                    && FMath::Abs(NormalY) <= UE_KINDA_SMALL_NUMBER && FMath::Abs(NormalZ) <= UE_KINDA_SMALL_NUMBER;
+                const auto NormalSquareSum = NormalX * NormalX + NormalY * NormalY + NormalZ * NormalZ;
+                AllUnitRows &= FMath::IsFinite(NormalSquareSum)
+                    && FMath::Abs(1.0 - NormalSquareSum) <= UE_KINDA_SMALL_NUMBER;
+            }
+            // TQuat(matrix) returns identity before its unit-axis ensure when any row is nearly zero.
+            if (NOT AnyZeroRow && NOT AllUnitRows)
+            { return false; }
+            QuatMagnitude = FMath::Max(QuatMagnitude, 4.0);
+        }
+        const auto PosedHipMagnitude = DoGet_LandingRotatedMagnitude(ScaledHipMagnitude, QuatMagnitude) + TranslationMagnitude;
+        const auto PosedDifferenceMagnitude = PosedHipMagnitude + PointMagnitude;
+        return FMath::IsFinite(ScaleMagnitude) && FMath::IsFinite(PosedDifferenceMagnitude * PosedDifferenceMagnitude);
+    }
+
+    auto
+        Get_IsProceduralSurfaceLandingReachValid(
+            const FTransform& InBody,
+            const TOptional<FTransform>& InPoseOffset,
+            const FProceduralSurfaceLandingConstraint& InConstraint)
+        -> bool
+    {
+        if (NOT DoGet_IsLandingConstraintValid(InConstraint) || NOT DoGet_IsLandingMathSafe(InBody, InPoseOffset, InConstraint))
+        { return false; }
+        const auto Hip = InBody.TransformPosition(InConstraint.Get_HipLocal());
+        if (Hip.ContainsNaN())
+        { return false; }
+        const auto Distance = FVector::Dist(Hip, InConstraint.Get_PointWorld());
+        if (NOT FMath::IsFinite(Distance) || Distance > InConstraint.Get_AdmissionReach())
+        { return false; }
+        if (InPoseOffset.IsSet())
+        {
+            const auto Posed = InPoseOffset.GetValue() * InBody;
+            if (Posed.ContainsNaN() || NOT Posed.GetRotation().IsNormalized())
+            { return false; }
+            const auto PosedHip = Posed.TransformPosition(InConstraint.Get_HipLocal());
+            if (PosedHip.ContainsNaN())
+            { return false; }
+            const auto PosedDistance = FVector::Dist(PosedHip, InConstraint.Get_PointWorld());
+            if (NOT FMath::IsFinite(PosedDistance) || PosedDistance > InConstraint.Get_Reach() + 1.0e-3)
+            { return false; }
+        }
+        return true;
     }
 
     auto
@@ -776,18 +980,21 @@ namespace ck
             const TOptional<FTransform>& InPoseOffset,
             FTransform& InOutBody,
             FProceduralSurfaceMotionState& InOutState,
-            const TOptional<TArrayView<const FProceduralSurfacePlantedContact>>& InPlantedContacts)
+            const TOptional<TArrayView<const FProceduralSurfacePlantedContact>>& InPlantedContacts,
+            TOptional<FProceduralSurfaceContactCorrectionAdmission> InAdmitContactCorrection,
+            TArrayView<const FProceduralSurfaceLandingConstraint> InLandings)
         -> FProceduralSurfaceReachPaceOutcome
     {
         auto Outcome = FProceduralSurfaceReachPaceOutcome{};
         const auto StartBody = InOutBody;
         const auto StartState = InOutState;
+        auto ContactCorrection = TOptional<FVector>{};
         const auto TryScale = [&](float InScale, FTransform& OutBody, FProceduralSurfaceMotionState& OutState) -> void
         {
             OutBody = StartBody;
             OutState = StartState;
-            StepProceduralSurfaceMotion(InSettings, InSteerDirection, InSpeed, InStep, InRayCast, InFeetSupport,
-                OutBody, OutState, InScale, InPlantedContacts);
+            DoStepProceduralSurfaceMotion(InSettings, InSteerDirection, InSpeed, InStep, InRayCast, InFeetSupport,
+                OutBody, OutState, InScale, InPlantedContacts, InScale == 0.0f ? &ContactCorrection : nullptr);
             Outcome.Set_Trials(Outcome.Get_Trials() + 1);
         };
 
@@ -799,6 +1006,8 @@ namespace ck
         constexpr auto ReachTolerance = 1.0e-3;
         const auto FitsReach = [&](const FTransform& InCandidate, TArrayView<const FReachLimit> InLimits) -> bool
         {
+            if (InAnchors.IsEmpty())
+            { return true; }
             const auto Posed = InPoseOffset.IsSet() ? InPoseOffset.GetValue() * InCandidate : FTransform::Identity;
             for (auto Index = 0; Index < InAnchors.Num(); ++Index)
             {
@@ -812,10 +1021,33 @@ namespace ck
             return true;
         };
 
+        auto ActiveLandings = TArray<uint8, TInlineAllocator<64>>{};
+        ActiveLandings.Reserve(InLandings.Num());
+        auto AnyActiveLanding = false;
+        for (auto Index = 0; Index < InLandings.Num(); ++Index)
+        {
+            // This is math validity only, not a start-pose reach gate. Full may move a landing into reach.
+            const auto Valid = DoGet_IsLandingConstraintValid(InLandings[Index])
+                && DoGet_IsLandingMathSafe(StartBody, InPoseOffset, InLandings[Index]);
+            ActiveLandings.Add(Valid ? 1 : 0);
+            AnyActiveLanding |= Valid;
+            if (NOT Valid)
+            { Outcome.Get_WithdrawnLandingIndices().Add(Index); }
+        }
+        const auto FitsLandings = [&](const FTransform& InCandidate) -> bool
+        {
+            for (auto Index = 0; Index < InLandings.Num(); ++Index)
+            {
+                if (ActiveLandings[Index] && NOT Get_IsProceduralSurfaceLandingReachValid(InCandidate, InPoseOffset, InLandings[Index]))
+                { return false; }
+            }
+            return true;
+        };
+
         auto FullBody = FTransform{};
         auto FullState = FProceduralSurfaceMotionState{};
         TryScale(1.0f, FullBody, FullState);
-        if (InAnchors.IsEmpty())
+        if (InAnchors.IsEmpty() && NOT AnyActiveLanding)
         {
             InOutBody = FullBody;
             InOutState = FullState;
@@ -826,7 +1058,7 @@ namespace ck
         Limits.Reserve(InAnchors.Num());
         for (const auto& Anchor : InAnchors)
         { Limits.Add(FReachLimit{Anchor.Get_Reach(), Anchor.Get_Reach()}); }
-        if (FitsReach(FullBody, TArrayView<const FReachLimit>{Limits}))
+        if (FitsReach(FullBody, TArrayView<const FReachLimit>{Limits}) && FitsLandings(FullBody))
         {
             InOutBody = FullBody;
             InOutState = FullState;
@@ -836,8 +1068,17 @@ namespace ck
         auto ZeroBody = FTransform{};
         auto ZeroState = FProceduralSurfaceMotionState{};
         TryScale(0.0f, ZeroBody, ZeroState);
-        const auto FullPosed = InPoseOffset.IsSet() ? InPoseOffset.GetValue() * FullBody : FTransform::Identity;
-        const auto ZeroPosed = InPoseOffset.IsSet() ? InPoseOffset.GetValue() * ZeroBody : FTransform::Identity;
+        // Actual anchors retain their existing posed baseline. Pending-only trials may compose their optional
+        // offset only after that specific trial passes its landing math preflight, including changed orientation.
+        auto FullPosed = FTransform::Identity;
+        auto ZeroPosed = FTransform::Identity;
+        auto HasPosedTrials = NOT InPoseOffset.IsSet();
+        if (InPoseOffset.IsSet() && NOT InAnchors.IsEmpty())
+        {
+            FullPosed = InPoseOffset.GetValue() * FullBody;
+            ZeroPosed = InPoseOffset.GetValue() * ZeroBody;
+            HasPosedTrials = true;
+        }
         auto AttemptedHipDistance = 0.0;
         for (const auto& Anchor : InAnchors)
         {
@@ -849,8 +1090,55 @@ namespace ck
                     FVector::Dist(FullPosed.TransformPosition(Anchor.Get_HipLocal()), ZeroPosed.TransformPosition(Anchor.Get_HipLocal())));
             }
         }
+        // Physical zero owns unavoidable motion. A lost future landing is withdrawn independently; it cannot
+        // enlarge actual stance limits, become a planted rejection index or create a physical override.
+        for (auto Index = 0; Index < InLandings.Num(); ++Index)
+        {
+            if (NOT ActiveLandings[Index])
+            { continue; }
+            const auto& Landing = InLandings[Index];
+            if (NOT Get_IsProceduralSurfaceLandingReachValid(ZeroBody, InPoseOffset, Landing))
+            {
+                ActiveLandings[Index] = 0;
+                Outcome.Get_WithdrawnLandingIndices().Add(Index);
+                continue;
+            }
+            // Unsafe Full still fails FitsLandings; it supplies neither widened reach nor malformed cadence metrics.
+            if (NOT DoGet_IsLandingMathSafe(FullBody, InPoseOffset, Landing))
+            { continue; }
+            const auto FullHip = FullBody.TransformPosition(Landing.Get_HipLocal());
+            const auto ZeroHip = ZeroBody.TransformPosition(Landing.Get_HipLocal());
+            const auto HipDifferenceMagnitude = DoGet_LandingVectorMagnitude(FullHip) + DoGet_LandingVectorMagnitude(ZeroHip);
+            if (FMath::IsFinite(HipDifferenceMagnitude * HipDifferenceMagnitude))
+            {
+                AttemptedHipDistance = FMath::Max(AttemptedHipDistance, FVector::Dist(FullHip, ZeroHip));
+            }
+            if (InPoseOffset.IsSet())
+            {
+                if (NOT HasPosedTrials)
+                {
+                    FullPosed = InPoseOffset.GetValue() * FullBody;
+                    ZeroPosed = InPoseOffset.GetValue() * ZeroBody;
+                    HasPosedTrials = true;
+                }
+                const auto FullPosedHip = FullPosed.TransformPosition(Landing.Get_HipLocal());
+                const auto ZeroPosedHip = ZeroPosed.TransformPosition(Landing.Get_HipLocal());
+                const auto PosedDifferenceMagnitude = DoGet_LandingVectorMagnitude(FullPosedHip) + DoGet_LandingVectorMagnitude(ZeroPosedHip);
+                if (FMath::IsFinite(PosedDifferenceMagnitude * PosedDifferenceMagnitude))
+                {
+                    AttemptedHipDistance = FMath::Max(AttemptedHipDistance, FVector::Dist(FullPosedHip, ZeroPosedHip));
+                }
+            }
+        }
         if (InStep > FCk_Time{})
-        { Outcome.Set_AttemptedStanceSpeed(static_cast<float>(AttemptedHipDistance / InStep.Get_Seconds())); }
+        {
+            const auto AttemptedSpeed = AttemptedHipDistance / InStep.Get_Seconds();
+            // Pending evidence may be finite in double precision yet not representable by this float metric.
+            // Keep its conservative default zero; legacy actual-anchor publication remains unchanged.
+            if (NOT InAnchors.IsEmpty()
+                || (FMath::IsFinite(AttemptedSpeed) && AttemptedSpeed <= TNumericLimits<float>::Max()))
+            { Outcome.Set_AttemptedStanceSpeed(static_cast<float>(AttemptedSpeed)); }
+        }
         auto PhysicalOverride = false;
         for (auto Index = 0; Index < InAnchors.Num(); ++Index)
         {
@@ -868,7 +1156,7 @@ namespace ck
         auto AcceptedBody = ZeroBody;
         auto AcceptedState = ZeroState;
         auto AcceptedScale = 0.0f;
-        if (FitsReach(FullBody, TArrayView<const FReachLimit>{Limits}))
+        if (FitsReach(FullBody, TArrayView<const FReachLimit>{Limits}) && FitsLandings(FullBody))
         {
             AcceptedBody = FullBody;
             AcceptedState = FullState;
@@ -885,7 +1173,7 @@ namespace ck
                 auto TrialBody = FTransform{};
                 auto TrialState = FProceduralSurfaceMotionState{};
                 TryScale(Scale, TrialBody, TrialState);
-                if (FitsReach(TrialBody, TArrayView<const FReachLimit>{Limits}))
+                if (FitsReach(TrialBody, TArrayView<const FReachLimit>{Limits}) && FitsLandings(TrialBody))
                 {
                     Lower = Scale;
                     AcceptedBody = TrialBody;
@@ -897,8 +1185,54 @@ namespace ck
             }
         }
 
-        // Every accepted pose and support state came from the same trial. Contact transitions need not be monotone in
-        // voluntary scale; the bounded search only commits candidates it actually checked.
+        // A stopped voluntary trial may still have adopted fresh support. Reuse only that actual adoption, never a
+        // retained/grace/coasting/falling support state, to propose its authored clearance correction without another
+        // query, integration step or rotation. The physical-zero baseline above remains untouched.
+        if (AcceptedScale == 0.0f && NOT PhysicalOverride && InStep > FCk_Time{} && InSpeed > 0.0f
+            && AttemptedHipDistance > 0.0 && ContactCorrection.IsSet()
+            && NOT ContactCorrection->ContainsNaN() && ContactCorrection->SizeSquared() > 0.0
+            && NOT ZeroBody.ContainsNaN() && (NOT InPoseOffset.IsSet() || NOT InPoseOffset->ContainsNaN()))
+        {
+            auto ContactBody = ZeroBody;
+            ContactBody.AddToTranslation(ContactCorrection.GetValue());
+            auto FitsOriginalReach = NOT ContactBody.ContainsNaN() && FitsLandings(ContactBody);
+            auto ContactPosed = FTransform::Identity;
+            if (FitsOriginalReach && InPoseOffset.IsSet() && NOT InAnchors.IsEmpty())
+            {
+                ContactPosed = InPoseOffset.GetValue() * ContactBody;
+                FitsOriginalReach = NOT ContactPosed.ContainsNaN();
+            }
+            if (FitsOriginalReach)
+            {
+                for (const auto& Anchor : InAnchors)
+                {
+                    if (Anchor.Get_FootWorld().ContainsNaN() || Anchor.Get_HipLocal().ContainsNaN()
+                        || NOT FMath::IsFinite(Anchor.Get_Reach()))
+                    {
+                        FitsOriginalReach = false;
+                        break;
+                    }
+                    const auto Limit = Anchor.Get_Reach() + ReachTolerance;
+                    if (FVector::Dist(ContactBody.TransformPosition(Anchor.Get_HipLocal()), Anchor.Get_FootWorld()) > Limit
+                        || (InPoseOffset.IsSet()
+                            && FVector::Dist(ContactPosed.TransformPosition(Anchor.Get_HipLocal()), Anchor.Get_FootWorld()) > Limit))
+                    {
+                        FitsOriginalReach = false;
+                        break;
+                    }
+                }
+            }
+            if (FitsOriginalReach && (NOT InAdmitContactCorrection.IsSet() || InAdmitContactCorrection.GetValue()(ContactBody)))
+            {
+                AcceptedBody = ContactBody;
+                AcceptedState = ZeroState;
+                AcceptedState.Set_Velocity((ContactBody.GetLocation() - StartBody.GetLocation()) / InStep.Get_Seconds());
+            }
+        }
+
+        // Every accepted pose and support state came from one evaluated trial, optionally followed by its admitted
+        // cached contact correction. Contact transitions need not be monotone in voluntary scale; only checked pairs
+        // are committed.
         InOutBody = AcceptedBody;
         InOutState = AcceptedState;
         if (AcceptedScale < 1.0f && NOT PhysicalOverride && InStep > FCk_Time{} && AttemptedHipDistance > 0.0)

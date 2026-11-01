@@ -241,7 +241,8 @@ namespace ck
             const FTransform& InBody,
             const FTransform& InPreviousOffset,
             const FTransform& InProposedOffset,
-            TArrayView<const FProceduralBodyPoseReachAnchor> InAnchors)
+            TArrayView<const FProceduralBodyPoseReachAnchor> InAnchors,
+            TFunction<bool(const FTransform& InOffset)> InAdmission)
         -> TOptional<FProceduralBodyPoseReachProjection>
     {
         if (InBody.ContainsNaN() || InPreviousOffset.ContainsNaN() || InProposedOffset.ContainsNaN()
@@ -259,9 +260,6 @@ namespace ck
         }
 
         auto Result = FProceduralBodyPoseReachProjection{}.Set_Offset(InProposedOffset);
-        if (InAnchors.IsEmpty())
-        { return Result; }
-
         constexpr auto ReachTolerance = 1.0e-3;
         auto Limits = TArray<double, TInlineAllocator<64>>{};
         Limits.Reserve(InAnchors.Num());
@@ -280,13 +278,15 @@ namespace ck
                         InAnchors[Index].Get_FootWorld()) > Limits[Index] + ReachTolerance)
                 { return false; }
             }
-            return true;
+            return NOT InAdmission || InAdmission(InOffset);
         };
         if (FitsReach(InProposedOffset))
         { return Result; }
 
         const auto PreviousFits = FitsReach(InPreviousOffset);
         const auto Base = PreviousFits ? InPreviousOffset : FTransform::Identity;
+        if (NOT PreviousFits && NOT FitsReach(Base))
+        { return {}; }
         Result.Set_Offset(Base).Set_Fraction(0.0f).Set_UsedIdentityBase(NOT PreviousFits);
         auto Lower = 0.0f;
         auto Upper = 1.0f;

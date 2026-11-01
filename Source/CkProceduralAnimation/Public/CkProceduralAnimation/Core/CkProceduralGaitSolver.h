@@ -314,8 +314,35 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
+    // Producer validates frame/solve freshness. Core checks geometry without retaining request authority.
+    struct CKPROCEDURALANIMATION_API FProceduralGaitPlannedReplantIntent
+    {
+        CK_GENERATED_BODY(FProceduralGaitPlannedReplantIntent);
+
+    private:
+        uint64 _Episode = 0;
+        FVector _ExpectedPlant = FVector::ZeroVector;
+        FVector _Target = FVector::ZeroVector;
+        FVector _ExitHip = FVector::ZeroVector;
+        TOptional<FVector> _ExitPosedHip;
+        uint64 _Frame = 0;
+        uint64 _ConsumerInputSolve = 0;
+
+    public:
+        CK_PROPERTY(_Episode);
+        CK_PROPERTY(_ExpectedPlant);
+        CK_PROPERTY(_Target);
+        CK_PROPERTY(_ExitHip);
+        CK_PROPERTY(_ExitPosedHip);
+        CK_PROPERTY(_Frame);
+        CK_PROPERTY(_ConsumerInputSolve);
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
     // _Hip is the simulation hip in the support frame like every other position. When set, _PosedHip
-    // contributes only to planted reach urgency; target validity, query geometry and reach clamping keep using _Hip.
+    // contributes to planted reach urgency and native-recovery touchdown admission; target validity, query geometry
+    // and reach clamping keep using _Hip.
     // _Reach is the leg's chain length in centimetres; zero disables the reach clamp and the reach Emergency for that leg.
     // _LandingGround reports the ground under the swing's
     // landing point and _LandingGroundZ, meaningful only when it is Found, its support-frame height: a swing whose landing
@@ -360,6 +387,9 @@ namespace ck
         float _FootContactRadius = 0.0f;
         bool _PlantCrowded = false;
         TOptional<FProceduralGaitReachPaceTrial> _ReachPaceTrial;
+        TOptional<FProceduralGaitPlannedReplantIntent> _PlannedReplantIntent;
+        // Explicit native Motion observation/capability; a contact radius alone never opts core callers in.
+        bool _NativeRecoveryEnabled = false;
 
     public:
         CK_PROPERTY(_IdealTarget);
@@ -382,6 +412,8 @@ namespace ck
         CK_PROPERTY(_FootContactRadius);
         CK_PROPERTY(_PlantCrowded);
         CK_PROPERTY(_ReachPaceTrial);
+        CK_PROPERTY(_PlannedReplantIntent);
+        CK_PROPERTY(_NativeRecoveryEnabled);
     };
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -398,6 +430,8 @@ namespace ck
         FQuat _Rotation = FQuat::Identity;
         float _SwingAlpha = 0.0f;
         bool _Planted = true;
+        bool _NativeTouchdownAttempted = false;
+        bool _NativeTouchdownResolved = false;
 
     public:
         CK_PROPERTY(_Position);
@@ -405,6 +439,8 @@ namespace ck
         CK_PROPERTY(_Rotation);
         CK_PROPERTY(_SwingAlpha);
         CK_PROPERTY(_Planted);
+        CK_PROPERTY(_NativeTouchdownAttempted);
+        CK_PROPERTY(_NativeTouchdownResolved);
     };
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -477,6 +513,7 @@ namespace ck
         bool _TargetTrusted = true;
         FVector _TargetNormal = FVector::UpVector;
         bool _TargetOnAFace = false;
+        bool _PlannedReplant = false;
 
     public:
         CK_PROPERTY(_StartPosition);
@@ -499,6 +536,7 @@ namespace ck
         CK_PROPERTY(_TargetTrusted);
         CK_PROPERTY(_TargetNormal);
         CK_PROPERTY(_TargetOnAFace);
+        CK_PROPERTY_GET(_PlannedReplant);
 
         // The forecast landing XY and accepted lift height. A later admitted report may remove the lift but cannot lower
         // the landing below its target. Its XY follows a pullback rather than retaining where a prior lift began.
@@ -546,6 +584,13 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
+    enum class EProceduralGaitAutomaticRecovery : uint8
+    {
+        None,
+        WaitingForContact,
+        Landing
+    };
+
     struct CKPROCEDURALANIMATION_API FProceduralGaitLegState
     {
         CK_GENERATED_BODY(FProceduralGaitLegState);
@@ -559,6 +604,8 @@ namespace ck
         FProceduralGaitLegPose _Emitted;
         bool _Enabled = true;
         bool _Participating = true;
+        EProceduralGaitAutomaticRecovery _AutomaticRecovery = EProceduralGaitAutomaticRecovery::None;
+        bool _AutomaticRecoveryFlightSuppressed = false;
 
     public:
         CK_PROPERTY(_Plant);
@@ -567,6 +614,7 @@ namespace ck
         CK_PROPERTY_GET(_Emitted);
         CK_PROPERTY_GET(_Enabled);
         CK_PROPERTY_GET(_Participating);
+        CK_PROPERTY_GET(_AutomaticRecovery);
     };
 
     struct CKPROCEDURALANIMATION_API FProceduralGaitDeniedTakeoff
@@ -602,6 +650,27 @@ namespace ck
     };
 
     // --------------------------------------------------------------------------------------------------------------------
+
+    struct CKPROCEDURALANIMATION_API FProceduralGaitNativeTouchdown
+    {
+        CK_GENERATED_BODY(FProceduralGaitNativeTouchdown);
+
+    private:
+        FVector _Position = FVector::ZeroVector;
+        FVector _Normal = FVector::UpVector;
+        bool _Trusted = false;
+
+    public:
+        CK_PROPERTY_GET(_Position);
+        CK_PROPERTY_GET(_Normal);
+        CK_PROPERTY_GET(_Trusted);
+        CK_DEFINE_CONSTRUCTORS(FProceduralGaitNativeTouchdown, _Position, _Normal, _Trusted);
+    };
+
+    class CKPROCEDURALANIMATION_API FProceduralGaitSolver;
+    // Synchronous, non-owning, support-frame resolver. Never stored, and never invoked for read-only evaluation.
+    using FProceduralGaitNativeRecoveryResolver = TFunctionRef<TOptional<FProceduralGaitNativeTouchdown>(
+        const FProceduralGaitSolver&, int32, const FVector&, const FVector&, const FVector&)>;
 
     class CKPROCEDURALANIMATION_API FProceduralGaitVelocityTracker
     {
@@ -683,7 +752,8 @@ namespace ck
         auto Step(FCk_Time InDeltaTime, float InBodyPlanarSpeed, const FVector& InBodyPlanarVelocity,
             TArrayView<const FProceduralGaitLegInput> InInputs,
             TArrayView<FProceduralGaitLegOutput> OutOutputs, bool InAirborne = false,
-            TOptional<float> InCadenceDriveSpeed = {}) -> bool;
+            TOptional<float> InCadenceDriveSpeed = {},
+            TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery = {}) -> bool;
         // The guard sees the evolving solver, including takeoffs accepted earlier in this Step. Denials are bounded
         // to one per leg and published only after valid input has been accepted. It never owns the callback.
         auto StepWithTakeoffGuard(FCk_Time InDeltaTime, float InBodyPlanarSpeed, const FVector& InBodyPlanarVelocity,
@@ -691,7 +761,8 @@ namespace ck
             TArrayView<FProceduralGaitLegOutput> OutOutputs, bool InAirborne,
             TOptional<float> InCadenceDriveSpeed,
             TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
-            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs) -> bool;
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs,
+            TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery = {}) -> bool;
         auto NumLegs() const -> int32 { return _LegStates.Num(); }
         auto IsLegEnabled(int32 InLegIndex) const -> bool;
         auto IsLegParticipating(int32 InLegIndex) const -> bool;
@@ -700,6 +771,9 @@ namespace ck
         // Validates the entire returned set before mutating any leg.
         auto AdmitTrustedReplants(TArrayView<const FProceduralGaitTrustedReplant> InReplants) -> bool;
         auto GetGaitClock() const -> float { return _GaitClock; }
+        // Actual unwrapped clock travel of the last Step; rejected or non-finite reporting grants no progress.
+        auto GetLastClockAdvance() const -> double
+        { return FMath::IsFinite(_LastClockAdvance) ? _LastClockAdvance : 0.0; }
         auto IsWindowOpen(float InPhaseOffset) const -> bool;
         auto GetLegState(int32 InLegIndex) const -> const FProceduralGaitLegState& { return _LegStates[InLegIndex]; }
         auto GetEffectivePhaseOffset(int32 InLegIndex) const -> float
@@ -741,7 +815,8 @@ namespace ck
             const FVector& InBodyPlanarVelocity,
             TArrayView<const FProceduralGaitLegInput> InInputs, TArrayView<FProceduralGaitLegOutput> OutOutputs,
             bool InAirborne, TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
-            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs) -> bool;
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs,
+            TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery) -> bool;
         auto UpdatePatternSelection(FCk_Time InDeltaTime, float InBodyPlanarSpeed,
             TArrayView<const FProceduralGaitLegInput> InInputs, bool InAdvance) -> void;
         auto DoSelectPattern(float InBodyPlanarSpeed, bool InAdvance) -> void;
@@ -758,6 +833,8 @@ namespace ck
         static auto DoGet_PlantReachDistance(const FProceduralGaitLegState& InState,
             const FProceduralGaitLegInput& InInput) -> double;
         static auto DoGet_IsReachPaceRelief(const FProceduralGaitLegState& InState,
+            const FProceduralGaitLegInput& InInput) -> bool;
+        static auto DoGet_IsPlannedReplant(const FProceduralGaitLegState& InState,
             const FProceduralGaitLegInput& InInput) -> bool;
         auto DoGet_IsEmergency(const FProceduralGaitLegState& InState, const FProceduralGaitLegInput& InInput) const -> bool;
         auto DoGet_IsHardOverstretched(const FProceduralGaitLegState& InState, const FProceduralGaitLegInput& InInput) const -> bool;
@@ -777,11 +854,14 @@ namespace ck
         static auto DoBeginSwing(FProceduralGaitLegState& InOutState, const FVector& InStartPosition,
             const FQuat& InStartRotation, const FVector& InTarget, bool InTargetTrusted, const FVector& InTargetNormal) -> void;
         static auto DoWriteDisabledOutput(const FProceduralGaitLegState& InState, FProceduralGaitLegOutput& OutOutput) -> void;
+        auto DoWriteWaitingRecovery(FProceduralGaitLegState& InOutState, const FProceduralGaitLegInput& InInput,
+            FCk_Time InDeltaTime, bool InAdvance, FProceduralGaitLegOutput& OutOutput) const -> void;
 
     private:
         FProceduralGaitSettings _Settings;
         TArray<FProceduralGaitLegState> _LegStates;
         float _GaitClock = 0.0f;
+        double _LastClockAdvance = 0.0;
         float _LastCadenceScale = 1.0f;
         FCk_Time _RestTime;
         bool _WasAirborne = false;

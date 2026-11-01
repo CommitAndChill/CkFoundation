@@ -29,7 +29,8 @@ enum class ECk_ProceduralBodyPose_Failure : uint8
     None,
     MissingPresentation,
     MalformedSupport,
-    MalformedConform
+    MalformedConform,
+    BodyObstructed
 };
 
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ProceduralBodyPose_Failure);

@@ -70,6 +70,7 @@ namespace ck
 
     private:
         float _Clearance = 65.0f;
+        TOptional<FVector> _HeightPlane;
         float _ProbeReach = 200.0f;
         FCk_Time _ContactGrace = FCk_Time{0.12};
         float _ConfirmAngleDegrees = 30.0f;
@@ -84,6 +85,7 @@ namespace ck
 
     public:
         CK_PROPERTY(_Clearance);
+        CK_PROPERTY(_HeightPlane);
         CK_PROPERTY(_ProbeReach);
         CK_PROPERTY(_ContactGrace);
         CK_PROPERTY(_ConfirmAngleDegrees);
@@ -105,6 +107,7 @@ namespace ck
 
     private:
         FVector _SupportNormal = FVector::UpVector;
+        FVector _SupportPoint = FVector::ZeroVector;
         FVector _TravelTangent = FVector::ForwardVector;
         // Effective forward used by the most recent Core step, including a stopped or paced accepted trial.
         FVector _StepForward = FVector::ZeroVector;
@@ -130,6 +133,7 @@ namespace ck
 
     public:
         CK_PROPERTY(_SupportNormal);
+        CK_PROPERTY(_SupportPoint);
         CK_PROPERTY(_TravelTangent);
         CK_PROPERTY(_StepForward);
         CK_PROPERTY(_Velocity);
@@ -209,6 +213,27 @@ namespace ck
         CK_DEFINE_CONSTRUCTORS(FProceduralSurfaceReachPaceAnchor, _FootWorld, _HipLocal, _Reach);
     };
 
+    // A committed native landing constrains voluntary body motion without becoming a planted reach anchor.
+    struct CKPROCEDURALANIMATION_API FProceduralSurfaceLandingConstraint
+    {
+        CK_GENERATED_BODY(FProceduralSurfaceLandingConstraint);
+
+    private:
+        FVector _PointWorld = FVector::ZeroVector;
+        FVector _HipLocal = FVector::ZeroVector;
+        float _AdmissionReach = 0.0f;
+        float _Reach = 0.0f;
+
+    public:
+        CK_PROPERTY_GET(_PointWorld);
+        CK_PROPERTY_GET(_HipLocal);
+        CK_PROPERTY_GET(_AdmissionReach);
+        CK_PROPERTY_GET(_Reach);
+
+    public:
+        CK_DEFINE_CONSTRUCTORS(FProceduralSurfaceLandingConstraint, _PointWorld, _HipLocal, _AdmissionReach, _Reach);
+    };
+
     // AttemptedStanceSpeed is the maximum constrained hip displacement between the already-simulated full and zero
     // voluntary trials divided by the substep duration, not the requested travel speed. It is zero when no reach trial
     // was rejected. This includes a turn in place and excludes a command stopped equally in both trials by collision.
@@ -226,6 +251,7 @@ namespace ck
         float _AttemptedStanceSpeed = 0.0f;
         TOptional<FTransform> _RejectedFullBody;
         TArray<int32, TInlineAllocator<64>> _RejectedAnchorIndices;
+        TArray<int32, TInlineAllocator<64>> _WithdrawnLandingIndices;
 
     public:
         CK_PROPERTY(_Scale);
@@ -234,12 +260,17 @@ namespace ck
         CK_PROPERTY(_AttemptedStanceSpeed);
         CK_PROPERTY(_RejectedFullBody);
         CK_PROPERTY(_RejectedAnchorIndices);
+        CK_PROPERTY(_WithdrawnLandingIndices);
     };
 
     // --------------------------------------------------------------------------------------------------------------------
 
     // Returns the first hit on the segment from InStart to InEnd.
     using FProceduralSurfaceRayCast = TFunctionRef<FProceduralSurfaceHit(const FVector& InStart, const FVector& InEnd)>;
+
+    // Borrowed for this call only. The contact-only candidate already fits every original simulation/posed reach;
+    // the caller may reject its body path before the matching support state is committed. Called at most once.
+    using FProceduralSurfaceContactCorrectionAdmission = TFunctionRef<bool(const FTransform& InCandidate)>;
 
     // Advances the body by one integration substep of InStep at InSpeed and rewrites the accepted support from the rays it
     // casts through InRayCast. A hit is trusted when it lies on the segment (fraction in (0, 1]), is finite and faces
@@ -314,9 +345,23 @@ namespace ck
             const TOptional<TArrayView<const FProceduralSurfacePlantedContact>>& InPlantedContacts = {})
         -> void;
 
+    // Simulation admission is exact; only presentation physical reach has the existing 0.001 cm tolerance.
+    // Scalar preflight rejects unsafe transform/distance arithmetic before it executes.
+    CKPROCEDURALANIMATION_API auto
+        Get_IsProceduralSurfaceLandingReachValid(
+            const FTransform& InBody,
+            const TOptional<FTransform>& InPoseOffset,
+            const FProceduralSurfaceLandingConstraint& InConstraint)
+        -> bool;
+
     // Replays the same substep from its original body and support state at bounded voluntary scales. Only a simulated
     // Body+State pair is committed; zero scale still queries support, resolves obstruction and falls. A prior stance that
     // cannot fit even at zero scale is reported as a physical override and is never worsened by voluntary travel.
+    // When requested travel is fully blocked, a fresh contact actually adopted by the zero trial may supply one cached
+    // clearance correction along its normal, with fixed rotation and original reach limits. It advances no extra time,
+    // query or replay. Admission rejection keeps the original zero Body+State; pace stays zero and its physical baseline
+    // is unchanged. Committed landings constrain admission separately from planted physical reach. A landing that
+    // cannot fit physical zero is withdrawn by input index, never widened or reported as a planted override.
     CKPROCEDURALANIMATION_API auto
         StepProceduralSurfaceMotionPaced(
             const FProceduralSurfaceMotionSettings& InSettings,
@@ -329,7 +374,9 @@ namespace ck
             const TOptional<FTransform>& InPoseOffset,
             FTransform& InOutBody,
             FProceduralSurfaceMotionState& InOutState,
-            const TOptional<TArrayView<const FProceduralSurfacePlantedContact>>& InPlantedContacts = {})
+            const TOptional<TArrayView<const FProceduralSurfacePlantedContact>>& InPlantedContacts = {},
+            TOptional<FProceduralSurfaceContactCorrectionAdmission> InAdmitContactCorrection = {},
+            TArrayView<const FProceduralSurfaceLandingConstraint> InLandings = {})
         -> FProceduralSurfaceReachPaceOutcome;
 }
 

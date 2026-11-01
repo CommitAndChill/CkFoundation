@@ -228,6 +228,7 @@ namespace ck
             State._Emitted._Rotation = State._Plant._Rotation;
         }
         _GaitClock = 0.0f;
+        _LastClockAdvance = 0.0;
         _LastCadenceScale = 1.0f;
         _MissedLandingLifts = 0;
         _RestTime = FCk_Time{};
@@ -361,6 +362,8 @@ namespace ck
             State._Participating = true;
             State._Swing = {};
             State._PendingStep = {};
+            State._AutomaticRecovery = EProceduralGaitAutomaticRecovery::None;
+            State._AutomaticRecoveryFlightSuppressed = _WasAirborne;
             State._Plant._Position = Replant.Get_Position();
             State._Plant._Rotation = Replant.Get_Rotation();
             State._Plant._Normal = Replant.Get_Normal();
@@ -395,6 +398,12 @@ namespace ck
         if (IsLegParticipating(InLegIndex) && NOT _LegStates[InLegIndex]._Swing._Active)
         {
             auto& State = _LegStates[InLegIndex];
+            if (State._AutomaticRecovery != EProceduralGaitAutomaticRecovery::None)
+            {
+                if (NOT InTrusted)
+                { State._Plant._Trusted = false; }
+                return;
+            }
 
             const auto NormalDelta = FQuat::FindBetweenNormals(
                 State._Plant._Normal.GetSafeNormal(KINDA_SMALL_NUMBER, FVector::UpVector),
@@ -428,6 +437,8 @@ namespace ck
         { return false; }
 
         auto& State = _LegStates[InLegIndex];
+        State._AutomaticRecovery = EProceduralGaitAutomaticRecovery::None;
+        State._AutomaticRecoveryFlightSuppressed = true;
         State._Emitted._Position = InPosition;
         State._Emitted._Rotation = InRotation;
         State._Plant._Position = InPosition;
@@ -720,13 +731,14 @@ namespace ck
             TArrayView<const FProceduralGaitLegInput> InInputs,
             TArrayView<FProceduralGaitLegOutput> OutOutputs,
             bool InAirborne,
-            TOptional<float> InCadenceDriveSpeed)
+            TOptional<float> InCadenceDriveSpeed,
+            TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery)
         -> bool
     {
         auto Denied = TArray<FProceduralGaitDeniedTakeoff>{};
         return StepWithTakeoffGuard(InDeltaTime, InBodyPlanarSpeed, InBodyPlanarVelocity, InInputs, OutOutputs,
             InAirborne, InCadenceDriveSpeed,
-            [](const FProceduralGaitSolver&, int32, bool) { return true; }, Denied);
+            [](const FProceduralGaitSolver&, int32, bool) { return true; }, Denied, InResolveNativeRecovery);
     }
 
     auto
@@ -740,9 +752,11 @@ namespace ck
             bool InAirborne,
             TOptional<float> InCadenceDriveSpeed,
             TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
-            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs)
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs,
+            TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery)
         -> bool
     {
+        _LastClockAdvance = 0.0;
         if (InInputs.Num() != OutOutputs.Num() || InInputs.Num() != _LegStates.Num()
             || NOT FMath::IsFinite(InDeltaTime.Get_Seconds()) || NOT FMath::IsFinite(InBodyPlanarSpeed)
             || InBodyPlanarSpeed < 0.0f || InBodyPlanarVelocity.ContainsNaN() || NOT ValidateSettings(_Settings)
@@ -763,7 +777,8 @@ namespace ck
                         || (Input._ReachPaceTrial.GetValue().Get_PosedHip().IsSet()
                             && Input._ReachPaceTrial.GetValue().Get_PosedHip().GetValue().ContainsNaN())))
                 || NOT FMath::IsFinite(Input._Reach) || Input._Reach < 0.0f
-                || NOT FMath::IsFinite(Input._FootContactRadius) || Input._FootContactRadius < 0.0f)
+                || NOT FMath::IsFinite(Input._FootContactRadius) || Input._FootContactRadius < 0.0f
+                || (Input._NativeRecoveryEnabled && (Input._Reach <= 0.0f || Input._FootContactRadius <= 0.0f)))
             { return false; }
         }
 
@@ -779,13 +794,13 @@ namespace ck
         {
             auto ReadOnlySolver = *this;
             const auto Evaluated = ReadOnlySolver.DoStep(InDeltaTime, InBodyPlanarSpeed, CadenceDriveSpeed,
-                InBodyPlanarVelocity, EffectiveInputs, OutOutputs, InAirborne, InCanTakeoff, Denied);
+                InBodyPlanarVelocity, EffectiveInputs, OutOutputs, InAirborne, InCanTakeoff, Denied, {});
             if (Evaluated)
             { OutDeniedTakeoffs.Reset(); }
             return Evaluated;
         }
         const auto Advanced = DoStep(InDeltaTime, InBodyPlanarSpeed, CadenceDriveSpeed, InBodyPlanarVelocity,
-            EffectiveInputs, OutOutputs, InAirborne, InCanTakeoff, Denied);
+            EffectiveInputs, OutOutputs, InAirborne, InCanTakeoff, Denied, InResolveNativeRecovery);
         if (Advanced)
         {
             for (auto LegIndex = 0; LegIndex < OutOutputs.Num(); ++LegIndex)
@@ -811,10 +826,16 @@ namespace ck
             TArrayView<FProceduralGaitLegOutput> OutOutputs,
             bool InAirborne,
             TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
-            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs)
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs,
+            TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery)
         -> bool
     {
         const auto Advance = InDeltaTime > FCk_Time{};
+        for (auto& Output : OutOutputs)
+        {
+            Output._NativeTouchdownAttempted = false;
+            Output._NativeTouchdownResolved = false;
+        }
 
         auto EnabledSetChanged = false;
         for (auto LegIndex = 0; LegIndex < InInputs.Num(); ++LegIndex)
@@ -826,6 +847,8 @@ namespace ck
                 State._Participating = ReconciledInput._Participating;
                 State._Swing._Active = false;
                 State._PendingStep._Time = FCk_Time{};
+                State._AutomaticRecovery = EProceduralGaitAutomaticRecovery::None;
+                State._AutomaticRecoveryFlightSuppressed = true;
                 State._Plant._Position = State._Emitted._Position;
                 State._Plant._Rotation = State._Emitted._Rotation;
                 State._Plant._Trusted = false;
@@ -845,6 +868,12 @@ namespace ck
                     { State._Swing._LandsOnTarget = true; }
                 }
             }
+        }
+
+        if (Advance && NOT InAirborne)
+        {
+            for (auto& State : _LegStates)
+            { State._AutomaticRecoveryFlightSuppressed = false; }
         }
 
         if (EnabledSetChanged && _Settings._Pattern._LegLossPolicy == EProceduralGaitLegLossPolicy::RedistributeOffsets)
@@ -892,8 +921,10 @@ namespace ck
 
         if (Advance && CadenceMoving && NOT InAirborne)
         {
-            _GaitClock = FMath::Frac(_GaitClock + static_cast<float>(InDeltaTime * CadenceScale
-                / FMath::Max(_Settings._Cadence._CycleDuration * _PatternBlend._EffectiveCycleScale, FCk_Time{KINDA_SMALL_NUMBER})));
+            const auto ClockAdvance = static_cast<float>(InDeltaTime * CadenceScale
+                / FMath::Max(_Settings._Cadence._CycleDuration * _PatternBlend._EffectiveCycleScale, FCk_Time{KINDA_SMALL_NUMBER}));
+            _LastClockAdvance += static_cast<double>(ClockAdvance);
+            _GaitClock = FMath::Frac(_GaitClock + ClockAdvance);
         }
 
         if (Advance && InAirborne && NOT _WasAirborne)
@@ -913,6 +944,8 @@ namespace ck
                 State._Swing._CatchStep = false;
                 State._Swing._BeyondSchedule = false;
                 State._Swing._DurationScale = 1.0f;
+                if (State._AutomaticRecovery != EProceduralGaitAutomaticRecovery::None)
+                { State._AutomaticRecovery = EProceduralGaitAutomaticRecovery::WaitingForContact; }
                 if (InInputs[LegIndex]._FootContactRadius > 0.0f)
                 { State._Plant._Trusted = false; }
             }
@@ -926,6 +959,12 @@ namespace ck
                 { continue; }
 
                 const auto& In = InInputs[LegIndex];
+                if (State._AutomaticRecovery != EProceduralGaitAutomaticRecovery::None)
+                {
+                    State._AutomaticRecovery = EProceduralGaitAutomaticRecovery::WaitingForContact;
+                    State._Plant._Trusted = false;
+                    continue;
+                }
                 if (NOT InCanTakeoff(*this, LegIndex, false))
                 {
                     State._Plant._Position = State._Emitted._AirPosition;
@@ -981,6 +1020,11 @@ namespace ck
                     continue;
                 }
 
+                if (Advance && In._NativeRecoveryEnabled && NOT State._AutomaticRecoveryFlightSuppressed)
+                {
+                    State._AutomaticRecovery = EProceduralGaitAutomaticRecovery::WaitingForContact;
+                    State._Plant._Trusted = false;
+                }
                 const auto TuckTarget = In._IdealTarget + FVector{0.0, 0.0, _Settings._Airborne._TuckLift};
                 const auto TuckRotation = MakeFootRotation(In._FacingDirection, FVector::UpVector);
                 if (Advance)
@@ -997,6 +1041,37 @@ namespace ck
                 Out._Planted = false;
             }
             return true;
+        }
+
+        // The automatic reground boundary remains before ordinary swing accounting. Waiting is not an active swing;
+        // a later admitted target can enter the same landing path without reserving a phase group while it waits.
+        if (Advance && InResolveNativeRecovery.IsSet())
+        {
+            for (auto LegIndex = 0; LegIndex < InInputs.Num(); ++LegIndex)
+            {
+                auto& State = _LegStates[LegIndex];
+                const auto& In = InInputs[LegIndex];
+                if (State._AutomaticRecovery != EProceduralGaitAutomaticRecovery::WaitingForContact
+                    || NOT State._Enabled || NOT State._Participating || NOT In._NativeRecoveryEnabled
+                    || State._PendingStep._Time > FCk_Time{} || NOT In._TargetValid || NOT In._TargetTrusted)
+                { continue; }
+                const auto Target = DoClampTarget(In, In._IdealTarget, true);
+                if (NOT DoGet_IsContactAvailable(LegIndex, Target, InInputs)
+                    || OutDeniedTakeoffs.ContainsByPredicate([LegIndex](const auto& InDenied)
+                        { return InDenied.Get_LegIndex() == LegIndex; }))
+                { continue; }
+                if (NOT InCanTakeoff(*this, LegIndex, false))
+                {
+                    OutDeniedTakeoffs.Emplace(LegIndex, false);
+                    continue;
+                }
+                DoBeginSwing(State, State._Emitted._Position, State._Emitted._Rotation, Target, true, In._GroundNormal);
+                State._Swing._TargetFrozen = false;
+                State._Swing._TargetOnAFace = Get_IsFaceNormal(In._GroundNormal, FVector::UpVector);
+                State._Swing._LandsOnTarget = true;
+                State._Swing._DurationScale = FMath::Clamp(_Settings._Airborne._LandingStepDurationScale, 0.1f, 1.0f);
+                State._AutomaticRecovery = EProceduralGaitAutomaticRecovery::Landing;
+            }
         }
 
         // The phase schedule swings one group at a time. Beside it, the group of a hard-overstretched foot may swing beyond the
@@ -1068,6 +1143,7 @@ namespace ck
                 const auto Offset = _PatternBlend._EffectiveOffsets[LegIndex];
 
                 if (NOT State._Enabled || NOT State._Participating || State._Swing._Active
+                    || State._AutomaticRecovery == EProceduralGaitAutomaticRecovery::WaitingForContact
                     || NOT In._TargetValid || IsWindowOpen(Offset))
                 {
                     continue;
@@ -1085,8 +1161,10 @@ namespace ck
 
             if (WorstGap > 0.0f)
             {
-                _GaitClock = FMath::Frac(_GaitClock
-                    + FMath::Min(WorstGap, static_cast<float>(InDeltaTime.Get_Seconds()) * _Settings._Schedule._AdvanceRate) + 1.0f);
+                const auto ClockAdvance = FMath::Min(WorstGap,
+                    static_cast<float>(InDeltaTime.Get_Seconds()) * _Settings._Schedule._AdvanceRate);
+                _LastClockAdvance += static_cast<double>(ClockAdvance);
+                _GaitClock = FMath::Frac(_GaitClock + ClockAdvance + 1.0f);
             }
         }
 
@@ -1107,6 +1185,7 @@ namespace ck
             const auto& State = _LegStates[LegIndex];
             const auto Offset = _PatternBlend._EffectiveOffsets[LegIndex];
             if (NOT State._Enabled || NOT State._Participating || State._Swing._Active
+                || State._AutomaticRecovery == EProceduralGaitAutomaticRecovery::WaitingForContact
                 || State._PendingStep._Time > FCk_Time{}
                 || HasSwingInGroup(Offset) || NOT DoGet_IsReachPaceRelief(State, In)
                 || (NOT BeyondScheduleOffsets.IsEmpty() && NOT ContainsGroup(BeyondScheduleOffsets, Offset))
@@ -1141,6 +1220,7 @@ namespace ck
             const auto Offset = _PatternBlend._EffectiveOffsets[LegIndex];
 
             if (ReachPacePhaseOffset.IsSet() || NOT State._Enabled || NOT State._Participating
+                || State._AutomaticRecovery == EProceduralGaitAutomaticRecovery::WaitingForContact
                 || State._Swing._Active || NOT In._TargetValid || HasSwingInGroup(Offset)
                 || NOT DoGet_IsEmergency(State, In))
             { continue; }
@@ -1172,11 +1252,20 @@ namespace ck
                 continue;
             }
 
+            if (State._AutomaticRecovery == EProceduralGaitAutomaticRecovery::WaitingForContact
+                && State._PendingStep._Time <= FCk_Time{})
+            {
+                DoWriteWaitingRecovery(State, In, InDeltaTime, Advance, Out);
+                continue;
+            }
+
             if (State._Swing._Active)
             {
                 const auto SwingDuration = FMath::Max(_Settings._Step._Duration * State._Swing._DurationScale / CadenceScale, FCk_Time{KINDA_SMALL_NUMBER});
                 const auto PreviousPhase = State._Swing._Phase;
                 const auto CanRetarget = In._TargetValid
+                    && (State._AutomaticRecovery != EProceduralGaitAutomaticRecovery::Landing
+                        || (In._NativeRecoveryEnabled && In._TargetTrusted))
                     && DoGet_IsContactAvailable(LegIndex, DoClampTarget(In, In._IdealTarget, In._TargetTrusted), InInputs);
                 if (Advance)
                 {
@@ -1274,12 +1363,18 @@ namespace ck
 
                 if (State._Swing._Phase >= 1.0f)
                 {
-                    State._Swing._Active = false;
-                    State._Swing._Phase = 0.0f;
-                    State._Swing._DurationScale = 1.0f;
-                    State._Swing._Overshoot = false;
-                    State._Swing._BeyondSchedule = false;
-
+                    const auto NativeLanding = State._AutomaticRecovery == EProceduralGaitAutomaticRecovery::Landing
+                        || State._Swing._PlannedReplant;
+                    if (NativeLanding && NOT Advance)
+                    {
+                        Out._Position = State._Emitted._Position;
+                        Out._Rotation = State._Emitted._Rotation;
+                        Out._Normal = State._Swing._TargetNormal;
+                        Out._SwingAlpha = State._Swing._Phase;
+                        Out._Planted = false;
+                        continue;
+                    }
+                    auto MissedLift = false;
                     if (In._TargetValid && NOT State._Swing._CatchStep && In._FootContactRadius <= 0.0f)
                     {
                         const auto BelowGround = FVector::DotProduct(In._IdealTarget - Target, In._GroundNormal);
@@ -1298,16 +1393,64 @@ namespace ck
                         if (In._LandingGroundZ - Target.Z <= MaxTouchdownLift)
                         { Target.Z = In._LandingGroundZ; }
                         else
-                        { ++_MissedLandingLifts; }
+                        { MissedLift = true; }
                     }
+                    auto TouchdownNormal = State._Swing._TargetNormal;
+                    auto TouchdownRotation = LandingRotation;
+                    auto TouchdownTrusted = procedural_gait_solver::Get_PlantTrusted(In, State._Swing._TargetTrusted)
+                        && DoGet_IsContactAvailable(LegIndex, Target, InInputs);
+                    if (NativeLanding)
+                    {
+                        auto Resolved = TOptional<FProceduralGaitNativeTouchdown>{};
+                        if (In._NativeRecoveryEnabled && InResolveNativeRecovery.IsSet())
+                        {
+                            Out._NativeTouchdownAttempted = true;
+                            Resolved = InResolveNativeRecovery.GetValue()(*this, LegIndex, Target,
+                                State._Swing._ValidatedTarget, State._Swing._TargetNormal);
+                        }
+                        constexpr auto PhysicalTolerance = 1.0e-3;
+                        const auto Limit = static_cast<double>(In._Reach) + PhysicalTolerance;
+                        const auto Admitted = Resolved.IsSet() && Resolved->Get_Trusted()
+                            && NOT Resolved->Get_Position().ContainsNaN() && NOT Resolved->Get_Normal().ContainsNaN()
+                            && Resolved->Get_Normal().IsNormalized() && In._Reach > 0.0f
+                            && FVector::Dist(Resolved->Get_Position(), In._Hip) <= Limit
+                            && (NOT In._PosedHip.IsSet() || FVector::Dist(Resolved->Get_Position(), In._PosedHip.GetValue()) <= Limit)
+                            && DoGet_IsContactAvailable(LegIndex, Resolved->Get_Position(), InInputs);
+                        if (NOT Admitted)
+                        {
+                            // Neither the rejected endpoint nor a guessed rest return may become a plant. Continue
+                            // from the pose actually emitted, with no committed landing reservation left behind.
+                            State._Swing = {};
+                            State._Swing._TargetTrusted = false;
+                            State._Plant._Trusted = false;
+                            State._Plant._Rotation = State._Emitted._Rotation;
+                            State._Emitted._AirPosition = State._Emitted._Position;
+                            State._AutomaticRecovery = EProceduralGaitAutomaticRecovery::WaitingForContact;
+                            DoWriteWaitingRecovery(State, In, InDeltaTime, Advance, Out);
+                            continue;
+                        }
+                        Target = Resolved->Get_Position();
+                        TouchdownNormal = Resolved->Get_Normal();
+                        TouchdownRotation = (FQuat::FindBetweenNormals(State._Swing._TargetNormal, TouchdownNormal)
+                            * LandingRotation).GetNormalized();
+                        TouchdownTrusted = true;
+                        Out._NativeTouchdownResolved = true;
+                        State._AutomaticRecovery = EProceduralGaitAutomaticRecovery::None;
+                    }
+                    State._Swing._Active = false;
+                    State._Swing._Phase = 0.0f;
+                    State._Swing._DurationScale = 1.0f;
+                    State._Swing._Overshoot = false;
+                    State._Swing._BeyondSchedule = false;
                     State._Swing._LandingLiftStartAlpha = -1.0f;
                     State._Swing._CatchStep = false;
+                    if (MissedLift)
+                    { ++_MissedLandingLifts; }
 
                     State._Plant._Position = Target;
-                    State._Plant._Normal = State._Swing._TargetNormal;
-                    State._Plant._Rotation = LandingRotation;
-                    State._Plant._Trusted = procedural_gait_solver::Get_PlantTrusted(In, State._Swing._TargetTrusted)
-                        && DoGet_IsContactAvailable(LegIndex, Target, InInputs);
+                    State._Plant._Normal = TouchdownNormal;
+                    State._Plant._Rotation = TouchdownRotation;
+                    State._Plant._Trusted = TouchdownTrusted;
 
                     Out._Position = State._Plant._Position;
                     Out._Normal = State._Plant._Normal;
@@ -1326,6 +1469,7 @@ namespace ck
                 const auto Error = FVector::Dist(State._Plant._Position, In._IdealTarget);
 
                 const auto Wants = In._TargetValid && Error > Threshold;
+                const auto StagingWants = InResolveNativeRecovery.IsSet() && DoGet_IsPlannedReplant(State, In);
                 const auto RecoveryWants = In._TargetValid && In._TargetTrusted && NOT State._Plant._Trusted;
                 const auto Crowded = In._PlantCrowded && In._FootContactRadius > 0.0f;
                 const auto ReachPaceRelief = DoGet_IsReachPaceRelief(State, In);
@@ -1339,7 +1483,7 @@ namespace ck
                 const auto YieldsToPriority = PriorityPhaseOffset.IsSet() && NOT CatchStep
                     && NOT FMath::IsNearlyEqual(PriorityPhaseOffset.GetValue(), LegPhaseOffset, 1.0e-3f);
 
-                const auto Triggered = CatchStep || (Emergency && (NOT Crowded || Budget)) || (Wants && IsWindowOpen(LegPhaseOffset) && Budget)
+                const auto Triggered = CatchStep || (Emergency && (NOT Crowded || Budget)) || ((Wants || StagingWants) && IsWindowOpen(LegPhaseOffset) && Budget)
                     || (SettleWants && Budget) || (RecoveryWants && Budget);
                 auto JoinDurationScale = 0.0f;
                 if (Emergency && (YieldsToPriority || (ReachPaceRelief && ContainsGroup(ScheduledOffsets, LegPhaseOffset)))
@@ -1381,14 +1525,21 @@ namespace ck
                 if (Advance && (OnSchedule || BeyondSchedule) && ContactAvailable && NOT AlreadyDenied
                     && InCanTakeoff(*this, LegIndex, Emergency))
                 {
-                    DoBeginSwing(State, State._Plant._Position, State._Plant._Rotation, SwingTarget, TargetTrusted,
+                    const auto WasWaiting = State._AutomaticRecovery == EProceduralGaitAutomaticRecovery::WaitingForContact;
+                    DoBeginSwing(State, WasWaiting ? State._Emitted._Position : State._Plant._Position,
+                        WasWaiting ? State._Emitted._Rotation : State._Plant._Rotation, SwingTarget, TargetTrusted,
                         In._TargetValid ? In._GroundNormal : State._Plant._Normal);
+                    if (CatchStep)
+                    { State._AutomaticRecovery = EProceduralGaitAutomaticRecovery::None; }
                     if (JoinsReservedGroup)
                     { State._Swing._DurationScale = JoinDurationScale; }
                     State._Swing._TargetFrozen = false;
                     State._Swing._TargetOnAFace = NOT CatchStep && In._TargetValid && Get_IsFaceNormal(In._GroundNormal, FVector::UpVector);
-                    // Recovery and reach relief land on the validated contact without stroke or freeze displacement.
-                    const auto ExactContact = RecoveryWants || ReachPaceRelief || In._FootContactRadius > 0.0f;
+                    // Recovery, reach relief and planned replants retain the validated exact contact.
+                    const auto StartsPlannedReplant = StagingWants && OnSchedule && NOT Emergency && NOT CatchStep
+                        && NOT RecoveryWants && NOT ReachPaceRelief;
+                    const auto ExactContact = RecoveryWants || ReachPaceRelief || StartsPlannedReplant || In._FootContactRadius > 0.0f;
+                    State._Swing._PlannedReplant = StartsPlannedReplant;
                     State._Swing._LandsOnTarget = ExactContact && NOT CatchStep;
 
                     State._Swing._Overshoot = NOT CatchStep && NOT ExactContact && (Wants || Emergency) && NOT In._TargetIsFoothold
@@ -1400,7 +1551,7 @@ namespace ck
                     ++NumSwinging;
                     (OnSchedule ? ScheduledOffsets : BeyondScheduleOffsets).Add(LegPhaseOffset);
 
-                    Out._Position = State._Plant._Position;
+                    Out._Position = WasWaiting ? State._Emitted._Position : State._Plant._Position;
                     Out._Normal = State._Plant._Normal;
                     Out._Rotation = State._Plant._Rotation;
                     Out._SwingAlpha = 0.0f;
@@ -1410,6 +1561,11 @@ namespace ck
                 {
                     if (Advance && (OnSchedule || BeyondSchedule) && ContactAvailable && NOT AlreadyDenied)
                     { OutDeniedTakeoffs.Emplace(LegIndex, Emergency); }
+                    if (State._AutomaticRecovery == EProceduralGaitAutomaticRecovery::WaitingForContact)
+                    {
+                        DoWriteWaitingRecovery(State, In, InDeltaTime, Advance, Out);
+                        continue;
+                    }
                     Out._Position = State._Plant._Position;
                     Out._Normal = State._Plant._Normal;
                     Out._Rotation = State._Plant._Rotation;
@@ -1427,6 +1583,43 @@ namespace ck
 
     auto
         FProceduralGaitSolver::
+        DoWriteWaitingRecovery(
+            FProceduralGaitLegState& InOutState,
+            const FProceduralGaitLegInput& InInput,
+            FCk_Time InDeltaTime,
+            bool InAdvance,
+            FProceduralGaitLegOutput& OutOutput) const
+        -> void
+    {
+        auto Position = InOutState._Emitted._Position;
+        auto Rotation = InOutState._Emitted._Rotation;
+        if (InAdvance)
+        {
+            const auto Follow = FMath::Max(_Settings._Airborne._FollowSpeed, KINDA_SMALL_NUMBER);
+            Position = procedural_gait_solver::Damp(Position,
+                InInput._IdealTarget + FVector{0.0, 0.0, _Settings._Airborne._TuckLift}, Follow, InDeltaTime);
+            Rotation = procedural_gait_solver::Damp(Rotation,
+                MakeFootRotation(InInput._FacingDirection, FVector::UpVector), Follow, InDeltaTime);
+        }
+        if (InInput._Reach > 0.0f)
+        { Position = procedural_gait_solver::Get_ReachableFlightPosition(InInput._Hip, Position, InInput._Reach); }
+        if (InAdvance)
+        {
+            InOutState._Emitted._AirPosition = Position;
+            InOutState._Plant._Rotation = Rotation;
+            InOutState._Plant._Trusted = false;
+        }
+        OutOutput._Position = Position;
+        OutOutput._Rotation = Rotation;
+        OutOutput._Normal = FVector::UpVector;
+        OutOutput._SwingAlpha = 1.0f;
+        OutOutput._Planted = false;
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProceduralGaitSolver::
         DoReconcileEnabled(
             FProceduralGaitLegState& InOutState,
             const FProceduralGaitLegInput& InInput,
@@ -1438,6 +1631,8 @@ namespace ck
         if (InOutState._Enabled == InInput._Enabled)
         { return false; }
 
+        InOutState._AutomaticRecovery = EProceduralGaitAutomaticRecovery::None;
+        InOutState._AutomaticRecoveryFlightSuppressed = true;
         if (NOT InInput._Enabled)
         {
             InOutState._Swing._Active = false;
@@ -1543,6 +1738,7 @@ namespace ck
         InOutState._Swing._BeyondSchedule = false;
         InOutState._Swing._ValidatedTarget = InTarget;
         InOutState._Swing._LandsOnTarget = false;
+        InOutState._Swing._PlannedReplant = false;
         InOutState._Swing._PullBackStartAlpha = -1.0f;
         InOutState._Swing._TargetTrusted = InTargetTrusted;
         InOutState._Swing._TargetNormal = InTargetNormal;
@@ -1934,6 +2130,42 @@ namespace ck
         const auto TargetFits = FVector::Dist(InInput._IdealTarget, Trial.Get_Hip()) <= Limit
             && (NOT Trial.Get_PosedHip().IsSet()
                 || FVector::Dist(InInput._IdealTarget, Trial.Get_PosedHip().GetValue()) <= Limit);
+        return PlantOutside && TargetFits;
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProceduralGaitSolver::
+        DoGet_IsPlannedReplant(
+            const FProceduralGaitLegState& InState,
+            const FProceduralGaitLegInput& InInput)
+        -> bool
+    {
+        if (NOT InInput._PlannedReplantIntent.IsSet() || NOT InState._Enabled || NOT InState._Participating
+            || NOT InInput._Enabled || NOT InInput._Participating || NOT InState._Plant._Trusted
+            || InState._Swing._Active || InState._PendingStep._Time > FCk_Time{}
+            || InState._AutomaticRecovery != EProceduralGaitAutomaticRecovery::None
+            || NOT InInput._TargetValid || NOT InInput._TargetTrusted || NOT InInput._NativeRecoveryEnabled
+            || InInput._Reach <= 0.0f)
+        { return false; }
+
+        const auto& Intent = InInput._PlannedReplantIntent.GetValue();
+        if (Intent.Get_Episode() == 0 || Intent.Get_ConsumerInputSolve() == MAX_uint64
+            || Intent.Get_ExpectedPlant().ContainsNaN() || Intent.Get_Target().ContainsNaN()
+            || Intent.Get_ExitHip().ContainsNaN()
+            || (Intent.Get_ExitPosedHip().IsSet() && Intent.Get_ExitPosedHip().GetValue().ContainsNaN())
+            || Intent.Get_ExpectedPlant() != InState._Plant._Position || Intent.Get_Target() != InInput._IdealTarget)
+        { return false; }
+
+        constexpr auto ReachTolerance = 1.0e-3;
+        const auto Limit = static_cast<double>(InInput._Reach) + ReachTolerance;
+        const auto PlantOutside = FVector::Dist(InState._Plant._Position, Intent.Get_ExitHip()) > Limit
+            || (Intent.Get_ExitPosedHip().IsSet()
+                && FVector::Dist(InState._Plant._Position, Intent.Get_ExitPosedHip().GetValue()) > Limit);
+        const auto TargetFits = FVector::Dist(InInput._IdealTarget, Intent.Get_ExitHip()) <= Limit
+            && (NOT Intent.Get_ExitPosedHip().IsSet()
+                || FVector::Dist(InInput._IdealTarget, Intent.Get_ExitPosedHip().GetValue()) <= Limit);
         return PlantOutside && TargetFits;
     }
 

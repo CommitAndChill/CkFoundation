@@ -8,6 +8,7 @@
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
 
 #include "CkEcsExt/Transform/CkTransform_Utils.h"
+#include "CkEcsExt/Transform/CkTransform_Fragment.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -61,20 +62,25 @@ auto
         const FCk_SurfaceMotion_Spec& InParams)
     -> FCk_Handle_SurfaceMotion
 {
-    const auto BodyValid = ck::IsValid(InBody)
+    CK_ENSURE_IF_NOT(ck::IsValid(InBody)
         && NOT InBody.Has<ck::FTag_DestroyEntity_Initiate>()
         && UCk_Utils_EntityLifetime_UE::Get_CanCreateEntity(InBody)
-        && NOT Has(InBody);
-    CK_ENSURE_IF_NOT(BodyValid,
+        && NOT Has(InBody),
         TEXT("Surface motion Add rejected body [{}]: it must be a live transform entity with no existing surface motion."),
         InBody)
     { return {}; }
 
-    const auto ParamsValid = ck::IsValid(InParams);
-    CK_ENSURE_IF_NOT(ParamsValid,
+    CK_ENSURE_IF_NOT(ck::IsValid(InParams),
         TEXT("Surface motion Add rejected body [{}]: invalid clearance, probe reach, contact grace, confirm angle, confirm time, "
-             "speed, turn rate, gravity or steer floor. A max step height is 0, or above the clearance and at most the probe reach."),
+             "speed, turn rate, gravity or steer floor. A max step height is 0, or above the clearance and at most the probe reach. "
+             "Enabled adaptive height also requires finite positive body half extents and collision margin."),
         InBody)
+    { return {}; }
+
+    CK_ENSURE_IF_NOT(NOT InParams.Get_AdaptiveHeight().Get_Enabled()
+        || (InBody.Get<ck::FFragment_Transform>().Get_Transform().GetRotation().IsNormalized()
+            && InBody.Get<ck::FFragment_Transform>().Get_Transform().GetScale3D().Equals(FVector::OneVector, 1.0e-4)),
+        TEXT("Adaptive surface motion Add rejected body [{}]: its collision box requires a rigid unit-scale body."), InBody)
     { return {}; }
 
     InBody.Add<ck::FFragment_SurfaceMotion_Params>(InParams);
@@ -157,6 +163,85 @@ auto
     return Get_Status(InHandle) == ECk_ProceduralAnimation_Status::Ready
         ? ck_surface_motion_utils::DoGet_ContactSource(InHandle.Get<ck::FFragment_SurfaceMotion_Support>()._State.Get_ContactSource())
         : ECk_SurfaceMotion_ContactSource::None;
+}
+
+auto
+    UCk_Utils_SurfaceMotion_UE::
+    Get_HasCurrentAdaptiveHeightSample(
+        const FCk_Handle_SurfaceMotion& InHandle)
+    -> bool
+{
+    return Get_Status(InHandle) == ECk_ProceduralAnimation_Status::Ready
+        && InHandle.Has<ck::FFragment_SurfaceMotion_Support>() && InHandle.Has<ck::FFragment_Transform>()
+        && InHandle.Get<ck::FFragment_SurfaceMotion_Support>().Get_EvaluatedFrame() == GFrameCounter
+        && InHandle.Get<ck::FFragment_SurfaceMotion_Support>().Get_EvaluatedBody().Equals(
+            InHandle.Get<ck::FFragment_Transform>().Get_Transform(), 1.0e-3);
+}
+
+auto
+    UCk_Utils_SurfaceMotion_UE::
+    Get_AdaptiveHeightActive(
+        const FCk_Handle_SurfaceMotion& InHandle)
+    -> bool
+{
+    return Get_Status(InHandle) == ECk_ProceduralAnimation_Status::Ready
+        ? InHandle.Get<ck::FFragment_SurfaceMotion_Support>().Get_AdaptiveHeightActive()
+        : false;
+}
+
+auto
+    UCk_Utils_SurfaceMotion_UE::
+    Get_AdaptiveHeightPreparing(
+        const FCk_Handle_SurfaceMotion& InHandle)
+    -> bool
+{
+    return Get_Status(InHandle) == ECk_ProceduralAnimation_Status::Ready
+        ? InHandle.Get<ck::FFragment_SurfaceMotion_Support>().Get_AdaptiveHeightPreparing()
+        : false;
+}
+
+auto
+    UCk_Utils_SurfaceMotion_UE::
+    Get_AdaptiveHeightGoal(
+        const FCk_Handle_SurfaceMotion& InHandle)
+    -> FVector
+{
+    return Get_Status(InHandle) == ECk_ProceduralAnimation_Status::Ready
+        ? InHandle.Get<ck::FFragment_SurfaceMotion_Support>().Get_AdaptiveHeightGoal()
+        : FVector::ZeroVector;
+}
+
+auto
+    UCk_Utils_SurfaceMotion_UE::
+    Get_HeightPlanningTrials(
+        const FCk_Handle_SurfaceMotion& InHandle)
+    -> int32
+{
+    return Get_Status(InHandle) == ECk_ProceduralAnimation_Status::Ready
+        ? InHandle.Get<ck::FFragment_SurfaceMotion_Support>().Get_HeightPlanningTrials()
+        : 0;
+}
+
+auto
+    UCk_Utils_SurfaceMotion_UE::
+    Get_HeightPlanningRays(
+        const FCk_Handle_SurfaceMotion& InHandle)
+    -> int32
+{
+    return Get_Status(InHandle) == ECk_ProceduralAnimation_Status::Ready
+        ? InHandle.Get<ck::FFragment_SurfaceMotion_Support>().Get_HeightPlanningRays()
+        : 0;
+}
+
+auto
+    UCk_Utils_SurfaceMotion_UE::
+    Get_HeightEnvelopeQueries(
+        const FCk_Handle_SurfaceMotion& InHandle)
+    -> int32
+{
+    return Get_Status(InHandle) == ECk_ProceduralAnimation_Status::Ready
+        ? InHandle.Get<ck::FFragment_SurfaceMotion_Support>().Get_HeightEnvelopeQueries()
+        : 0;
 }
 
 auto

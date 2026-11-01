@@ -72,10 +72,14 @@ private:
     FVector _Normal = FVector::UpVector;
     FVector _PlantedPosition = FVector::ZeroVector;
     FVector _SwingTarget = FVector::ZeroVector;
+    FVector _SwingValidatedTarget = FVector::ZeroVector;
     float _SwingAlpha = 0.0f;
     float _PhaseOffset = 0.0f;
     bool _Planted = false;
     bool _ContactTrusted = false;
+    bool _SwingActive = false;
+    bool _SwingTargetTrusted = false;
+    bool _SwingTargetFrozen = false;
 
 public:
     CK_PROPERTY(_Position);
@@ -83,10 +87,14 @@ public:
     CK_PROPERTY(_Normal);
     CK_PROPERTY(_PlantedPosition);
     CK_PROPERTY(_SwingTarget);
+    CK_PROPERTY(_SwingValidatedTarget);
     CK_PROPERTY(_SwingAlpha);
     CK_PROPERTY(_PhaseOffset);
     CK_PROPERTY(_Planted);
     CK_PROPERTY(_ContactTrusted);
+    CK_PROPERTY(_SwingActive);
+    CK_PROPERTY(_SwingTargetTrusted);
+    CK_PROPERTY(_SwingTargetFrozen);
 };
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -200,6 +208,17 @@ private:
     int32 _ChosenFoothold = INDEX_NONE;
     ck::EProceduralFootholdSource _FootholdSource = ck::EProceduralFootholdSource::None;
     bool _PlantOccluded = false;
+    ck::EProceduralGaitAutomaticRecovery _AutomaticRecovery = ck::EProceduralGaitAutomaticRecovery::None;
+    bool _NativeTouchdownAttempted = false;
+    bool _NativeTouchdownResolved = false;
+    bool _HasReservation = false;
+    bool _HasReachAnchor = false;
+    bool _ActualPlantSeedAttempted = false;
+    bool _ActualPlantSeedForceAdjusted = false;
+    bool _ActualPlantSeedAdmitted = false;
+    bool _HasCommittedLanding = false;
+    FVector _CommittedLandingWorld = FVector::ZeroVector;
+    float _CommittedLandingAdmissionReach = 0.0f;
 
 public:
     CK_PROPERTY(_Id);
@@ -217,6 +236,17 @@ public:
     CK_PROPERTY(_ChosenFoothold);
     CK_PROPERTY(_FootholdSource);
     CK_PROPERTY(_PlantOccluded);
+    CK_PROPERTY(_AutomaticRecovery);
+    CK_PROPERTY(_NativeTouchdownAttempted);
+    CK_PROPERTY(_NativeTouchdownResolved);
+    CK_PROPERTY(_HasReservation);
+    CK_PROPERTY(_HasReachAnchor);
+    CK_PROPERTY(_ActualPlantSeedAttempted);
+    CK_PROPERTY(_ActualPlantSeedForceAdjusted);
+    CK_PROPERTY(_ActualPlantSeedAdmitted);
+    CK_PROPERTY(_HasCommittedLanding);
+    CK_PROPERTY(_CommittedLandingWorld);
+    CK_PROPERTY(_CommittedLandingAdmissionReach);
 };
 
 // --------------------------------------------------------------------------------------------------------------------

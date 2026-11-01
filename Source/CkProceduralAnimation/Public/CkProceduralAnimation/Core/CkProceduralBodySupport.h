@@ -175,7 +175,8 @@ namespace ck
 
     // Keeps each trusted foot within max(its physical chain reach, its current simulation-hip distance). If the old
     // presentation offset is outside that physical baseline, identity is the feasible base. Candidate offsets interpolate
-    // both rotation and translation, and only a checked candidate is returned. Empty anchors retain the proposed pose.
+    // both rotation and translation, and only a checked candidate is returned. An optional admission callback checks
+    // every candidate, including an empty-anchor proposal and the previous/identity base. No admissible base returns unset.
     // Offsets are rigid (unit scale, normalized rotation). Unset on an invalid offset, a non-finite transform or
     // anchor, or a non-positive reach.
     CKPROCEDURALANIMATION_API auto
@@ -183,7 +184,8 @@ namespace ck
             const FTransform& InBody,
             const FTransform& InPreviousOffset,
             const FTransform& InProposedOffset,
-            TArrayView<const FProceduralBodyPoseReachAnchor> InAnchors)
+            TArrayView<const FProceduralBodyPoseReachAnchor> InAnchors,
+            TFunction<bool(const FTransform& InOffset)> InAdmission = {})
         -> TOptional<FProceduralBodyPoseReachProjection>;
 
     // --------------------------------------------------------------------------------------------------------------------

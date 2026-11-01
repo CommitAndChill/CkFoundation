@@ -150,6 +150,30 @@ namespace ck
             float InMargin)
         -> bool;
 
+    // Scalar offsets along a finite unit line at its sphere boundary; geometry only, never contact admission.
+    CKPROCEDURALANIMATION_API auto
+        Get_ProceduralFootholdLineSphereOffsets(
+            const FVector& InLinePoint,
+            const FVector& InUnitDirection,
+            const FVector& InSphereCenter,
+            double InRadius)
+        -> TOptional<FVector2D>;
+
+    // One bounded query point from a native failed face; no contact or movement authority.
+    CKPROCEDURALANIMATION_API auto
+        Get_ProceduralFootholdFailedFaceQueryPoint(
+            const FVector& InFacePoint,
+            const FVector& InFaceNormal,
+            const FVector& InUp,
+            const FVector& InBody,
+            const FVector& InHip,
+            const FVector& InLateral,
+            const FVector& InOutboard,
+            double InBodyBoundary,
+            double InOwnSideMinimum,
+            float InSearchRadius)
+        -> TOptional<FVector>;
+
     // |p - ideal| / reach + SlopeWeight x (1 - dot(n, normalized SlopeUp)) +
     // (planted ? ContinuityWeight x |p.Z - plant.Z| / reach : 0), in the support frame. SlopeUp must be finite and nonzero;
     // its default +Z preserves existing ranking. Malformed inputs cost the most a double holds.
