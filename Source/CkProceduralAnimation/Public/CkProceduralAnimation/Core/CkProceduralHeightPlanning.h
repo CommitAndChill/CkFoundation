@@ -4,6 +4,39 @@
 
 namespace ck
 {
+    struct CKPROCEDURALANIMATION_API FProceduralHeightRecoveryLegGeometry
+    {
+        CK_GENERATED_BODY(FProceduralHeightRecoveryLegGeometry);
+
+    private:
+        FVector _HipLocal = FVector::ZeroVector;
+        FVector _FirstPoint = FVector::ZeroVector;
+        TOptional<FVector> _SecondPoint;
+        float _AdmissionReach = 0.0f;
+
+    public:
+        CK_PROPERTY_GET(_HipLocal);
+        CK_PROPERTY_GET(_FirstPoint);
+        CK_PROPERTY_GET(_SecondPoint);
+        CK_PROPERTY_GET(_AdmissionReach);
+
+    public:
+        CK_DEFINE_CONSTRUCTORS(FProceduralHeightRecoveryLegGeometry, _HipLocal, _FirstPoint, _SecondPoint, _AdmissionReach);
+    };
+
+    /** One smaller positive Recovery proposal from alternative observed points within each leg.
+     *  Native all-leg admission remains required; this scalar grants no permission to move. */
+    CKPROCEDURALANIMATION_API auto
+    Get_ProceduralHeightRecoveryRetryDelta(
+        const FTransform& InBody,
+        const TOptional<FTransform>& InPoseOffset,
+        const FVector& InUp,
+        TArrayView<const FProceduralSurfaceReachPaceAnchor> InAnchors,
+        TArrayView<const FProceduralHeightRecoveryLegGeometry> InLegs,
+        double InMaxTranslation,
+        double InFailedDelta)
+        -> TOptional<double>;
+
     /** Existing stance bounds only; native future landing admission is a separate required proof. */
     CKPROCEDURALANIMATION_API auto
     Get_ProceduralHeightStanceInterval(

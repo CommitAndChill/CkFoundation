@@ -638,6 +638,7 @@ namespace ck
                         [](const auto& InCandidate) { return InCandidate.Get_RequiresRelief(); });
                     const auto WholeBodyGoal = ObstacleHeightDelta.IsSet() || (InSupportComp._AdaptiveHeightActive && NOT HasRelief);
                     auto TriedWholeBodyGoal = false;
+                    auto TriedRecoveryRetry = false;
                     auto TriedPreparatoryBody = false;
                     enum class EHeightGoalRoute : uint8
                     {
@@ -793,6 +794,141 @@ namespace ck
                         }
 #endif
                         return Accepted;
+                    };
+                    const auto RecoveryRetryDelta = [&](const FProceduralGaitHeightCandidate& InCandidate,
+                        double InFailedDelta) -> TOptional<double>
+                    {
+                        if (TriedRecoveryRetry || NOT WholeBodyGoal || NOT InSupportComp._AdaptiveHeightActive
+                            || HasRelief || ObstacleHeightDelta.IsSet() || StagingWasActive
+                            || Staging._Phase != EProceduralContactStagingPhase::Dormant
+                            || PreviousPaceState != ECk_SurfaceMotion_ReachPaceState::Blocked
+                            || NOT InSupportComp._State.Get_Grounded() || InSupportComp._HeightPlanningTrials >= MaxHeightTrials
+                            || NOT FMath::IsFinite(InFailedDelta) || InFailedDelta <= 1.0e-3 || Attempts.Num() != 1)
+                        { return {}; }
+                        const auto First = Attempts[0];
+                        if (NOT First.Completed || First.Accepted || First.Stage != EProceduralHeightPlanStage::Recovery
+                            || First.Route != EHeightGoalRoute::Ordinary || First.Candidate != &InCandidate
+                            || First.Delta != InFailedDelta
+                            || First.SeedFailure != EProceduralHeightSeedFailure::TrustedDownFinalForceReject)
+                        { return {}; }
+                        if (ck::Is_NOT_Valid(InHandle) || NOT InHandle.Has<FFragment_ProceduralGait_Tunables>()
+                            || UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InHandle) != World
+                            || UCk_Utils_ProceduralGait_UE::Get_Status(GaitHandle) != ECk_ProceduralAnimation_Status::Ready
+                            || GFrameCounter == 0 || NOT Planning.Get_HasSample()
+                            || Planning.Get_Frame() != GFrameCounter - 1
+                            || Planning.Get_SolveSequence() != Gait._SolveSequence
+                            || NOT Planning.Get_BodyAtSolve().Equals(Body, 1.0e-3)
+                            || NOT Planning.Get_Direction().Equals(InMotionComp._Direction, 1.0e-3)
+                            || NOT FMath::IsNearlyEqual(Planning.Get_Speed(), InMotionComp._Speed)
+                            || NOT InTransform.Get_Transform().Equals(Body, 1.0e-3)
+                            || Gait._Legs.Num() < 2 || Gait._Legs.Num() > 64
+                            || Gait._Solver.NumLegs() != Gait._Legs.Num() || Gait._Solver.IsAirborne()
+                            || Planning.Get_Candidates().Num() > 2 * Gait._Legs.Num())
+                        { return {}; }
+                        if (HasPose && (UCk_Utils_ProceduralBodyPose_UE::Get_Status(
+                                UCk_Utils_ProceduralBodyPose_UE::Cast(InHandle)) != ECk_ProceduralAnimation_Status::Ready
+                            || NOT UCk_Utils_ProceduralBodyPose_UE::Get_Offset(
+                                UCk_Utils_ProceduralBodyPose_UE::CastChecked(InHandle)).Equals(PoseOffset, 1.0e-3)))
+                        { return {}; }
+                        const auto& Stance = Gait._ReachStance;
+                        if (NOT Stance.Get_HasSample() || Stance.Get_SolveSequence() != Gait._SolveSequence
+                            || NOT Stance.Get_BodyAtSolve().Equals(Body, 1.0e-3) || Stance.Get_Anchors().Num() > 64
+                            || CoreAnchors.Num() != Stance.Get_Anchors().Num())
+                        { return {}; }
+                        auto EnabledMask = uint64{0};
+                        auto SupportingMask = uint64{0};
+                        auto Plants = 0;
+                        const auto& Step = InHandle.Get<FFragment_ProceduralGait_Tunables>().Get_Step();
+                        auto Geometry = TArray<FProceduralHeightRecoveryLegGeometry, TInlineAllocator<64>>{};
+                        for (auto Index = 0; Index < Gait._Legs.Num(); ++Index)
+                        {
+                            const auto& Leg = Gait._Legs[Index];
+                            if (NOT procedural_leg::Get_IsLive(Leg) || NOT Leg.Has<FFragment_ProceduralLeg>()
+                                || NOT Leg.Has<FFragment_ProceduralLeg_Params>()
+                                || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Leg) != InHandle.ConvertToHandle())
+                            { return {}; }
+                            for (auto Previous = 0; Previous < Index; ++Previous)
+                            {
+                                if (Gait._Legs[Previous] == Leg)
+                                { return {}; }
+                            }
+                            const auto Bit = uint64{1} << Index;
+                            if (procedural_leg::Get_IsStructurallyEnabled(Leg))
+                            { EnabledMask |= Bit; }
+                            if (NOT procedural_leg::Get_IsSupporting(Leg))
+                            { continue; }
+                            SupportingMask |= Bit;
+                            if (NOT Gait._Solver.IsLegParticipating(Index))
+                            { return {}; }
+                            const auto& Params = Leg.Get<FFragment_ProceduralLeg_Params>();
+                            const auto& Foot = Leg.Get<FFragment_ProceduralLeg>().Get_Foot();
+                            const auto HipLocal = Params.Get_Placement().Get_HipLocal();
+                            const auto Reach = ck_procedural_gait_utils::Get_Reach(Params.Get_Chain());
+                            const auto ForceReach = Reach * Step.Get_ForceStepReachFraction();
+                            if (HipLocal.ContainsNaN() || Foot.Get_Position().ContainsNaN()
+                                || NOT FMath::IsFinite(Reach) || Reach <= 0.0f
+                                || NOT FMath::IsFinite(ForceReach) || ForceReach <= 0.0f)
+                            { return {}; }
+                            if (Foot.Get_Phase() == ECk_ProceduralLeg_FootPhase::Planted
+                                && Foot.Get_Contact() == ECk_ProceduralLeg_FootContact::Trusted)
+                            {
+                                ++Plants;
+                                auto MatchingAnchors = 0;
+                                for (const auto& Anchor : Stance.Get_Anchors())
+                                {
+                                    if (Anchor.Get_Leg() != Leg)
+                                    { continue; }
+                                    if (NOT Anchor.Get_FootWorld().Equals(Foot.Get_Position(), 1.0e-3)
+                                        || NOT Anchor.Get_HipLocal().Equals(HipLocal, 1.0e-3) || Anchor.Get_Reach() != Reach)
+                                    { return {}; }
+                                    ++MatchingAnchors;
+                                }
+                                if (MatchingAnchors != 1)
+                                { return {}; }
+                            }
+                            auto FirstPoint = TOptional<FVector>{};
+                            auto SecondPoint = TOptional<FVector>{};
+                            for (const auto& Observed : Planning.Get_Candidates())
+                            {
+                                if (Observed.Get_Leg() != Leg)
+                                { continue; }
+                                if (NOT Observed.Get_FootWorld().Equals(Foot.Get_Position(), 1.0e-3)
+                                    || NOT Observed.Get_HipLocal().Equals(HipLocal, 1.0e-3)
+                                    || Observed.Get_Reach() != Reach || Observed.Get_AdmissionReach() != ForceReach
+                                    || Observed.Get_PointWorld().ContainsNaN() || NOT Observed.Get_NormalWorld().IsNormalized())
+                                { return {}; }
+                                if (NOT FirstPoint.IsSet())
+                                { FirstPoint = Observed.Get_PointWorld(); }
+                                else if (NOT SecondPoint.IsSet())
+                                { SecondPoint = Observed.Get_PointWorld(); }
+                                else
+                                { return {}; }
+                            }
+                            if (NOT FirstPoint.IsSet())
+                            { return {}; }
+                            Geometry.Emplace(HipLocal, FirstPoint.GetValue(), SecondPoint, ForceReach);
+                        }
+                        if (EnabledMask != Planning.Get_EnabledMask() || SupportingMask != Planning.Get_SupportingMask()
+                            || Plants != Stance.Get_Anchors().Num())
+                        { return {}; }
+                        for (const auto& Observed : Planning.Get_Candidates())
+                        {
+                            const auto& Leg = Observed.Get_Leg();
+                            if (ck::Is_NOT_Valid(Leg) || NOT Gait._Legs.Contains(Leg))
+                            { return {}; }
+                            const auto& Params = Leg.Get<FFragment_ProceduralLeg_Params>();
+                            const auto& Foot = Leg.Get<FFragment_ProceduralLeg>().Get_Foot();
+                            const auto Reach = ck_procedural_gait_utils::Get_Reach(Params.Get_Chain());
+                            if (NOT Observed.Get_FootWorld().Equals(Foot.Get_Position(), 1.0e-3)
+                                || NOT Observed.Get_HipLocal().Equals(Params.Get_Placement().Get_HipLocal(), 1.0e-3)
+                                || Observed.Get_Reach() != Reach
+                                || Observed.Get_AdmissionReach() != Reach * Step.Get_ForceStepReachFraction()
+                                || Observed.Get_PointWorld().ContainsNaN() || NOT Observed.Get_NormalWorld().IsNormalized())
+                            { return {}; }
+                        }
+                        return Get_ProceduralHeightRecoveryRetryDelta(Body, CorePoseOffset, Up,
+                            TArrayView<const FProceduralSurfaceReachPaceAnchor>{CoreAnchors},
+                            TArrayView<const FProceduralHeightRecoveryLegGeometry>{Geometry}, Settings.Get_Clearance(), InFailedDelta);
                     };
                     const auto RetainedPlaneLower = NOT WholeBodyGoal
                         ? Get_ProceduralHeightRetainedPlaneLower(Body, CorePoseOffset, Up,
@@ -1036,8 +1172,15 @@ namespace ck
                             const auto Dispatch = DispatchGoal(Candidate, Delta, EHeightGoalRoute::Ordinary);
                             if (Dispatch.Accepted || Dispatch.PlanningConsumed)
                             { break; }
+                            const auto RecoveryDelta = RecoveryRetryDelta(Candidate, Delta);
+                            if (RecoveryDelta.IsSet())
+                            {
+                                TriedRecoveryRetry = true;
+                                TryGoal(Candidate, RecoveryDelta.GetValue(), EHeightGoalRoute::Ordinary);
+                                break;
+                            }
                         }
-                        if (FoundGoal || CooperativeConsumed)
+                        if (FoundGoal || CooperativeConsumed || TriedRecoveryRetry)
                         { break; }
                     }
                     // A fixed seed may fail its interval or lie at/below a retained-foot plane even though native

@@ -3706,6 +3706,7 @@ namespace ck
                 if ((SupportingMask & ck_procedural_gait::Get_LegBit(Index)) == 0)
                 { continue; }
                 auto HasLanding = false;
+                auto AllFailedSeedsFinalForce = true;
                 auto TriedCandidates = 0;
                 for (const auto& Observed : Planning.Get_Candidates())
                 {
@@ -3713,14 +3714,21 @@ namespace ck
                     { continue; }
                     if (++TriedCandidates > 2)
                     { return false; }
-                    if (AdmitLanding(Observed, Index))
+                    auto SeedFailure = EProceduralHeightSeedFailure::None;
+                    if (AdmitLanding(Observed, Index, &SeedFailure))
                     {
                         HasLanding = true;
                         break;
                     }
+                    AllFailedSeedsFinalForce = AllFailedSeedsFinalForce
+                        && SeedFailure == EProceduralHeightSeedFailure::TrustedDownFinalForceReject;
                 }
                 if (NOT HasLanding)
-                { return false; }
+                {
+                    if (OutSeedFailure != nullptr && TriedCandidates > 0 && TriedCandidates <= 2 && AllFailedSeedsFinalForce)
+                    { *OutSeedFailure = EProceduralHeightSeedFailure::TrustedDownFinalForceReject; }
+                    return false;
+                }
             }
         }
         else if (InStage == EProceduralHeightPlanStage::Landing)

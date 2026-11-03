@@ -126,7 +126,9 @@ namespace ck
         }
     };
 
-    // Exact native seed failure of this Landing admission call; never a retained contact or generic rejection.
+    // Landing reports the exact native seed failure; Recovery reports TrustedDownFinalForceReject only when all
+    // 1..2 actually attempted seeds of a failed supporting leg returned that cause. Successful Recovery, other
+    // Recovery failures and other stages leave None; retained contacts and generic rejections are never classified.
     enum class EProceduralHeightSeedFailure : uint8
     {
         None,

@@ -189,6 +189,132 @@ namespace ck_procedural_height_planning
 namespace ck
 {
     auto
+        Get_ProceduralHeightRecoveryRetryDelta(
+            const FTransform& InBody,
+            const TOptional<FTransform>& InPoseOffset,
+            const FVector& InUp,
+            TArrayView<const FProceduralSurfaceReachPaceAnchor> InAnchors,
+            TArrayView<const FProceduralHeightRecoveryLegGeometry> InLegs,
+            double InMaxTranslation,
+            double InFailedDelta)
+        -> TOptional<double>
+    {
+        using namespace ck_procedural_height_planning;
+        if (InLegs.Num() <= 0 || InLegs.Num() > 64 || InLegs.GetData() == nullptr
+            || InAnchors.Num() <= 0 || InAnchors.Num() > 64 || InAnchors.GetData() == nullptr
+            || NOT FMath::IsFinite(InFailedDelta) || InFailedDelta <= 1.0e-3
+            || NOT Get_IsNativeVector(InBody.GetLocation())
+            || (InPoseOffset.IsSet() && NOT Get_IsNativeVector(InPoseOffset->GetLocation())))
+        { return {}; }
+        for (const auto& Anchor : InAnchors)
+        {
+            if (NOT Get_IsNativeVector(Anchor.Get_HipLocal()) || NOT Get_IsNativeVector(Anchor.Get_FootWorld()))
+            { return {}; }
+        }
+        for (const auto& Leg : InLegs)
+        {
+            if (NOT Get_IsNativeVector(Leg.Get_HipLocal()) || NOT Get_IsNativeVector(Leg.Get_FirstPoint())
+                || NOT FMath::IsFinite(Leg.Get_AdmissionReach()) || Leg.Get_AdmissionReach() <= 0.0f
+                || (Leg.Get_SecondPoint().IsSet() && NOT Get_IsNativeVector(Leg.Get_SecondPoint().GetValue())))
+            { return {}; }
+        }
+        const auto Stance = Get_ProceduralHeightStanceInterval(InBody, InPoseOffset, InUp, InAnchors, InMaxTranslation);
+        if (NOT Stance.IsSet())
+        { return {}; }
+        auto Posed = TOptional<FTransform>{};
+        if (InPoseOffset.IsSet())
+        {
+            Posed = Get_CheckedPose(InBody, InPoseOffset.GetValue());
+            if (NOT Posed.IsSet() || NOT Get_IsNativeVector(Posed->GetLocation()))
+            { return {}; }
+        }
+        constexpr auto MaxComponents = 65;
+        FVector2D Components[MaxComponents];
+        FVector2D NextComponents[MaxComponents];
+        Components[0] = Stance.GetValue();
+        auto ComponentCount = 1;
+        for (const auto& Leg : InLegs)
+        {
+            const auto Hip = Get_CheckedPosition(InBody, Leg.Get_HipLocal());
+            if (NOT Hip.IsSet() || NOT Get_IsNativeVector(Hip.GetValue()))
+            { return {}; }
+            auto PosedHip = TOptional<FVector>{};
+            if (Posed.IsSet())
+            {
+                PosedHip = Get_CheckedPosition(Posed.GetValue(), Leg.Get_HipLocal());
+                if (NOT PosedHip.IsSet() || NOT Get_IsNativeVector(PosedHip.GetValue()))
+                { return {}; }
+            }
+            FVector2D LegIntervals[2];
+            auto LegIntervalCount = 0;
+            const auto PointCount = Leg.Get_SecondPoint().IsSet() ? 2 : 1;
+            for (auto PointIndex = 0; PointIndex < PointCount; ++PointIndex)
+            {
+                const auto& Point = PointIndex == 0 ? Leg.Get_FirstPoint() : Leg.Get_SecondPoint().GetValue();
+                auto Interval = Stance.GetValue();
+                // Native-range inputs bound every intermediate below double overflow. A false intersection
+                // here is geometric emptiness, so another point for the same leg may still qualify.
+                if (NOT DoIntersect(Hip.GetValue(), Point, InUp, Leg.Get_AdmissionReach(), Interval)
+                    || (PosedHip.IsSet() && NOT DoIntersect(PosedHip.GetValue(), Point, InUp,
+                        Leg.Get_AdmissionReach(), Interval)))
+                { continue; }
+                if (LegIntervalCount >= 2)
+                { return {}; }
+                LegIntervals[LegIntervalCount++] = Interval;
+            }
+            if (LegIntervalCount == 0)
+            { return {}; }
+            if (LegIntervalCount == 2)
+            {
+                if (LegIntervals[1].X < LegIntervals[0].X)
+                { Swap(LegIntervals[0], LegIntervals[1]); }
+                if (LegIntervals[1].X <= LegIntervals[0].Y)
+                {
+                    LegIntervals[0].Y = FMath::Max(LegIntervals[0].Y, LegIntervals[1].Y);
+                    LegIntervalCount = 1;
+                }
+            }
+            auto ComponentIndex = 0;
+            auto LegIntervalIndex = 0;
+            auto NextCount = 0;
+            while (ComponentIndex < ComponentCount && LegIntervalIndex < LegIntervalCount)
+            {
+                const auto& Component = Components[ComponentIndex];
+                const auto& LegInterval = LegIntervals[LegIntervalIndex];
+                const auto Lower = FMath::Max(Component.X, LegInterval.X);
+                const auto Upper = FMath::Min(Component.Y, LegInterval.Y);
+                if (Lower <= Upper)
+                {
+                    if (NextCount >= MaxComponents)
+                    { return {}; }
+                    NextComponents[NextCount++] = FVector2D{Lower, Upper};
+                }
+                if (Component.Y < LegInterval.Y)
+                { ++ComponentIndex; }
+                else if (LegInterval.Y < Component.Y)
+                { ++LegIntervalIndex; }
+                else
+                {
+                    ++ComponentIndex;
+                    ++LegIntervalIndex;
+                }
+            }
+            if (NextCount == 0)
+            { return {}; }
+            ComponentCount = NextCount;
+            for (auto Index = 0; Index < ComponentCount; ++Index)
+            { Components[Index] = NextComponents[Index]; }
+        }
+        for (auto Index = ComponentCount - 1; Index >= 0; --Index)
+        {
+            const auto Upper = Components[Index].Y;
+            if (FMath::IsFinite(Upper) && Upper > 1.0e-3 && Upper < InFailedDelta)
+            { return Upper; }
+        }
+        return {};
+    }
+
+    auto
         Get_ProceduralHeightStanceInterval(
             const FTransform& InBody,
             const TOptional<FTransform>& InPoseOffset,
