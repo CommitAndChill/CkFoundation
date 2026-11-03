@@ -223,7 +223,7 @@ namespace ck_procedural_contact_staging
 
     auto
         TryGet_Query(const ck::FProceduralContactStagingInput& InInput,
-            const ck::FProceduralContactStagingLeg& InLeg, double InFaceCoordinate)
+            const ck::FProceduralContactStagingLeg& InLeg, double InFaceCoordinate, bool& OutDirectSphereFailure)
         -> TOptional<FVector>
     {
         if (NOT InLeg._NativeTop.IsSet() || NOT Get_IsVectorBounded(InLeg._NativeTop->_Point)
@@ -243,10 +243,81 @@ namespace ck_procedural_contact_staging
             || FVector::DotProduct(Displacement, Tangent) != 0.0
             || FVector::DotProduct(Displacement, InInput._Up) != 0.0
             || FVector::DotProduct(Displacement, InInput._Forward) <= 0.0
-            || FVector::DotProduct(Represented - InLeg._NativeTop->_Point, InInput._Up) != 0.0
-            || NOT Get_FitsSphere(Represented, Plant, InLeg._SearchRadius))
+            || FVector::DotProduct(Represented - InLeg._NativeTop->_Point, InInput._Up) != 0.0)
         { return {}; }
+        OutDirectSphereFailure = NOT Get_FitsSphere(Represented, Plant, InLeg._SearchRadius);
         return Represented;
+    }
+
+    auto
+        TryGet_Intermediate(const ck::FProceduralContactStagingInput& InInput,
+            const ck::FProceduralContactStagingLeg& InLeg, const FVector& InFinal)
+        -> TOptional<FVector>
+    {
+        const auto& Plant = InLeg._Anchor.Get_FootWorld();
+        const auto Tangent = FVector::CrossProduct(InInput._Up, InInput._Forward);
+        if (NOT InLeg._NativeTop.IsSet()
+            || Plant != FVector(static_cast<float>(Plant.X), static_cast<float>(Plant.Y), static_cast<float>(Plant.Z))
+            || FVector::DotProduct(Plant - InLeg._NativeTop->_Point, InInput._Up) != 0.0
+            || FVector::DotProduct(InFinal - InLeg._NativeTop->_Point, InInput._Up) != 0.0
+            || FVector::DotProduct(InFinal - Plant, Tangent) != 0.0)
+        { return {}; }
+        const auto Start = FVector::DotProduct(Plant, InInput._Forward);
+        const auto Difference = FVector::DotProduct(InFinal, InInput._Forward) - Start;
+        if (NOT FMath::IsFinite(Difference) || Difference <= 0.0)
+        { return {}; }
+        const auto Half = Difference * 0.5;
+        const auto Coordinate = Start + Half;
+        if (NOT FMath::IsFinite(Half) || NOT FMath::IsFinite(Coordinate)
+            || FMath::Abs(Coordinate) > static_cast<double>(TNumericLimits<float>::Max()))
+        { return {}; }
+        const auto Represented = static_cast<double>(static_cast<float>(Coordinate));
+        const auto Midpoint = Get_BodyAtCoordinate(FTransform{FQuat::Identity, Plant},
+            InInput._Forward, Represented).GetLocation();
+        if (NOT Get_IsVectorBounded(Midpoint)
+            || FVector::DotProduct(Midpoint - Plant, InInput._Up) != 0.0
+            || FVector::DotProduct(Midpoint - Plant, Tangent) != 0.0
+            || FVector::DotProduct(Midpoint - InLeg._NativeTop->_Point, InInput._Up) != 0.0
+            || NOT ck::Get_IsProceduralContactStagingIntermediateTargetValid(
+                Midpoint, Plant, InFinal, InInput._Forward, InLeg._SearchRadius))
+        { return {}; }
+        return Midpoint;
+    }
+
+    auto
+        DoIntersectMilestone(FInterval& InOutInterval, const ck::FProceduralContactStagingInput& InInput,
+            const ck::FProceduralContactStagingLeg& InLeg, const FVector& InPoint, double InCoordinate)
+        -> bool
+    {
+        const auto IntersectHip = [&](const FVector& InHip, const FVector& InOutboard)
+        {
+            return DoIntersectSphere(InOutInterval, InPoint, InHip, InLeg._ForceReach,
+                InCoordinate, InInput._Forward)
+                && DoIntersectOwnSide(InOutInterval, InPoint, InHip, InOutboard,
+                    InLeg._OwnSideTolerance, InCoordinate, InInput._Forward);
+        };
+        return IntersectHip(InInput._Body.TransformPosition(InLeg._Anchor.Get_HipLocal()), InLeg._OutboardWorld)
+            && (NOT InInput._PosedBody.IsSet()
+                || IntersectHip(InInput._PosedBody->TransformPosition(InLeg._Anchor.Get_HipLocal()),
+                    InInput._PosedBody->TransformVectorNoScale(InInput._Body.InverseTransformVectorNoScale(InLeg._OutboardWorld))));
+    }
+
+    auto
+        Get_FitsMilestone(const ck::FProceduralContactStagingInput& InInput, const FTransform& InBody,
+            const ck::FProceduralContactStagingLeg& InLeg, const FVector& InPoint)
+        -> bool
+    {
+        const auto FitsHip = [&](const FVector& InHip, const FVector& InOutboard)
+        {
+            return Get_FitsSphere(InPoint, InHip, InLeg._ForceReach)
+                && FVector::DotProduct(InPoint - InHip, InOutboard.GetSafeNormal())
+                    >= -static_cast<double>(InLeg._OwnSideTolerance) + OwnSideQueryMargin;
+        };
+        if (NOT FitsHip(InBody.TransformPosition(InLeg._Anchor.Get_HipLocal()), InLeg._OutboardWorld))
+        { return false; }
+        return NOT InInput._PosedBody.IsSet() || FitsHip(Get_TranslatedBody(InInput._PosedBody.GetValue(),
+            InBody.GetLocation() - InInput._Body.GetLocation()).TransformPosition(InLeg._Anchor.Get_HipLocal()),
+                InInput._PosedBody->TransformVectorNoScale(InInput._Body.InverseTransformVectorNoScale(InLeg._OutboardWorld)));
     }
 }
 
@@ -291,11 +362,12 @@ namespace ck
     // ----------------------------------------------------------------------------------------------------------------
 
     auto
-        Get_ProceduralContactStagingPlan(
-            const FProceduralContactStagingInput& InInput)
+        DoGet_ProceduralContactStagingPlan(
+            const FProceduralContactStagingInput& InInput, bool InAllowTwoPlacement, bool& OutDirectSphereFailure)
         -> TOptional<FProceduralContactStagingPlan>
     {
         using namespace ck_procedural_contact_staging;
+        OutDirectSphereFailure = false;
         if (InInput._Legs.Num() <= 0 || InInput._Legs.Num() > MaximumCount
             || InInput._Landings.Num() < 0 || InInput._Landings.Num() > MaximumCount
             || InInput._Legs.GetData() == nullptr
@@ -362,15 +434,29 @@ namespace ck
             { continue; }
             if (Result._RequiredCount == static_cast<int32>(Result._Required.size()))
             { return {}; }
-            const auto Query = TryGet_Query(InInput, Leg, FaceCoordinate);
+            auto DirectSphereFailure = false;
+            const auto Query = TryGet_Query(InInput, Leg, FaceCoordinate, DirectSphereFailure);
             if (NOT Query.IsSet())
             { return {}; }
+            if (DirectSphereFailure && NOT InAllowTwoPlacement)
+            {
+                OutDirectSphereFailure = true;
+                return {};
+            }
+            TOptional<FVector> Intermediate;
+            if (DirectSphereFailure)
+            {
+                Intermediate = TryGet_Intermediate(InInput, Leg, Query.GetValue());
+                if (NOT Intermediate.IsSet())
+                { return {}; }
+                Result._TwoPlacement = true;
+            }
             if (Result._RequiredCount > 0 && FVector::DotProduct(Query.GetValue()
                 - Result._Required[0]._ProposedQuery, InInput._Up) != 0.0)
             { return {}; }
             RequiredInputIndices[Result._RequiredCount] = Index;
             Result._Required[Result._RequiredCount++] =
-                FProceduralContactStagingRequiredLeg{Leg._RosterIndex, Anchor.Get_FootWorld(), Query.GetValue()};
+                FProceduralContactStagingRequiredLeg{Leg._RosterIndex, Anchor.Get_FootWorld(), Query.GetValue(), Intermediate};
         }
         if (Result._RequiredCount == 0)
         { return {}; }
@@ -405,6 +491,23 @@ namespace ck
                 || NOT DoIntersectOwnSide(Retreat, Point, InInput._Body.TransformPosition(Leg._Anchor.Get_HipLocal()),
                     Leg._OutboardWorld, Leg._OwnSideTolerance, BodyCoordinate, InInput._Forward))
             { return {}; }
+        }
+        if (Result._TwoPlacement)
+        {
+            for (const auto& Leg : InInput._Legs)
+            {
+                if (NOT DoIntersectMilestone(Retreat, InInput, Leg, Leg._Anchor.Get_FootWorld(), BodyCoordinate))
+                { return {}; }
+            }
+            for (auto Index = 0; Index < Result._RequiredCount; ++Index)
+            {
+                const auto& Required = Result._Required[Index];
+                const auto& Leg = InInput._Legs[RequiredInputIndices[Index]];
+                if (NOT DoIntersectMilestone(Retreat, InInput, Leg, Required._ProposedQuery, BodyCoordinate)
+                    || (Required._IntermediateQuery.IsSet() && NOT DoIntersectMilestone(Retreat, InInput,
+                        Leg, Required._IntermediateQuery.GetValue(), BodyCoordinate)))
+                { return {}; }
+            }
         }
         const auto RetreatCoordinate = TryGet_RepresentedMidpoint(Retreat);
         if (NOT RetreatCoordinate.IsSet())
@@ -475,7 +578,142 @@ namespace ck
                     Landing.Get_Reach(), Landing.Get_AdmissionReach()))
             { return {}; }
         }
+        if (Result._TwoPlacement && NOT Get_IsProceduralContactStagingHoldValid(InInput, Result))
+        { return {}; }
         return Result;
+    }
+
+    auto
+        Get_ProceduralContactStagingPlan(
+            const FProceduralContactStagingInput& InInput)
+        -> TOptional<FProceduralContactStagingPlan>
+    {
+        auto DirectSphereFailure = false;
+        return DoGet_ProceduralContactStagingPlan(InInput, false, DirectSphereFailure);
+    }
+
+    auto
+        Get_ProceduralContactStagingTwoPlacementPlan(
+            const FProceduralContactStagingInput& InInput)
+        -> TOptional<FProceduralContactStagingPlan>
+    {
+        auto DirectSphereFailure = false;
+        const auto Existing = DoGet_ProceduralContactStagingPlan(InInput, false, DirectSphereFailure);
+        if (Existing.IsSet() || NOT DirectSphereFailure)
+        { return Existing; }
+        return DoGet_ProceduralContactStagingPlan(InInput, true, DirectSphereFailure);
+    }
+
+    auto
+        Get_IsProceduralContactStagingIntermediateTargetValid(
+            const FVector& InPoint,
+            const FVector& InActualPlant,
+            const FVector& InFinalQuery,
+            const FVector& InForward,
+            float InSearchRadius)
+        -> bool
+    {
+        using namespace ck_procedural_contact_staging;
+        if (NOT Get_IsVectorBounded(InPoint) || NOT Get_IsVectorBounded(InActualPlant)
+            || NOT Get_IsVectorBounded(InFinalQuery) || NOT Get_IsCardinal(InForward)
+            || NOT Get_IsRadius(InSearchRadius))
+        { return false; }
+        const auto Displacement = InPoint - InActualPlant;
+        const auto FinalDisplacement = InFinalQuery - InActualPlant;
+        const auto Along = FVector::DotProduct(Displacement, InForward);
+        const auto FinalAlong = FVector::DotProduct(FinalDisplacement, InForward);
+        return FMath::IsFinite(Along) && FMath::IsFinite(FinalAlong) && Along > 0.0 && Along < FinalAlong
+            && Displacement == InForward * Along && FinalDisplacement == InForward * FinalAlong
+            && Get_FitsSphere(InPoint, InActualPlant, InSearchRadius)
+            && Get_FitsSphere(InFinalQuery, InPoint, InSearchRadius);
+    }
+
+    auto
+        Get_IsProceduralContactStagingHoldValid(
+            const FProceduralContactStagingInput& InInput,
+            const FProceduralContactStagingPlan& InPlan)
+        -> bool
+    {
+        using namespace ck_procedural_contact_staging;
+        if (NOT InPlan._TwoPlacement || InPlan._RequiredCount < 1 || InPlan._RequiredCount > 2
+            || InInput._Legs.Num() < 1 || InInput._Legs.Num() > MaximumCount || InInput._Legs.GetData() == nullptr
+            || InInput._Landings.Num() < 0 || InInput._Landings.Num() > MaximumCount
+            || (InInput._Landings.Num() > 0 && InInput._Landings.GetData() == nullptr)
+            || NOT Get_IsCardinal(InInput._Up) || NOT Get_IsCardinal(InInput._Forward)
+            || FVector::DotProduct(InInput._Up, InInput._Forward) != 0.0
+            || NOT Get_IsBodySupported(InInput._Body) || NOT Get_IsBodySupported(InPlan._RetreatBody)
+            || (InInput._PosedBody.IsSet() && NOT Get_IsBodySupported(InInput._PosedBody.GetValue(), false)))
+        { return false; }
+        auto Seen = uint64{0};
+        auto Found = uint64{0};
+        for (const auto& Leg : InInput._Legs)
+        {
+            if (Leg._RosterIndex < 0 || Leg._RosterIndex >= MaximumCount
+                || NOT Get_IsVectorBounded(Leg._Anchor.Get_FootWorld())
+                || NOT Get_IsVectorBounded(Leg._Anchor.Get_HipLocal())
+                || NOT Get_IsRadius(Leg._Anchor.Get_Reach()) || NOT Get_IsRadius(Leg._ForceReach)
+                || Leg._ForceReach > Leg._Anchor.Get_Reach() || NOT Get_IsRadius(Leg._SearchRadius)
+                || NOT Get_IsVectorBounded(Leg._OutboardWorld)
+                || NOT FMath::IsFinite(Leg._OwnSideTolerance) || Leg._OwnSideTolerance < 0.0f)
+            { return false; }
+            const auto Bit = uint64{1} << Leg._RosterIndex;
+            if ((Seen & Bit) != 0 || NOT Get_FitsMilestone(InInput, InPlan._RetreatBody, Leg, Leg._Anchor.Get_FootWorld()))
+            { return false; }
+            Seen |= Bit;
+            for (auto Required = 0; Required < InPlan._RequiredCount; ++Required)
+            {
+                const auto& Milestones = InPlan._Required[Required];
+                if (Milestones._RosterIndex != Leg._RosterIndex)
+                { continue; }
+                if ((Found & Bit) != 0
+                    || NOT Get_FitsMilestone(InInput, InPlan._RetreatBody, Leg, Milestones._OriginalPlant)
+                    || NOT Get_IsVectorBounded(Milestones._ProposedQuery)
+                    || (Milestones._IntermediateQuery.IsSet() && NOT Get_IsVectorBounded(Milestones._IntermediateQuery.GetValue())))
+                { return false; }
+                Found |= Bit;
+            }
+        }
+        auto RequiredMask = uint64{0};
+        for (auto Required = 0; Required < InPlan._RequiredCount; ++Required)
+        {
+            const auto RosterIndex = InPlan._Required[Required]._RosterIndex;
+            if (RosterIndex < 0 || RosterIndex >= MaximumCount)
+            { return false; }
+            const auto Bit = uint64{1} << RosterIndex;
+            if ((RequiredMask & Bit) != 0)
+            { return false; }
+            RequiredMask |= Bit;
+        }
+        if (Found != RequiredMask)
+        { return false; }
+        for (const auto& Landing : InInput._Landings)
+        {
+            if (NOT Get_IsVectorBounded(Landing.Get_PointWorld()) || NOT Get_IsVectorBounded(Landing.Get_HipLocal())
+                || NOT Get_IsRadius(Landing.Get_Reach()) || NOT Get_IsRadius(Landing.Get_AdmissionReach())
+                || Landing.Get_AdmissionReach() > Landing.Get_Reach()
+                || NOT Get_FitsPhysical(InInput, InPlan._RetreatBody, Landing.Get_PointWorld(),
+                    Landing.Get_HipLocal(), Landing.Get_Reach(), Landing.Get_AdmissionReach()))
+            { return false; }
+        }
+        const auto Combinations = InPlan._RequiredCount == 2 ? 9 : 3;
+        for (auto Combination = 0; Combination < Combinations; ++Combination)
+        {
+            for (auto Required = 0; Required < InPlan._RequiredCount; ++Required)
+            {
+                const auto& Milestones = InPlan._Required[Required];
+                const auto State = Required == 0 ? Combination % 3 : Combination / 3;
+                const auto Point = State == 2 ? Milestones._ProposedQuery
+                    : State == 1 && Milestones._IntermediateQuery.IsSet() ? Milestones._IntermediateQuery.GetValue()
+                    : Milestones._OriginalPlant;
+                for (const auto& Leg : InInput._Legs)
+                {
+                    if (Leg._RosterIndex == Milestones._RosterIndex
+                        && NOT Get_FitsMilestone(InInput, InPlan._RetreatBody, Leg, Point))
+                    { return false; }
+                }
+            }
+        }
+        return true;
     }
 }
 

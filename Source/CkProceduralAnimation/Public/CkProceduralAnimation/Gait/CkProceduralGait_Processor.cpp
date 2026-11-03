@@ -1,4 +1,5 @@
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Processor.h"
+#include "CkProceduralAnimation/CkProceduralAnimation_Log.h"
 
 #include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Control.h"
 #include "CkProceduralAnimation/Articulation/CkProceduralArticulation_Fragment.h"
@@ -3962,6 +3963,10 @@ namespace ck
             const auto& Leg = Gait._Legs[Index];
             if (ck_procedural_gait::Get_IsLegEnabled(Leg))
             { EnabledMask |= ck_procedural_gait::Get_LegBit(Index); }
+            if (procedural_leg::Get_IsStructurallyEnabled(Leg)
+                && (NOT Leg.Has<FFragment_ProceduralLeg_Params>() || NOT Leg.Has<FFragment_LifetimeOwner>()
+                    || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Leg) != InGait.ConvertToHandle()))
+            { return {}; }
             if (NOT procedural_leg::Get_IsSupporting(Leg))
             { continue; }
             SupportingMask |= ck_procedural_gait::Get_LegBit(Index);
@@ -4079,7 +4084,8 @@ namespace ck
         for (const auto& Required : Staging._Required)
         {
             if (Required._Index < 0 || Required._Index >= Gait._Legs.Num() || Gait._Legs[Required._Index] != Required._Leg
-                || ck::Is_NOT_Valid(Required._Leg) || NOT procedural_leg::Get_IsSupporting(Required._Leg)
+                || ck::Is_NOT_Valid(Required._Leg) || NOT Required._Leg.Has<FFragment_ProceduralLeg_Params>()
+                || NOT Required._Leg.Has<FFragment_LifetimeOwner>() || NOT procedural_leg::Get_IsSupporting(Required._Leg)
                 || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Required._Leg) != InGait.ConvertToHandle())
             { return false; }
         }
@@ -4105,8 +4111,27 @@ namespace ck
         { return false; }
         for (const auto& Landing : Landings)
         {
+            auto FutureFits = Get_IsProceduralContactStagingFuturePlantReachValid(Staging._ExitBody, InPoseOffset, Landing.Get_Constraint());
+            if (NOT FutureFits && Staging._TwoPlacement && InGait.Has<FFragment_ProceduralContactStagingFence>())
+            {
+                const auto& Fence = InGait.Get<FFragment_ProceduralContactStagingFence>();
+                const auto RequiredIndex = Staging._Required.IndexOfByPredicate([&](const auto& InRequired)
+                    { return InRequired._Leg == Landing.Get_Leg(); });
+                if (Fence._Spent && Fence._Owner == InGait.ConvertToHandle() && Fence._Episode == Staging._Episode
+                    && RequiredIndex != INDEX_NONE && Fence._RequiredCount == Staging._Required.Num()
+                    && Fence._Legs[RequiredIndex]._StartedCount > 0 && Fence._Legs[RequiredIndex]._StartedCount <= 2)
+                {
+                    const auto& Milestones = Fence._Legs[RequiredIndex];
+                    const auto& Placement = Milestones._Placements[Milestones._StartedCount - 1];
+                    const auto& Required = Staging._Required[RequiredIndex];
+                    FutureFits = Placement._Started && NOT Placement._Completed && NOT Placement._Final
+                        && Placement._Target == Landing.Get_Constraint().Get_PointWorld()
+                        && Get_IsProceduralContactStagingIntermediateTargetValid(Placement._Target, Milestones._ActualPlant,
+                            Required._Query, Staging._Direction, Required._Geometry._SearchRadius);
+                }
+            }
             if (NOT Get_IsProceduralSurfaceLandingReachValid(InBody, InPoseOffset, Landing.Get_Constraint())
-                || NOT Get_IsProceduralContactStagingFuturePlantReachValid(Staging._ExitBody, InPoseOffset, Landing.Get_Constraint()))
+                || NOT FutureFits)
             { return false; }
         }
         auto* World = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InGait);
@@ -4742,6 +4767,8 @@ namespace ck
         }
         auto* Staging = InHandle.Has<FFragment_SurfaceMotion_Support>()
             ? &InHandle.Get<FFragment_SurfaceMotion_Support>()._ContactStaging : nullptr;
+        auto* StagingFence = InHandle.Has<FFragment_ProceduralContactStagingFence>()
+            ? &InHandle.Get<FFragment_ProceduralContactStagingFence>() : nullptr;
         const auto ConsumerInputSolve = InGaitComp._SolveSequence;
         const auto FreshStagingReplant = Staging != nullptr && Dt > 0.0 && NativeMotionObservation
             && GFrameCounter != 0 && GFrameCounter != MAX_uint64 && ConsumerInputSolve != MAX_uint64
@@ -4757,7 +4784,11 @@ namespace ck
             && Staging->_Direction.Equals(InHandle.Get<FFragment_SurfaceMotion>()._Direction, 1.0e-3)
             && Staging->_Speed == InHandle.Get<FFragment_SurfaceMotion>()._Speed
             && (NOT InHandle.Has<FFragment_ProceduralBodyPose>() || HasPose)
-            && NOT Staging->_ExitBody.ContainsNaN() && Staging->_ExitBody.GetRotation().IsNormalized();
+            && NOT Staging->_ExitBody.ContainsNaN() && Staging->_ExitBody.GetRotation().IsNormalized()
+            && (NOT Staging->_TwoPlacement || (StagingFence != nullptr && StagingFence->_Spent
+                && StagingFence->_Owner == InHandle.ConvertToHandle() && StagingFence->_World.Get() == World
+                && StagingFence->_Episode == Staging->_Episode
+                && StagingFence->_RequiredCount == Staging->_Required.Num()));
         auto StagingCompletions = uint8{0};
         auto StagingStarted = uint8{0};
         auto StagingCompletionReceipts = std::array<TOptional<ck_procedural_gait::FPlantSeedPlane>, 2>{};
@@ -4892,7 +4923,11 @@ namespace ck
             const auto RequiredIndex = FreshStagingReplant ? Staging->_Required.IndexOfByPredicate([&](const auto& InRequired)
                 { return InRequired._Leg == Leg && InRequired._Index == Index; }) : INDEX_NONE;
             const auto StagingLeg = RequiredIndex != INDEX_NONE && NativeRecoveryInput
-                && UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Leg) == InHandle.ConvertToHandle();
+                && UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Leg) == InHandle.ConvertToHandle()
+                && (NOT Staging->_TwoPlacement
+                    || (StagingFence->_Legs[RequiredIndex]._Next != EProceduralContactStagingMilestone::Complete
+                        && (StagingFence->_Legs[RequiredIndex]._Next != EProceduralContactStagingMilestone::Intermediate
+                            || Staging->_Required[RequiredIndex]._IntermediateQuery.IsSet())));
             const auto NativeRecoveryPose = NativeRecoveryInput
                 && InGaitComp._Solver.GetLegState(Index).Get_AutomaticRecovery() != EProceduralGaitAutomaticRecovery::None;
             if (HasPose && (NativeRecoveryPose
@@ -5444,10 +5479,34 @@ namespace ck
                     : Staging->_ExitBody;
                 const auto ExitPosedHip = ExitPosedBody.TransformPosition(Placement.Get_HipLocal());
                 const auto PlantWorld = Basis.RotateVector(LegState.Get_Plant().Get_Position());
-                return (FVector::Dist(PlantWorld, ExitHip) > Limit || FVector::Dist(PlantWorld, ExitPosedHip) > Limit)
-                    && FVector::Dist(InPoint, ExitHip) <= Limit && FVector::Dist(InPoint, ExitPosedHip) <= Limit
-                    && FVector::Dist(InPoint, Hip) <= Limit && FVector::Dist(InPoint, PosedHip) <= Limit
+                const auto PlantOutside = FVector::Dist(PlantWorld, ExitHip) > Limit || FVector::Dist(PlantWorld, ExitPosedHip) > Limit;
+                const auto FinalFits = FVector::Dist(InPoint, ExitHip) <= Limit && FVector::Dist(InPoint, ExitPosedHip) <= Limit;
+                const auto CurrentFits = FVector::Dist(InPoint, Hip) <= Limit && FVector::Dist(InPoint, PosedHip) <= Limit
                     && Get_IsProceduralFootContactAvailable(InPoint, Params.Get_FootContactRadius(), Index, Reservations);
+                if (NOT Staging->_TwoPlacement)
+                { return PlantOutside && FinalFits && CurrentFits; }
+                const auto& Milestones = StagingFence->_Legs[RequiredIndex];
+                const auto SearchRadius = InTunables.Get_Foothold().Get_SearchRadius() > 0.0f
+                    ? InTunables.Get_Foothold().Get_SearchRadius() : ck_procedural_gait::DerivedSearchRadiusShareOfReach * Reach;
+                const auto ForceReach = Step.Get_ForceStepReachFraction() * Reach;
+                const auto PosedOutboard = HasPose
+                    ? PresentationBody.TransformVectorNoScale(Body.InverseTransformVectorNoScale(FootholdQuery.Outboard))
+                    : FootholdQuery.Outboard;
+                if (NOT PlantOutside || NOT CurrentFits || Milestones._StartedCount >= 2
+                    || Milestones._ActualPlant != LegComp._Foot.Get_Position()
+                    || NOT FMath::IsFinite(ForceReach) || ForceReach <= 0.0f
+                    || FVector::Dist(InPoint, Hip) > ForceReach || FVector::Dist(InPoint, PosedHip) > ForceReach
+                    || NOT Get_IsFootholdOnOwnSide(InPoint - Hip, FootholdQuery.Outboard,
+                        ck_procedural_gait::InboardToleranceShareOfReach * Reach)
+                    || NOT Get_IsFootholdOnOwnSide(InPoint - PosedHip, PosedOutboard,
+                        ck_procedural_gait::InboardToleranceShareOfReach * Reach)
+                    || NOT FMath::IsFinite(SearchRadius) || SearchRadius <= 0.0f
+                    || FVector::Dist(InPoint, Milestones._ActualPlant) > SearchRadius)
+                { return false; }
+                return FinalFits || (Milestones._Next == EProceduralContactStagingMilestone::Intermediate
+                    && Milestones._StartedCount == 0
+                    && Get_IsProceduralContactStagingIntermediateTargetValid(InPoint, Milestones._ActualPlant,
+                        Staging->_Required[RequiredIndex]._Query, Staging->_Direction, SearchRadius));
             };
             // This last opportunity owns no extra search or boundary budget and cannot replace an older success.
             if (StagingLeg && NOT Trusted && PreserveCurrentPlant && FreshPlantPoint.IsSet()
@@ -5459,7 +5518,11 @@ namespace ck
                 auto StagingQuery = FootholdQuery;
                 StagingQuery.Probe = &StraightProbe;
                 --Foothold.UnusedBoundarySamples;
-                auto Candidate = ck_procedural_gait::DoProbe_Down(StagingQuery, Staging->_Required[RequiredIndex]._Query,
+                const auto& Required = Staging->_Required[RequiredIndex];
+                const auto QueryPoint = Staging->_TwoPlacement
+                    && StagingFence->_Legs[RequiredIndex]._Next == EProceduralContactStagingMilestone::Intermediate
+                    ? Required._IntermediateQuery.GetValue() : Required._Query;
+                auto Candidate = ck_procedural_gait::DoProbe_Down(StagingQuery, QueryPoint,
                     EProceduralFootholdSource::Ring, ck_procedural_gait::EGroundProbeAttempts::RetryFromInsideSolid,
                     ck_procedural_gait::EFootholdReprobe::None, ck_procedural_gait::EFootholdStage::Search, RayCount, nullptr);
                 const auto CandidateIndex = DebugLeg.Get_Footholds().Num();
@@ -5671,7 +5734,9 @@ namespace ck
                     && Receipt.Filter.Get_MinResponse() == Filter.Get_MinResponse()
                     && Receipt.Filter.Get_BodySelection() == Filter.Get_BodySelection()
                     && Receipt.Filter.Get_CollideWithBackFacesConvex() == Filter.Get_CollideWithBackFacesConvex();
-                if (ReceiptMatches && (Receipt.StagingGeometry || StagingTargetFits(Position, Normal, Receipt.SearchPredicates)))
+                if (ReceiptMatches && (Staging->_TwoPlacement
+                        ? StagingTargetFits(Position, Normal, Receipt.SearchPredicates)
+                        : (Receipt.StagingGeometry || StagingTargetFits(Position, Normal, Receipt.SearchPredicates))))
                 {
                     const auto PosedHip = HasPose ? PresentationBody.TransformPosition(Placement.Get_HipLocal()) : Hip;
                     auto PosedVisible = PosedHip == Receipt.SimulationHip
@@ -5706,6 +5771,19 @@ namespace ck
                         if (HasPose)
                         { Intent.Set_ExitPosedHip(TOptional<FVector>{InverseBasis.RotateVector(
                             ExitPosedBody.TransformPosition(Placement.Get_HipLocal()))}); }
+                        if (Staging->_TwoPlacement)
+                        {
+                            const auto& Milestones = StagingFence->_Legs[RequiredIndex];
+                            const auto Limit = static_cast<double>(Reach) + 1.0e-3;
+                            const auto FinalFits = FVector::Dist(Position, ExitHip) <= Limit
+                                && FVector::Dist(Position, ExitPosedBody.TransformPosition(Placement.Get_HipLocal())) <= Limit;
+                            const auto SearchRadius = InTunables.Get_Foothold().Get_SearchRadius() > 0.0f
+                                ? InTunables.Get_Foothold().Get_SearchRadius() : ck_procedural_gait::DerivedSearchRadiusShareOfReach * Reach;
+                            Intent.Set_Milestone(FinalFits ? EProceduralGaitReplantMilestone::Final : EProceduralGaitReplantMilestone::Intermediate)
+                                .Set_PlacementSlot(Milestones._StartedCount)
+                                .Set_FinalQuery(InverseBasis.RotateVector(Staging->_Required[RequiredIndex]._Query))
+                                .Set_Forward(InverseBasis.RotateVector(Staging->_Direction)).Set_SearchRadius(SearchRadius);
+                        }
                         Input.Set_PlannedReplantIntent(TOptional<FProceduralGaitPlannedReplantIntent>{Intent});
                     }
                 }
@@ -5873,6 +5951,82 @@ namespace ck
             InHandle.Add<FFragment_ProceduralGait_Failure>(ECk_ProceduralGait_Failure::SolverStep);
             return;
         }
+        const auto ExhaustTwoPlacement = [&]()
+        {
+            auto* Current = GetCurrentStaging();
+            if (Current != nullptr && Current->_TwoPlacement)
+            {
+                if (StagingFence != nullptr && StagingFence->_Spent && NOT StagingFence->_AbortRecorded
+                    && StagingFence->_Episode == Current->_Episode)
+                {
+                    StagingFence->_AbortRecorded = true;
+                    procedural_animation::Log(TEXT("[ContactStaging] event[abort] owner[{}] episode[{}] frame[{}] phase[{}] elapsed[{}] cycles[{}]"),
+                        InHandle, Current->_Episode, GFrameCounter, static_cast<int32>(Current->_Phase),
+                        StagingFence->_Elapsed, StagingFence->_Cycles);
+                }
+                Current->_Phase = EProceduralContactStagingPhase::Exhausted;
+                Current->_IntentFrame = 0;
+                Current->_PoseRayTickets.Reset();
+                Current->_ReservedRays = 0;
+                Current->_PendingBody.Reset();
+            }
+        };
+        // The solver records every guarded begin-swing transition, including a same-solve native touchdown.
+        auto* StartedStaging = GetCurrentStaging();
+        if (StartedStaging != nullptr && StartedStaging->_TwoPlacement
+            && StartedStaging->_Phase != EProceduralContactStagingPhase::Dormant
+            && StartedStaging->_Phase != EProceduralContactStagingPhase::Exhausted)
+        {
+            auto ClaimsRevision = TOptional<uint64>{};
+            const auto ValidFence = StagingFence != nullptr && StagingFence->_Spent
+                && StagingFence->_Owner == InHandle.ConvertToHandle() && StagingFence->_World.Get() == World
+                && StagingFence->_Episode == StartedStaging->_Episode
+                && StartedStaging->_Required.Num() > 0 && StartedStaging->_Required.Num() <= 2
+                && StagingFence->_RequiredCount == StartedStaging->_Required.Num()
+                && ck_procedural_gait::Get_LandingClaimsRevision(InHandle, ClaimsRevision);
+            if (NOT ValidFence)
+            { ExhaustTwoPlacement(); }
+            else
+            {
+                for (auto RequiredIndex = 0; RequiredIndex < StartedStaging->_Required.Num(); ++RequiredIndex)
+                {
+                    const auto& Required = StartedStaging->_Required[RequiredIndex];
+                    if (NOT Inputs.IsValidIndex(Required._Index) || Required._Index >= InGaitComp._Solver.NumLegs())
+                    { ExhaustTwoPlacement(); break; }
+                    const auto& State = InGaitComp._Solver.GetLegState(Required._Index);
+                    const auto Starts = State.Get_StartsThisStep();
+                    if (Starts == 0)
+                    { continue; }
+                    const auto& Input = Inputs[Required._Index];
+                    auto& Milestones = StagingFence->_Legs[RequiredIndex];
+                    if (Starts != 1 || NOT FreshStagingReplant || NOT Input.Get_PlannedReplantIntent().IsSet()
+                        || Milestones._StartedCount >= 2 || Milestones._Next == EProceduralContactStagingMilestone::Complete)
+                    { ExhaustTwoPlacement(); break; }
+                    const auto& Intent = Input.Get_PlannedReplantIntent().GetValue();
+                    auto& Placement = Milestones._Placements[Milestones._StartedCount];
+                    const auto IsFinal = Intent.Get_Milestone() == EProceduralGaitReplantMilestone::Final;
+                    if (Placement._Started || Intent.Get_Episode() != StartedStaging->_Episode
+                        || Intent.Get_Frame() != GFrameCounter || Intent.Get_ConsumerInputSolve() != ConsumerInputSolve
+                        || Intent.Get_PlacementSlot() != Milestones._StartedCount
+                        || State.Get_LastStartedTarget() != Intent.Get_Target()
+                        || (NOT IsFinal && (Intent.Get_Milestone() != EProceduralGaitReplantMilestone::Intermediate
+                            || Milestones._Next != EProceduralContactStagingMilestone::Intermediate || Milestones._StartedCount != 0)))
+                    { ExhaustTwoPlacement(); break; }
+                    Placement._Started = true;
+                    Placement._Final = IsFinal;
+                    Placement._Frame = GFrameCounter;
+                    Placement._InputSolve = ConsumerInputSolve;
+                    Placement._Body = Body;
+                    Placement._Target = Basis.RotateVector(State.Get_LastStartedTarget());
+                    Placement._ClaimsRevision = ClaimsRevision;
+                    ++Milestones._StartedCount;
+                    procedural_animation::Log(TEXT("[ContactStaging] event[start] owner[{}] episode[{}] leg[{}] slot[{}] final[{}] frame[{}] inputSolve[{}] target[{:.17g},{:.17g},{:.17g}]"),
+                        InHandle, StartedStaging->_Episode, Required._Index, Intent.Get_PlacementSlot(), IsFinal,
+                        GFrameCounter, ConsumerInputSolve, Placement._Target.X, Placement._Target.Y, Placement._Target.Z);
+                    StagingStarted |= static_cast<uint8>(uint8{1} << RequiredIndex);
+                }
+            }
+        }
         for (auto& Lease : InGaitComp._ParticipationLeases)
         {
             if (NOT Lease._Recovering || Lease._HasPreparedTrajectory || Lease._LandingProbePending
@@ -5978,10 +6132,13 @@ namespace ck
                     { return InRequired._Leg == Leg && InRequired._Index == Index; });
                 if (Required != INDEX_NONE)
                 {
-                    if (InGaitComp._Solver.GetLegState(Index).Get_Swing().Get_Active()
+                    if (NOT CompletionStaging->_TwoPlacement && (InGaitComp._Solver.GetLegState(Index).Get_Swing().Get_Active()
                         || (Output.Get_Planted() && PreviousPhase == ECk_ProceduralLeg_FootPhase::Swinging))
+                        )
                     { StagingStarted |= static_cast<uint8>(uint8{1} << Required); }
-                    if (Output.Get_Planted() && ContactTrusted && PreviousPhase == ECk_ProceduralLeg_FootPhase::Swinging)
+                    const auto CompletedTransition = PreviousPhase == ECk_ProceduralLeg_FootPhase::Swinging
+                        || (CompletionStaging->_TwoPlacement && InGaitComp._Solver.GetLegState(Index).Get_StartsThisStep() > 0);
+                    if (Output.Get_Planted() && ContactTrusted && CompletedTransition)
                     {
                         const auto HipLocal = Leg.Get<FFragment_ProceduralLeg_Params>().Get_Placement().Get_HipLocal();
                         const auto ExitHip = CompletionStaging->_ExitBody.TransformPosition(HipLocal);
@@ -5990,8 +6147,41 @@ namespace ck
                             : CompletionStaging->_ExitBody;
                         const auto Point = LegComp._Foot.Get_Position();
                         const auto Limit = static_cast<double>(Inputs[Index].Get_Reach()) + 1.0e-3;
-                        if (FVector::Dist(Point, ExitHip) <= Limit
-                            && FVector::Dist(Point, ExitPosedBody.TransformPosition(HipLocal)) <= Limit)
+                        auto Completed = FVector::Dist(Point, ExitHip) <= Limit
+                            && FVector::Dist(Point, ExitPosedBody.TransformPosition(HipLocal)) <= Limit;
+                        if (CompletionStaging->_TwoPlacement)
+                        {
+                            Completed = false;
+                            if (StagingFence != nullptr && StagingFence->_Spent && StagingFence->_Episode == CompletionStaging->_Episode
+                                && StagingFence->_RequiredCount == CompletionStaging->_Required.Num())
+                            {
+                                auto& Milestones = StagingFence->_Legs[Required];
+                                if (Milestones._StartedCount > 0 && Milestones._StartedCount <= 2)
+                                {
+                                    const auto& Placement = Milestones._Placements[Milestones._StartedCount - 1];
+                                    auto ClaimsRevision = TOptional<uint64>{};
+                                    const auto& RequiredContact = CompletionStaging->_Required[Required];
+                                    const auto SearchRadius = InTunables.Get_Foothold().Get_SearchRadius() > 0.0f
+                                        ? InTunables.Get_Foothold().Get_SearchRadius()
+                                        : ck_procedural_gait::DerivedSearchRadiusShareOfReach * Inputs[Index].Get_Reach();
+                                    const auto GeometryFits = Placement._Final
+                                        ? FVector::Dist(Point, ExitHip) <= Limit
+                                            && FVector::Dist(Point, ExitPosedBody.TransformPosition(HipLocal)) <= Limit
+                                        : Get_IsProceduralContactStagingIntermediateTargetValid(Point, Milestones._ActualPlant,
+                                            RequiredContact._Query, CompletionStaging->_Direction, SearchRadius);
+                                    Completed = Placement._Started && NOT Placement._Completed
+                                        && Placement._Frame <= GFrameCounter && Placement._InputSolve <= ConsumerInputSolve
+                                        && Output.Get_NativeTouchdownAttempted() && Output.Get_NativeTouchdownResolved()
+                                        && LegComp._Foot.Get_Normal() == CompletionStaging->_Up && GeometryFits
+                                        && FVector::Dist(Point, Milestones._ActualPlant) <= SearchRadius
+                                        && ck_procedural_gait::Get_LandingClaimsRevision(InHandle, ClaimsRevision)
+                                        && ClaimsRevision == Placement._ClaimsRevision;
+                                }
+                            }
+                            if (NOT Completed)
+                            { ExhaustTwoPlacement(); }
+                        }
+                        if (Completed)
                         {
                             StagingCompletions |= static_cast<uint8>(uint8{1} << Required);
                             StagingCompletionReceipts[Required] = ck_procedural_gait::FPlantSeedPlane{
@@ -6135,6 +6325,7 @@ namespace ck
                         { continue; }
                         const auto& Leg = PublishedStaging->_Required[Required]._Leg;
                         if (ck::Is_NOT_Valid(Leg) || NOT Leg.Has<FFragment_ProceduralLeg>()
+                            || NOT Leg.Has<FFragment_ProceduralLeg_Params>() || NOT Leg.Has<FFragment_LifetimeOwner>()
                             || NOT procedural_leg::Get_IsSupporting(Leg)
                             || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Leg) != InHandle.ConvertToHandle())
                         { continue; }
@@ -6143,9 +6334,39 @@ namespace ck
                         if (Receipt.IsSet() && Foot.Get_Phase() == ECk_ProceduralLeg_FootPhase::Planted
                             && Foot.Get_Contact() == ECk_ProceduralLeg_FootContact::Trusted
                             && Foot.Get_Position() == Receipt->Point && Foot.Get_Normal() == Receipt->Normal)
-                        { PublishedStaging->_LandedMask |= Bit; }
+                        {
+                            if (PublishedStaging->_TwoPlacement)
+                            {
+                                auto& Milestones = StagingFence->_Legs[Required];
+                                if (Milestones._StartedCount == 0 || Milestones._StartedCount > 2)
+                                { ExhaustTwoPlacement(); break; }
+                                auto& Placement = Milestones._Placements[Milestones._StartedCount - 1];
+                                auto PublicationClaimsRevision = TOptional<uint64>{};
+                                if (NOT Placement._Started || Placement._Completed
+                                    || NOT ck_procedural_gait::Get_LandingClaimsRevision(InHandle, PublicationClaimsRevision)
+                                    || PublicationClaimsRevision != Placement._ClaimsRevision)
+                                { ExhaustTwoPlacement(); break; }
+                                Placement._Completed = true;
+                                Placement._CompletedFrame = GFrameCounter;
+                                Placement._CompletedSolve = PublishedGait._SolveSequence;
+                                Placement._Plant = Foot.Get_Position();
+                                Placement._Normal = Foot.Get_Normal();
+                                Milestones._ActualPlant = Foot.Get_Position();
+                                Milestones._Next = Placement._Final ? EProceduralContactStagingMilestone::Complete
+                                    : EProceduralContactStagingMilestone::Final;
+                                procedural_animation::Log(TEXT("[ContactStaging] event[touchdown] owner[{}] episode[{}] leg[{}] slot[{}] final[{}] frame[{}] producedSolve[{}] native[1,1] plant[{:.17g},{:.17g},{:.17g}]"),
+                                    InHandle, PublishedStaging->_Episode, PublishedStaging->_Required[Required]._Index,
+                                    Milestones._StartedCount - 1, Placement._Final, GFrameCounter, PublishedGait._SolveSequence,
+                                    Placement._Plant.X, Placement._Plant.Y, Placement._Plant.Z);
+                                if (Placement._Final)
+                                { PublishedStaging->_LandedMask |= Bit; }
+                            }
+                            else
+                            { PublishedStaging->_LandedMask |= Bit; }
+                        }
                     }
-                    const auto NewStarts = StagingStarted & static_cast<uint8>(~PublishedStaging->_StartedMask);
+                    const auto NewStarts = PublishedStaging->_TwoPlacement ? StagingStarted
+                        : StagingStarted & static_cast<uint8>(~PublishedStaging->_StartedMask);
                     PublishedStaging->_StartedMask |= StagingStarted;
                     const auto Clock = PublishedGait._Solver.GetGaitClock();
                     const auto Advance = PublishedGait._Solver.GetLastClockAdvance();
@@ -6156,7 +6377,20 @@ namespace ck
                     else
                     { PublishedStaging->_ClockTravelWithoutProgress += Advance; }
                     const auto AllRequired = static_cast<uint8>((uint8{1} << PublishedStaging->_Required.Num()) - 1);
-                    const auto HasUnstarted = ((PublishedStaging->_StartedMask | PublishedStaging->_LandedMask) & AllRequired) != AllRequired;
+                    auto HasUnstarted = ((PublishedStaging->_StartedMask | PublishedStaging->_LandedMask) & AllRequired) != AllRequired;
+                    if (PublishedStaging->_TwoPlacement)
+                    {
+                        HasUnstarted = false;
+                        for (auto Required = 0; Required < PublishedStaging->_Required.Num(); ++Required)
+                        {
+                            const auto& Milestones = StagingFence->_Legs[Required];
+                            if (Milestones._StartedCount > 2)
+                            { ExhaustTwoPlacement(); break; }
+                            HasUnstarted |= Milestones._Next != EProceduralContactStagingMilestone::Complete
+                                && (Milestones._StartedCount == 0
+                                    || Milestones._Placements[Milestones._StartedCount - 1]._Completed);
+                        }
+                    }
                     const auto ValidClock = FMath::IsFinite(Clock) && Clock >= 0.0f && Clock < 1.0f
                         && FMath::IsFinite(Advance) && Advance >= 0.0
                         && FMath::IsFinite(PublishedStaging->_ClockTravelWithoutProgress)
@@ -6169,6 +6403,14 @@ namespace ck
                         PublishedStaging->_PoseRayTickets.Reset();
                         PublishedStaging->_ReservedRays = 0;
                     }
+                }
+                if (PublishedStaging->_TwoPlacement)
+                {
+                    const auto Advance = PublishedGait._Solver.GetLastClockAdvance();
+                    if (StagingFence == nullptr || NOT StagingFence->_Spent
+                        || StagingFence->_Episode != PublishedStaging->_Episode
+                        || NOT StagingFence->TryAcknowledge(GFrameCounter, ConsumerInputSolve, PublishedGait._SolveSequence, Advance))
+                    { ExhaustTwoPlacement(); }
                 }
             }
 

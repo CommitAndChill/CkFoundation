@@ -314,6 +314,12 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
+    enum class EProceduralGaitReplantMilestone : uint8
+    {
+        Final,
+        Intermediate
+    };
+
     // Producer validates frame/solve freshness. Core checks geometry without retaining request authority.
     struct CKPROCEDURALANIMATION_API FProceduralGaitPlannedReplantIntent
     {
@@ -327,6 +333,11 @@ namespace ck
         TOptional<FVector> _ExitPosedHip;
         uint64 _Frame = 0;
         uint64 _ConsumerInputSolve = 0;
+        EProceduralGaitReplantMilestone _Milestone = EProceduralGaitReplantMilestone::Final;
+        uint8 _PlacementSlot = 0;
+        FVector _FinalQuery = FVector::ZeroVector;
+        FVector _Forward = FVector::ZeroVector;
+        float _SearchRadius = 0.0f;
 
     public:
         CK_PROPERTY(_Episode);
@@ -336,6 +347,11 @@ namespace ck
         CK_PROPERTY(_ExitPosedHip);
         CK_PROPERTY(_Frame);
         CK_PROPERTY(_ConsumerInputSolve);
+        CK_PROPERTY(_Milestone);
+        CK_PROPERTY(_PlacementSlot);
+        CK_PROPERTY(_FinalQuery);
+        CK_PROPERTY(_Forward);
+        CK_PROPERTY(_SearchRadius);
     };
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -606,6 +622,8 @@ namespace ck
         bool _Participating = true;
         EProceduralGaitAutomaticRecovery _AutomaticRecovery = EProceduralGaitAutomaticRecovery::None;
         bool _AutomaticRecoveryFlightSuppressed = false;
+        uint8 _StartsThisStep = 0;
+        FVector _LastStartedTarget = FVector::ZeroVector;
 
     public:
         CK_PROPERTY(_Plant);
@@ -615,6 +633,8 @@ namespace ck
         CK_PROPERTY_GET(_Enabled);
         CK_PROPERTY_GET(_Participating);
         CK_PROPERTY_GET(_AutomaticRecovery);
+        CK_PROPERTY_GET(_StartsThisStep);
+        CK_PROPERTY_GET(_LastStartedTarget);
     };
 
     struct CKPROCEDURALANIMATION_API FProceduralGaitDeniedTakeoff
@@ -834,8 +854,8 @@ namespace ck
             const FProceduralGaitLegInput& InInput) -> double;
         static auto DoGet_IsReachPaceRelief(const FProceduralGaitLegState& InState,
             const FProceduralGaitLegInput& InInput) -> bool;
-        static auto DoGet_IsPlannedReplant(const FProceduralGaitLegState& InState,
-            const FProceduralGaitLegInput& InInput) -> bool;
+        auto DoGet_IsPlannedReplant(const FProceduralGaitLegState& InState,
+            const FProceduralGaitLegInput& InInput) const -> bool;
         auto DoGet_IsEmergency(const FProceduralGaitLegState& InState, const FProceduralGaitLegInput& InInput) const -> bool;
         auto DoGet_IsHardOverstretched(const FProceduralGaitLegState& InState, const FProceduralGaitLegInput& InInput) const -> bool;
         auto DoGet_EmergencyRatio(const FProceduralGaitLegState& InState, const FProceduralGaitLegInput& InInput) const -> double;

@@ -831,6 +831,8 @@ namespace ck
         -> bool
     {
         const auto Advance = InDeltaTime > FCk_Time{};
+        for (auto& State : _LegStates)
+        { State._StartsThisStep = 0; }
         for (auto& Output : OutOutputs)
         {
             Output._NativeTouchdownAttempted = false;
@@ -1725,6 +1727,8 @@ namespace ck
             const FVector& InTargetNormal)
         -> void
     {
+        ++InOutState._StartsThisStep;
+        InOutState._LastStartedTarget = InTarget;
         InOutState._Swing._Active = true;
         InOutState._Swing._Phase = 0.0f;
         InOutState._Swing._DurationScale = 1.0f;
@@ -2139,7 +2143,7 @@ namespace ck
         FProceduralGaitSolver::
         DoGet_IsPlannedReplant(
             const FProceduralGaitLegState& InState,
-            const FProceduralGaitLegInput& InInput)
+            const FProceduralGaitLegInput& InInput) const
         -> bool
     {
         if (NOT InInput._PlannedReplantIntent.IsSet() || NOT InState._Enabled || NOT InState._Participating
@@ -2151,7 +2155,7 @@ namespace ck
         { return false; }
 
         const auto& Intent = InInput._PlannedReplantIntent.GetValue();
-        if (Intent.Get_Episode() == 0 || Intent.Get_ConsumerInputSolve() == MAX_uint64
+        if (Intent.Get_Episode() == 0 || Intent.Get_ConsumerInputSolve() == MAX_uint64 || Intent.Get_PlacementSlot() > 1
             || Intent.Get_ExpectedPlant().ContainsNaN() || Intent.Get_Target().ContainsNaN()
             || Intent.Get_ExitHip().ContainsNaN()
             || (Intent.Get_ExitPosedHip().IsSet() && Intent.Get_ExitPosedHip().GetValue().ContainsNaN())
@@ -2166,7 +2170,28 @@ namespace ck
         const auto TargetFits = FVector::Dist(InInput._IdealTarget, Intent.Get_ExitHip()) <= Limit
             && (NOT Intent.Get_ExitPosedHip().IsSet()
                 || FVector::Dist(InInput._IdealTarget, Intent.Get_ExitPosedHip().GetValue()) <= Limit);
-        return PlantOutside && TargetFits;
+        if (Intent.Get_Milestone() == EProceduralGaitReplantMilestone::Final)
+        { return PlantOutside && TargetFits; }
+        if (Intent.Get_Milestone() != EProceduralGaitReplantMilestone::Intermediate
+            || Intent.Get_PlacementSlot() != 0 || Intent.Get_FinalQuery().ContainsNaN()
+            || Intent.Get_Forward().ContainsNaN() || NOT Intent.Get_Forward().IsNormalized()
+            || NOT FMath::IsFinite(Intent.Get_SearchRadius()) || Intent.Get_SearchRadius() <= 0.0f)
+        { return false; }
+        const auto Displacement = Intent.Get_FinalQuery() - InState._Plant._Position;
+        const auto TargetDisplacement = InInput._IdealTarget - InState._Plant._Position;
+        const auto Along = FVector::DotProduct(Displacement, Intent.Get_Forward());
+        const auto TargetAlong = FVector::DotProduct(TargetDisplacement, Intent.Get_Forward());
+        const auto ForceReach = _Settings._Reach._ForceStepFraction * InInput._Reach;
+        return PlantOutside && FMath::IsFinite(Along) && FMath::IsFinite(TargetAlong)
+            && FMath::IsFinite(ForceReach) && ForceReach > 0.0f
+            && Along > 0.0 && TargetAlong > 0.0 && TargetAlong < Along
+            && Displacement == Intent.Get_Forward() * Along
+            && TargetDisplacement == Intent.Get_Forward() * TargetAlong
+            && FVector::Dist(InState._Plant._Position, InInput._IdealTarget) <= Intent.Get_SearchRadius()
+            && FVector::Dist(InInput._IdealTarget, Intent.Get_FinalQuery()) <= Intent.Get_SearchRadius()
+            && FVector::Dist(InInput._IdealTarget, InInput._Hip) <= ForceReach
+            && (NOT InInput._PosedHip.IsSet()
+                || FVector::Dist(InInput._IdealTarget, InInput._PosedHip.GetValue()) <= ForceReach);
     }
 
     // --------------------------------------------------------------------------------------------------------------------

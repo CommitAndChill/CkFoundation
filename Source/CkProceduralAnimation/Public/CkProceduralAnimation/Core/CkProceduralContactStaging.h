@@ -46,7 +46,9 @@ namespace ck
     {
         int32 _RosterIndex = INDEX_NONE;
         FVector _OriginalPlant = FVector::ZeroVector;
+        // Final query remains in the original field for single-hop callers.
         FVector _ProposedQuery = FVector::ZeroVector;
+        TOptional<FVector> _IntermediateQuery;
     };
 
     struct FProceduralContactStagingPlan
@@ -55,6 +57,7 @@ namespace ck
         FTransform _ExitBody = FTransform::Identity;
         std::array<FProceduralContactStagingRequiredLeg, 2> _Required;
         int32 _RequiredCount = 0;
+        bool _TwoPlacement = false;
     };
 
     // One cardinal, unit-scale geometry proposal, at most 64 legs/landings and two required replacements.
@@ -63,6 +66,29 @@ namespace ck
         Get_ProceduralContactStagingPlan(
             const FProceduralContactStagingInput& InInput)
         -> TOptional<FProceduralContactStagingPlan>;
+
+    // Old single-hop success wins unchanged. Only its direct search-sphere failure permits a midpoint fallback.
+    CKPROCEDURALANIMATION_API auto
+        Get_ProceduralContactStagingTwoPlacementPlan(
+            const FProceduralContactStagingInput& InInput)
+        -> TOptional<FProceduralContactStagingPlan>;
+
+    // Pure line-and-two-spheres check for an actual selected intermediate, without native contact authority.
+    CKPROCEDURALANIMATION_API auto
+        Get_IsProceduralContactStagingIntermediateTargetValid(
+            const FVector& InPoint,
+            const FVector& InActualPlant,
+            const FVector& InFinalQuery,
+            const FVector& InForward,
+            float InSearchRadius)
+        -> bool;
+
+    // Rechecks the locked hold using fresh actual contacts and immutable milestones; no new top hit is needed.
+    CKPROCEDURALANIMATION_API auto
+        Get_IsProceduralContactStagingHoldValid(
+            const FProceduralContactStagingInput& InInput,
+            const FProceduralContactStagingPlan& InPlan)
+        -> bool;
 
     // Future planted-contact certificate only, for every pending landing after native completion. Current body
     // goals still use Get_IsProceduralSurfaceLandingReachValid while the contact remains an active landing.
