@@ -12,6 +12,7 @@
 namespace ck
 {
     class FProcessor_ProceduralGait_Update;
+    class FProcessor_SurfaceMotion_Update;
 
     // Native down-probe terrain observation, never an admitted foothold or a plant.
     struct CKPROCEDURALANIMATION_API FProceduralGaitHeightCandidate
@@ -144,6 +145,59 @@ namespace ck
         PreparatoryBody
     };
 
+#if WITH_DEV_AUTOMATION_TESTS
+    struct CKPROCEDURALANIMATION_API FProceduralHeightRecoveryTestSeed
+    {
+        bool MetadataFresh = false;
+        bool NativeHit = false;
+        EProceduralFootholdCast Cast = EProceduralFootholdCast::Down;
+        EProceduralFootholdVerdict Verdict = EProceduralFootholdVerdict::Miss;
+        FVector Point = FVector::ZeroVector;
+        FVector Normal = FVector::ZeroVector;
+        int32 Rays = 0;
+    };
+
+    struct CKPROCEDURALANIMATION_API FProceduralHeightRecoveryTestReceipt
+    {
+        FProceduralHeightRecoveryTestSeed OriginalSeeds[2]{};
+        FProceduralHeightRecoveryTestSeed BoundarySeeds[2]{};
+        FVector BoundaryPoints[2]{};
+        uint8 OriginalCallsPerLeg[64]{};
+        int32 FirstFailedLeg = INDEX_NONE;
+        int32 OriginalSeedCount = 0;
+        int32 BoundarySeedCount = 0;
+        int32 OriginalRaysBeforeContinuation = 0;
+        int32 ContinuationRays = 0;
+        int32 GeometryPointCount = 0;
+        bool Qualified = false;
+        bool Consumed = false;
+        bool BoundaryAccepted = false;
+        bool AdmissionAccepted = false;
+        bool LaterLegFailed = false;
+    };
+#endif
+
+    /** Surface-issued, synchronous authority for one continuation of its original positive obstacle Recovery. */
+    struct CKPROCEDURALANIMATION_API FProceduralHeightRecoveryContinuation
+    {
+    private:
+        FProceduralHeightRecoveryContinuation() = default;
+        FProceduralHeightRecoveryContinuation(const FProceduralHeightRecoveryContinuation&) = delete;
+        auto operator=(const FProceduralHeightRecoveryContinuation&) -> FProceduralHeightRecoveryContinuation& = delete;
+
+        TFunction<bool(int32)> _TryConsume;
+        TFunction<bool()> _IsCurrent;
+#if WITH_DEV_AUTOMATION_TESTS
+        FProceduralHeightRecoveryTestReceipt* _TestReceipt = nullptr;
+#endif
+        friend class FProcessor_SurfaceMotion_Update;
+        friend CKPROCEDURALANIMATION_API auto Get_IsProceduralHeightPlanAdmitted(FCk_Handle_ProceduralGait,
+            const FTransform&, const TOptional<FTransform>&, const FProceduralGaitHeightCandidate&, int32&, int32,
+            EProceduralHeightPlanStage, TOptional<FProceduralGaitHeightRetryWitness>*,
+            TArray<FProceduralContactStagingBoundary>*, EProceduralHeightSeedFailure*,
+            FProceduralHeightRecoveryContinuation*) -> bool;
+    };
+
     CKPROCEDURALANIMATION_API auto
         Get_IsProceduralHeightPlanAdmitted(
             FCk_Handle_ProceduralGait InGait,
@@ -155,7 +209,8 @@ namespace ck
             EProceduralHeightPlanStage InStage = EProceduralHeightPlanStage::Landing,
             TOptional<FProceduralGaitHeightRetryWitness>* OutVisibilityRetry = nullptr,
             TArray<FProceduralContactStagingBoundary>* OutStagingBoundaries = nullptr,
-            EProceduralHeightSeedFailure* OutSeedFailure = nullptr)
+            EProceduralHeightSeedFailure* OutSeedFailure = nullptr,
+            FProceduralHeightRecoveryContinuation* InRecoveryContinuation = nullptr)
         -> bool;
 
     CKPROCEDURALANIMATION_API auto
@@ -188,6 +243,7 @@ namespace ck
         bool Completed = false;
         bool WitnessRequested = false;
         TOptional<FProceduralGaitHeightRetryWitness> Witness;
+        FProceduralHeightRecoveryTestReceipt Recovery;
         int32 Rays = 0;
         int32 Envelopes = 0;
         int32 Trials = 0;
@@ -201,6 +257,7 @@ namespace ck
         CK_GENERATED_BODY(FFragment_ProceduralHeightPlanning_Test);
 
         FProceduralHeightPlanningTestAttempt Attempts[4]{};
+        FProceduralHeightRecoveryTestReceipt* ActiveRecoveryReceipt = nullptr;
         int32 Count = 0;
         bool Overflow = false;
         uint64 Frame = 0;

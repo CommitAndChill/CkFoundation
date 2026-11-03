@@ -196,7 +196,7 @@ namespace ck
         friend CKPROCEDURALANIMATION_API auto Get_IsProceduralHeightPlanAdmitted(FCk_Handle_ProceduralGait, const FTransform&,
             const TOptional<FTransform>&, const FProceduralGaitHeightCandidate&, int32&, int32,
             EProceduralHeightPlanStage, TOptional<FProceduralGaitHeightRetryWitness>*, TArray<FProceduralContactStagingBoundary>*,
-            EProceduralHeightSeedFailure*) -> bool;
+            EProceduralHeightSeedFailure*, FProceduralHeightRecoveryContinuation*) -> bool;
         friend CKPROCEDURALANIMATION_API auto Get_ProceduralContactStagingLegs(FCk_Handle_ProceduralGait,
             const TArray<FProceduralContactStagingBoundary>&) -> TArray<FProceduralContactStagingLeg>;
         friend CKPROCEDURALANIMATION_API auto Get_IsProceduralContactStagingBodyAdmitted(FCk_Handle_ProceduralGait,

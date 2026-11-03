@@ -10,6 +10,9 @@
 #include "CkCore/Time/CkTime.h"
 
 #include "CkEcs/Tag/CkTag.h"
+#if WITH_DEV_AUTOMATION_TESTS
+#include "CkJolt/Query/CkJoltQuery_Data.h"
+#endif
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -113,6 +116,78 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
+    struct CKPROCEDURALANIMATION_API FProceduralSupportReturnObservation
+    {
+        CK_GENERATED_BODY(FProceduralSupportReturnObservation);
+        FCk_Handle Root;
+        FCk_Handle Collider;
+        TWeakObjectPtr<UWorld> World;
+        TArray<FCk_Handle> Roster;
+        TArray<FCk_Handle> Parts;
+        TOptional<uint64> ClaimsRevision;
+        FTransform Body = FTransform::Identity;
+        TOptional<FTransform> Pose;
+        FVector Up = FVector::ZeroVector;
+        FVector Direction = FVector::ZeroVector;
+        FVector Normal = FVector::ZeroVector;
+        float Speed = 0.0f;
+        uint64 EnabledMask = 0;
+        uint64 SupportingMask = 0;
+        uint64 Frame = 0;
+        uint64 Solve = 0;
+        double WorldSeconds = 0.0;
+        double SeenSeconds = 0.0;
+    };
+
+#if WITH_DEV_AUTOMATION_TESTS
+    struct CKPROCEDURALANIMATION_API FFragment_ProceduralBodyPreparation_Test
+    {
+        CK_GENERATED_BODY(FFragment_ProceduralBodyPreparation_Test);
+        uint64 Frame = 0;
+        bool ClipConsumed = false;
+        bool ClipAccepted = false;
+        int32 ClipTrial = 0;
+        FTransform ClipFullGoal = FTransform::Identity;
+        FCk_Jolt_HitResult ClipFullHit;
+        FCk_Jolt_HitResult ClipPartialHit;
+        bool ClipEntryDormant = false;
+        bool ClipStagingDormant = false;
+        FTransform ClipBefore = FTransform::Identity;
+        FTransform ClipRejected = FTransform::Identity;
+        FTransform ClipCandidate = FTransform::Identity;
+        int32 ClipRaysBefore = 0;
+        int32 ClipRaysAfter = 0;
+        int32 ClipEnvelopesBefore = 0;
+        int32 ClipEnvelopesAfter = 0;
+        bool ObstacleContinuationIssued = false;
+        bool SupportEligible = false;
+        bool SupportPending = false;
+        bool SupportRoom = false;
+        int32 SupportRoomCalls = 0;
+        bool SupportBudgetDeclined = false;
+        bool SupportPendingRetained = false;
+        int32 SupportBudgetEnvelopesBefore = 0;
+        int32 SupportRemainingSubsteps = 0;
+        int32 SupportProofQueries = 0;
+        int32 SupportAcceptedSubsteps = 0;
+        bool SupportPhysical = false;
+        bool SupportLandings = false;
+        bool SupportEnvelope = false;
+        bool SupportCommitted = false;
+        bool SupportZeroAccepted = false;
+        FCk_Jolt_HitResult SupportSweep;
+        FProceduralSurfaceMotionState SupportStateBefore;
+        FProceduralSurfaceMotionState SupportStateAfter;
+        ECk_SurfaceMotion_ContactSource SupportPublicSource = ECk_SurfaceMotion_ContactSource::None;
+        FTransform SupportBefore = FTransform::Identity;
+        FTransform SupportAfter = FTransform::Identity;
+        FVector SupportNormal = FVector::ZeroVector;
+        int32 SupportTrials = 0;
+        int32 SupportRays = 0;
+        int32 SupportEnvelopes = 0;
+    };
+#endif
+
     // The accepted support frame, the pending contact that would replace it and the body's integrated motion, rewritten
     // every substep.
     struct CKPROCEDURALANIMATION_API FFragment_SurfaceMotion_Support
@@ -152,6 +227,7 @@ namespace ck
         FTransform _HeightObstructionBody = FTransform::Identity;
         uint64 _HeightObstructionFrame = 0;
         TOptional<FProceduralSurfaceAdaptiveTopReceipt> _AdaptiveTopAcquisition;
+        TOptional<FProceduralSupportReturnObservation> _SupportReturnObservation;
 
     public:
         CK_PROPERTY_GET(_EvaluatedFrame);

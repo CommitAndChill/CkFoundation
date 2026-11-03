@@ -1,6 +1,7 @@
 #include "CkProceduralAnimation/Core/CkProceduralFoothold.h"
 
 #include "CkCore/Algorithms/CkAlgorithms.h"
+#include "CkProceduralAnimation/Core/CkProceduralGaitSolver.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -132,6 +133,167 @@ namespace ck
     }
 
     // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        Get_IsProceduralFootholdNativePointRepresentable(
+            const FVector& InPoint)
+        -> bool
+    {
+        constexpr auto Limit = static_cast<double>(TNumericLimits<float>::Max());
+        return FMath::IsFinite(InPoint.X) && FMath::Abs(InPoint.X) <= Limit
+            && FMath::IsFinite(InPoint.Y) && FMath::Abs(InPoint.Y) <= Limit
+            && FMath::IsFinite(InPoint.Z) && FMath::Abs(InPoint.Z) <= Limit;
+    }
+
+    auto
+        Get_ProceduralFootholdUnderBodyBoundary(
+            const FProceduralFootholdUnderBodyBoundaryQuery& InQuery,
+            const FVector& InSeed,
+            const FVector& InNormal,
+            bool& InOutJointBoundaryAttempted,
+            int32* OutConstructedPoints)
+        -> TOptional<FVector>
+    {
+        constexpr auto ReservationMargin = 0.1;
+        if (OutConstructedPoints != nullptr)
+        { *OutConstructedPoints = 0; }
+        if (InQuery.BodyLocation.ContainsNaN() || InQuery.Hip.ContainsNaN()
+            || InQuery.Lateral.ContainsNaN() || NOT InQuery.Lateral.IsNormalized()
+            || InQuery.Outboard.ContainsNaN() || InQuery.Reservations.Num() < 0
+            || (InQuery.Reservations.Num() > 0 && InQuery.Reservations.GetData() == nullptr))
+        { return {}; }
+        const auto SideDot = FVector::DotProduct(InQuery.Outboard, InQuery.Lateral);
+        const auto Side = FMath::Sign(SideDot);
+        if (InSeed.ContainsNaN() || InNormal.ContainsNaN() || InNormal.IsNearlyZero()
+            || NOT FMath::IsFinite(SideDot) || FMath::Abs(SideDot) <= UE_DOUBLE_SMALL_NUMBER
+            || NOT FMath::IsFinite(InQuery.BodyBoundary) || InQuery.BodyBoundary <= 0.0
+            || NOT FMath::IsFinite(InQuery.FootContactRadius) || InQuery.FootContactRadius <= 0.0f
+            || NOT FMath::IsFinite(InQuery.SearchRadius) || InQuery.SearchRadius <= 0.0f)
+        { return {}; }
+        const auto Normal = InNormal.GetSafeNormal();
+        if (NOT Normal.IsNormalized())
+        { return {}; }
+        const auto Tangent = FVector::VectorPlaneProject(InQuery.Lateral, Normal);
+        const auto TangentSquared = Tangent.SizeSquared();
+        if (NOT FMath::IsFinite(TangentSquared) || TangentSquared <= UE_DOUBLE_SMALL_NUMBER)
+        { return {}; }
+        const auto DX = InSeed.X - InQuery.BodyLocation.X;
+        const auto DY = InSeed.Y - InQuery.BodyLocation.Y;
+        const auto DZ = InSeed.Z - InQuery.BodyLocation.Z;
+        if (NOT FMath::IsFinite(DX) || NOT FMath::IsFinite(DY) || NOT FMath::IsFinite(DZ))
+        { return {}; }
+        const auto CheckedOffset = Side * InQuery.BodyBoundary - (DX * InQuery.Lateral.X
+            + DY * InQuery.Lateral.Y + DZ * InQuery.Lateral.Z);
+        const auto Parameter = CheckedOffset / TangentSquared;
+        const auto CheckedX = InSeed.X + Tangent.X * Parameter;
+        const auto CheckedY = InSeed.Y + Tangent.Y * Parameter;
+        const auto CheckedZ = InSeed.Z + Tangent.Z * Parameter;
+        if (NOT FMath::IsFinite(CheckedX) || NOT FMath::IsFinite(CheckedY) || NOT FMath::IsFinite(CheckedZ))
+        { return {}; }
+        const auto BoundaryOffset = Side * InQuery.BodyBoundary - FVector::DotProduct(InSeed - InQuery.BodyLocation, InQuery.Lateral);
+        const auto Point = InSeed + Tangent * (BoundaryOffset / TangentSquared);
+        if (OutConstructedPoints != nullptr)
+        { ++*OutConstructedPoints; }
+        const auto SafeDistanceSquared = [](const FVector& InLeft, const FVector& InRight) -> TOptional<double>
+        {
+            const auto X = InLeft.X - InRight.X;
+            const auto Y = InLeft.Y - InRight.Y;
+            const auto Z = InLeft.Z - InRight.Z;
+            if (NOT FMath::IsFinite(X) || NOT FMath::IsFinite(Y) || NOT FMath::IsFinite(Z))
+            { return {}; }
+            const auto Squared = X * X + Y * Y + Z * Z;
+            return FMath::IsFinite(Squared) ? TOptional<double>{Squared} : TOptional<double>{};
+        };
+        const auto Refine = [&](const FVector& InPoint) -> FVector
+        {
+            if (InOutJointBoundaryAttempted || InPoint.ContainsNaN() || NOT InNormal.IsNormalized()
+                || NOT InQuery.Lateral.IsNormalized())
+            { return InPoint; }
+            if (NOT SafeDistanceSquared(InPoint, InSeed).IsSet()
+                || SafeDistanceSquared(InPoint, InSeed).GetValue() > FMath::Square(static_cast<double>(InQuery.SearchRadius)))
+            { return InPoint; }
+            const auto Direction = FVector::CrossProduct(InNormal, InQuery.Lateral).GetSafeNormal();
+            if (NOT Direction.IsNormalized())
+            { return InPoint; }
+            for (const auto& Reservation : InQuery.Reservations)
+            {
+                if (NOT FMath::IsFinite(Reservation.Get_Radius()) || Reservation.Get_Radius() <= 0.0f
+                    || Reservation.Get_LegIndex() < 0 || Reservation.Get_LegIndex() == InQuery.LegIndex
+                    || Reservation.Get_Position().ContainsNaN())
+                { continue; }
+                const auto Radius = static_cast<double>(InQuery.FootContactRadius) + Reservation.Get_Radius();
+                const auto DistanceSquared = SafeDistanceSquared(InPoint, Reservation.Get_Position());
+                if (NOT DistanceSquared.IsSet() || DistanceSquared.GetValue() >= Radius * Radius)
+                { continue; }
+                InOutJointBoundaryAttempted = true;
+                const auto Roots = ck::Get_ProceduralFootholdLineSphereOffsets(InPoint, Direction,
+                    Reservation.Get_Position(), Radius + ReservationMargin);
+                if (NOT Roots.IsSet())
+                { return InPoint; }
+                auto Best = TOptional<FVector>{};
+                auto BestDistance = TNumericLimits<double>::Max();
+                auto BestOffset = 0.0;
+                const auto ForceLimit = InQuery.ForceReach;
+                if (NOT FMath::IsFinite(ForceLimit) || ForceLimit <= 0.0f)
+                { return InPoint; }
+                for (const auto Offset : {Roots->X, Roots->Y})
+                {
+                    const auto X = InPoint.X + Offset * Direction.X;
+                    const auto Y = InPoint.Y + Offset * Direction.Y;
+                    const auto Z = InPoint.Z + Offset * Direction.Z;
+                    if (NOT FMath::IsFinite(X) || NOT FMath::IsFinite(Y) || NOT FMath::IsFinite(Z))
+                    { continue; }
+                    const auto RootPoint = FVector{X, Y, Z};
+                    if (OutConstructedPoints != nullptr)
+                    { ++*OutConstructedPoints; }
+                    const auto SeedDistance = SafeDistanceSquared(RootPoint, InSeed);
+                    const auto HipDistance = SafeDistanceSquared(RootPoint, InQuery.Hip);
+                    const auto BodyDistance = SafeDistanceSquared(RootPoint, InQuery.BodyLocation);
+                    if (NOT SeedDistance.IsSet() || NOT HipDistance.IsSet() || NOT BodyDistance.IsSet()
+                        || SeedDistance.GetValue() > FMath::Square(static_cast<double>(InQuery.SearchRadius))
+                        || FMath::Sqrt(HipDistance.GetValue()) > ForceLimit)
+                    { continue; }
+                    const auto PlaneDistance = (X - InSeed.X) * InNormal.X
+                        + (Y - InSeed.Y) * InNormal.Y + (Z - InSeed.Z) * InNormal.Z;
+                    const auto BodyLateral = (X - InQuery.BodyLocation.X) * InQuery.Lateral.X
+                        + (Y - InQuery.BodyLocation.Y) * InQuery.Lateral.Y + (Z - InQuery.BodyLocation.Z) * InQuery.Lateral.Z;
+                    if (NOT FMath::IsFinite(PlaneDistance) || FMath::Abs(PlaneDistance) > KINDA_SMALL_NUMBER
+                        || NOT FMath::IsFinite(BodyLateral) || FMath::Abs(BodyLateral - Side * InQuery.BodyBoundary) > KINDA_SMALL_NUMBER
+                        || NOT ck::Get_IsFootholdOnOwnSide(RootPoint - InQuery.Hip, InQuery.Outboard,
+                            InQuery.OwnSideTolerance))
+                    { continue; }
+                    auto ReservationsSafe = true;
+                    for (const auto& Current : InQuery.Reservations)
+                    {
+                        if (NOT FMath::IsFinite(Current.Get_Radius()) || Current.Get_Radius() < 0.0f)
+                        { ReservationsSafe = false; break; }
+                        if (Current.Get_Radius() == 0.0f || Current.Get_LegIndex() == InQuery.LegIndex)
+                        { continue; }
+                        if (Current.Get_LegIndex() < 0 || Current.Get_Position().ContainsNaN()
+                            || NOT SafeDistanceSquared(RootPoint, Current.Get_Position()).IsSet())
+                        { ReservationsSafe = false; break; }
+                    }
+                    if (NOT ReservationsSafe || NOT ck::Get_IsProceduralFootContactAvailable(RootPoint,
+                            InQuery.FootContactRadius, InQuery.LegIndex, InQuery.Reservations))
+                    { continue; }
+                    if (NOT Best.IsSet() || SeedDistance.GetValue() < BestDistance
+                        || (SeedDistance.GetValue() == BestDistance && Offset < BestOffset))
+                    {
+                        Best = RootPoint;
+                        BestDistance = SeedDistance.GetValue();
+                        BestOffset = Offset;
+                    }
+                }
+                return Best.IsSet() ? Best.GetValue() : InPoint;
+            }
+            return InPoint;
+        };
+        const auto Refined = Refine(Point);
+        if (Refined.ContainsNaN() || NOT SafeDistanceSquared(Refined, InSeed).IsSet()
+            || SafeDistanceSquared(Refined, InSeed).GetValue() > FMath::Square(static_cast<double>(InQuery.SearchRadius)))
+        { return {}; }
+        return Refined;
+    }
 
     auto
         Get_ProceduralFootholdFailedFaceQueryPoint(

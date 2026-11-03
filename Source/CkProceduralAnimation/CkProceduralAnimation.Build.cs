@@ -21,6 +21,10 @@ public class CkProceduralAnimation : CkModuleRules
             "CkTween",
         });
 
-        PrivateDependencyModuleNames.Add("AnimationCore");
+        PrivateDependencyModuleNames.AddRange(new string[]
+        {
+            "AnimationCore",
+            "CkThirdParty",
+        });
     }
 }

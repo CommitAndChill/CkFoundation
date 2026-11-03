@@ -140,7 +140,8 @@ namespace ck_procedural_surface_motion
             const ck::FProceduralSurfaceMotionSettings& InSettings,
             ck::FProceduralSurfaceRayCast InRayCast,
             FContact& InOutContact,
-            const FVector& InUp)
+            const FVector& InUp,
+            bool InValidateNativeResult = false)
         -> double
     {
         const auto Clearance = static_cast<double>(InSettings.Get_Clearance());
@@ -152,6 +153,14 @@ namespace ck_procedural_surface_motion
         const auto Normal = InOutContact.Hit.Get_Normal().GetSafeNormal();
         const auto& Point = InOutContact.Hit.Get_Position();
         const auto Blocker = InRayCast(Point + Normal * RoomRayStartOffset, Point + Normal * Clearance);
+        if (InValidateNativeResult && Blocker.Get_Hit() && (NOT FMath::IsFinite(Blocker.Get_Fraction())
+            || Blocker.Get_Fraction() < 0.0f || Blocker.Get_Fraction() > 1.0f
+            || Blocker.Get_Position().ContainsNaN() || Blocker.Get_Position().GetAbsMax() > TNumericLimits<float>::Max()
+            || Blocker.Get_Normal().ContainsNaN()
+            || (Blocker.Get_Fraction() > 0.0f && NOT Blocker.Get_Normal().IsNormalized())))
+        { InOutContact.Room = 0.0; return 0.0; }
+        if (InValidateNativeResult && NOT Blocker.Get_Hit())
+        { InOutContact.Room = Clearance; return Clearance; }
         const auto BlockerDistance = FVector::Distance(Blocker.Get_Position(), Point);
         const auto ConcaveCorner = Blocker.Get_Hit() && Blocker.Get_Fraction() > 0.0f
             && BlockerDistance <= RoomCornerClearances * Clearance
@@ -776,6 +785,161 @@ namespace ck
         InOutState.Set_SupportPoint(FallHit.Get_Position());
         InOutState.Set_TravelTangent(InOutBody.GetRotation().GetAxisX());
         InOutState.Set_MissingContact(FCk_Time{});
+    }
+
+    namespace support_return
+    {
+        auto
+            NativeVector(
+                const FVector& InValue)
+            -> bool
+        {
+            const auto Limit = static_cast<double>(TNumericLimits<float>::Max());
+            return NOT InValue.ContainsNaN() && FMath::Abs(InValue.X) <= Limit
+                && FMath::Abs(InValue.Y) <= Limit && FMath::Abs(InValue.Z) <= Limit;
+        }
+
+        auto
+            Inputs(
+                const FProceduralSurfaceMotionSettings& InSettings,
+                const FProceduralSurfaceHit& InHit,
+                const FTransform& InBody,
+                const FProceduralSurfaceMotionState& InState)
+            -> bool
+        {
+            return InHit.Get_Hit() && FMath::IsFinite(InHit.Get_Fraction())
+                && InHit.Get_Fraction() > 0.0f && InHit.Get_Fraction() <= 1.0f
+                && NativeVector(InHit.Get_Position()) && InHit.Get_Normal().IsNormalized()
+                && NOT InBody.ContainsNaN() && NativeVector(InBody.GetLocation())
+                && InBody.GetRotation().IsNormalized() && InBody.GetScale3D().Equals(FVector::OneVector, 1.0e-4)
+                && InState.Get_SupportNormal().IsNormalized() && InState.Get_StepForward().IsNormalized()
+                && FMath::Abs(FVector::DotProduct(InState.Get_SupportNormal(), InState.Get_StepForward())) <= KINDA_SMALL_NUMBER
+                && InState.Get_Grounded() && InState.Get_ContactTrusted()
+                && NativeVector(InSettings.Get_Gravity()) && NOT InSettings.Get_Gravity().IsNearlyZero()
+                && InHit.Get_Normal() == -InSettings.Get_Gravity().GetSafeNormal()
+                && NOT InSettings.Get_HeightPlane().IsSet()
+                && FMath::IsFinite(InSettings.Get_Clearance()) && InSettings.Get_Clearance() > 0.0f
+                && FMath::IsFinite(InSettings.Get_ClearanceSpeed()) && InSettings.Get_ClearanceSpeed() > 0.0f
+                && FMath::IsFinite(InSettings.Get_SurfaceTurnRateDegrees()) && InSettings.Get_SurfaceTurnRateDegrees() > 0.0f
+                && FMath::IsFinite(InSettings.Get_ConfirmAngleDegrees()) && InSettings.Get_ConfirmAngleDegrees() >= 0.0f
+                && FMath::IsFinite(InSettings.Get_ConfirmTime().Get_Seconds()) && InSettings.Get_ConfirmTime().Get_Seconds() >= 0.0;
+        }
+    }
+
+    auto
+        Get_IsProceduralSupportReturnContactEligible(
+            const FProceduralSurfaceMotionSettings& InSettings,
+            const TOptional<FProceduralSurfaceFeetSupport>& InFeetSupport,
+            TArrayView<const FProceduralSurfacePlantedContact> InPlants,
+            const FTransform& InBody,
+            const FProceduralSurfaceMotionState& InState,
+            const FProceduralSurfaceHit& InHit)
+        -> bool
+    {
+        using namespace ck_procedural_surface_motion;
+        if (NOT support_return::Inputs(InSettings, InHit, InBody, InState)
+            || NOT InFeetSupport.IsSet() || InPlants.Num() < 1 || InPlants.Num() > 64 || InPlants.GetData() == nullptr)
+        { return false; }
+        const auto& Feet = InFeetSupport.GetValue();
+        if (NOT support_return::NativeVector(Feet.Get_Point()) || NOT support_return::NativeVector(Feet.Get_Origin())
+            || NOT Feet.Get_Basis().IsNormalized() || NOT Feet.Get_Normal().IsNormalized()
+            || NOT FMath::IsFinite(Feet.Get_FootprintMin().X) || NOT FMath::IsFinite(Feet.Get_FootprintMin().Y)
+            || NOT FMath::IsFinite(Feet.Get_FootprintMax().X) || NOT FMath::IsFinite(Feet.Get_FootprintMax().Y)
+            || Feet.Get_FootprintMin().GetAbsMax() > TNumericLimits<float>::Max()
+            || Feet.Get_FootprintMax().GetAbsMax() > TNumericLimits<float>::Max()
+            || Feet.Get_FootprintMin().X > Feet.Get_FootprintMax().X || Feet.Get_FootprintMin().Y > Feet.Get_FootprintMax().Y)
+        { return false; }
+        for (const auto& Plant : InPlants)
+        {
+            if (NOT support_return::NativeVector(Plant.Get_Position()) || NOT Plant.Get_Normal().IsNormalized())
+            { return false; }
+        }
+        const auto& Normal = InHit.Get_Normal();
+        const auto Angle = Get_AngleDegrees(InState.Get_SupportNormal(), Normal);
+        const auto Contact = FContact{InHit, EProceduralSurfaceContactSource::NativeEnvelope};
+        return Angle > InSettings.Get_ConfirmAngleDegrees() && Angle > SameSurfaceMaxDegrees
+            && FVector::DotProduct(Feet.Get_Normal(), Normal) > FVector::DotProduct(Feet.Get_Normal(), InState.Get_SupportNormal())
+            && Get_HasClimbPlant(Contact, InState.Get_SupportNormal(), TOptional<TArrayView<const FProceduralSurfacePlantedContact>>{InPlants})
+            && DoGet_FeetContact(InSettings, InFeetSupport, InBody.GetLocation(), Normal, Normal).IsSet();
+    }
+
+    auto
+        Get_HasProceduralSupportReturnRoom(
+            const FProceduralSurfaceMotionSettings& InSettings,
+            FProceduralSurfaceRayCast InRayCast,
+            const FProceduralSurfaceHit& InHit,
+            const FVector& InOldUp)
+        -> bool
+    {
+        if (NOT InHit.Get_Hit() || NOT FMath::IsFinite(InHit.Get_Fraction())
+            || InHit.Get_Fraction() <= 0.0f || InHit.Get_Fraction() > 1.0f
+            || NOT support_return::NativeVector(InHit.Get_Position())
+            || NOT InHit.Get_Normal().IsNormalized() || NOT InOldUp.IsNormalized()
+            || NOT FMath::IsFinite(InSettings.Get_Clearance()) || InSettings.Get_Clearance() <= 0.0f
+            || NOT support_return::NativeVector(InHit.Get_Position() + InHit.Get_Normal() * InSettings.Get_Clearance())
+            || NOT support_return::NativeVector(InHit.Get_Position() + InHit.Get_Normal()))
+        { return false; }
+        auto Contact = ck_procedural_surface_motion::FContact{InHit, EProceduralSurfaceContactSource::NativeEnvelope};
+        return ck_procedural_surface_motion::Get_Room(InSettings, InRayCast, Contact, InOldUp, true)
+            >= static_cast<double>(InSettings.Get_Clearance());
+    }
+
+    auto
+        Get_IsProceduralSupportReturnNormalConsistent(
+            const FVector& InPrevious,
+            const FVector& InCurrent)
+        -> bool
+    {
+        return InPrevious.IsNormalized() && InCurrent.IsNormalized()
+            && ck_procedural_surface_motion::Get_AngleDegrees(InPrevious, InCurrent)
+                <= ck_procedural_surface_motion::CandidateConsistencyDegrees;
+    }
+
+    auto
+        Get_IsProceduralSupportReturnConfirmed(
+            const FProceduralSurfaceMotionSettings& InSettings,
+            double InSeenSeconds)
+        -> bool
+    {
+        return FMath::IsFinite(InSeenSeconds) && InSeenSeconds >= 0.0
+            && FMath::IsFinite(InSettings.Get_ConfirmTime().Get_Seconds()) && InSettings.Get_ConfirmTime().Get_Seconds() >= 0.0
+            && InSeenSeconds + ck_procedural_surface_motion::ConfirmTolerance.Get_Seconds() >= InSettings.Get_ConfirmTime().Get_Seconds();
+    }
+
+    auto
+        TryMake_ProceduralSupportReturn(
+            const FProceduralSurfaceMotionSettings& InSettings,
+            const FProceduralSurfaceHit& InHit,
+            FCk_Time InStep,
+            const FTransform& InBody,
+            const FProceduralSurfaceMotionState& InState,
+            FTransform& OutBody,
+            FProceduralSurfaceMotionState& OutState)
+        -> bool
+    {
+        const auto Seconds = InStep.Get_Seconds();
+        if (NOT support_return::Inputs(InSettings, InHit, InBody, InState) || NOT FMath::IsFinite(Seconds)
+            || Seconds <= 0.0 || NOT FMath::IsFinite(1.0 / Seconds)
+            || NOT FMath::IsFinite(Seconds * InSettings.Get_ClearanceSpeed())
+            || NOT FMath::IsFinite(Seconds * InSettings.Get_SurfaceTurnRateDegrees()))
+        { return false; }
+        auto Candidate = InBody;
+        auto State = InState;
+        const auto Contact = ck_procedural_surface_motion::FContact{InHit, EProceduralSurfaceContactSource::NativeEnvelope};
+        ck_procedural_surface_motion::DoAdopt(InSettings, Contact, InState.Get_SupportNormal(), InState.Get_StepForward(),
+            InBody.GetLocation(), Seconds, 1.0f, Candidate, State, nullptr);
+        if (Candidate.ContainsNaN() || NOT support_return::NativeVector(Candidate.GetLocation()))
+        { return false; }
+        State.Set_Grounded(true).Set_ContactTrusted(true).Set_MissingContact(FCk_Time{})
+            .Set_Velocity((Candidate.GetLocation() - InBody.GetLocation()) / Seconds)
+            .Set_CandidateSeen(FCk_Time{}).Set_CandidateNormal(InHit.Get_Normal()).Set_CandidatePoint(InHit.Get_Position())
+            .Set_Obstruction(EProceduralSurfaceObstruction::None).Set_ObstructionPoint(FVector::ZeroVector)
+            .Set_ObstructionNormal(FVector::ZeroVector).Set_ObstructionStandoff(0.0f).Set_ClimbAcquisition({});
+        if (State.Get_Velocity().ContainsNaN())
+        { return false; }
+        OutBody = Candidate;
+        OutState = State;
+        return true;
     }
 
     auto

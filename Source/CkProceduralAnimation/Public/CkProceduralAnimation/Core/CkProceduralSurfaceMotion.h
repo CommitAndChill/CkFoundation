@@ -23,7 +23,8 @@ namespace ck
         Fan,
         Fall,
         Feet,
-        Step
+        Step,
+        NativeEnvelope
     };
 
     // What the body does with a face the forward ray meets that is not a step: Climb makes it the next support once
@@ -344,6 +345,44 @@ namespace ck
             float InVoluntaryScale = 1.0f,
             const TOptional<TArrayView<const FProceduralSurfacePlantedContact>>& InPlantedContacts = {})
         -> void;
+
+    // Pure qualification/proposal helpers for the adapter's separately admitted native support return.
+    CKPROCEDURALANIMATION_API auto
+        Get_IsProceduralSupportReturnContactEligible(
+            const FProceduralSurfaceMotionSettings& InSettings,
+            const TOptional<FProceduralSurfaceFeetSupport>& InFeetSupport,
+            TArrayView<const FProceduralSurfacePlantedContact> InPlants,
+            const FTransform& InBody,
+            const FProceduralSurfaceMotionState& InState,
+            const FProceduralSurfaceHit& InHit)
+        -> bool;
+
+    CKPROCEDURALANIMATION_API auto
+        Get_HasProceduralSupportReturnRoom(
+            const FProceduralSurfaceMotionSettings& InSettings,
+            FProceduralSurfaceRayCast InRayCast,
+            const FProceduralSurfaceHit& InHit,
+            const FVector& InOldUp)
+        -> bool;
+
+    CKPROCEDURALANIMATION_API auto
+        Get_IsProceduralSupportReturnNormalConsistent(const FVector& InPrevious, const FVector& InCurrent)
+        -> bool;
+
+    CKPROCEDURALANIMATION_API auto
+        Get_IsProceduralSupportReturnConfirmed(const FProceduralSurfaceMotionSettings& InSettings, double InSeenSeconds)
+        -> bool;
+
+    CKPROCEDURALANIMATION_API auto
+        TryMake_ProceduralSupportReturn(
+            const FProceduralSurfaceMotionSettings& InSettings,
+            const FProceduralSurfaceHit& InHit,
+            FCk_Time InStep,
+            const FTransform& InBody,
+            const FProceduralSurfaceMotionState& InState,
+            FTransform& OutBody,
+            FProceduralSurfaceMotionState& OutState)
+        -> bool;
 
     // Simulation admission is exact; only presentation physical reach has the existing 0.001 cm tolerance.
     // Scalar preflight rejects unsafe transform/distance arithmetic before it executes.

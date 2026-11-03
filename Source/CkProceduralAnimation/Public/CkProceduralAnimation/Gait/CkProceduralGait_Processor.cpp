@@ -2678,98 +2678,18 @@ namespace ck_procedural_gait
             {
                 const auto BodyBoundary = static_cast<double>(InQuery.MaxHipLateral) - UnderBodyMargin + ReservationBoundaryMargin;
                 auto JointBoundaryAttempted = false;
-                const auto RefineUnderBodyPoint = [&](const FVector& InPoint, const FFootholdCandidate& InCandidate) -> FVector
-                {
-                    if (JointBoundaryAttempted || InPoint.ContainsNaN() || NOT InCandidate.Normal.IsNormalized()
-                        || NOT Lateral.IsNormalized())
-                    { return InPoint; }
-                    const auto SafeDistanceSquared = [](const FVector& InLeft, const FVector& InRight) -> TOptional<double>
-                    {
-                        const auto X = InLeft.X - InRight.X;
-                        const auto Y = InLeft.Y - InRight.Y;
-                        const auto Z = InLeft.Z - InRight.Z;
-                        if (NOT FMath::IsFinite(X) || NOT FMath::IsFinite(Y) || NOT FMath::IsFinite(Z))
-                        { return {}; }
-                        const auto Squared = X * X + Y * Y + Z * Z;
-                        return FMath::IsFinite(Squared) ? TOptional<double>{Squared} : TOptional<double>{};
-                    };
-                    if (NOT SafeDistanceSquared(InPoint, InCandidate.Position).IsSet()
-                        || FVector::DistSquared(InPoint, InCandidate.Position) > FMath::Square(static_cast<double>(SearchRadius)))
-                    { return InPoint; }
-                    const auto Direction = FVector::CrossProduct(InCandidate.Normal, Lateral).GetSafeNormal();
-                    if (NOT Direction.IsNormalized())
-                    { return InPoint; }
-                    for (const auto& Reservation : InQuery.Reservations)
-                    {
-                        if (NOT FMath::IsFinite(Reservation.Get_Radius()) || Reservation.Get_Radius() <= 0.0f
-                            || Reservation.Get_LegIndex() < 0 || Reservation.Get_LegIndex() == InQuery.LegIndex
-                            || Reservation.Get_Position().ContainsNaN())
-                        { continue; }
-                        const auto Radius = static_cast<double>(InQuery.FootContactRadius) + Reservation.Get_Radius();
-                        const auto DistanceSquared = SafeDistanceSquared(InPoint, Reservation.Get_Position());
-                        if (NOT DistanceSquared.IsSet() || DistanceSquared.GetValue() >= Radius * Radius)
-                        { continue; }
-                        JointBoundaryAttempted = true;
-                        const auto Roots = ck::Get_ProceduralFootholdLineSphereOffsets(InPoint, Direction,
-                            Reservation.Get_Position(), Radius + ReservationBoundaryMargin);
-                        if (NOT Roots.IsSet())
-                        { return InPoint; }
-                        auto Best = TOptional<FVector>{};
-                        auto BestDistance = TNumericLimits<double>::Max();
-                        auto BestOffset = 0.0;
-                        const auto ForceLimit = InQuery.Step->Get_ForceStepReachFraction() * InQuery.Reach;
-                        if (NOT FMath::IsFinite(ForceLimit) || ForceLimit <= 0.0f)
-                        { return InPoint; }
-                        for (const auto Offset : {Roots->X, Roots->Y})
-                        {
-                            const auto X = InPoint.X + Offset * Direction.X;
-                            const auto Y = InPoint.Y + Offset * Direction.Y;
-                            const auto Z = InPoint.Z + Offset * Direction.Z;
-                            if (NOT FMath::IsFinite(X) || NOT FMath::IsFinite(Y) || NOT FMath::IsFinite(Z))
-                            { continue; }
-                            const auto Point = FVector{X, Y, Z};
-                            const auto SeedDistance = SafeDistanceSquared(Point, InCandidate.Position);
-                            const auto HipDistance = SafeDistanceSquared(Point, InQuery.Hip);
-                            const auto BodyDistance = SafeDistanceSquared(Point, InQuery.BodyLocation);
-                            if (NOT SeedDistance.IsSet() || NOT HipDistance.IsSet() || NOT BodyDistance.IsSet()
-                                || SeedDistance.GetValue() > FMath::Square(static_cast<double>(SearchRadius))
-                                || FMath::Sqrt(HipDistance.GetValue()) > ForceLimit)
-                            { continue; }
-                            const auto PlaneDistance = (X - InCandidate.Position.X) * InCandidate.Normal.X
-                                + (Y - InCandidate.Position.Y) * InCandidate.Normal.Y + (Z - InCandidate.Position.Z) * InCandidate.Normal.Z;
-                            const auto BodyLateral = (X - InQuery.BodyLocation.X) * Lateral.X
-                                + (Y - InQuery.BodyLocation.Y) * Lateral.Y + (Z - InQuery.BodyLocation.Z) * Lateral.Z;
-                            if (NOT FMath::IsFinite(PlaneDistance) || FMath::Abs(PlaneDistance) > KINDA_SMALL_NUMBER
-                                || NOT FMath::IsFinite(BodyLateral) || FMath::Abs(BodyLateral - Side * BodyBoundary) > KINDA_SMALL_NUMBER
-                                || NOT ck::Get_IsFootholdOnOwnSide(Point - InQuery.Hip, InQuery.Outboard,
-                                    InboardToleranceShareOfReach * InQuery.Reach))
-                            { continue; }
-                            auto ReservationsSafe = true;
-                            for (const auto& Current : InQuery.Reservations)
-                            {
-                                if (NOT FMath::IsFinite(Current.Get_Radius()) || Current.Get_Radius() < 0.0f)
-                                { ReservationsSafe = false; break; }
-                                if (Current.Get_Radius() == 0.0f || Current.Get_LegIndex() == InQuery.LegIndex)
-                                { continue; }
-                                if (Current.Get_LegIndex() < 0 || Current.Get_Position().ContainsNaN()
-                                    || NOT SafeDistanceSquared(Point, Current.Get_Position()).IsSet())
-                                { ReservationsSafe = false; break; }
-                            }
-                            if (NOT ReservationsSafe || NOT ck::Get_IsProceduralFootContactAvailable(Point,
-                                    InQuery.FootContactRadius, InQuery.LegIndex, InQuery.Reservations))
-                            { continue; }
-                            if (NOT Best.IsSet() || SeedDistance.GetValue() < BestDistance
-                                || (SeedDistance.GetValue() == BestDistance && Offset < BestOffset))
-                            {
-                                Best = Point;
-                                BestDistance = SeedDistance.GetValue();
-                                BestOffset = Offset;
-                            }
-                        }
-                        return Best.IsSet() ? Best.GetValue() : InPoint;
-                    }
-                    return InPoint;
-                };
+                const auto BoundaryQuery = ck::FProceduralFootholdUnderBodyBoundaryQuery{
+                    .BodyLocation = InQuery.BodyLocation,
+                    .Hip = InQuery.Hip,
+                    .Lateral = Lateral,
+                    .Outboard = InQuery.Outboard,
+                    .BodyBoundary = BodyBoundary,
+                    .SearchRadius = SearchRadius,
+                    .ForceReach = InQuery.Step->Get_ForceStepReachFraction() * InQuery.Reach,
+                    .OwnSideTolerance = InboardToleranceShareOfReach * InQuery.Reach,
+                    .FootContactRadius = InQuery.FootContactRadius,
+                    .LegIndex = InQuery.LegIndex,
+                    .Reservations = InQuery.Reservations};
                 for (auto Index = FirstPickIndex; Index < OrdinaryCandidateCount && BoundarySamples < MaxBoundarySamples; ++Index)
                 {
                     const auto Candidate = Candidates[Index];
@@ -2778,17 +2698,10 @@ namespace ck_procedural_gait
                         || Candidate.Position.ContainsNaN() || Candidate.Normal.ContainsNaN() || Candidate.Normal.IsNearlyZero()
                         || NOT FMath::IsFinite(BodyBoundary) || BodyBoundary <= 0.0)
                     { continue; }
-                    const auto Normal = Candidate.Normal.GetSafeNormal();
-                    if (NOT Normal.IsNormalized())
-                    { continue; }
-                    const auto Tangent = FVector::VectorPlaneProject(Lateral, Normal);
-                    const auto TangentSquared = Tangent.SizeSquared();
-                    if (NOT FMath::IsFinite(TangentSquared) || TangentSquared <= UE_DOUBLE_SMALL_NUMBER)
-                    { continue; }
-                    // Along the observed plane, reach the existing own-side body boundary plus the same small margin.
-                    const auto Offset = Side * BodyBoundary - FVector::DotProduct(Candidate.Position - InQuery.BodyLocation, Lateral);
-                    const auto Point = Candidate.Position + Tangent * (Offset / TangentSquared);
-                    ProbeBoundary(RefineUnderBodyPoint(Point, Candidate), Candidate.Position);
+                    const auto Point = ck::Get_ProceduralFootholdUnderBodyBoundary(BoundaryQuery,
+                        Candidate.Position, Candidate.Normal, JointBoundaryAttempted);
+                    if (Point.IsSet())
+                    { ProbeBoundary(Point.GetValue(), Candidate.Position); }
                 }
                 SearchPick = Get_SearchPick();
             }
@@ -3344,8 +3257,9 @@ namespace ck_procedural_gait
     {
         if (InIndex < 0 || InIndex >= InSolver.NumLegs() || ck::Is_NOT_Valid(InLeg)
             || NOT InLeg.Has<ck::FFragment_ProceduralLeg_Params>() || NOT InLeg.Has<ck::FFragment_ProceduralLeg>()
-            || NOT ck::procedural_leg::Get_IsSupporting(InLeg)
+            || NOT InLeg.Has<ck::FFragment_LifetimeOwner>()
             || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InLeg) != InGait.ConvertToHandle()
+            || NOT ck::procedural_leg::Get_IsSupporting(InLeg)
             || NOT InSolver.IsLegParticipating(InIndex))
         { return false; }
         const auto& Params = InLeg.Get<ck::FFragment_ProceduralLeg_Params>();
@@ -3444,7 +3358,8 @@ namespace ck
             EProceduralHeightPlanStage InStage,
             TOptional<FProceduralGaitHeightRetryWitness>* OutVisibilityRetry,
             TArray<FProceduralContactStagingBoundary>* OutStagingBoundaries,
-            EProceduralHeightSeedFailure* OutSeedFailure)
+            EProceduralHeightSeedFailure* OutSeedFailure,
+            FProceduralHeightRecoveryContinuation* InRecoveryContinuation)
         -> bool
     {
         if (OutSeedFailure != nullptr)
@@ -3506,6 +3421,7 @@ namespace ck
             {
                 if (NOT Gait._Legs.Contains(InLeg) || ck::Is_NOT_Valid(InLeg)
                     || NOT InLeg.Has<FFragment_ProceduralLeg>() || NOT InLeg.Has<FFragment_ProceduralLeg_Params>()
+                    || NOT InLeg.Has<FFragment_LifetimeOwner>()
                     || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InLeg) != InGait.ConvertToHandle())
                 { return false; }
                 if (InGait.Has<FFragment_ProceduralArticulation_Claims>())
@@ -3558,15 +3474,16 @@ namespace ck
         {
             const auto& Leg = Gait._Legs[Index];
             if (procedural_leg::Get_IsLive(Leg)
-                && (NOT Leg.Has<FFragment_ProceduralLeg>() || NOT Leg.Has<FFragment_ProceduralLeg_Params>()))
+                && (NOT Leg.Has<FFragment_ProceduralLeg>() || NOT Leg.Has<FFragment_ProceduralLeg_Params>()
+                    || NOT Leg.Has<FFragment_LifetimeOwner>()
+                    || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Leg) != InGait.ConvertToHandle()))
             { return false; }
             if (ck_procedural_gait::Get_IsLegEnabled(Leg))
             { EnabledMask |= ck_procedural_gait::Get_LegBit(Index); }
             if (NOT procedural_leg::Get_IsSupporting(Leg))
             { continue; }
             SupportingMask |= ck_procedural_gait::Get_LegBit(Index);
-            if (NOT Leg.Has<FFragment_ProceduralLeg>() || NOT Leg.Has<FFragment_ProceduralLeg_Params>()
-                || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Leg) != InGait.ConvertToHandle())
+            if (NOT Leg.Has<FFragment_ProceduralLeg>() || NOT Leg.Has<FFragment_ProceduralLeg_Params>())
             { return false; }
             const auto& Foot = Leg.Get<FFragment_ProceduralLeg>().Get_Foot();
             if (Foot.Get_Phase() == ECk_ProceduralLeg_FootPhase::Planted
@@ -3652,12 +3569,37 @@ namespace ck
 #endif
             };
         };
+        auto ContinuationUsed = false;
+        auto CaptureRecoveryNative = InRecoveryContinuation != nullptr;
+#if WITH_DEV_AUTOMATION_TESTS
+        auto* RecoveryReceipt = InRecoveryContinuation != nullptr && InStage == EProceduralHeightPlanStage::Recovery
+            ? InRecoveryContinuation->_TestReceipt : nullptr;
+        if (RecoveryReceipt == nullptr && InStage == EProceduralHeightPlanStage::Recovery && IsInGameThread()
+            && InGait.Has<FFragment_ProceduralHeightPlanning_Test>())
+        {
+            const auto& ReceiptOwner = InGait.Get<FFragment_ProceduralHeightPlanning_Test>();
+            if (ReceiptOwner.Frame == GFrameCounter && ReceiptOwner.Solve == Gait._SolveSequence)
+            { RecoveryReceipt = ReceiptOwner.ActiveRecoveryReceipt; }
+        }
+        CaptureRecoveryNative = CaptureRecoveryNative || RecoveryReceipt != nullptr;
+        if (RecoveryReceipt != nullptr)
+        { *RecoveryReceipt = FProceduralHeightRecoveryTestReceipt{}; }
+        const auto RecordRecoverySeed = [](const ck_procedural_gait::FFootholdCandidate& InNative,
+            bool InMetadataFresh, int32 InRays) -> FProceduralHeightRecoveryTestSeed
+        {
+            return {InMetadataFresh, InNative.NativeHit, InNative.Cast, InNative.Verdict,
+                InNative.Position, InNative.Normal, InRays};
+        };
+#endif
         auto AdmittedSeed = TOptional<ck_procedural_gait::FFootholdCandidate>{};
         const auto AdmitLanding = [&](const FProceduralGaitHeightCandidate& InObserved, int32 InIndex,
-            EProceduralHeightSeedFailure* OutLandingFailure = nullptr) -> bool
+            EProceduralHeightSeedFailure* OutLandingFailure = nullptr,
+            TOptional<ck_procedural_gait::FFootholdCandidate>* OutNative = nullptr) -> bool
         {
             if (OutLandingFailure != nullptr)
             { *OutLandingFailure = EProceduralHeightSeedFailure::None; }
+            if (OutNative != nullptr)
+            { OutNative->Reset(); }
             const auto& ObservedLeg = Gait._Legs[InIndex];
             const auto& ObservedParams = ObservedLeg.Get<FFragment_ProceduralLeg_Params>();
             const auto& ObservedPlacement = ObservedParams.Get_Placement();
@@ -3678,6 +3620,8 @@ namespace ck
                 EProceduralFootholdSource::Ring, ck_procedural_gait::EGroundProbeAttempts::Every,
                 ck_procedural_gait::EFootholdReprobe::ClampTowardHip, ck_procedural_gait::EFootholdStage::Search,
                 InOutRays, nullptr, OutLandingFailure != nullptr ? &SeedFailure : nullptr);
+            if (OutNative != nullptr)
+            { *OutNative = Candidate; }
             const auto Admitted = Candidate.Verdict == EProceduralFootholdVerdict::Usable
                 && FVector::Dist(LandingQuery.Hip, Candidate.Position) <= InObserved.Get_AdmissionReach()
                 && FVector::Dist(PresentationBody.TransformPosition(ObservedPlacement.Get_HipLocal()), Candidate.Position)
@@ -3707,7 +3651,12 @@ namespace ck
                 { continue; }
                 auto HasLanding = false;
                 auto AllFailedSeedsFinalForce = true;
+                auto AllFailedSeedsUnderBody = true;
+                auto FailedSeeds = TArray<ck_procedural_gait::FFootholdCandidate, TInlineAllocator<2>>{};
                 auto TriedCandidates = 0;
+#if WITH_DEV_AUTOMATION_TESTS
+                auto OriginalSeeds = TArray<FProceduralHeightRecoveryTestSeed, TInlineAllocator<2>>{};
+#endif
                 for (const auto& Observed : Planning.Get_Candidates())
                 {
                     if (Observed.Get_Leg() != Gait._Legs[Index])
@@ -3715,16 +3664,154 @@ namespace ck
                     if (++TriedCandidates > 2)
                     { return false; }
                     auto SeedFailure = EProceduralHeightSeedFailure::None;
-                    if (AdmitLanding(Observed, Index, &SeedFailure))
+                    auto Native = TOptional<ck_procedural_gait::FFootholdCandidate>{};
+#if WITH_DEV_AUTOMATION_TESTS
+                    const auto SeedRays = InOutRays;
+                    if (RecoveryReceipt != nullptr)
+                    { ++RecoveryReceipt->OriginalCallsPerLeg[Index]; }
+#endif
+                    const auto Admitted = AdmitLanding(Observed, Index, &SeedFailure,
+                        CaptureRecoveryNative ? &Native : nullptr);
+#if WITH_DEV_AUTOMATION_TESTS
+                    if (RecoveryReceipt != nullptr)
+                    {
+                        auto SeedReceipt = Native.IsSet() ? RecordRecoverySeed(Native.GetValue(), true, InOutRays - SeedRays)
+                            : FProceduralHeightRecoveryTestSeed{};
+                        SeedReceipt.Rays = InOutRays - SeedRays;
+                        OriginalSeeds.Add(SeedReceipt);
+                    }
+#endif
+                    if (Admitted)
                     {
                         HasLanding = true;
                         break;
                     }
                     AllFailedSeedsFinalForce = AllFailedSeedsFinalForce
                         && SeedFailure == EProceduralHeightSeedFailure::TrustedDownFinalForceReject;
+                    const auto TrustedUnderBody = Native.IsSet() && Native->NativeHit
+                        && Native->Cast == EProceduralFootholdCast::Down
+                        && Native->Verdict == EProceduralFootholdVerdict::UnderBody
+                        && NOT Native->Position.ContainsNaN() && Native->Normal.IsNormalized();
+                    AllFailedSeedsUnderBody = AllFailedSeedsUnderBody && TrustedUnderBody;
+                    if (TrustedUnderBody)
+                    { FailedSeeds.Add(Native.GetValue()); }
                 }
                 if (NOT HasLanding)
                 {
+#if WITH_DEV_AUTOMATION_TESTS
+                    if (RecoveryReceipt != nullptr && RecoveryReceipt->FirstFailedLeg == INDEX_NONE)
+                    {
+                        RecoveryReceipt->FirstFailedLeg = Index;
+                        RecoveryReceipt->OriginalSeedCount = OriginalSeeds.Num();
+                        for (auto SeedIndex = 0; SeedIndex < OriginalSeeds.Num(); ++SeedIndex)
+                        { RecoveryReceipt->OriginalSeeds[SeedIndex] = OriginalSeeds[SeedIndex]; }
+                        RecoveryReceipt->OriginalRaysBeforeContinuation = InOutRays;
+                    }
+                    else if (RecoveryReceipt != nullptr && ContinuationUsed)
+                    { RecoveryReceipt->LaterLegFailed = true; }
+#endif
+                    const auto Qualifies = NOT ContinuationUsed && TriedCandidates > 0 && TriedCandidates <= 2
+                        && AllFailedSeedsUnderBody && FailedSeeds.Num() == TriedCandidates
+                        && InRecoveryContinuation != nullptr && InRecoveryContinuation->_TryConsume
+                        && InRecoveryContinuation->_IsCurrent;
+#if WITH_DEV_AUTOMATION_TESTS
+                    if (RecoveryReceipt != nullptr && NOT ContinuationUsed)
+                    { RecoveryReceipt->Qualified = Qualifies; }
+#endif
+                    if (Qualifies && InRecoveryContinuation->_TryConsume(InOutRays))
+                    {
+                        ContinuationUsed = true;
+#if WITH_DEV_AUTOMATION_TESTS
+                        if (RecoveryReceipt != nullptr)
+                        { RecoveryReceipt->Consumed = true; }
+#endif
+                        const auto Query = MakeQuery(Index);
+                        const auto SearchRadius = Foothold.Get_SearchRadius() > 0.0f
+                            ? Foothold.Get_SearchRadius() : ck_procedural_gait::DerivedSearchRadiusShareOfReach * Query.Reach;
+                        const auto BoundaryQuery = FProceduralFootholdUnderBodyBoundaryQuery{
+                            .BodyLocation = Query.BodyLocation,
+                            .Hip = Query.Hip,
+                            .Lateral = Query.Basis.GetAxisY(),
+                            .Outboard = Query.Outboard,
+                            .BodyBoundary = static_cast<double>(Query.MaxHipLateral) - ck_procedural_gait::UnderBodyMargin + 0.1,
+                            .SearchRadius = SearchRadius,
+                            .ForceReach = Query.Step->Get_ForceStepReachFraction() * Query.Reach,
+                            .OwnSideTolerance = ck_procedural_gait::InboardToleranceShareOfReach * Query.Reach,
+                            .FootContactRadius = Query.FootContactRadius,
+                            .LegIndex = Query.LegIndex,
+                            .Reservations = Query.Reservations};
+                        auto JointBoundaryAttempted = false;
+#if WITH_DEV_AUTOMATION_TESTS
+                        const auto BoundaryStartRays = InOutRays;
+#endif
+                        for (const auto& Failed : FailedSeeds)
+                        {
+#if WITH_DEV_AUTOMATION_TESTS
+                            auto ConstructedPoints = 0;
+#endif
+                            const auto Point = Get_ProceduralFootholdUnderBodyBoundary(BoundaryQuery,
+                                Failed.Position, Failed.Normal, JointBoundaryAttempted
+#if WITH_DEV_AUTOMATION_TESTS
+                                , &ConstructedPoints
+#endif
+                                );
+#if WITH_DEV_AUTOMATION_TESTS
+                            if (RecoveryReceipt != nullptr)
+                            { RecoveryReceipt->GeometryPointCount += ConstructedPoints; }
+#endif
+                            if (NOT Point.IsSet() || NOT Get_IsProceduralFootholdNativePointRepresentable(Point.GetValue()))
+                            { continue; }
+                            auto NativeSpansFit = true;
+                            for (auto Attempt = 0; Attempt < 2; ++Attempt)
+                            {
+                                const auto Span = MakeProceduralGroundProbeSpan(Attempt, Probe.Get_Up(),
+                                    Probe.Get_Down(), Probe.Get_OutwardLean());
+                                if (NOT FMath::IsFinite(Span.Get_UpDistance()) || NOT FMath::IsFinite(Span.Get_DownDistance())
+                                    || NOT FMath::IsFinite(Span.Get_OutwardLean()))
+                                { NativeSpansFit = false; break; }
+                                const auto ProbeUp = Query.Basis.GetAxisZ();
+                                const auto Radial = FVector::VectorPlaneProject(Point.GetValue() - Query.BodyLocation, ProbeUp).GetSafeNormal();
+                                const auto Axis = FProceduralGaitSolver::ComputeTraceAxis(ProbeUp, Radial, Span.Get_OutwardLean());
+                                if (NOT Get_IsProceduralFootholdNativePointRepresentable(Point.GetValue() + Axis * Span.Get_UpDistance())
+                                    || NOT Get_IsProceduralFootholdNativePointRepresentable(Point.GetValue() - Axis * Span.Get_DownDistance()))
+                                { NativeSpansFit = false; break; }
+                            }
+                            if (NOT NativeSpansFit)
+                            { continue; }
+                            if (NOT InRecoveryContinuation->_IsCurrent())
+                            { return false; }
+#if WITH_DEV_AUTOMATION_TESTS
+                            const auto BoundaryRays = InOutRays;
+#endif
+                            const auto Boundary = ck_procedural_gait::DoProbe_Down(Query, Point.GetValue(),
+                                EProceduralFootholdSource::Ring, ck_procedural_gait::EGroundProbeAttempts::RetryFromInsideSolid,
+                                ck_procedural_gait::EFootholdReprobe::None, ck_procedural_gait::EFootholdStage::Search,
+                                InOutRays, nullptr);
+                            HasLanding = Boundary.Verdict == EProceduralFootholdVerdict::Usable
+                                && FVector::Dist(Query.Hip, Boundary.Position) <= BoundaryQuery.ForceReach
+                                && FVector::Dist(PresentationBody.TransformPosition(
+                                    Gait._Legs[Index].Get<FFragment_ProceduralLeg_Params>().Get_Placement().Get_HipLocal()),
+                                    Boundary.Position) <= BoundaryQuery.ForceReach;
+#if WITH_DEV_AUTOMATION_TESTS
+                            if (RecoveryReceipt != nullptr)
+                            {
+                                const auto SeedIndex = RecoveryReceipt->BoundarySeedCount++;
+                                RecoveryReceipt->BoundaryPoints[SeedIndex] = Point.GetValue();
+                                RecoveryReceipt->BoundarySeeds[SeedIndex] = RecordRecoverySeed(Boundary, false, InOutRays - BoundaryRays);
+                                RecoveryReceipt->ContinuationRays = InOutRays - BoundaryStartRays;
+                                RecoveryReceipt->BoundaryAccepted = HasLanding;
+                            }
+#endif
+                            if (HasLanding)
+                            { break; }
+                            if (NOT InRecoveryContinuation->_IsCurrent())
+                            { return false; }
+                        }
+                        if (NOT InRecoveryContinuation->_IsCurrent())
+                        { return false; }
+                    }
+                    if (HasLanding)
+                    { continue; }
                     if (OutSeedFailure != nullptr && TriedCandidates > 0 && TriedCandidates <= 2 && AllFailedSeedsFinalForce)
                     { *OutSeedFailure = EProceduralHeightSeedFailure::TrustedDownFinalForceReject; }
                     return false;
@@ -3785,13 +3872,16 @@ namespace ck
         for (const auto& Anchor : Stance.Get_Anchors())
         {
             const auto& AnchorLeg = Anchor.Get_Leg();
-            if (NOT procedural_leg::Get_IsSupporting(AnchorLeg)
-                || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(AnchorLeg) != InGait.ConvertToHandle())
+            const auto AnchorIndex = Gait._Legs.IndexOfByKey(AnchorLeg);
+            if (AnchorIndex == INDEX_NONE || NOT procedural_leg::Get_IsLive(AnchorLeg)
+                || NOT AnchorLeg.Has<FFragment_ProceduralLeg>() || NOT AnchorLeg.Has<FFragment_ProceduralLeg_Params>()
+                || NOT AnchorLeg.Has<FFragment_LifetimeOwner>()
+                || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(AnchorLeg) != InGait.ConvertToHandle()
+                || NOT procedural_leg::Get_IsSupporting(AnchorLeg))
             { return false; }
             const auto& Foot = AnchorLeg.Get<FFragment_ProceduralLeg>().Get_Foot();
             const auto& AnchorParams = AnchorLeg.Get<FFragment_ProceduralLeg_Params>();
-            const auto AnchorIndex = Gait._Legs.IndexOfByKey(AnchorLeg);
-            if (AnchorIndex == INDEX_NONE || Foot.Get_Phase() != ECk_ProceduralLeg_FootPhase::Planted
+            if (Foot.Get_Phase() != ECk_ProceduralLeg_FootPhase::Planted
                 || Foot.Get_Contact() != ECk_ProceduralLeg_FootContact::Trusted
                 || NOT Foot.Get_Position().Equals(Anchor.Get_FootWorld(), 1.0e-3)
                 || NOT AnchorParams.Get_Placement().Get_HipLocal().Equals(Anchor.Get_HipLocal(), 1.0e-3)
@@ -3818,6 +3908,12 @@ namespace ck
             if (PresentationBlocker.IsSet())
             { RecordBoundary(Anchor, NativeTop.GetValue(), PresentationBlocker); PublishVisibilityRetry(); return false; }
         }
+        if (ContinuationUsed && NOT InRecoveryContinuation->_IsCurrent())
+        { return false; }
+#if WITH_DEV_AUTOMATION_TESTS
+        if (RecoveryReceipt != nullptr)
+        { RecoveryReceipt->AdmissionAccepted = true; }
+#endif
 #if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
         HeightObservation.Result = true;
 #endif
@@ -4416,6 +4512,64 @@ namespace ck
         auto HasFreshRequestedLead = false;
 
         InGaitComp._Solver.TransformState(InverseBasis * InGaitComp._Basis);
+
+        // A continuing plant already has a published world anchor. Capture its transformed solver state before
+        // any per-leg work so publication can avoid another basis round trip only when that plant is unchanged.
+        struct FContinuingWorldPlant
+        {
+            FCk_Handle_ProceduralLeg Leg;
+            FVector WorldPosition;
+            FVector WorldNormal;
+            FVector SupportPosition;
+            FVector SupportNormal;
+            bool Trusted = false;
+        };
+        auto ContinuingWorldPlants = TArray<TOptional<FContinuingWorldPlant>, TInlineAllocator<8>>{};
+        ContinuingWorldPlants.SetNum(InGaitComp._Legs.Num());
+        const auto ContinuingPlantSolve = InGaitComp._SolveSequence;
+        const auto HasCurrentWorldPlant = [&](const FCk_Handle_ProceduralLeg& InLeg, int32 InIndex) -> bool
+        {
+            if (InIndex < 0 || InIndex >= 64 || InIndex >= InGaitComp._Solver.NumLegs()
+                || ck::Is_NOT_Valid(InLeg) || NOT InLeg.Has<FFragment_ProceduralLeg>()
+                || NOT InLeg.Has<FFragment_ProceduralLeg_Params>()
+                || NOT InLeg.Has<FFragment_LifetimeOwner>()
+                || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InLeg) != InHandle.ConvertToHandle()
+                || NOT procedural_leg::Get_IsSupporting(InLeg)
+                || NOT InGaitComp._Solver.IsLegEnabled(InIndex)
+                || NOT InGaitComp._Solver.IsLegParticipating(InIndex)
+                || InGaitComp._Solver.HasPendingStep(InIndex)
+                || (InGaitComp._UnplantedMask & ck_procedural_gait::Get_LegBit(InIndex)) != 0
+                || InGaitComp._ParticipationLeases.ContainsByPredicate([InIndex](const auto& InLease)
+                    { return InLease._LegIndices.Contains(InIndex); }))
+            { return false; }
+
+            const auto& Stance = InGaitComp._ReachStance;
+            const auto& Foot = InLeg.Get<FFragment_ProceduralLeg>().Get_Foot();
+            const auto& State = InGaitComp._Solver.GetLegState(InIndex);
+            return Stance.Get_HasSample() && Stance.Get_SolveSequence() == ContinuingPlantSolve
+                && InGaitComp._SolveSequence == ContinuingPlantSolve
+                && Foot.Get_Phase() == ECk_ProceduralLeg_FootPhase::Planted
+                && Foot.Get_Contact() == ECk_ProceduralLeg_FootContact::Trusted
+                && NOT Foot.Get_Position().ContainsNaN() && Foot.Get_Normal().IsNormalized()
+                && NOT State.Get_Swing().Get_Active() && State.Get_Plant().Get_Trusted()
+                && State.Get_AutomaticRecovery() == EProceduralGaitAutomaticRecovery::None
+                && NOT State.Get_Plant().Get_Position().ContainsNaN() && State.Get_Plant().Get_Normal().IsNormalized()
+                && Stance.Get_Anchors().ContainsByPredicate([&](const auto& InAnchor)
+                    { return InAnchor.Get_Leg() == InLeg && InAnchor.Get_FootWorld() == Foot.Get_Position(); });
+        };
+        if (Basis.IsNormalized() && (InverseBasis * InGaitComp._Basis).IsNormalized())
+        {
+            for (auto Index = 0; Index < InGaitComp._Legs.Num(); ++Index)
+            {
+                const auto& Leg = InGaitComp._Legs[Index];
+                if (NOT HasCurrentWorldPlant(Leg, Index))
+                { continue; }
+                const auto& Foot = Leg.Get<FFragment_ProceduralLeg>().Get_Foot();
+                const auto& Plant = InGaitComp._Solver.GetLegState(Index).Get_Plant();
+                ContinuingWorldPlants[Index] = FContinuingWorldPlant{Leg, Foot.Get_Position(), Foot.Get_Normal(),
+                    Plant.Get_Position(), Plant.Get_Normal(), Plant.Get_Trusted()};
+            }
+        }
 
         const FFragment_SurfaceMotion_Support* PaceSupport = nullptr;
         TOptional<ck_procedural_gait::FObservedBlockedFace> BlockedFace;
@@ -5795,9 +5949,21 @@ namespace ck
                 == EProceduralGaitAutomaticRecovery::WaitingForContact;
             const auto ContactTrusted = NOT Waiting
                 && (Output.Get_Planted() ? Plant.Get_Trusted() : Inputs[Index].Get_TargetTrusted());
+            const auto* ContinuingPlant = ContinuingWorldPlants[Index].IsSet()
+                ? &ContinuingWorldPlants[Index].GetValue() : nullptr;
+            const auto KeepWorldPlant = ContinuingPlant != nullptr && Output.Get_Planted() && ContactTrusted
+                && NOT Output.Get_NativeTouchdownAttempted() && NOT Output.Get_NativeTouchdownResolved()
+                && ContinuingPlant->Leg == Leg && HasCurrentWorldPlant(Leg, Index)
+                && LegComp._Foot.Get_Position() == ContinuingPlant->WorldPosition
+                && LegComp._Foot.Get_Normal() == ContinuingPlant->WorldNormal
+                && Plant.Get_Position() == ContinuingPlant->SupportPosition
+                && Plant.Get_Normal() == ContinuingPlant->SupportNormal
+                && Plant.Get_Trusted() == ContinuingPlant->Trusted;
             LegComp._Foot
-                .Set_Position(Basis.RotateVector(Output.Get_Planted() ? Plant.Get_Position() : Output.Get_Position()))
-                .Set_Normal(Basis.RotateVector(Output.Get_Planted() ? Plant.Get_Normal() : Output.Get_Normal()))
+                .Set_Position(KeepWorldPlant ? ContinuingPlant->WorldPosition
+                    : Basis.RotateVector(Output.Get_Planted() ? Plant.Get_Position() : Output.Get_Position()))
+                .Set_Normal(KeepWorldPlant ? ContinuingPlant->WorldNormal
+                    : Basis.RotateVector(Output.Get_Planted() ? Plant.Get_Normal() : Output.Get_Normal()))
                 .Set_Rotation((Basis * (Output.Get_Planted() ? Plant.Get_Rotation() : Output.Get_Rotation())).GetNormalized())
                 .Set_SwingAlpha(Output.Get_SwingAlpha())
                 .Set_Phase(Output.Get_Planted() ? ECk_ProceduralLeg_FootPhase::Planted : ECk_ProceduralLeg_FootPhase::Swinging)

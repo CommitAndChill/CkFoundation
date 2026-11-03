@@ -55,7 +55,8 @@ enum class ECk_SurfaceMotion_ContactSource : uint8
     Fan,
     Fall,
     Feet,
-    Step
+    Step,
+    NativeEnvelope
 };
 
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_SurfaceMotion_ContactSource);

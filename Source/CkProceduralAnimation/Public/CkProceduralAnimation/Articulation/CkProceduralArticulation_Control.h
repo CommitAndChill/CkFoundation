@@ -6,6 +6,16 @@
 class CKPROCEDURALANIMATION_API FCk_ProceduralArticulation_Control
 {
 public:
+    // Optional absence is distinct from revision zero. Outputs are empty on failure; returned parts exclude the root.
+    // Validates every binding, then requires Body and the requested exact limb handles to be unclaimed and settled.
+    static auto
+    TryGet_UnclaimedState(
+        const FCk_Handle& InRoot,
+        TArrayView<const FCk_Handle> InRequiredLimbs,
+        TOptional<uint64>& OutClaimsRevision,
+        TArray<FCk_Handle>& OutBoundParts)
+        -> bool;
+
     static auto
     TryReserveClaims(
         const FCk_Handle_ProceduralArticulation& InSubject,

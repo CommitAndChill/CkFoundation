@@ -39,6 +39,8 @@ namespace ck_surface_motion_utils
             { return ECk_SurfaceMotion_ContactSource::Feet; }
             case ck::EProceduralSurfaceContactSource::Step:
             { return ECk_SurfaceMotion_ContactSource::Step; }
+            case ck::EProceduralSurfaceContactSource::NativeEnvelope:
+            { return ECk_SurfaceMotion_ContactSource::NativeEnvelope; }
             default:
             { return ECk_SurfaceMotion_ContactSource::None; }
         }

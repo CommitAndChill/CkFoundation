@@ -9,6 +9,7 @@
 #include "CkProceduralAnimation/Gait/CkProceduralGait_Utils.h"
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Fragment.h"
 #include "CkProceduralAnimation/Leg/CkProceduralLeg_Utils.h"
+#include "CkProceduralAnimation/Limb/CkProceduralLimb_Fragment.h"
 #include "CkProceduralAnimation/Rig/CkProceduralRig_Processor.h"
 
 #include "CkCore/Validation/CkIsValid.h"
@@ -26,6 +27,19 @@
 
 namespace ck_procedural_articulation_control
 {
+    auto
+        Get_IsOptionalSubjectMemberLive(
+            const FCk_Handle& InHandle)
+        -> bool
+    {
+        return ck::IsValid(InHandle) && NOT InHandle.Has<ck::FTag_DestroyEntity_Initiate>()
+            && NOT InHandle.Has<ck::FTag_DestroyEntity_EndPlay>()
+            && NOT InHandle.Has<ck::FTag_DestroyEntity_Teardown>()
+            && NOT InHandle.Has<ck::FTag_DestroyEntity_Await>()
+            && NOT InHandle.Has<ck::FTag_DestroyEntity_Finalize>()
+            && (NOT InHandle.Has<ck::FFragment_ProceduralLeg>() || NOT InHandle.Has<ck::FTag_ProceduralLeg_Detached>());
+    }
+
     auto
         Get_IsTokenValid(
             FCk_ArticulationControlToken InToken)
@@ -303,6 +317,134 @@ namespace ck_procedural_articulation_control
             Presentation != FCk_Handle_Transform{}, MoveTemp(LimbPoses)};
         return true;
     }
+}
+
+auto
+    FCk_ProceduralArticulation_Control::
+    TryGet_UnclaimedState(
+        const FCk_Handle& InRoot,
+        TArrayView<const FCk_Handle> InRequiredLimbs,
+        TOptional<uint64>& OutClaimsRevision,
+        TArray<FCk_Handle>& OutBoundParts)
+    -> bool
+{
+    using namespace ck_procedural_articulation_control;
+    OutClaimsRevision.Reset();
+    OutBoundParts.Reset();
+    if (NOT Get_IsOptionalSubjectMemberLive(InRoot) || InRequiredLimbs.Num() < 0
+        || InRequiredLimbs.Num() > 64 || (InRequiredLimbs.Num() > 0 && InRequiredLimbs.GetData() == nullptr))
+    { return false; }
+    const auto Registry = InRoot.Get_RegistryView().Get_RegistryHandle();
+    auto Required = TSet<FCk_Handle>{};
+    for (const auto& Limb : InRequiredLimbs)
+    {
+        if (NOT Get_IsOptionalSubjectMemberLive(Limb) || Limb == InRoot || Required.Contains(Limb)
+            || Limb.Get_RegistryView().Get_RegistryHandle() != Registry
+            || NOT Limb.Has<ck::FFragment_LifetimeOwner>()
+            || Limb.Get<ck::FFragment_LifetimeOwner>().Get_Entity() != InRoot)
+        { return false; }
+        Required.Add(Limb);
+    }
+    const auto HasParams = InRoot.Has<ck::FFragment_ProceduralArticulation_Params>();
+    const auto HasBindings = InRoot.Has<ck::FFragment_ProceduralArticulation_Bindings>();
+    const auto HasClaims = InRoot.Has<ck::FFragment_ProceduralArticulation_Claims>();
+    const auto HasPose = InRoot.Has<ck::FFragment_ProceduralArticulation_Pose>();
+    const auto HasLegacy = InRoot.Has<ck::FFragment_ProceduralArticulation_LegacyCandidate>();
+    const auto HasControl = InRoot.Has<ck::FFragment_ProceduralArticulation_ControlCandidate>();
+    const auto HasHealth = InRoot.Has<ck::FFragment_ProceduralArticulation_Health>();
+    if (NOT HasParams && NOT HasBindings && NOT HasClaims && NOT HasPose && NOT HasLegacy && NOT HasControl && NOT HasHealth)
+    { return true; }
+    if (NOT HasParams || NOT HasBindings || NOT HasClaims || NOT HasPose || NOT HasLegacy || NOT HasControl || NOT HasHealth)
+    { return false; }
+    const auto& Claims = InRoot.Get<ck::FFragment_ProceduralArticulation_Claims>();
+    const auto& Pose = InRoot.Get<ck::FFragment_ProceduralArticulation_Pose>();
+    const auto& Control = InRoot.Get<ck::FFragment_ProceduralArticulation_ControlCandidate>();
+    const auto& Health = InRoot.Get<ck::FFragment_ProceduralArticulation_Health>();
+    if (Health.Get_State() != ECk_ProceduralArticulation_Health::Operational
+        || Health.Get_Fault() != ECk_ProceduralArticulation_Fault::None
+        || Pose._SettledRevision == 0 || Pose._IssuedRevision != Pose._SettledRevision || Pose._PendingObservation
+        || Control._HasControlCandidate || Claims._BatchStaged || Claims._BatchPublicationPending
+        || NOT Claims._Tickets.IsEmpty() || NOT Claims._TicketChannels.IsEmpty()
+        || NOT Claims._TokenPoses.IsEmpty() || NOT Claims._TicketRevisions.IsEmpty())
+    { return false; }
+    const auto& Bindings = InRoot.Get<ck::FFragment_ProceduralArticulation_Bindings>();
+    const auto& Bound = Bindings.Get_Bindings();
+    const auto& Limbs = Bindings.Get_Limbs();
+    if (Bound.Num() > 64 || Limbs.Num() != Bound.Num() || Claims._LimbOwners.Num() != Bound.Num())
+    { return false; }
+    auto Parts = TArray<FCk_Handle>{};
+    auto SeenParts = TSet<FCk_Handle>{};
+    const auto AddPart = [&](const FCk_Handle_Transform& InPart) -> bool
+    {
+        const auto Part = InPart.ConvertToHandle();
+        if (NOT Get_IsOptionalSubjectMemberLive(Part) || Part == InRoot || SeenParts.Contains(Part)
+            || Part.Get_RegistryView().Get_RegistryHandle() != Registry
+            || NOT Part.Has<ck::FFragment_LifetimeOwner>()
+            || Part.Get<ck::FFragment_LifetimeOwner>().Get_Entity() != InRoot
+            || NOT Get_IsBoundPartLive(InPart, InRoot))
+        { return false; }
+        for (const auto& Limb : Limbs)
+        {
+            if (Limb.ConvertToHandle() == Part)
+            { return false; }
+        }
+        const auto Transform = UCk_Utils_Transform_UE::Get_EntityCurrentTransform(InPart);
+        if (Transform.ContainsNaN() || NOT Transform.GetRotation().IsNormalized()
+            || Transform.GetScale3D().GetAbsMin() <= UE_SMALL_NUMBER)
+        { return false; }
+        SeenParts.Add(Part);
+        Parts.Add(Part);
+        return true;
+    };
+    if (Bindings.Get_Presentation() != FCk_Handle_Transform{} && NOT AddPart(Bindings.Get_Presentation()))
+    { return false; }
+    auto Ids = TSet<FName>{};
+    auto SeenLimbs = TSet<FCk_Handle>{};
+    for (auto Index = 0; Index < Bound.Num(); ++Index)
+    {
+        const auto& Binding = Bound[Index];
+        const auto Limb = Limbs[Index].ConvertToHandle();
+        if (Binding.Get_LimbId().IsNone() || Ids.Contains(Binding.Get_LimbId())
+            || NOT Get_IsOptionalSubjectMemberLive(Limb) || Limb == InRoot || SeenLimbs.Contains(Limb)
+            || Limb.Get_RegistryView().Get_RegistryHandle() != Registry
+            || NOT Limb.Has<ck::FFragment_LifetimeOwner>()
+            || Limb.Get<ck::FFragment_LifetimeOwner>().Get_Entity() != InRoot
+            || NOT Limb.Has<ck::FFragment_ProceduralLimb>())
+        { return false; }
+        const auto& Identity = Limb.Get<ck::FFragment_ProceduralLimb>();
+        if (Identity.Get_Id() != Binding.Get_LimbId() || Identity.Get_Index() != Index
+            || Binding.Get_Segments().Num() < 1 || Binding.Get_Segments().Num() > 8)
+        { return false; }
+        Ids.Add(Binding.Get_LimbId());
+        SeenLimbs.Add(Limb);
+        for (const auto& Part : Binding.Get_Segments())
+        {
+            if (NOT AddPart(Part))
+            { return false; }
+        }
+        if (Binding.Get_Terminal() != FCk_Handle_Transform{} && NOT AddPart(Binding.Get_Terminal()))
+        { return false; }
+    }
+    if (Claims._BodyOwner != FCk_ArticulationControlToken{})
+    { return false; }
+    for (const auto& Limb : Required)
+    {
+        auto Found = false;
+        for (auto Index = 0; Index < Limbs.Num(); ++Index)
+        {
+            if (Limbs[Index].ConvertToHandle() != Limb)
+            { continue; }
+            if (Claims._LimbOwners[Index] != FCk_ArticulationControlToken{})
+            { return false; }
+            Found = true;
+            break;
+        }
+        if (NOT Found)
+        { return false; }
+    }
+    OutClaimsRevision = Claims._Revision;
+    OutBoundParts = MoveTemp(Parts);
+    return true;
 }
 
 auto

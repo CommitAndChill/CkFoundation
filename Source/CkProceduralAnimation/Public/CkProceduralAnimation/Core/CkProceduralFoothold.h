@@ -159,6 +159,38 @@ namespace ck
             double InRadius)
         -> TOptional<FVector2D>;
 
+    struct FProceduralFootReservation;
+
+    CKPROCEDURALANIMATION_API auto
+        Get_IsProceduralFootholdNativePointRepresentable(
+            const FVector& InPoint)
+        -> bool;
+
+    struct CKPROCEDURALANIMATION_API FProceduralFootholdUnderBodyBoundaryQuery
+    {
+        FVector BodyLocation = FVector::ZeroVector;
+        FVector Hip = FVector::ZeroVector;
+        FVector Lateral = FVector::RightVector;
+        FVector Outboard = FVector::ZeroVector;
+        double BodyBoundary = 0.0;
+        float SearchRadius = 0.0f;
+        float ForceReach = 0.0f;
+        float OwnSideTolerance = 0.0f;
+        float FootContactRadius = 0.0f;
+        int32 LegIndex = INDEX_NONE;
+        TArrayView<const FProceduralFootReservation> Reservations;
+    };
+
+    /** Geometry only. The shared flag bounds the first conflicting reservation refinement across a seed batch. */
+    CKPROCEDURALANIMATION_API auto
+        Get_ProceduralFootholdUnderBodyBoundary(
+            const FProceduralFootholdUnderBodyBoundaryQuery& InQuery,
+            const FVector& InSeed,
+            const FVector& InNormal,
+            bool& InOutJointBoundaryAttempted,
+            int32* OutConstructedPoints = nullptr)
+        -> TOptional<FVector>;
+
     // One bounded query point from a native failed face; no contact or movement authority.
     CKPROCEDURALANIMATION_API auto
         Get_ProceduralFootholdFailedFaceQueryPoint(

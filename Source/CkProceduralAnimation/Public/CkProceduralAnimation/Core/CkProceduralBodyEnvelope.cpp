@@ -1,9 +1,12 @@
 #include "CkProceduralAnimation/Core/CkProceduralBodyEnvelope.h"
 
 #include "CkJolt/Query/CkJoltQuery_Utils.h"
+#include "CkJolt/CkJolt_Utils.h"
 #include "CkJolt/Subsystem/CkJolt_Subsystem.h"
 
 #include <Engine/World.h>
+#include <limits>
+#include <Jolt/Math/Mat44.h>
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 
@@ -103,9 +106,12 @@ namespace ck
             int32 InQueryLimit,
             TOptional<FCk_Jolt_HitResult>* OutSweepHit,
             TOptional<FProceduralBodyEnvelopeOverlapObservation>* OutOverlap,
-            EProceduralBodyEnvelopeEndpointValidation InEndpointValidation)
+            EProceduralBodyEnvelopeEndpointValidation InEndpointValidation,
+            FProceduralBodyEnvelopeEnclosureObservation* OutEnclosure)
         -> bool
     {
+        if (OutEnclosure != nullptr)
+        { *OutEnclosure = FProceduralBodyEnvelopeEnclosureObservation{}; }
         if (OutSweepHit != nullptr)
         { OutSweepHit->Reset(); }
         if (OutOverlap != nullptr)
@@ -155,6 +161,8 @@ namespace ck
         { return false; }
         const auto& Shape = Enclosure->_Shape;
         const auto& Rotation = Enclosure->_Rotation;
+        if (OutEnclosure != nullptr)
+        { *OutEnclosure = FProceduralBodyEnvelopeEnclosureObservation{InStart, InEnd, Shape.Get_HalfExtents(), Rotation}; }
 
         if (InOutQueries >= InQueryLimit)
         { return false; }
@@ -215,3 +223,94 @@ namespace ck
 }
 
 // --------------------------------------------------------------------------------------------------------------------
+
+namespace ck
+{
+    FProceduralBodyEnvelopeEnclosureObservation::
+        FProceduralBodyEnvelopeEnclosureObservation(
+            const FTransform& InStart,
+            const FTransform& InEnd,
+            const FVector& InHalfExtents,
+            const FRotator& InRotation)
+    {
+        if (NOT ck_procedural_body_envelope::Get_IsRigid(InStart)
+            || NOT ck_procedural_body_envelope::Get_IsRigid(InEnd)
+            || NOT ck_procedural_body_envelope::Get_IsFloatVector(InHalfExtents)
+            || InHalfExtents.GetMin() <= 0.0 || InRotation.ContainsNaN()
+            || FMath::Abs(InRotation.Pitch) > 360.0 || FMath::Abs(InRotation.Yaw) > 360.0
+            || FMath::Abs(InRotation.Roll) > 360.0)
+        { return; }
+        // Match CreateShape_FromDimensions and the query transform's native float conversions exactly.
+        const auto NativeExtents = ck::jolt::Conv(InHalfExtents);
+        if (NativeExtents.GetX() <= JPH::cDefaultConvexRadius
+            || NativeExtents.GetY() <= JPH::cDefaultConvexRadius
+            || NativeExtents.GetZ() <= JPH::cDefaultConvexRadius)
+        { return; }
+        const auto NativeQuaternion = ck::jolt::Conv(InRotation.Quaternion());
+        if (NOT NativeQuaternion.IsNormalized())
+        { return; }
+        const auto NativeMatrix = JPH::Mat44::sRotation(NativeQuaternion);
+        const auto Radius = FMath::Abs(static_cast<double>(NativeMatrix.GetColumn3(0).GetZ())) * NativeExtents.GetX()
+            + FMath::Abs(static_cast<double>(NativeMatrix.GetColumn3(1).GetZ())) * NativeExtents.GetY()
+            + FMath::Abs(static_cast<double>(NativeMatrix.GetColumn3(2).GetZ())) * NativeExtents.GetZ();
+        // A rounded box is inside its sharp half-extents box. The coefficients above are the actual native float
+        // matrix, not the original double quaternion. A float corner transform uses at most three products and two
+        // additions: gamma(5), with unit roundoff epsilon/2. This denominator also bounds the two double additions
+        // above. It bounds arithmetic error only: no native shape, padding or query is changed.
+        const auto RoundoffBound = Radius / (1.0 - 8.0 * std::numeric_limits<float>::epsilon());
+        if (NOT FMath::IsFinite(RoundoffBound) || RoundoffBound <= 0.0
+            || RoundoffBound > static_cast<double>(TNumericLimits<float>::Max()))
+        { return; }
+        _Start = InStart;
+        _End = InEnd;
+        _HalfExtents = InHalfExtents;
+        _Rotation = InRotation;
+        _NativeHalfExtents = ck::jolt::Conv(NativeExtents);
+        _NativeRotation = ck::jolt::Conv(NativeQuaternion);
+        _WorldUpRadius = RoundoffBound;
+        _HasObservation = true;
+    }
+
+    // ----------------------------------------------------------------------------------------------------------------
+
+    auto
+        TryGet_ProceduralBodyPlaneClip(
+            const FProceduralBodyEnvelopeEnclosureObservation& InEnclosure,
+            const FTransform& InCurrent,
+            const FTransform& InRejectedPartial,
+            const FCk_Jolt_HitResult& InHit,
+            const FVector& InUp)
+        -> TOptional<FTransform>
+    {
+        if (NOT InEnclosure.Get_HasObservation() || InUp != FVector::UpVector
+            || NOT ck_procedural_body_envelope::Get_IsRigid(InCurrent)
+            || NOT ck_procedural_body_envelope::Get_IsRigid(InRejectedPartial)
+            || NOT InEnclosure.Get_Start().Equals(InCurrent, 0.0)
+            || NOT InEnclosure.Get_End().Equals(InRejectedPartial, 0.0)
+            || InCurrent.GetRotation() != InRejectedPartial.GetRotation()
+            || InCurrent.GetScale3D() != InRejectedPartial.GetScale3D()
+            || InCurrent.GetLocation().X != InRejectedPartial.GetLocation().X
+            || InCurrent.GetLocation().Y != InRejectedPartial.GetLocation().Y
+            || InRejectedPartial.GetLocation().Z >= InCurrent.GetLocation().Z
+            || NOT InHit.Get_HasHit() || NOT FMath::IsFinite(InHit.Get_Fraction())
+            || InHit.Get_Fraction() <= 0.0f || InHit.Get_Fraction() >= 1.0f
+            || NOT ck_procedural_body_envelope::Get_IsFloatVector(InHit.Get_Position())
+            || InHit.Get_Normal() != FVector::UpVector)
+        { return {}; }
+        const auto Radius = InEnclosure.Get_WorldUpRadius();
+        const auto PlaneAndRadius = InHit.Get_Position().Z + Radius;
+        constexpr auto HeightGoalSeparation = 0.1;
+        const auto UnrepresentedHeight = PlaneAndRadius + HeightGoalSeparation;
+        if (NOT FMath::IsFinite(Radius) || Radius <= 0.0 || NOT FMath::IsFinite(PlaneAndRadius)
+            || NOT FMath::IsFinite(UnrepresentedHeight)
+            || FMath::Abs(UnrepresentedHeight) > static_cast<double>(TNumericLimits<float>::Max()))
+        { return {}; }
+        const auto Height = static_cast<double>(static_cast<float>(UnrepresentedHeight));
+        if (NOT FMath::IsFinite(Height) || Height <= PlaneAndRadius
+            || Height <= InRejectedPartial.GetLocation().Z || Height >= InCurrent.GetLocation().Z)
+        { return {}; }
+        auto Candidate = InCurrent;
+        Candidate.SetLocation(FVector{InCurrent.GetLocation().X, InCurrent.GetLocation().Y, Height});
+        return Candidate;
+    }
+}
