@@ -1,4 +1,5 @@
 #include "CkProceduralAnimation/Core/CkProceduralBodyEnvelope.h"
+#include "CkProceduralBodyEnvelopeCertificate.h"
 
 #include "CkJolt/Query/CkJoltQuery_Utils.h"
 #include "CkJolt/CkJolt_Utils.h"
@@ -155,10 +156,14 @@ namespace ck
         // CkJolt's vector conversion preserves UE centimetre values. Its default convex radius is therefore 0.05 cm
         // here. Padding each axis by that radius makes the rounded Jolt box enclose the authored sharp box plus margin.
         const auto BoxExtents = HalfExtents + FVector{Margin + JPH::cDefaultConvexRadius};
-        const auto Enclosure = ck_procedural_body_envelope::TryGet_Enclosure(
+        auto Enclosure = ck_procedural_body_envelope::TryGet_Enclosure(
             BoxExtents, InStart.GetRotation(), InEnd.GetRotation());
         if (NOT Enclosure.IsSet())
         { return false; }
+        const auto Certified = ck_body_envelope_certificate::TryGet_CertifiedHalfExtents(
+            HalfExtents, Margin, InStart, InEnd, Enclosure->_Rotation, Enclosure->_Shape.Get_HalfExtents());
+        if (Certified.IsSet())
+        { Enclosure->_Shape.Set_HalfExtents(*Certified); }
         const auto& Shape = Enclosure->_Shape;
         const auto& Rotation = Enclosure->_Rotation;
         if (OutEnclosure != nullptr)
