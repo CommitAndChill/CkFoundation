@@ -126,6 +126,14 @@ namespace ck
         }
     };
 
+    // Exact native seed failure of this Landing admission call; never a retained contact or generic rejection.
+    enum class EProceduralHeightSeedFailure : uint8
+    {
+        None,
+        TrustedInitialDownClampReprobeMiss,
+        TrustedDownFinalForceReject
+    };
+
     enum class EProceduralHeightPlanStage : uint8
     {
         Landing,
@@ -144,7 +152,8 @@ namespace ck
             int32 InRayLimit,
             EProceduralHeightPlanStage InStage = EProceduralHeightPlanStage::Landing,
             TOptional<FProceduralGaitHeightRetryWitness>* OutVisibilityRetry = nullptr,
-            TArray<FProceduralContactStagingBoundary>* OutStagingBoundaries = nullptr)
+            TArray<FProceduralContactStagingBoundary>* OutStagingBoundaries = nullptr,
+            EProceduralHeightSeedFailure* OutSeedFailure = nullptr)
         -> bool;
 
     CKPROCEDURALANIMATION_API auto
@@ -161,4 +170,43 @@ namespace ck
             int32& InOutRays,
             int32 InRayLimit)
         -> bool;
+
+#if WITH_DEV_AUTOMATION_TESTS
+    // Test-attached, copy-only receipts from actual Surface planning calls; never gameplay authority.
+    struct CKPROCEDURALANIMATION_API FProceduralHeightPlanningTestAttempt
+    {
+        CK_GENERATED_BODY(FProceduralHeightPlanningTestAttempt);
+
+        FProceduralGaitHeightCandidate Candidate;
+        double Delta = 0.0;
+        uint8 Route = 0; // Ordinary=0, Deferred=1, Interior=2, Cooperative=3.
+        EProceduralHeightPlanStage Stage = EProceduralHeightPlanStage::Landing;
+        EProceduralHeightSeedFailure SeedFailure = EProceduralHeightSeedFailure::None;
+        bool Accepted = false;
+        bool Completed = false;
+        bool WitnessRequested = false;
+        TOptional<FProceduralGaitHeightRetryWitness> Witness;
+        int32 Rays = 0;
+        int32 Envelopes = 0;
+        int32 Trials = 0;
+        FTransform BodyBefore = FTransform::Identity;
+        FTransform BodyAfter = FTransform::Identity;
+        bool Preparing = false;
+    };
+
+    struct CKPROCEDURALANIMATION_API FFragment_ProceduralHeightPlanning_Test
+    {
+        CK_GENERATED_BODY(FFragment_ProceduralHeightPlanning_Test);
+
+        FProceduralHeightPlanningTestAttempt Attempts[4]{};
+        int32 Count = 0;
+        bool Overflow = false;
+        uint64 Frame = 0;
+        uint64 Solve = 0;
+        bool CooperativeThirdOffered = false;
+        bool InteriorOffered = false;
+        int32 ValidatedWitnessTrial = 0; // One-based charged trial, zero when no witness validated.
+        bool PlanningConsumed = false;
+    };
+#endif
 }

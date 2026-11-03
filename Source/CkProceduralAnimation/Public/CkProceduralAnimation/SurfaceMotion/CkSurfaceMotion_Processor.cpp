@@ -20,6 +20,9 @@
 #include "CkJolt/Query/CkJoltQuery_Utils.h"
 
 #include <Engine/World.h>
+#if WITH_DEV_AUTOMATION_TESTS
+#include <CoreGlobals.h>
+#endif
 
 CK_REGISTER_PROCESSOR(ck::FProcessor_SurfaceMotion_Setup);
 CK_REGISTER_PROCESSOR(ck::FProcessor_SurfaceMotion_HandleRequests);
@@ -27,6 +30,7 @@ CK_REGISTER_PROCESSOR(ck::FProcessor_SurfaceMotion_Update);
 CK_REGISTER_PROCESSOR(ck::FProcessor_SurfaceMotion_CancelPendingRequests);
 
 // --------------------------------------------------------------------------------------------------------------------
+
 
 namespace ck_surface_motion
 {
@@ -146,6 +150,17 @@ namespace ck
             const FFragment_Transform& InTransform)
         -> void
     {
+#if WITH_DEV_AUTOMATION_TESTS
+        auto* HeightTest = InHandle.Has<FFragment_ProceduralHeightPlanning_Test>()
+            ? &InHandle.Get<FFragment_ProceduralHeightPlanning_Test>() : nullptr;
+        if (HeightTest != nullptr)
+        {
+            *HeightTest = FFragment_ProceduralHeightPlanning_Test{};
+            HeightTest->Frame = GFrameCounter;
+            HeightTest->Solve = InHandle.Has<FFragment_ProceduralGait>()
+                ? InHandle.Get<FFragment_ProceduralGait>()._SolveSequence : 0;
+        }
+#endif
         InSupportComp._AdaptiveTopAcquisition.Reset();
         auto& Staging = InSupportComp._ContactStaging;
         Staging._PoseRayTickets.Reset();
@@ -624,21 +639,29 @@ namespace ck
                     const auto WholeBodyGoal = ObstacleHeightDelta.IsSet() || (InSupportComp._AdaptiveHeightActive && NOT HasRelief);
                     auto TriedWholeBodyGoal = false;
                     auto TriedPreparatoryBody = false;
+                    enum class EHeightGoalRoute : uint8
+                    {
+                        Ordinary,
+                        Deferred,
+                        Interior,
+                        Cooperative
+                    };
                     struct FHeightGoalAttempt
                     {
                         const FProceduralGaitHeightCandidate* Candidate;
                         double Delta;
+                        EProceduralHeightPlanStage Stage;
+                        EHeightGoalRoute Route;
+                        EProceduralHeightSeedFailure SeedFailure = EProceduralHeightSeedFailure::None;
+                        bool Completed = false;
+                        bool Accepted = false;
                     };
                     auto Attempts = TArray<FHeightGoalAttempt, TInlineAllocator<4>>{};
                     auto DeferredCandidates = TArray<const FProceduralGaitHeightCandidate*, TInlineAllocator<8>>{};
-                    const auto TryGoal = [&](const FProceduralGaitHeightCandidate& InCandidate, double InDelta,
-                        TOptional<FProceduralGaitHeightRetryWitness>* OutVisibilityRetry = nullptr) -> bool
+                    const auto RunGoal = [&](const FProceduralGaitHeightCandidate& InCandidate, double InDelta,
+                        TOptional<FProceduralGaitHeightRetryWitness>* OutVisibilityRetry,
+                        EProceduralHeightSeedFailure* OutSeedFailure) -> bool
                     {
-                        if (OutVisibilityRetry != nullptr)
-                        { OutVisibilityRetry->Reset(); }
-                        ++InSupportComp._HeightPlanningTrials;
-                        TriedWholeBodyGoal |= WholeBodyGoal;
-                        Attempts.Add(FHeightGoalAttempt{&InCandidate, InDelta});
                         auto GoalBody = Body;
                         GoalBody.AddToTranslation(Up * InDelta);
                         if (NOT FitsLandings(GoalBody))
@@ -646,7 +669,7 @@ namespace ck
                         if (NOT Get_IsProceduralHeightPlanAdmitted(GaitHandle, GoalBody, CorePoseOffset, InCandidate,
                                 InSupportComp._HeightPlanningRays, MaxPlanningRays,
                                 WholeBodyGoal ? EProceduralHeightPlanStage::Recovery : EProceduralHeightPlanStage::Landing,
-                                OutVisibilityRetry, &StagingObservations))
+                                OutVisibilityRetry, &StagingObservations, OutSeedFailure))
                         { return false; }
                         auto FullSweepHit = TOptional<FCk_Jolt_HitResult>{};
                         if (NOT EnvelopeClear(Body, GoalBody, ck_surface_motion::EEnvelopeScope::Simulation, &FullSweepHit))
@@ -678,7 +701,9 @@ namespace ck
                                 {
                                     StartStaging();
                                     if (StagingOwnsMotion)
-                                    { FoundGoal = true; return true; }
+                                    {
+                                        FoundGoal = true; return true;
+                                    }
                                 }
                                 return false;
                             }
@@ -720,10 +745,243 @@ namespace ck
                         { InSupportComp._AdaptiveHeightActive = false; }
                         return true;
                     };
+                    const auto TryGoal = [&](const FProceduralGaitHeightCandidate& InCandidate, double InDelta,
+                        EHeightGoalRoute InRoute,
+                        TOptional<FProceduralGaitHeightRetryWitness>* OutVisibilityRetry = nullptr) -> bool
+                    {
+                        if (OutVisibilityRetry != nullptr)
+                        { OutVisibilityRetry->Reset(); }
+                        ++InSupportComp._HeightPlanningTrials;
+                        TriedWholeBodyGoal |= WholeBodyGoal;
+                        const auto AttemptIndex = Attempts.Add(FHeightGoalAttempt{&InCandidate, InDelta,
+                            WholeBodyGoal ? EProceduralHeightPlanStage::Recovery : EProceduralHeightPlanStage::Landing,
+                            InRoute});
+                        auto SeedFailure = EProceduralHeightSeedFailure::None;
+#if WITH_DEV_AUTOMATION_TESTS
+                        const auto BodyBeforeAttempt = Body;
+#endif
+                        const auto Accepted = RunGoal(InCandidate, InDelta, OutVisibilityRetry, &SeedFailure);
+                        auto& Attempt = Attempts[AttemptIndex];
+                        Attempt.SeedFailure = Accepted ? EProceduralHeightSeedFailure::None : SeedFailure;
+                        Attempt.Completed = true;
+                        Attempt.Accepted = Accepted;
+#if WITH_DEV_AUTOMATION_TESTS
+                        if (HeightTest != nullptr)
+                        {
+                            if (HeightTest->Count >= 4)
+                            { HeightTest->Overflow = true; }
+                            else
+                            {
+                                auto& Receipt = HeightTest->Attempts[HeightTest->Count++];
+                                Receipt.Candidate = InCandidate;
+                                Receipt.Delta = InDelta;
+                                Receipt.Route = static_cast<uint8>(InRoute);
+                                Receipt.Stage = Attempt.Stage;
+                                Receipt.SeedFailure = Attempt.SeedFailure;
+                                Receipt.Accepted = Accepted;
+                                Receipt.Completed = Attempt.Completed;
+                                Receipt.WitnessRequested = OutVisibilityRetry != nullptr;
+                                Receipt.Witness = OutVisibilityRetry != nullptr ? *OutVisibilityRetry
+                                    : TOptional<FProceduralGaitHeightRetryWitness>{};
+                                Receipt.Rays = InSupportComp._HeightPlanningRays;
+                                Receipt.Envelopes = InSupportComp._HeightEnvelopeQueries;
+                                Receipt.Trials = InSupportComp._HeightPlanningTrials;
+                                Receipt.BodyBefore = BodyBeforeAttempt;
+                                Receipt.BodyAfter = Body;
+                                Receipt.Preparing = InSupportComp._AdaptiveHeightPreparing;
+                            }
+                        }
+#endif
+                        return Accepted;
+                    };
                     const auto RetainedPlaneLower = NOT WholeBodyGoal
                         ? Get_ProceduralHeightRetainedPlaneLower(Body, CorePoseOffset, Up,
                             TArrayView<const FProceduralSurfaceReachPaceAnchor>{CoreAnchors})
                         : TOptional<double>{};
+                    auto CooperativeConsumed = false;
+                    struct FHeightGoalOffer
+                    {
+                        const FProceduralGaitHeightCandidate* Candidate;
+                        double Delta;
+                    };
+                    struct FHeightGoalDispatch
+                    {
+                        bool Accepted;
+                        bool ReplacedOriginal;
+                        const FProceduralGaitHeightCandidate* Candidate;
+                        double Delta;
+                        EHeightGoalRoute Route;
+                        bool PlanningConsumed;
+                    };
+                    const auto VisibilityRetryMatches = [&](const TOptional<FProceduralGaitHeightRetryWitness>& InVisibilityRetry,
+                        const FProceduralGaitHeightCandidate& InCandidate, double InDelta) -> bool
+                    {
+                        if (NOT InVisibilityRetry.IsSet())
+                        { return false; }
+                        const auto& Witness = InVisibilityRetry.GetValue();
+                        const auto& OriginalCandidate = Witness.Get_Candidate();
+                        auto RejectedBody = Body;
+                        RejectedBody.AddToTranslation(Up * InDelta);
+                        if (Witness.Get_Frame() != GFrameCounter || Witness.Get_SolveSequence() != Gait._SolveSequence
+                            || NOT Witness.Get_BodyAtSolve().Equals(Body, 1.0e-6)
+                            || NOT Witness.Get_RejectedBody().Equals(RejectedBody, 1.0e-6)
+                            || NOT Witness.Get_SupportUp().Equals(Up, 1.0e-6)
+                            || Witness.Get_PoseOffset().IsSet() != CorePoseOffset.IsSet()
+                            || (CorePoseOffset.IsSet() && NOT Witness.Get_PoseOffset()->Equals(CorePoseOffset.GetValue(), 1.0e-6))
+                            || OriginalCandidate.Get_Leg() != InCandidate.Get_Leg()
+                            || OriginalCandidate.Get_HipLocal() != InCandidate.Get_HipLocal()
+                            || OriginalCandidate.Get_FootWorld() != InCandidate.Get_FootWorld()
+                            || OriginalCandidate.Get_PointWorld() != InCandidate.Get_PointWorld()
+                            || OriginalCandidate.Get_NormalWorld() != InCandidate.Get_NormalWorld()
+                            || OriginalCandidate.Get_Reach() != InCandidate.Get_Reach()
+                            || OriginalCandidate.Get_AdmissionReach() != InCandidate.Get_AdmissionReach()
+                            || OriginalCandidate.Get_RequiresRelief() != InCandidate.Get_RequiresRelief()
+                            || Witness.Get_Cast() != EProceduralFootholdCast::Down
+                            || Witness.Get_PointWorld().ContainsNaN() || NOT Witness.Get_NormalWorld().IsNormalized())
+                        { return false; }
+                        return true;
+                    };
+                    const auto SelectCooperative = [&](int32 InRequiredHistory) -> TOptional<FHeightGoalOffer>
+                    {
+                        if (NOT Adaptive.Get_Enabled() || NOT CanPlan
+                            || PreviousPaceState != ECk_SurfaceMotion_ReachPaceState::Blocked
+                            || NOT HasRelief || WholeBodyGoal || ObstacleHeightDelta.IsSet()
+                            || Staging._Phase != EProceduralContactStagingPhase::Dormant
+                            || (InRequiredHistory != 2 && InRequiredHistory != MaxHeightTrials - 1)
+                            || InSupportComp._HeightPlanningTrials != InRequiredHistory
+                            || Attempts.Num() != InRequiredHistory || CooperativeConsumed
+                            || NOT RetainedPlaneLower.IsSet() || NOT FMath::IsFinite(RetainedPlaneLower.GetValue()))
+                        { return {}; }
+                        for (const auto& Attempt : Attempts)
+                        {
+                            if (NOT Attempt.Completed || Attempt.Accepted
+                                || Attempt.Stage != EProceduralHeightPlanStage::Landing
+                                || (Attempt.SeedFailure != EProceduralHeightSeedFailure::TrustedInitialDownClampReprobeMiss
+                                    && Attempt.SeedFailure != EProceduralHeightSeedFailure::TrustedDownFinalForceReject))
+                            { return {}; }
+                        }
+                        const auto LegCount = Gait._Legs.Num();
+                        const auto CandidateCount = Planning.Get_Candidates().Num();
+                        if (LegCount < 2 || LegCount > 64 || CandidateCount < 0 || CandidateCount > 2 * LegCount)
+                        { return {}; }
+                        const auto AnchorView = TArrayView<const FProceduralSurfaceReachPaceAnchor>{CoreAnchors};
+                        for (auto Index = 0; Index < FMath::Min(8, CandidateCount); ++Index)
+                        {
+                            const auto& Candidate = Planning.Get_Candidates()[Index];
+                            const auto& Leg = Candidate.Get_Leg();
+                            if (Candidate.Get_RequiresRelief() || ck::Is_NOT_Valid(Leg)
+                                || NOT Gait._Legs.Contains(Leg) || NOT Leg.Has<FFragment_LifetimeOwner>()
+                                || NOT Leg.Has<FFragment_ProceduralLeg>() || NOT Leg.Has<FFragment_ProceduralLeg_Params>()
+                                || NOT procedural_leg::Get_IsSupporting(Leg)
+                                || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Leg) != InHandle.ConvertToHandle()
+                                || Candidate.Get_HipLocal().ContainsNaN() || Candidate.Get_FootWorld().ContainsNaN()
+                                || Candidate.Get_PointWorld().ContainsNaN() || Candidate.Get_NormalWorld().ContainsNaN()
+                                || NOT Candidate.Get_NormalWorld().IsNormalized()
+                                || NOT FMath::IsFinite(Candidate.Get_Reach()) || Candidate.Get_Reach() <= 0.0f
+                                || NOT FMath::IsFinite(Candidate.Get_AdmissionReach()) || Candidate.Get_AdmissionReach() <= 0.0f)
+                            { continue; }
+                            const auto Interval = Get_ProceduralHeightPlanningInterval(Body, CorePoseOffset, Up, AnchorView,
+                                Candidate.Get_HipLocal(), Candidate.Get_PointWorld(), Candidate.Get_AdmissionReach(), Settings.Get_Clearance());
+                            const auto Delta = Get_ProceduralHeightReprojectionDelta(Body, CorePoseOffset, Up, AnchorView,
+                                Candidate.Get_HipLocal(), Candidate.Get_PointWorld(), Candidate.Get_AdmissionReach(), Settings.Get_Clearance());
+                            if (NOT Interval.IsSet() || NOT FMath::IsFinite(Interval->X) || NOT FMath::IsFinite(Interval->Y)
+                                || Interval->X > Interval->Y || NOT Delta.IsSet() || NOT FMath::IsFinite(Delta.GetValue())
+                                || Delta.GetValue() >= -1.0e-3 || Delta.GetValue() < Interval->X || Delta.GetValue() > Interval->Y
+                                || Delta.GetValue() < RetainedPlaneLower.GetValue())
+                            { continue; }
+                            const auto AlreadyAttempted = Attempts.ContainsByPredicate([&](const auto& InAttempt)
+                            {
+                                return InAttempt.Candidate->Get_Leg() == Candidate.Get_Leg()
+                                    && InAttempt.Candidate->Get_PointWorld() == Candidate.Get_PointWorld()
+                                    && InAttempt.Candidate->Get_NormalWorld() == Candidate.Get_NormalWorld()
+                                    && InAttempt.Delta == Delta.GetValue();
+                            });
+                            if (NOT AlreadyAttempted)
+                            {
+                                return FHeightGoalOffer{&Candidate, Delta.GetValue()};
+                            }
+                        }
+                        return {};
+                    };
+                    const auto DispatchGoal = [&](const FProceduralGaitHeightCandidate& InCandidate, double InDelta,
+                        EHeightGoalRoute InRoute,
+                        TOptional<FProceduralGaitHeightRetryWitness>* OutVisibilityRetry = nullptr) -> FHeightGoalDispatch
+                    {
+                        const auto ThirdCooperative = SelectCooperative(2);
+                        if (ThirdCooperative.IsSet())
+                        {
+                            if (OutVisibilityRetry != nullptr)
+                            { OutVisibilityRetry->Reset(); }
+                            const auto& Offer = ThirdCooperative.GetValue();
+                            CooperativeConsumed = true;
+#if WITH_DEV_AUTOMATION_TESTS
+                            if (HeightTest != nullptr)
+                            {
+                                HeightTest->CooperativeThirdOffered = true;
+                                HeightTest->PlanningConsumed = true;
+                            }
+#endif
+                            auto VisibilityRetry = TOptional<FProceduralGaitHeightRetryWitness>{};
+                            const auto Accepted = TryGoal(*Offer.Candidate, Offer.Delta,
+                                EHeightGoalRoute::Cooperative, &VisibilityRetry);
+                            const auto FinishDispatch = [&](bool InAccepted, const FProceduralGaitHeightCandidate& InActualCandidate,
+                                double InActualDelta, EHeightGoalRoute InActualRoute, bool InReplacedOriginal) -> FHeightGoalDispatch
+                            {
+                                return {InAccepted, InReplacedOriginal, &InActualCandidate,
+                                    InActualDelta, InActualRoute, true};
+                            };
+                            if (Accepted)
+                            { return FinishDispatch(true, *Offer.Candidate, Offer.Delta, EHeightGoalRoute::Cooperative, true); }
+
+                            auto Interior = TOptional<double>{};
+                            if (VisibilityRetryMatches(VisibilityRetry, *Offer.Candidate, Offer.Delta))
+                            {
+#if WITH_DEV_AUTOMATION_TESTS
+                                if (HeightTest != nullptr)
+                                { HeightTest->ValidatedWitnessTrial = InSupportComp._HeightPlanningTrials; }
+#endif
+                                Interior = Get_ProceduralHeightInteriorRetryDelta(Body, CorePoseOffset, Up,
+                                    TArrayView<const FProceduralSurfaceReachPaceAnchor>{CoreAnchors},
+                                    Offer.Candidate->Get_HipLocal(), VisibilityRetry->Get_PointWorld(),
+                                    Offer.Candidate->Get_AdmissionReach(), Settings.Get_Clearance(), Offer.Delta);
+                            }
+                            const auto AlreadyAttempted = Interior.IsSet() && Attempts.ContainsByPredicate([&](const auto& InAttempt)
+                            {
+                                return InAttempt.Candidate->Get_Leg() == Offer.Candidate->Get_Leg()
+                                    && InAttempt.Candidate->Get_PointWorld() == Offer.Candidate->Get_PointWorld()
+                                    && InAttempt.Candidate->Get_NormalWorld() == Offer.Candidate->Get_NormalWorld()
+                                    && InAttempt.Delta == Interior.GetValue();
+                            });
+                            if (Interior.IsSet() && NOT AlreadyAttempted)
+                            {
+#if WITH_DEV_AUTOMATION_TESTS
+                                if (HeightTest != nullptr)
+                                { HeightTest->InteriorOffered = true; }
+#endif
+                                const auto InteriorAccepted = TryGoal(*Offer.Candidate, Interior.GetValue(), EHeightGoalRoute::Interior);
+                                return FinishDispatch(InteriorAccepted, *Offer.Candidate, Interior.GetValue(),
+                                    EHeightGoalRoute::Interior, true);
+                            }
+                            const auto OriginalAccepted = TryGoal(InCandidate, InDelta, InRoute);
+                            return FinishDispatch(OriginalAccepted, InCandidate, InDelta, InRoute, false);
+                        }
+                        const auto Cooperative = SelectCooperative(MaxHeightTrials - 1);
+                        if (Cooperative.IsSet())
+                        {
+                            if (OutVisibilityRetry != nullptr)
+                            { OutVisibilityRetry->Reset(); }
+                            const auto& Offer = Cooperative.GetValue();
+                            const auto Accepted = TryGoal(*Offer.Candidate, Offer.Delta, EHeightGoalRoute::Cooperative);
+                            CooperativeConsumed = true;
+#if WITH_DEV_AUTOMATION_TESTS
+                            if (HeightTest != nullptr)
+                            { HeightTest->PlanningConsumed = true; }
+#endif
+                            return {Accepted, true, Offer.Candidate, Offer.Delta, EHeightGoalRoute::Cooperative, true};
+                        }
+                        const auto Accepted = TryGoal(InCandidate, InDelta, InRoute, OutVisibilityRetry);
+                        return {Accepted, false, &InCandidate, InDelta, InRoute, false};
+                    };
                     for (const auto& Candidate : Planning.Get_Candidates())
                     {
                         if (InSupportComp._HeightPlanningTrials >= MaxHeightTrials)
@@ -775,15 +1033,16 @@ namespace ck
                                     continue;
                                 }
                             }
-                            if (TryGoal(Candidate, Delta))
+                            const auto Dispatch = DispatchGoal(Candidate, Delta, EHeightGoalRoute::Ordinary);
+                            if (Dispatch.Accepted || Dispatch.PlanningConsumed)
                             { break; }
                         }
-                        if (FoundGoal)
+                        if (FoundGoal || CooperativeConsumed)
                         { break; }
                     }
                     // A fixed seed may fail its interval or lie at/below a retained-foot plane even though native
                     // down replay can reproject it. Keep eligible ordinary proposals first and share their goal budget.
-                    if (NOT FoundGoal && NOT WholeBodyGoal)
+                    if (NOT FoundGoal && NOT WholeBodyGoal && NOT CooperativeConsumed)
                     {
                         const auto AnchorView = TArrayView<const FProceduralSurfaceReachPaceAnchor>{CoreAnchors};
                         auto TriedVisibilityInterior = false;
@@ -806,34 +1065,17 @@ namespace ck
                             if (AlreadyAttempted)
                             { continue; }
                             auto VisibilityRetry = TOptional<FProceduralGaitHeightRetryWitness>{};
-                            if (TryGoal(*Candidate, Delta.GetValue(), &VisibilityRetry))
+                            const auto Dispatch = DispatchGoal(*Candidate, Delta.GetValue(), EHeightGoalRoute::Deferred, &VisibilityRetry);
+                            if (Dispatch.Accepted || Dispatch.PlanningConsumed)
                             { break; }
                             if (TriedVisibilityInterior || NOT VisibilityRetry.IsSet()
                                 || InSupportComp._HeightPlanningTrials >= MaxHeightTrials || Delta.GetValue() >= -1.0e-3)
                             { continue; }
                             // Only this failed native call may seed one interior proposal. The original sampled
                             // candidate still owns provenance and is replayed through every unchanged admission.
-                            const auto& Witness = VisibilityRetry.GetValue();
-                            const auto& OriginalCandidate = Witness.Get_Candidate();
-                            auto RejectedBody = Body;
-                            RejectedBody.AddToTranslation(Up * Delta.GetValue());
-                            if (Witness.Get_Frame() != GFrameCounter || Witness.Get_SolveSequence() != Gait._SolveSequence
-                                || NOT Witness.Get_BodyAtSolve().Equals(Body, 1.0e-6)
-                                || NOT Witness.Get_RejectedBody().Equals(RejectedBody, 1.0e-6)
-                                || NOT Witness.Get_SupportUp().Equals(Up, 1.0e-6)
-                                || Witness.Get_PoseOffset().IsSet() != CorePoseOffset.IsSet()
-                                || (CorePoseOffset.IsSet() && NOT Witness.Get_PoseOffset()->Equals(CorePoseOffset.GetValue(), 1.0e-6))
-                                || OriginalCandidate.Get_Leg() != Candidate->Get_Leg()
-                                || OriginalCandidate.Get_HipLocal() != Candidate->Get_HipLocal()
-                                || OriginalCandidate.Get_FootWorld() != Candidate->Get_FootWorld()
-                                || OriginalCandidate.Get_PointWorld() != Candidate->Get_PointWorld()
-                                || OriginalCandidate.Get_NormalWorld() != Candidate->Get_NormalWorld()
-                                || OriginalCandidate.Get_Reach() != Candidate->Get_Reach()
-                                || OriginalCandidate.Get_AdmissionReach() != Candidate->Get_AdmissionReach()
-                                || OriginalCandidate.Get_RequiresRelief() != Candidate->Get_RequiresRelief()
-                                || Witness.Get_Cast() != EProceduralFootholdCast::Down
-                                || Witness.Get_PointWorld().ContainsNaN() || NOT Witness.Get_NormalWorld().IsNormalized())
+                            if (NOT VisibilityRetryMatches(VisibilityRetry, *Candidate, Delta.GetValue()))
                             { continue; }
+                            const auto& Witness = VisibilityRetry.GetValue();
                             const auto Interior = Get_ProceduralHeightInteriorRetryDelta(Body, CorePoseOffset, Up, AnchorView,
                                 Candidate->Get_HipLocal(), Witness.Get_PointWorld(), Candidate->Get_AdmissionReach(),
                                 Settings.Get_Clearance(), Delta.GetValue());
@@ -849,7 +1091,8 @@ namespace ck
                             if (AlreadyTriedInterior)
                             { continue; }
                             TriedVisibilityInterior = true;
-                            if (TryGoal(*Candidate, Interior.GetValue()))
+                            const auto InteriorDispatch = DispatchGoal(*Candidate, Interior.GetValue(), EHeightGoalRoute::Interior);
+                            if (InteriorDispatch.Accepted || InteriorDispatch.PlanningConsumed)
                             { break; }
                         }
                     }

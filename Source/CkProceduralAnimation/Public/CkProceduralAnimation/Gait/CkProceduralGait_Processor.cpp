@@ -17,6 +17,9 @@
 #include "CkCore/TypeTraits/CkTypeTraits.h"
 
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+#include "CkEcs/Handle/CkHandle_Utils.h"
+#endif
 #include "CkEcs/Request/CkRequest_Completion.h"
 #include "CkEcs/Scheduler/CkProcessorRegistration.h"
 
@@ -24,6 +27,11 @@
 
 #include <Engine/World.h>
 #include <Misc/ScopeExit.h>
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+#include <CoreGlobals.h>
+#include <HAL/CriticalSection.h>
+#include <Misc/ScopeLock.h>
+#endif
 #include <cmath>
 #include <limits>
 
@@ -33,6 +41,269 @@ CK_REGISTER_PROCESSOR(ck::FProcessor_ProceduralGait_Update);
 CK_REGISTER_PROCESSOR(ck::FProcessor_ProceduralGait_CancelPendingRequests);
 
 // --------------------------------------------------------------------------------------------------------------------
+
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+namespace ck_procedural_gait_processor_hip_query_test
+{
+    struct FObservation
+    {
+        uint64 Words[40]{};
+        int32 PointCount = 0;
+        bool Enabled = false;
+        bool OldSeen = false;
+        bool Tilted = false;
+        bool TiltedPoint = false;
+    };
+
+    struct FCounter
+    {
+        FCriticalSection Mutex;
+        uint64 Key[4]{};
+        uint32 Count = 0;
+        bool Overflow = false;
+    };
+
+    static_assert(sizeof(FObservation) <= 352);
+    static_assert(sizeof(FCounter) <= 256);
+
+    auto
+        Put(
+            FObservation& InRow,
+            int32 InSlot,
+            uint64 InValue)
+        -> void
+    {
+        InRow.Words[0] |= uint64{1} << (InSlot - 1);
+        InRow.Words[InSlot] = InValue;
+    }
+
+    auto
+        Vector(
+            FObservation& InRow,
+            int32 InSlot,
+            const FVector& InValue)
+        -> void
+    {
+        for (int32 Axis = 0; Axis < 3; ++Axis)
+        {
+            uint64 Bits = 0;
+            const auto Value = InValue[Axis];
+            FMemory::Memcpy(&Bits, &Value, sizeof(Bits));
+            Put(InRow, InSlot + Axis, Bits);
+        }
+    }
+
+    auto
+        Begin(
+            const FCk_Handle& InRoot,
+            const FCk_Handle& InLeg,
+            int32 InLegIndex,
+            UWorld* InWorld,
+            uint64 InInputSolve,
+            bool InStaging)
+        -> FObservation
+    {
+        auto Row = FObservation{};
+        if (NOT GIsAutomationTesting || NOT IsInGameThread())
+        {
+            return Row;
+        }
+        const auto Name = UCk_Utils_Handle_UE::Get_DebugName(InRoot);
+        Row.Tilted = Name == FName{TEXT("CkAutomationTiltedSeed")};
+        if (NOT Row.Tilted && Name != FName{TEXT("CkAutomationHipQuery")})
+        {
+            return Row;
+        }
+        Row.Enabled = true;
+        const auto Registry = InRoot.Get_RegistryView().Get_RegistryHandle();
+        Put(Row, 1, static_cast<uint64>(reinterpret_cast<UPTRINT>(InWorld)));
+        Put(Row, 2, static_cast<uint32>(Registry.SlotIndex));
+        Put(Row, 3, static_cast<uint32>(Registry.Generation));
+        Put(Row, 4, static_cast<uint32>(InRoot.Get_Entity().Get_ID()));
+        Put(Row, 5, static_cast<uint32>(InLeg.Get_Entity().Get_ID()));
+        Put(Row, 6, static_cast<uint32>(InLegIndex));
+        Put(Row, 7, GFrameCounter);
+        Put(Row, 8, InInputSolve);
+        Put(Row, 17, InStaging);
+        Put(Row, 36, 1);
+        Put(Row, 37, 0);
+        return Row;
+    }
+
+    auto
+        Counter()
+        -> FCounter&
+    {
+        static auto Value = FCounter{};
+        return Value;
+    }
+
+    auto
+        Emit(
+            FObservation& InRow)
+        -> void
+    {
+        if (NOT InRow.Enabled || NOT InRow.OldSeen || (InRow.Tilted && NOT InRow.TiltedPoint))
+        {
+            return;
+        }
+        auto& State = Counter();
+        const auto Lock = FScopeLock{&State.Mutex};
+        if (State.Key[0] != InRow.Words[1] || State.Key[1] != InRow.Words[2]
+            || State.Key[2] != InRow.Words[3] || State.Key[3] != InRow.Words[4])
+        {
+            for (int32 Index = 0; Index < 4; ++Index)
+            {
+                State.Key[Index] = InRow.Words[Index + 1];
+            }
+            State.Count = 0;
+            State.Overflow = false;
+        }
+        if (State.Count == 512)
+        {
+            if (State.Overflow)
+            {
+                return;
+            }
+            State.Overflow = true;
+            Put(InRow, 37, 1);
+        }
+        else
+        {
+            ++State.Count;
+        }
+        Put(InRow, 35, State.Overflow ? 513 : State.Count);
+        TCHAR Hex[680]{};
+        constexpr TCHAR Digits[] = TEXT("0123456789abcdef");
+        for (int32 Word = 0; Word < 40; ++Word)
+        {
+            for (int32 Nibble = 0; Nibble < 16; ++Nibble)
+            {
+                Hex[17 * Word + Nibble] = Digits[(InRow.Words[Word] >> (4 * (15 - Nibble))) & 15];
+            }
+            Hex[17 * Word + 16] = Word == 39 ? TCHAR{0} : TCHAR{' '};
+        }
+        UE_LOG(LogTemp, Display, TEXT("%s %s"), InRow.Tilted ? TEXT("TQT1") : TEXT("HQT1"), Hex);
+    }
+}
+#endif
+
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+namespace ck_procedural_height_seed_test
+{
+    struct FObservation
+    {
+        uint64 W[40]{};
+        bool Enabled = false;
+        bool Result = false;
+    };
+    struct FCounter
+    {
+        FCriticalSection Mutex;
+        uint64 Key[4]{};
+        uint32 Count = 0;
+        bool Overflow = false;
+    };
+    static_assert(sizeof(FObservation) <= 336);
+    static_assert(sizeof(FCounter) <= 256);
+    auto
+    Put(FObservation& R, int32 S, uint64 V) -> void
+    {
+        R.W[0] |= uint64{1} << (S - 1);
+        R.W[S] = V;
+    }
+    auto
+    Vector(FObservation& R, int32 S, const FVector& V) -> void
+    {
+        for (auto A = 0; A < 3; ++A)
+        {
+            uint64 Bits = 0;
+            const auto Value = V[A];
+            FMemory::Memcpy(&Bits, &Value, sizeof(Bits));
+            Put(R, S + A, Bits);
+        }
+    }
+    auto
+    Begin(const FCk_Handle& Root, const FCk_Handle& Leg, int32 Index, UWorld* World, uint64 Solve, uint64 Stage,
+          int32 Rays, bool Requested) -> FObservation
+    {
+        auto R = FObservation{};
+        if (NOT IsInGameThread() || NOT GIsAutomationTesting ||
+            UCk_Utils_Handle_UE::Get_DebugName(Root) != FName{TEXT("CkAutomationHeightSeed")} ||
+            Stage != static_cast<uint64>(ck::EProceduralHeightPlanStage::Landing))
+        {
+            return R;
+        }
+        R.Enabled = true;
+        const auto Registry = Root.Get_RegistryView().Get_RegistryHandle();
+        Put(R, 1, reinterpret_cast<UPTRINT>(World));
+        Put(R, 2, static_cast<uint32>(Registry.SlotIndex));
+        Put(R, 3, static_cast<uint32>(Registry.Generation));
+        Put(R, 4, static_cast<uint32>(Root.Get_Entity().Get_ID()));
+        Put(R, 5, static_cast<uint32>(Leg.Get_Entity().Get_ID()));
+        Put(R, 6, Index);
+        Put(R, 7, GFrameCounter);
+        Put(R, 8, Solve);
+        Put(R, 9, Stage);
+        Put(R, 10, Rays);
+        Put(R, 30, Requested);
+        Put(R, 37, 1);
+        Put(R, 38, 0);
+        return R;
+    }
+    auto
+    Finish(FObservation& R, int32 Rays, const ck::EProceduralHeightSeedFailure* Cause) -> void
+    {
+        if (NOT R.Enabled)
+        {
+            return;
+        }
+        Put(R, 11, Rays);
+        Put(R, 29, R.Result);
+        if (Cause != nullptr)
+        {
+            Put(R, 31, static_cast<uint64>(*Cause));
+        }
+        static auto Counter = FCounter{};
+        const auto Lock = FScopeLock{&Counter.Mutex};
+        if (Counter.Key[0] != R.W[1] || Counter.Key[1] != R.W[2] || Counter.Key[2] != R.W[3] ||
+            Counter.Key[3] != R.W[4])
+        {
+            for (auto I = 0; I < 4; ++I)
+            {
+                Counter.Key[I] = R.W[I + 1];
+            }
+            Counter.Count = 0;
+            Counter.Overflow = false;
+        }
+        if (Counter.Count == 64)
+        {
+            if (Counter.Overflow)
+            {
+                return;
+            }
+            Counter.Overflow = true;
+            Put(R, 38, 1);
+        }
+        else
+        {
+            ++Counter.Count;
+        }
+        Put(R, 36, Counter.Overflow ? 65 : Counter.Count);
+        TCHAR Hex[680]{};
+        constexpr TCHAR Digits[] = TEXT("0123456789abcdef");
+        for (auto I = 0; I < 40; ++I)
+        {
+            for (auto N = 0; N < 16; ++N)
+            {
+                Hex[17 * I + N] = Digits[(R.W[I] >> (4 * (15 - N))) & 15];
+            }
+            Hex[17 * I + 16] = I == 39 ? TCHAR{0} : TCHAR{' '};
+        }
+        UE_LOG(LogTemp, Display, TEXT("HST1 %s"), Hex);
+    }
+} // namespace ck_procedural_height_seed_test
+#endif
 
 namespace ck_procedural_gait
 {
@@ -183,6 +454,9 @@ namespace ck_procedural_gait
         uint64 ReceiptInputSolve = 0;
         FTransform ReceiptBody = FTransform::Identity;
         bool CaptureTargetReceipt = false;
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+        ck_procedural_height_seed_test::FObservation* HeightSeedObservation = nullptr;
+#endif
     };
 
     constexpr auto MaxInwardOccluderTopReceipts = 2;
@@ -896,6 +1170,348 @@ namespace ck_procedural_gait
         return {};
     }
 
+    // Ordinary acquisition after older failures: one body-limited anchor and one float XY cell.
+    // Query geometry grants no landing authority; the caller retains native/trial admission.
+    auto
+        Get_HipBodyBoundaryQueryPoint(
+            const FFootholdQuery& InQuery,
+            const FPlantSeedPlane& InPlane,
+            const FVector& InUp,
+            float InForceReach,
+            float InOwnSideTolerance,
+            const TOptional<FVector>& InIdenticalFinalPoint
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+            , int32* OutTestPointCount = nullptr
+#endif
+            )
+        -> TOptional<FVector>
+    {
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+        if (OutTestPointCount != nullptr)
+        {
+            *OutTestPointCount = 0;
+        }
+#endif
+        constexpr auto Margin = 0.1;
+        constexpr auto MaxReservations = 64;
+        constexpr auto FloatMax = static_cast<double>(std::numeric_limits<float>::max());
+        if (InQuery.Hip.ContainsNaN() || InQuery.BodyLocation.ContainsNaN()
+            || InQuery.Outboard.ContainsNaN() || InPlane.Point.ContainsNaN()
+            || InPlane.Normal.ContainsNaN() || InUp.ContainsNaN()
+            || InQuery.Basis.ContainsNaN() || NOT InQuery.Basis.IsNormalized()
+            || NOT FMath::IsFinite(InForceReach) || InForceReach <= 0.0f
+            || NOT FMath::IsFinite(InOwnSideTolerance) || InOwnSideTolerance <= Margin
+            || NOT FMath::IsFinite(InQuery.MaxHipLateral)
+            || NOT FMath::IsFinite(InQuery.FootContactRadius) || InQuery.FootContactRadius < 0.0f
+            || InQuery.LegIndex < 0 || InQuery.Reservations.Num() < 0
+            || InQuery.Reservations.Num() > MaxReservations
+            || (InQuery.Reservations.Num() > 0 && InQuery.Reservations.GetData() == nullptr)
+            || InUp != FVector::UpVector || InPlane.Normal != FVector::UpVector
+            || FMath::Abs(InPlane.Point.Z) > FloatMax
+            || static_cast<double>(static_cast<float>(InPlane.Point.Z)) != InPlane.Point.Z
+            || (InIdenticalFinalPoint.IsSet() && InIdenticalFinalPoint.GetValue().ContainsNaN()))
+        {
+            return {};
+        }
+        const auto BodyY = InQuery.Basis.GetAxisY();
+        if (BodyY.ContainsNaN() || NOT BodyY.IsNormalized() || BodyY.Z != 0.0
+            || InQuery.Basis.GetAxisZ() != InUp)
+        {
+            return {};
+        }
+        double OutboardSquared = 0.0;
+        if (NOT Get_PlantQueryDot(InQuery.Outboard, InQuery.Outboard, OutboardSquared)
+            || OutboardSquared <= SMALL_NUMBER)
+        {
+            return {};
+        }
+        const auto Direction = InQuery.Outboard.GetSafeNormal();
+        const auto Origin = FVector{InQuery.Hip.X, InQuery.Hip.Y, InPlane.Point.Z};
+        FVector BodyOffset;
+        double Lateral = 0.0;
+        double Denominator = 0.0;
+        double AlongBody = 0.0;
+        if (Direction.ContainsNaN() || NOT Direction.IsNormalized() || Direction.Z != 0.0
+            || NOT Get_PlantQueryDifference(Origin, InQuery.BodyLocation, BodyOffset)
+            || NOT Get_PlantQueryDot(BodyOffset, BodyY, Lateral) || Lateral == 0.0
+            || NOT Get_PlantQueryDot(Direction, Direction, Denominator) || Denominator <= 0.0
+            || NOT Get_PlantQueryDot(Direction, BodyY, AlongBody))
+        {
+            return {};
+        }
+        const auto Sigma = Lateral > 0.0 ? 1.0 : -1.0;
+        const auto BodyBoundary = static_cast<double>(InQuery.MaxHipLateral)
+            - static_cast<double>(UnderBodyMargin) + Margin;
+        const auto BodyDenominator = Sigma * AlongBody;
+        if (NOT FMath::IsFinite(BodyBoundary) || BodyBoundary <= 0.0
+            || Sigma * Lateral < BodyBoundary
+            || NOT FMath::IsFinite(BodyDenominator) || BodyDenominator <= 0.0)
+        {
+            return {};
+        }
+        const auto OwnParameter = (static_cast<double>(InOwnSideTolerance) - Margin) / Denominator;
+        const auto BodyParameter = (Sigma * Lateral - BodyBoundary) / BodyDenominator;
+        if (NOT FMath::IsFinite(OwnParameter) || OwnParameter < 0.0
+            || NOT FMath::IsFinite(BodyParameter) || BodyParameter < 0.0)
+        {
+            return {};
+        }
+        const auto Parameter = FMath::Min(OwnParameter, BodyParameter);
+        FVector Anchor;
+        if (NOT Get_PlantQueryImage(Origin, -Direction, Parameter, Anchor))
+        {
+            return {};
+        }
+        Anchor.Z = InPlane.Point.Z;
+        double X[2];
+        double Y[2];
+        if (NOT Get_PlantQueryAxisCell(Anchor.X, X) || NOT Get_PlantQueryAxisCell(Anchor.Y, Y))
+        {
+            return {};
+        }
+        const auto InverseBasis = InQuery.Basis.Inverse();
+        const auto ForceSquared = FMath::Square(static_cast<double>(InForceReach));
+        const auto NativeBodyBand = InQuery.MaxHipLateral - UnderBodyMargin;
+        if (NOT FMath::IsFinite(ForceSquared) || NOT FMath::IsFinite(NativeBodyBand))
+        {
+            return {};
+        }
+        // Preserve radius-before-self validation before any reservation may be ignored.
+        if (InQuery.FootContactRadius > 0.0f)
+        {
+            for (const auto& Reservation : InQuery.Reservations)
+            {
+                const auto Radius = Reservation.Get_Radius();
+                if (NOT FMath::IsFinite(Radius) || Radius < 0.0f)
+                {
+                    return {};
+                }
+                if (Radius == 0.0f || Reservation.Get_LegIndex() == InQuery.LegIndex)
+                {
+                    continue;
+                }
+                if (Reservation.Get_Position().ContainsNaN() || Reservation.Get_LegIndex() < 0)
+                {
+                    return {};
+                }
+            }
+        }
+        FVector Points[4];
+        int32 PointCount = 0;
+        for (int32 Corner = 0; Corner < 4; ++Corner)
+        {
+            const FVector Point{X[Corner & 1], Y[(Corner >> 1) & 1], Anchor.Z};
+            auto Duplicate = false;
+            for (int32 Index = 0; Index < PointCount; ++Index)
+            {
+                if (Points[Index] == Point)
+                {
+                    Duplicate = true;
+                    break;
+                }
+            }
+            if (Duplicate)
+            {
+                continue;
+            }
+            Points[PointCount++] = Point;
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+            if (OutTestPointCount != nullptr)
+            {
+                *OutTestPointCount = PointCount;
+            }
+#endif
+            FVector HipOffset;
+            FVector RoundedBodyOffset;
+            double RoundedLateral = 0.0;
+            if (Point.ContainsNaN()
+                || NOT Get_PlantQueryDifference(Point, InQuery.Hip, HipOffset)
+                || NOT Get_PlantQueryDifference(Point, InQuery.BodyLocation, RoundedBodyOffset)
+                || NOT Get_PlantQueryDot(RoundedBodyOffset, BodyY, RoundedLateral))
+            {
+                continue;
+            }
+            const auto NativeBodyOffset = InverseBasis.RotateVector(RoundedBodyOffset);
+            if (NativeBodyOffset.ContainsNaN() || FMath::Abs(NativeBodyOffset.Y) > FloatMax)
+            {
+                continue;
+            }
+            const auto NativeLateral = static_cast<float>(NativeBodyOffset.Y);
+            const auto HipSquared = HipOffset.SizeSquared();
+            if (NOT FMath::IsFinite(NativeLateral)
+                || NOT FMath::IsFinite(HipSquared) || HipSquared > ForceSquared
+                || FVector::Dist(Point, InQuery.Hip) > InForceReach
+                || Sigma * RoundedLateral < BodyBoundary
+                || Sigma * NativeBodyOffset.Y < BodyBoundary
+                || Sigma * static_cast<double>(NativeLateral) < BodyBoundary
+                || FMath::Abs(NativeLateral) < NativeBodyBand
+                || NOT ck::Get_IsFootholdOnOwnSide(HipOffset, InQuery.Outboard, InOwnSideTolerance)
+                || NOT ck::Get_IsProceduralFootContactAvailable(Point, InQuery.FootContactRadius,
+                    InQuery.LegIndex, InQuery.Reservations))
+            {
+                continue;
+            }
+            // This point is deduplicated ONLY against the source-proven identical old final straight call.
+            if (InIdenticalFinalPoint.IsSet() && Point == InIdenticalFinalPoint.GetValue())
+            {
+                continue;
+            }
+            return Point;
+        }
+        return {};
+    }
+
+    struct FTiltedPlantSeedContext
+    {
+        bool PaidNativeDownUnreachable = false;
+        bool SearchGranted = false;
+        int32 RemainingSlots = 0;
+        bool StagingAtEntry = false;
+        bool StagingNow = false;
+    };
+
+    // One query placement from a fresh plant plane. Native admission remains in the existing final block.
+    auto
+        Get_TiltedPlantSeedQueryPoint(
+            const FFootholdQuery& InQuery,
+            const FVector& InPaidSeed,
+            const FVector& InPlant,
+            const FVector& InLead,
+            const FPlantSeedPlane& InPlane,
+            float InForceReach,
+            float InSearchRadius,
+            const ck::FProceduralGaitReachPaceTrial& InTrial,
+            const FTiltedPlantSeedContext& InContext,
+            const TOptional<FVector>& InIdenticalPaidPoint)
+        -> TOptional<FVector>
+    {
+        if (NOT InContext.PaidNativeDownUnreachable || NOT InContext.SearchGranted
+            || InContext.RemainingSlots <= 0 || InContext.StagingAtEntry || InContext.StagingNow
+            || InQuery.Basis.ContainsNaN() || NOT InQuery.Basis.IsNormalized()
+            || NOT FMath::IsFinite(InQuery.Reach) || InQuery.Reach <= 0.0f
+            || NOT FMath::IsFinite(InForceReach) || InForceReach <= 0.0f
+            || NOT FMath::IsFinite(InSearchRadius) || InSearchRadius <= 0.0f
+            || NOT FMath::IsFinite(InQuery.RestDrop) || NOT FMath::IsFinite(InQuery.MaxHipLateral)
+            || NOT FMath::IsFinite(InQuery.FootContactRadius) || InQuery.FootContactRadius < 0.0f
+            || InQuery.LegIndex < 0 || InQuery.Reservations.Num() < 0 || InQuery.Reservations.Num() > 64
+            || (InQuery.Reservations.Num() > 0 && InQuery.Reservations.GetData() == nullptr))
+        {
+            return {};
+        }
+        constexpr auto FloatMax = static_cast<double>(std::numeric_limits<float>::max());
+        const auto FitsFloat = [](const FVector& InPoint) -> bool
+        {
+            constexpr auto Limit = static_cast<double>(std::numeric_limits<float>::max());
+            return FMath::IsFinite(InPoint.X) && FMath::Abs(InPoint.X) <= Limit
+                && FMath::IsFinite(InPoint.Y) && FMath::Abs(InPoint.Y) <= Limit
+                && FMath::IsFinite(InPoint.Z) && FMath::Abs(InPoint.Z) <= Limit;
+        };
+        if (NOT FitsFloat(InPaidSeed) || NOT FitsFloat(InPlant) || NOT FitsFloat(InLead)
+            || NOT FitsFloat(InPlane.Point) || InPlane.Normal != FVector::UpVector
+            || NOT FitsFloat(InQuery.Hip) || NOT FitsFloat(InQuery.BodyLocation)
+            || NOT FitsFloat(InTrial.Get_Hip())
+            || (InTrial.Get_PosedHip().IsSet() && NOT FitsFloat(InTrial.Get_PosedHip().GetValue()))
+            || (InIdenticalPaidPoint.IsSet() && NOT FitsFloat(InIdenticalPaidPoint.GetValue())))
+        {
+            return {};
+        }
+        const auto Up = InQuery.Basis.GetAxisZ();
+        double OutboardSquared = 0.0;
+        if (Up.ContainsNaN() || NOT Up.IsNormalized() || Up == FVector::UpVector
+            || InQuery.Outboard.ContainsNaN()
+            || NOT Get_PlantQueryDot(InQuery.Outboard, InQuery.Outboard, OutboardSquared)
+            || OutboardSquared <= SMALL_NUMBER
+            || static_cast<double>(static_cast<float>(InPlane.Point.Z)) != InPlane.Point.Z)
+        {
+            return {};
+        }
+        const auto Point = FVector{static_cast<double>(static_cast<float>(InPaidSeed.X)),
+            static_cast<double>(static_cast<float>(InPaidSeed.Y)), InPlane.Point.Z};
+        FVector Displacement;
+        FVector HipOffset;
+        FVector BodyOffset;
+        double LeadSquared = 0.0;
+        double Progress = 0.0;
+        double SearchSquared = 0.0;
+        double HipSquared = 0.0;
+        if (Point == InPlant || (InIdenticalPaidPoint.IsSet() && Point == InIdenticalPaidPoint.GetValue())
+            || NOT Get_PlantQueryDifference(Point, InPlant, Displacement)
+            || NOT Get_PlantQueryDifference(Point, InQuery.Hip, HipOffset)
+            || NOT Get_PlantQueryDifference(Point, InQuery.BodyLocation, BodyOffset)
+            || NOT Get_PlantQueryDot(InLead, InLead, LeadSquared) || LeadSquared <= 0.0
+            || NOT Get_PlantQueryDot(Displacement, InLead, Progress)
+            || Progress < 0.5 * LeadSquared || Progress > LeadSquared
+            || NOT Get_PlantQueryDot(Displacement, Displacement, SearchSquared)
+            || SearchSquared > FMath::Square(static_cast<double>(InSearchRadius))
+            || NOT Get_PlantQueryDot(HipOffset, HipOffset, HipSquared)
+            || HipSquared > FMath::Square(static_cast<double>(InForceReach))
+            || FVector::Dist(Point, InQuery.Hip) > InForceReach)
+        {
+            return {};
+        }
+        const auto InverseBasis = InQuery.Basis.Inverse();
+        const auto FromBody = InverseBasis.RotateVector(BodyOffset);
+        const auto FromHip = InverseBasis.RotateVector(HipOffset);
+        const auto TrialPoint = InverseBasis.RotateVector(Point);
+        if (FromBody.ContainsNaN() || FromHip.ContainsNaN() || NOT FitsFloat(TrialPoint)
+            || FMath::Abs(FromBody.Y) > FloatMax || FMath::Abs(FromHip.Z) > FloatMax)
+        {
+            return {};
+        }
+        FVector TrialOffset;
+        double TrialSquared = 0.0;
+        const auto PhysicalSquared = FMath::Square(static_cast<double>(InQuery.Reach) + 1.0e-3);
+        if (NOT Get_PlantQueryDifference(TrialPoint, InTrial.Get_Hip(), TrialOffset)
+            || NOT Get_PlantQueryDot(TrialOffset, TrialOffset, TrialSquared) || TrialSquared > PhysicalSquared
+            || FVector::Dist(TrialPoint, InTrial.Get_Hip()) > static_cast<double>(InQuery.Reach) + 1.0e-3)
+        {
+            return {};
+        }
+        if (InTrial.Get_PosedHip().IsSet())
+        {
+            if (NOT Get_PlantQueryDifference(TrialPoint, InTrial.Get_PosedHip().GetValue(), TrialOffset)
+                || NOT Get_PlantQueryDot(TrialOffset, TrialOffset, TrialSquared) || TrialSquared > PhysicalSquared
+                || FVector::Dist(TrialPoint, InTrial.Get_PosedHip().GetValue()) > static_cast<double>(InQuery.Reach) + 1.0e-3)
+            {
+                return {};
+            }
+        }
+        // Preserve the contact predicate's radius-before-self and zero-radius rules.
+        if (InQuery.FootContactRadius > 0.0f)
+        {
+            for (const auto& Reservation : InQuery.Reservations)
+            {
+                const auto Radius = Reservation.Get_Radius();
+                if (NOT FMath::IsFinite(Radius) || Radius < 0.0f)
+                {
+                    return {};
+                }
+                if (Radius == 0.0f || Reservation.Get_LegIndex() == InQuery.LegIndex)
+                {
+                    continue;
+                }
+                FVector Offset;
+                double DistanceSquared = 0.0;
+                if (Reservation.Get_LegIndex() < 0 || Reservation.Get_Position().ContainsNaN()
+                    || NOT Get_PlantQueryDifference(Point, Reservation.Get_Position(), Offset)
+                    || NOT Get_PlantQueryDot(Offset, Offset, DistanceSquared))
+                {
+                    return {};
+                }
+            }
+        }
+        if (NOT ck::Get_IsFootholdOnOwnSide(HipOffset, InQuery.Outboard,
+                InboardToleranceShareOfReach * InQuery.Reach)
+            || ck::Get_IsFootholdUnderBody(static_cast<float>(FromBody.Y), static_cast<float>(-FromHip.Z),
+                InQuery.MaxHipLateral, InQuery.RestDrop, UnderBodyMargin)
+            || NOT ck::Get_IsProceduralFootContactAvailable(Point, InQuery.FootContactRadius,
+                InQuery.LegIndex, InQuery.Reservations))
+        {
+            return {};
+        }
+        return Point;
+    }
+
     auto
         Get_IsPlantSeedProbeIdentical(
             const FCk_ProceduralGait_Probe& InPaid,
@@ -1095,9 +1711,12 @@ namespace ck_procedural_gait
             const FFootholdQuery& InQuery,
             FFootholdCandidate& InOutCandidate,
             EFootholdStage InStage,
-            int32& InOutRayCount)
+            int32& InOutRayCount,
+            ck::EProceduralHeightSeedFailure* OutSeedFailure = nullptr)
         -> void
     {
+        if (OutSeedFailure != nullptr)
+        { *OutSeedFailure = ck::EProceduralHeightSeedFailure::None; }
         InOutCandidate.NativeReceipt.Reset();
         const auto HipDistance = FVector::Dist(InOutCandidate.Position, InQuery.Hip);
         const auto LimitFraction = InOutCandidate.Cast == ck::EProceduralFootholdCast::Face
@@ -1106,6 +1725,9 @@ namespace ck_procedural_gait
         if (HipDistance > LimitFraction * InQuery.Reach)
         {
             InOutCandidate.Verdict = ck::EProceduralFootholdVerdict::Unreachable;
+            if (OutSeedFailure != nullptr && InOutCandidate.NativeHit
+                && InOutCandidate.Cast == ck::EProceduralFootholdCast::Down)
+            { *OutSeedFailure = ck::EProceduralHeightSeedFailure::TrustedDownFinalForceReject; }
             return;
         }
 
@@ -1198,9 +1820,12 @@ namespace ck_procedural_gait
             EGroundProbeAttempts InAttempts,
             EFootholdStage InStage,
             int32& InOutRayCount,
-            FCk_ProceduralAnimation_DebugProbe* InDebugProbe)
+            FCk_ProceduralAnimation_DebugProbe* InDebugProbe,
+            ck::EProceduralHeightSeedFailure* OutSeedFailure = nullptr)
         -> FFootholdCandidate
     {
+        if (OutSeedFailure != nullptr)
+        { *OutSeedFailure = ck::EProceduralHeightSeedFailure::None; }
         const auto TargetLimit = InQuery.Step->Get_TargetReachFraction() * InQuery.Reach;
         if (FVector::Dist(InCandidate.Position, InQuery.Hip) > TargetLimit)
         {
@@ -1216,6 +1841,9 @@ namespace ck_procedural_gait
             if (NOT Reprobed.IsSet())
             {
                 InCandidate.Verdict = ck::EProceduralFootholdVerdict::Unreachable;
+                if (OutSeedFailure != nullptr && InCandidate.NativeHit
+                    && InCandidate.Cast == ck::EProceduralFootholdCast::Down)
+                { *OutSeedFailure = ck::EProceduralHeightSeedFailure::TrustedInitialDownClampReprobeMiss; }
                 return InCandidate;
             }
 
@@ -1225,7 +1853,7 @@ namespace ck_procedural_gait
             InCandidate.NativeHit = true;
         }
 
-        DoValidate(InQuery, InCandidate, InStage, InOutRayCount);
+        DoValidate(InQuery, InCandidate, InStage, InOutRayCount, OutSeedFailure);
         return InCandidate;
     }
 
@@ -1245,9 +1873,16 @@ namespace ck_procedural_gait
             EFootholdReprobe InReprobe,
             EFootholdStage InStage,
             int32& InOutRayCount,
-            FCk_ProceduralAnimation_DebugProbe* InDebugProbe)
+            FCk_ProceduralAnimation_DebugProbe* InDebugProbe,
+            ck::EProceduralHeightSeedFailure* OutSeedFailure = nullptr)
         -> FFootholdCandidate
     {
+        if (OutSeedFailure != nullptr)
+        { *OutSeedFailure = ck::EProceduralHeightSeedFailure::None; }
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+        auto* HeightTrace = InQuery.HeightSeedObservation;
+        if (HeightTrace != nullptr) { ck_procedural_height_seed_test::Put(*HeightTrace, 13, 0); ck_procedural_height_seed_test::Put(*HeightTrace, 16, 0); }
+#endif
         const auto Up = InQuery.Basis.GetAxisZ();
         const auto ProbeAt = [&](const FVector& InProbePoint, const FCk_ProceduralGait_Probe& InProbe) -> TOptional<FCk_Jolt_HitResult>
         {
@@ -1257,32 +1892,54 @@ namespace ck_procedural_gait
 
         auto Candidate = FFootholdCandidate{InPoint, Up, InSource, ck::EProceduralFootholdVerdict::Miss, ck::EProceduralFootholdCast::Down};
         auto Hit = ProbeAt(InPoint, *InQuery.Probe);
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+        if (HeightTrace != nullptr)
+        { ck_procedural_height_seed_test::Put(*HeightTrace, 12, Hit.IsSet()); if (Hit.IsSet()) { ck_procedural_height_seed_test::Vector(*HeightTrace, 17, Hit->Get_Position()); } }
+#endif
         if (NOT Hit.IsSet())
         { return Candidate; }
         DoObserve_HeightCandidate(InQuery, Hit.GetValue());
 
         if (InQuery.Probe->Get_OutwardLean() > 0.0f && ck::FProceduralGaitSolver::Get_IsFaceNormal(Hit->Get_Normal(), Up))
         {
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+            if (HeightTrace != nullptr) { ck_procedural_height_seed_test::Put(*HeightTrace, 13, 1); }
+#endif
             const auto StraightHit = UCk_Utils_JoltQuery_UE::Get_RayCast(InQuery.World, InPoint + Up * InQuery.Probe->Get_Up(),
                 InPoint - Up * InQuery.Probe->Get_Down(), InQuery.Probe->Get_QueryFilter());
             ++InOutRayCount;
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+            if (HeightTrace != nullptr)
+            { ck_procedural_height_seed_test::Put(*HeightTrace, 14, StraightHit.Get_HasHit()); if (StraightHit.Get_HasHit()) { ck_procedural_height_seed_test::Vector(*HeightTrace, 20, StraightHit.Get_Position()); } }
+#endif
             if (Get_TrustedHit(StraightHit, -Up))
             { DoObserve_HeightCandidate(InQuery, StraightHit); }
             const auto LevelInReach = Get_TrustedHit(StraightHit, -Up)
                 && NOT ck::FProceduralGaitSolver::Get_IsFaceNormal(StraightHit.Get_Normal(), Up)
                 && FVector::Dist(StraightHit.Get_Position(), InQuery.Hip) <= InQuery.Step->Get_ForceStepReachFraction() * InQuery.Reach;
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+            if (HeightTrace != nullptr) { ck_procedural_height_seed_test::Put(*HeightTrace, 15, LevelInReach); }
+#endif
             if (LevelInReach)
-            { Hit = StraightHit; }
+            {
+                Hit = StraightHit;
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+                if (HeightTrace != nullptr) { ck_procedural_height_seed_test::Put(*HeightTrace, 16, 1); }
+#endif
+            }
         }
 
         Candidate.Position = Hit->Get_Position();
         Candidate.Normal = Hit->Get_Normal().GetSafeNormal();
         Candidate.NativeHit = true;
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+        if (HeightTrace != nullptr) { ck_procedural_height_seed_test::Vector(*HeightTrace, 23, Hit->Get_Position()); }
+#endif
 
         if (InReprobe == EFootholdReprobe::ClampTowardHip)
-        { return DoReprobe_DownTowardHip(InQuery, Candidate, InAttempts, InStage, InOutRayCount, InDebugProbe); }
+        { return DoReprobe_DownTowardHip(InQuery, Candidate, InAttempts, InStage, InOutRayCount, InDebugProbe, OutSeedFailure); }
 
-        DoValidate(InQuery, Candidate, InStage, InOutRayCount);
+        DoValidate(InQuery, Candidate, InStage, InOutRayCount, OutSeedFailure);
         return Candidate;
     }
 
@@ -2786,9 +3443,12 @@ namespace ck
             int32 InRayLimit,
             EProceduralHeightPlanStage InStage,
             TOptional<FProceduralGaitHeightRetryWitness>* OutVisibilityRetry,
-            TArray<FProceduralContactStagingBoundary>* OutStagingBoundaries)
+            TArray<FProceduralContactStagingBoundary>* OutStagingBoundaries,
+            EProceduralHeightSeedFailure* OutSeedFailure)
         -> bool
     {
+        if (OutSeedFailure != nullptr)
+        { *OutSeedFailure = ck::EProceduralHeightSeedFailure::None; }
         if (OutVisibilityRetry != nullptr)
         { OutVisibilityRetry->Reset(); }
         if (ck::Is_NOT_Valid(InGait) || NOT InGait.Has<FFragment_ProceduralGait>()
@@ -2945,6 +3605,11 @@ namespace ck
         auto* World = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InGait);
         if (ck::Is_NOT_Valid(World))
         { return false; }
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+        auto HeightObservation = ck_procedural_height_seed_test::Begin(InGait, Leg, LegIndex, World,
+            Gait._SolveSequence, static_cast<uint64>(InStage), InOutRays, OutSeedFailure != nullptr);
+        ON_SCOPE_EXIT { ck_procedural_height_seed_test::Finish(HeightObservation, InOutRays, OutSeedFailure); };
+#endif
         const auto& Probe = Tunables.Get_Probe();
         const auto& Foothold = Tunables.Get_Foothold();
         const auto Rehit = [&](const FVector& InPoint, const FVector& InNormal) -> TOptional<FCk_Jolt_HitResult>
@@ -2981,11 +3646,18 @@ namespace ck
                 .Foothold = &Foothold,
                 .FootContactRadius = QueryParams.Get_FootContactRadius(),
                 .LegIndex = InIndex,
-                .Reservations = Reservations};
+                .Reservations = Reservations
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+                , .HeightSeedObservation = HeightObservation.Enabled && InIndex == LegIndex ? &HeightObservation : nullptr
+#endif
+            };
         };
         auto AdmittedSeed = TOptional<ck_procedural_gait::FFootholdCandidate>{};
-        const auto AdmitLanding = [&](const FProceduralGaitHeightCandidate& InObserved, int32 InIndex) -> bool
+        const auto AdmitLanding = [&](const FProceduralGaitHeightCandidate& InObserved, int32 InIndex,
+            EProceduralHeightSeedFailure* OutLandingFailure = nullptr) -> bool
         {
+            if (OutLandingFailure != nullptr)
+            { *OutLandingFailure = EProceduralHeightSeedFailure::None; }
             const auto& ObservedLeg = Gait._Legs[InIndex];
             const auto& ObservedParams = ObservedLeg.Get<FFragment_ProceduralLeg_Params>();
             const auto& ObservedPlacement = ObservedParams.Get_Placement();
@@ -3001,14 +3673,27 @@ namespace ck
             if (NOT Hit.IsSet())
             { return false; }
             const auto LandingQuery = MakeQuery(InIndex);
+            auto SeedFailure = EProceduralHeightSeedFailure::None;
             const auto Candidate = ck_procedural_gait::DoProbe_Down(LandingQuery, InObserved.Get_PointWorld(),
                 EProceduralFootholdSource::Ring, ck_procedural_gait::EGroundProbeAttempts::Every,
                 ck_procedural_gait::EFootholdReprobe::ClampTowardHip, ck_procedural_gait::EFootholdStage::Search,
-                InOutRays, nullptr);
+                InOutRays, nullptr, OutLandingFailure != nullptr ? &SeedFailure : nullptr);
             const auto Admitted = Candidate.Verdict == EProceduralFootholdVerdict::Usable
                 && FVector::Dist(LandingQuery.Hip, Candidate.Position) <= InObserved.Get_AdmissionReach()
                 && FVector::Dist(PresentationBody.TransformPosition(ObservedPlacement.Get_HipLocal()), Candidate.Position)
                     <= InObserved.Get_AdmissionReach();
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+            if (HeightObservation.Enabled)
+            {
+                using namespace ck_procedural_height_seed_test;
+                Put(HeightObservation, 26, Candidate.NativeHit); Put(HeightObservation, 27, static_cast<uint64>(Candidate.Verdict));
+                if (OutLandingFailure != nullptr) { Put(HeightObservation, 28, static_cast<uint64>(SeedFailure)); }
+                if (Candidate.NativeHit) { Vector(HeightObservation, 32, Candidate.Position); }
+                Put(HeightObservation, 35, Admitted);
+            }
+#endif
+            if (NOT Admitted && OutLandingFailure != nullptr)
+            { *OutLandingFailure = SeedFailure; }
             if (Admitted && Candidate.Cast == EProceduralFootholdCast::Down
                 && InStage == EProceduralHeightPlanStage::Landing && OutVisibilityRetry != nullptr)
             { AdmittedSeed = Candidate; }
@@ -3040,8 +3725,13 @@ namespace ck
         }
         else if (InStage == EProceduralHeightPlanStage::Landing)
         {
-            if (NOT AdmitLanding(InCandidate, LegIndex))
-            { return false; }
+            auto SeedFailure = EProceduralHeightSeedFailure::None;
+            if (NOT AdmitLanding(InCandidate, LegIndex, &SeedFailure))
+            {
+                if (OutSeedFailure != nullptr)
+                { *OutSeedFailure = SeedFailure; }
+                return false;
+            }
         }
         else if (NOT Rehit(InCandidate.Get_PointWorld(), InCandidate.Get_NormalWorld()).IsSet())
         { return false; }
@@ -3120,6 +3810,9 @@ namespace ck
             if (PresentationBlocker.IsSet())
             { RecordBoundary(Anchor, NativeTop.GetValue(), PresentationBlocker); PublishVisibilityRetry(); return false; }
         }
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+        HeightObservation.Result = true;
+#endif
         return true;
     }
 
@@ -4202,6 +4895,11 @@ namespace ck
             // Only an unsuccessful budgeted search can grant one unused boundary slot. The actual stance was just
             // checked natively above; it seeds a NEW future query, never a restored held target or take-off authority.
             TOptional<FVector> BoundarySeedPoint;
+            auto FailedFinalStraightPoint = TOptional<FVector>{};
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+            auto HipObservation = ck_procedural_gait_processor_hip_query_test::Begin(
+                InHandle, Leg, Index, FootholdQuery.World, ConsumerInputSolve, StagingLeg);
+#endif
             struct FFailedPlantSeedQuery
             {
                 FVector SeedPoint;
@@ -4211,6 +4909,7 @@ namespace ck
                 TOptional<ck_procedural_gait::FPlantSeedPlane> Plane;
                 float ForceReach;
                 float SearchRadius;
+                bool NativeDownUnreachable = false;
             };
             auto FailedPlantSeed = TOptional<FFailedPlantSeedQuery>{};
             const auto& PressureTrial = Input.Get_ReachPaceTrial();
@@ -4277,7 +4976,9 @@ namespace ck
                     {
                         // This receipt exists only after the charged old seed actually failed native/trial admission.
                         FailedPlantSeed = FFailedPlantSeedQuery{SeedPoint, PaidSeedProbe,
-                            FreshPlantPoint.GetValue(), Query - Neutral, FreshPlantPlane, ForceReach, SearchRadius};
+                            FreshPlantPoint.GetValue(), Query - Neutral, FreshPlantPlane, ForceReach, SearchRadius,
+                            Candidate.NativeHit && Candidate.Cast == EProceduralFootholdCast::Down
+                                && Candidate.Verdict == EProceduralFootholdVerdict::Unreachable};
                         if (FreshPlantPlane.IsSet() && Foothold.UnusedBoundarySamples > 0)
                         {
                             BoundarySeedPoint = ck_procedural_gait::Get_PlantSeedBoundaryPoint(
@@ -4425,6 +5126,30 @@ namespace ck
                     Failed.ForceReach, Failed.SearchRadius, ck_procedural_gait::InboardToleranceShareOfReach * Reach,
                     FootholdQuery.FootContactRadius, Index, FootholdQuery.Reservations, IdenticalPaidPoint);
             }
+            if (NOT BoundarySeedPoint.IsSet() && FailedPlantSeed.IsSet()
+                && NOT Trusted && PreserveCurrentPlant && Foothold.UnusedBoundarySamples > 0
+                && FreshPlantPoint.IsSet() && FreshPlantPlane.IsSet() && HasFreshRequestedLead
+                && FootholdQuery.RefreshPlantedHold && NOT FootholdQuery.BlockedFace.IsSet()
+                && PressureTrial.IsSet() && NOT InGaitComp._Solver.HasPendingStep(Index)
+                && FailedPlantSeed->Plane.IsSet() && FootholdQuery.Probe != nullptr)
+            {
+                const auto& Failed = FailedPlantSeed.GetValue();
+                auto ProposedProbe = *FootholdQuery.Probe;
+                ProposedProbe.Set_OutwardLean(0.0f);
+                const auto IdenticalPaidPoint = ck_procedural_gait::Get_IsPlantSeedProbeIdentical(Failed.Probe, ProposedProbe)
+                    ? TOptional<FVector>{Failed.SeedPoint} : TOptional<FVector>{};
+                const auto Context = ck_procedural_gait::FTiltedPlantSeedContext{
+                    Failed.NativeDownUnreachable, SearchBudget.RemainingLegs < SearchesLeft,
+                    Foothold.UnusedBoundarySamples,
+                    StagingAtEntry.IsSet() && StagingAtEntry->_Phase != EProceduralContactStagingPhase::Dormant,
+                    Staging != nullptr && Staging->_Phase != EProceduralContactStagingPhase::Dormant};
+                BoundarySeedPoint = ck_procedural_gait::Get_TiltedPlantSeedQueryPoint(FootholdQuery,
+                    Failed.SeedPoint, Failed.Plant, Failed.Lead, Failed.Plane.GetValue(), Failed.ForceReach,
+                    Failed.SearchRadius, PressureTrial.GetValue(), Context, IdenticalPaidPoint);
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+                HipObservation.TiltedPoint = BoundarySeedPoint.IsSet();
+#endif
+            }
             // All older native opportunities keep priority. Geometry alone cannot publish a target.
             if (NOT Trusted && PreserveCurrentPlant && Foothold.UnusedBoundarySamples > 0 && BoundarySeedPoint.IsSet())
             {
@@ -4432,12 +5157,61 @@ namespace ck
                 StraightProbe.Set_OutwardLean(0.0f);
                 auto BoundaryQuery = FootholdQuery;
                 BoundaryQuery.Probe = &StraightProbe;
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+                if (HipObservation.Enabled && HipObservation.Tilted && HipObservation.TiltedPoint)
+                {
+                    using namespace ck_procedural_gait_processor_hip_query_test;
+                    HipObservation.OldSeen = true;
+                    Put(HipObservation, 9, FailedPlantSeed->NativeDownUnreachable);
+                    Vector(HipObservation, 11, BoundarySeedPoint.GetValue());
+                    Put(HipObservation, 21, Foothold.UnusedBoundarySamples);
+                    Put(HipObservation, 23, RayCount);
+                    Vector(HipObservation, 25, Up);
+                    uint64 Bits = 0;
+                    const auto Z = FailedPlantSeed->Plane->Point.Z;
+                    FMemory::Memcpy(&Bits, &Z, sizeof(Bits));
+                    Put(HipObservation, 28, Bits);
+                    Put(HipObservation, 38, 1);
+                }
+#endif
                 --Foothold.UnusedBoundarySamples;
                 DebugLeg.Set_ActualPlantSeedAttempted(true);
                 DebugLeg.Set_ActualPlantSeedForceAdjusted(true);
                 const auto Candidate = ck_procedural_gait::DoProbe_Down(BoundaryQuery, BoundarySeedPoint.GetValue(),
                     EProceduralFootholdSource::Ring, ck_procedural_gait::EGroundProbeAttempts::RetryFromInsideSolid,
                     ck_procedural_gait::EFootholdReprobe::None, ck_procedural_gait::EFootholdStage::Search, RayCount, nullptr);
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+                if (HipObservation.Enabled && NOT HipObservation.Tilted)
+                {
+                    using namespace ck_procedural_gait_processor_hip_query_test;
+                    HipObservation.OldSeen = true;
+                    Put(HipObservation, 9, Candidate.NativeHit);
+                    Put(HipObservation, 10, static_cast<uint64>(Candidate.Verdict));
+                    Vector(HipObservation, 11, BoundarySeedPoint.GetValue());
+                    if (Candidate.NativeHit)
+                    {
+                        Vector(HipObservation, 14, Candidate.Position);
+                    }
+                }
+#endif
+                if (Candidate.NativeHit && Candidate.Verdict == EProceduralFootholdVerdict::Unreachable)
+                {
+                    FailedFinalStraightPoint = BoundarySeedPoint.GetValue();
+                }
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+                if (HipObservation.Enabled && HipObservation.Tilted && HipObservation.TiltedPoint)
+                {
+                    using namespace ck_procedural_gait_processor_hip_query_test;
+                    Put(HipObservation, 10, static_cast<uint64>(Candidate.Verdict));
+                    Put(HipObservation, 18, Candidate.NativeHit);
+                    Put(HipObservation, 22, Foothold.UnusedBoundarySamples);
+                    Put(HipObservation, 24, RayCount);
+                    if (Candidate.NativeHit)
+                    {
+                        Vector(HipObservation, 14, Candidate.Position);
+                    }
+                }
+#endif
                 const auto CandidateIndex = DebugLeg.Get_Footholds().Num();
                 DebugLeg.Get_Footholds().Add(FCk_ProceduralAnimation_DebugFoothold{}
                     .Set_Position(Candidate.Position).Set_Normal(Candidate.Normal)
@@ -4448,6 +5222,13 @@ namespace ck
                 const auto FitsTrial = FVector::Dist(Target, Trial.Get_Hip()) <= Limit
                     && (NOT Trial.Get_PosedHip().IsSet()
                         || FVector::Dist(Target, Trial.Get_PosedHip().GetValue()) <= Limit);
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+                if (HipObservation.Enabled && HipObservation.Tilted && HipObservation.TiltedPoint)
+                {
+                    ck_procedural_gait_processor_hip_query_test::Put(HipObservation, 19, FitsTrial);
+                    ck_procedural_gait_processor_hip_query_test::Put(HipObservation, 20, 0);
+                }
+#endif
                 if (Candidate.Verdict == EProceduralFootholdVerdict::Usable && FitsTrial)
                 {
                     InGaitComp._Footholds[Index] = FProceduralFootholdState{}
@@ -4457,6 +5238,12 @@ namespace ck
                     Trusted = true;
                     PreserveCurrentPlant = false;
                     DebugLeg.Set_ActualPlantSeedAdmitted(true);
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+                    if (HipObservation.Enabled && HipObservation.Tilted && HipObservation.TiltedPoint)
+                    {
+                        ck_procedural_gait_processor_hip_query_test::Put(HipObservation, 20, 1);
+                    }
+#endif
                 }
             }
             const auto StagingTargetFits = [&](const FVector& InPoint, const FVector& InNormal, bool InSearchChecked) -> bool
@@ -4535,6 +5322,127 @@ namespace ck
                     }
                 }
             }
+            // All older opportunities, including staging, precede this additional ordinary family.
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+            if (HipObservation.Enabled && NOT HipObservation.Tilted)
+            {
+                ck_procedural_gait_processor_hip_query_test::Put(HipObservation, 30, Foothold.UnusedBoundarySamples);
+                ck_procedural_gait_processor_hip_query_test::Put(HipObservation, 31, Foothold.UnusedBoundarySamples);
+                ck_procedural_gait_processor_hip_query_test::Put(HipObservation, 32, RayCount);
+                ck_procedural_gait_processor_hip_query_test::Put(HipObservation, 19, 0);
+                ck_procedural_gait_processor_hip_query_test::Put(HipObservation, 29, 0);
+            }
+#endif
+            const auto HipBoundaryEligible = NOT StagingLeg && NOT Trusted && PreserveCurrentPlant
+                && SearchBudget.RemainingLegs < SearchesLeft && Foothold.UnusedBoundarySamples > 0
+                && FailedFinalStraightPoint.IsSet() && FailedPlantSeed.IsSet()
+                && FreshPlantPoint.IsSet() && FreshPlantPlane.IsSet() && HasFreshRequestedLead
+                && FootholdQuery.RefreshPlantedHold && NOT FootholdQuery.BlockedFace.IsSet()
+                && PressureTrial.IsSet() && NOT InGaitComp._Solver.HasPendingStep(Index)
+                && FailedPlantSeed->Plane.IsSet() && FootholdQuery.Probe != nullptr;
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+            if (HipObservation.Enabled && NOT HipObservation.Tilted)
+            {
+                ck_procedural_gait_processor_hip_query_test::Put(HipObservation, 18, HipBoundaryEligible);
+            }
+#endif
+            if (HipBoundaryEligible)
+            {
+                const auto& Failed = FailedPlantSeed.GetValue();
+                // Same immutable base query and the same straight copied probe as the old final call.
+                auto StraightProbe = *FootholdQuery.Probe;
+                StraightProbe.Set_OutwardLean(0.0f);
+                auto HipBoundaryQuery = FootholdQuery;
+                HipBoundaryQuery.Probe = &StraightProbe;
+                const auto Point = ck_procedural_gait::Get_HipBodyBoundaryQueryPoint(FootholdQuery,
+                    Failed.Plane.GetValue(), FootholdQuery.Basis.GetAxisZ(), Failed.ForceReach,
+                    ck_procedural_gait::InboardToleranceShareOfReach * Reach, FailedFinalStraightPoint
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+                    , HipObservation.Enabled ? &HipObservation.PointCount : nullptr
+#endif
+                    );
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+                if (HipObservation.Enabled && NOT HipObservation.Tilted)
+                {
+                    ck_procedural_gait_processor_hip_query_test::Put(HipObservation, 19, Point.IsSet());
+                    ck_procedural_gait_processor_hip_query_test::Put(HipObservation, 34, HipObservation.PointCount);
+                    if (Point.IsSet())
+                    {
+                        ck_procedural_gait_processor_hip_query_test::Vector(HipObservation, 20, Point.GetValue());
+                    }
+                }
+#endif
+                if (Point.IsSet())
+                {
+                    --Foothold.UnusedBoundarySamples;
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+                    if (HipObservation.Enabled && NOT HipObservation.Tilted)
+                    {
+                        ck_procedural_gait_processor_hip_query_test::Put(HipObservation, 31, Foothold.UnusedBoundarySamples);
+                    }
+#endif
+                    DebugLeg.Set_ActualPlantSeedAttempted(true);
+                    DebugLeg.Set_ActualPlantSeedForceAdjusted(true);
+                    const auto Candidate = ck_procedural_gait::DoProbe_Down(HipBoundaryQuery, Point.GetValue(),
+                        EProceduralFootholdSource::Ring, ck_procedural_gait::EGroundProbeAttempts::RetryFromInsideSolid,
+                        ck_procedural_gait::EFootholdReprobe::None, ck_procedural_gait::EFootholdStage::Search, RayCount, nullptr);
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+                    if (HipObservation.Enabled && NOT HipObservation.Tilted)
+                    {
+                        using namespace ck_procedural_gait_processor_hip_query_test;
+                        Put(HipObservation, 23, Candidate.NativeHit);
+                        Put(HipObservation, 24, static_cast<uint64>(Candidate.Verdict));
+                        if (Candidate.NativeHit)
+                        {
+                            Vector(HipObservation, 25, Candidate.Position);
+                        }
+                    }
+#endif
+                    const auto CandidateIndex = DebugLeg.Get_Footholds().Num();
+                    DebugLeg.Get_Footholds().Add(FCk_ProceduralAnimation_DebugFoothold{}
+                        .Set_Position(Candidate.Position).Set_Normal(Candidate.Normal)
+                        .Set_Source(Candidate.Source).Set_Verdict(Candidate.Verdict));
+                    const auto Limit = static_cast<double>(Reach) + 1.0e-3;
+                    const auto& Trial = PressureTrial.GetValue();
+                    const auto Target = InverseBasis.RotateVector(Candidate.Position);
+                    const auto FitsTrial = FVector::Dist(Target, Trial.Get_Hip()) <= Limit
+                        && (NOT Trial.Get_PosedHip().IsSet()
+                            || FVector::Dist(Target, Trial.Get_PosedHip().GetValue()) <= Limit);
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+                    if (HipObservation.Enabled && NOT HipObservation.Tilted)
+                    {
+                        ck_procedural_gait_processor_hip_query_test::Put(HipObservation, 28, FitsTrial);
+                    }
+#endif
+                    if (Candidate.Verdict == EProceduralFootholdVerdict::Usable && FitsTrial)
+                    {
+                        InGaitComp._Footholds[Index] = FProceduralFootholdState{}
+                            .Set_Position(Candidate.Position).Set_Normal(Candidate.Normal)
+                            .Set_Source(Candidate.Source).Set_Hold(EProceduralFootholdHold::Held).Set_Cast(Candidate.Cast);
+                        Foothold = ck_procedural_gait::DoFinish(Candidate, CandidateIndex, Foothold.IdealVerdict, &DebugLeg);
+                        Trusted = true;
+                        PreserveCurrentPlant = false;
+                        DebugLeg.Set_ActualPlantSeedAdmitted(true);
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+                        if (HipObservation.Enabled && NOT HipObservation.Tilted)
+                        {
+                            ck_procedural_gait_processor_hip_query_test::Put(HipObservation, 29, 1);
+                        }
+#endif
+                    }
+                }
+            }
+#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+            if (HipObservation.Enabled && NOT HipObservation.Tilted)
+            {
+                ck_procedural_gait_processor_hip_query_test::Put(HipObservation, 33, RayCount);
+                ck_procedural_gait_processor_hip_query_test::Emit(HipObservation);
+            }
+            else if (HipObservation.Enabled && HipObservation.Tilted)
+            {
+                ck_procedural_gait_processor_hip_query_test::Emit(HipObservation);
+            }
+#endif
             if (CaptureHeight)
             {
                 const auto& Trial = Input.Get_ReachPaceTrial();

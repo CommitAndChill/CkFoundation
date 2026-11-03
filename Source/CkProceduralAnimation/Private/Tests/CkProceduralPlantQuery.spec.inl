@@ -344,6 +344,291 @@ auto
 #endif
 
 #if WITH_DEV_AUTOMATION_TESTS
+namespace ck_procedural_gait_query_tests
+{
+    struct FHipBodyInput
+    {
+        ck_procedural_gait::FFootholdQuery Foothold;
+        ck_procedural_gait::FPlantSeedPlane Plane{FVector::ZeroVector, FVector::UpVector};
+        FVector Up = FVector::UpVector;
+        float Force = 100.0f;
+        float Tolerance = 14.0f;
+
+        FHipBodyInput()
+        {
+            Foothold.Hip = FVector{0.0, 30.0, 10.0};
+            Foothold.Outboard = FVector{0.0, 1.0, 0.0};
+            Foothold.MaxHipLateral = 30.0f;
+            Foothold.LegIndex = 1;
+        }
+
+        auto
+            Query(
+                const TOptional<FVector>& InIdenticalFinalPoint = {}) const
+            -> TOptional<FVector>
+        {
+            return ck_procedural_gait::Get_HipBodyBoundaryQueryPoint(
+                Foothold, Plane, Up, Force, Tolerance, InIdenticalFinalPoint);
+        }
+    };
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_ProceduralPlantQuery_HipBodyGeometry,
+    "Ck.ProceduralAnimation.Foothold.PlantQuery.HipBodyGeometry",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+auto
+    FCkTest_ProceduralPlantQuery_HipBodyGeometry::
+    RunTest(
+        const FString&)
+    -> bool
+{
+    using namespace ck_procedural_gait_query_tests;
+    for (const auto Side : {-1.0, 1.0})
+    {
+        for (const auto Yaw : {0.0, 0.5})
+        {
+            auto Input = FHipBodyInput{};
+            Input.Foothold.Basis = FQuat{FVector::UpVector, Yaw};
+            Input.Foothold.BodyLocation = FVector{119000.0, 391000.0, 0.0};
+            const auto BodyY = Input.Foothold.Basis.GetAxisY();
+            Input.Foothold.Outboard = Side * BodyY;
+            Input.Foothold.Hip = Input.Foothold.BodyLocation + Side * 30.0 * BodyY + 10.0 * FVector::UpVector;
+            const auto Point = Input.Query();
+            TestTrue(TEXT("Both signed sides and horizontal yaw admit geometry"), Point.IsSet());
+            if (NOT Point.IsSet())
+            {
+                continue;
+            }
+            const auto Q = Point.GetValue();
+            const auto Offset = Input.Foothold.Basis.Inverse().RotateVector(Q - Input.Foothold.BodyLocation);
+            const auto NativeLateral = static_cast<float>(Offset.Y);
+            const auto Boundary = static_cast<double>(Input.Foothold.MaxHipLateral) - 5.0 + 0.1;
+            TestEqual(TEXT("Proposal retains exact paid-plane height"), Q.Z, Input.Plane.Point.Z);
+            TestEqual(TEXT("Rounded proposal X is binary32"), Q.X, static_cast<double>(static_cast<float>(Q.X)));
+            TestEqual(TEXT("Rounded proposal Y is binary32"), Q.Y, static_cast<double>(static_cast<float>(Q.Y)));
+            TestTrue(TEXT("Rounded inverse lateral preserves same-side margin"), Side * Offset.Y >= Boundary);
+            TestTrue(TEXT("Actual native float lateral preserves same-side margin"), Side * NativeLateral >= Boundary);
+            TestTrue(TEXT("Rounded point passes original force squared"),
+                FVector::DistSquared(Q, Input.Foothold.Hip) <= FMath::Square(static_cast<double>(Input.Force)));
+            TestTrue(TEXT("Rounded point passes original own-side predicate"), ck::Get_IsFootholdOnOwnSide(
+                Q - Input.Foothold.Hip, Input.Foothold.Outboard, Input.Tolerance));
+            const auto Repeated = Input.Query();
+            TestTrue(TEXT("Same input retains deterministic first passing corner"),
+                Repeated.IsSet() && Repeated.GetValue() == Q);
+        }
+    }
+    auto Input = FHipBodyInput{};
+    Input.Foothold.Hip.X = -0.0;
+    const auto SignedZero = Input.Query();
+    TestTrue(TEXT("Exact X cell deduplicates signed zero"), SignedZero.IsSet() && NOT std::signbit(SignedZero->X));
+    Input.Foothold.Hip.Y = 24.0;
+    TestFalse(TEXT("Initially in-band declines instead of outward repair"), Input.Query().IsSet());
+    return NOT HasAnyErrors();
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_ProceduralPlantQuery_HipBodyInvalid,
+    "Ck.ProceduralAnimation.Foothold.PlantQuery.HipBodyInvalid",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+auto
+    FCkTest_ProceduralPlantQuery_HipBodyInvalid::
+    RunTest(
+        const FString&)
+    -> bool
+{
+    using namespace ck_procedural_gait_query_tests;
+    TestFalse(TEXT("Default query declines before geometry"), ck_procedural_gait::Get_HipBodyBoundaryQueryPoint(
+        {}, {FVector::ZeroVector, FVector::UpVector}, FVector::UpVector, 100.0f, 14.0f, {}).IsSet());
+    auto Input = FHipBodyInput{};
+    Input.Foothold.Hip.X = std::numeric_limits<double>::infinity();
+    TestFalse(TEXT("Nonfinite hip rejected"), Input.Query().IsSet());
+    Input = FHipBodyInput{};
+    Input.Foothold.Basis.X = std::numeric_limits<double>::quiet_NaN();
+    TestFalse(TEXT("Malformed basis rejected before rotation"), Input.Query().IsSet());
+    Input = FHipBodyInput{};
+    Input.Foothold.Outboard = FVector::ZeroVector;
+    TestFalse(TEXT("Zero outboard rejected before normalization"), Input.Query().IsSet());
+    Input = FHipBodyInput{};
+    Input.Foothold.Outboard.Z = 0.01;
+    TestFalse(TEXT("Nonhorizontal outboard rejected"), Input.Query().IsSet());
+    Input = FHipBodyInput{};
+    Input.Foothold.Outboard.Y = -1.0;
+    TestFalse(TEXT("Direction away from the body boundary rejected"), Input.Query().IsSet());
+    Input = FHipBodyInput{};
+    Input.Tolerance = 0.0f;
+    TestFalse(TEXT("Nonpositive own-side allowance rejected"), Input.Query().IsSet());
+    Input = FHipBodyInput{};
+    Input.Force = std::numeric_limits<float>::quiet_NaN();
+    TestFalse(TEXT("Nonfinite force rejected"), Input.Query().IsSet());
+    Input = FHipBodyInput{};
+    Input.Plane.Point.Z = std::nextafter(1.0, 2.0);
+    TestFalse(TEXT("Nonrepresentable plane height rejected before cell"), Input.Query().IsSet());
+    Input = FHipBodyInput{};
+    Input.Plane.Normal.Y = 0.1;
+    TestFalse(TEXT("Nonhorizontal native plane rejected"), Input.Query().IsSet());
+    Input = FHipBodyInput{};
+    Input.Up = -FVector::UpVector;
+    TestFalse(TEXT("Unsupported world up rejected"), Input.Query().IsSet());
+    Input = FHipBodyInput{};
+    Input.Foothold.Hip = FVector{0.0, 3.0e38, 0.0};
+    Input.Foothold.BodyLocation = FVector{0.0, -3.0e38, 0.0};
+    Input.Foothold.MaxHipLateral = 3.0e38f;
+    Input.Force = 1.0e30f;
+    TestFalse(TEXT("Finite lateral beyond binary32 range declines before cast"), Input.Query().IsSet());
+    Input = FHipBodyInput{};
+    Input.Foothold.Hip.Y = std::numeric_limits<double>::max();
+    Input.Foothold.BodyLocation.Y = -std::numeric_limits<double>::max();
+    TestFalse(TEXT("Opposite finite offset overflow declines before vector construction"), Input.Query().IsSet());
+    Input = FHipBodyInput{};
+    Input.Foothold.Reservations = TArrayView<const ck::FProceduralFootReservation>{
+        static_cast<const ck::FProceduralFootReservation*>(nullptr), 1};
+    TestFalse(TEXT("Nonempty null reservation view declines before access"), Input.Query().IsSet());
+    return NOT HasAnyErrors();
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_ProceduralPlantQuery_HipBodyReservationsAndIdentity,
+    "Ck.ProceduralAnimation.Foothold.PlantQuery.HipBodyReservationsAndIdentity",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+auto
+    FCkTest_ProceduralPlantQuery_HipBodyReservationsAndIdentity::
+    RunTest(
+        const FString&)
+    -> bool
+{
+    using namespace ck_procedural_gait_query_tests;
+    auto Input = FHipBodyInput{};
+    const auto Base = Input.Query();
+    TestTrue(TEXT("Unreserved body-limited proposal exists"), Base.IsSet());
+    if (NOT Base.IsSet())
+    {
+        return false;
+    }
+    TestFalse(TEXT("Identical full-signature old final point consumes no new query"), Input.Query(Base).IsSet());
+    auto OtherHeight = Base.GetValue();
+    OtherHeight.Z += 1.0;
+    TestTrue(TEXT("Different point does not certify an identical old final query"), Input.Query(OtherHeight).IsSet());
+    Input.Force = 1.0f;
+    TestFalse(TEXT("Force bound cannot be rescued by another corner"), Input.Query().IsSet());
+    Input = FHipBodyInput{};
+    const TArray<ck::FProceduralFootReservation> Covered{{Base.GetValue(), 100.0f, 2}};
+    Input.Foothold.Reservations = Covered;
+    Input.Foothold.FootContactRadius = 1.0f;
+    TestFalse(TEXT("Entire single cell blocked by current reservation"), Input.Query().IsSet());
+    Input.Foothold.FootContactRadius = 0.0f;
+    TestTrue(TEXT("Zero contact radius retains original contact bypass"), Input.Query().IsSet());
+    auto MalformedPosition = FVector::ZeroVector;
+    MalformedPosition.X = std::numeric_limits<double>::quiet_NaN();
+    const TArray<ck::FProceduralFootReservation> BadSelf{{MalformedPosition, -1.0f, 1}};
+    Input.Foothold.Reservations = BadSelf;
+    Input.Foothold.FootContactRadius = 1.0f;
+    TestFalse(TEXT("Malformed radius rejected before matching self skip"), Input.Query().IsSet());
+    const TArray<ck::FProceduralFootReservation> Self{{MalformedPosition, 1.0f, 1}};
+    Input.Foothold.Reservations = Self;
+    TestTrue(TEXT("Valid self radius ignores unused malformed position"), Input.Query().IsSet());
+    const TArray<ck::FProceduralFootReservation> Active{{MalformedPosition, 1.0f, 2}};
+    Input.Foothold.Reservations = Active;
+    TestFalse(TEXT("Active malformed reservation position rejected"), Input.Query().IsSet());
+    TArray<ck::FProceduralFootReservation> Full;
+    for (int32 Index = 0; Index < 64; ++Index)
+    {
+        Full.Emplace(FVector{-1000.0 - 4.0 * Index, 0.0, 0.0}, 1.0f, 2);
+    }
+    Input.Foothold.Reservations = Full;
+    TestTrue(TEXT("Full bounded reservation view supported"), Input.Query().IsSet());
+    Full.Emplace(FVector::ZeroVector, 0.0f, 1);
+    Input.Foothold.Reservations = Full;
+    TestFalse(TEXT("Oversized reservation view declines without truncation"), Input.Query().IsSet());
+    return NOT HasAnyErrors();
+}
+#endif
+
+#if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_ProceduralPlantQuery_SeedFailureMetadata,
+    "Ck.ProceduralAnimation.Foothold.PlantQuery.SeedFailureMetadata",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+auto
+    FCkTest_ProceduralPlantQuery_SeedFailureMetadata::
+    RunTest(
+        const FString&)
+    -> bool
+{
+    using namespace ck_procedural_gait;
+    const auto Step = FCk_ProceduralGait_Step{}.Set_TargetReachFraction(0.6f).Set_ForceStepReachFraction(0.8f);
+    const auto Foothold = FCk_ProceduralGait_Foothold{}.Set_MaxAngle(45.0f);
+    auto Query = FFootholdQuery{};
+    Query.Step = &Step;
+    Query.Foothold = &Foothold;
+    Query.Reach = 100.0f;
+    Query.RestDrop = 40.0f;
+    Query.MaxHipLateral = 30.0f;
+    Query.Outboard = FVector{0.0, 1.0, 0.0};
+    auto Rays = 7;
+    auto Failure = ck::EProceduralHeightSeedFailure::None;
+    auto Candidate = FFootholdCandidate{};
+    Candidate.Position = FVector{200.0, 0.0, 0.0};
+    Candidate.NativeHit = true;
+    Candidate.Cast = ck::EProceduralFootholdCast::Down;
+    // These are supplied candidate metadata, not observations of a native query or hit.
+    DoValidate(Query, Candidate, EFootholdStage::Search, Rays, &Failure);
+    TestTrue(TEXT("Down hit metadata beyond force retains Unreachable"),
+        Candidate.Verdict == ck::EProceduralFootholdVerdict::Unreachable);
+    TestTrue(TEXT("Down hit metadata classifies final force rejection"),
+        Failure == ck::EProceduralHeightSeedFailure::TrustedDownFinalForceReject);
+    TestEqual(TEXT("Force rejection returns before world rays"), Rays, 7);
+
+    Candidate.NativeHit = false;
+    DoValidate(Query, Candidate, EFootholdStage::Search, Rays, &Failure);
+    TestTrue(TEXT("No-hit metadata retains force verdict"),
+        Candidate.Verdict == ck::EProceduralFootholdVerdict::Unreachable);
+    TestTrue(TEXT("No-hit metadata resets reused failure output"), Failure == ck::EProceduralHeightSeedFailure::None);
+    TestEqual(TEXT("No-hit force rejection adds no rays"), Rays, 7);
+
+    Candidate.NativeHit = true;
+    Candidate.Cast = ck::EProceduralFootholdCast::Face;
+    Failure = ck::EProceduralHeightSeedFailure::TrustedDownFinalForceReject;
+    DoValidate(Query, Candidate, EFootholdStage::Search, Rays, &Failure);
+    TestTrue(TEXT("Face metadata retains target-reach rejection"),
+        Candidate.Verdict == ck::EProceduralFootholdVerdict::Unreachable);
+    TestTrue(TEXT("Face metadata cannot inherit Down failure cause"), Failure == ck::EProceduralHeightSeedFailure::None);
+    TestEqual(TEXT("Face force rejection adds no rays"), Rays, 7);
+
+    Candidate.Cast = ck::EProceduralFootholdCast::Down;
+    Candidate.Position = FVector{0.0, 30.0, 0.0};
+    Candidate.Normal = FVector{1.0, 0.0, 0.0};
+    Failure = ck::EProceduralHeightSeedFailure::TrustedDownFinalForceReject;
+    DoValidate(Query, Candidate, EFootholdStage::Search, Rays, &Failure);
+    TestTrue(TEXT("Within-force steep metadata retains TooSteep"),
+        Candidate.Verdict == ck::EProceduralFootholdVerdict::TooSteep);
+    TestTrue(TEXT("TooSteep resets prior failure cause"), Failure == ck::EProceduralHeightSeedFailure::None);
+    TestEqual(TEXT("TooSteep returns before visibility rays"), Rays, 7);
+
+    Candidate.Position = FVector{0.0, 0.0, -20.0};
+    Candidate.Normal = FVector::UpVector;
+    Failure = ck::EProceduralHeightSeedFailure::TrustedDownFinalForceReject;
+    DoValidate(Query, Candidate, EFootholdStage::Search, Rays, &Failure);
+    TestTrue(TEXT("Within-force level metadata retains UnderBody"),
+        Candidate.Verdict == ck::EProceduralFootholdVerdict::UnderBody);
+    TestTrue(TEXT("UnderBody resets prior failure cause"), Failure == ck::EProceduralHeightSeedFailure::None);
+    TestEqual(TEXT("UnderBody returns before visibility rays"), Rays, 7);
+    TestTrue(TEXT("Worldless early-rejection fixture stays worldless"), Query.World == nullptr);
+    return NOT HasAnyErrors();
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FCkTest_ProceduralPlantQuery_ProbeIdentity,
     "Ck.ProceduralAnimation.Foothold.PlantQuery.ProbeIdentity",
@@ -380,6 +665,215 @@ auto
     Filter = Paid.Get_QueryFilter(); Filter.Set_CollideWithBackFacesConvex(true);
     Changed = Paid; Changed.Set_QueryFilter(Filter);
     TestFalse(TEXT("Changed back-face policy cannot certify identity"), Get_IsPlantSeedProbeIdentical(Paid, Changed));
+    return NOT HasAnyErrors();
+}
+#endif
+
+#if WITH_DEV_AUTOMATION_TESTS
+namespace ck_procedural_gait_query_tests
+{
+    struct FTiltedInput
+    {
+        ck_procedural_gait::FFootholdQuery Query;
+        FVector Paid{10.0, 50.0, -1.0};
+        FVector Plant{0.0, 50.0, 0.0};
+        FVector Lead{20.0, 0.0, 0.0};
+        ck_procedural_gait::FPlantSeedPlane Plane{Plant, FVector::UpVector};
+        ck::FProceduralGaitReachPaceTrial Trial;
+        ck_procedural_gait::FTiltedPlantSeedContext Context{true, true, 1, false, false};
+        float Force = 92.0f;
+        float Search = 30.0f;
+
+        FTiltedInput()
+        {
+            Query.Basis = FQuat{FVector::ForwardVector, 0.1};
+            Query.BodyLocation = FVector{0.0, 0.0, 60.0};
+            Query.Hip = FVector{0.0, 30.0, 60.0};
+            Query.Outboard = Query.Basis.GetAxisY();
+            Query.Reach = 100.0f;
+            Query.RestDrop = 60.0f;
+            Query.MaxHipLateral = 30.0f;
+            Query.LegIndex = 1;
+            Trial.Set_Hip(Query.Basis.Inverse().RotateVector(FVector{100.0, 50.0, 20.0}));
+            Trial.Set_PosedHip(Trial.Get_Hip());
+        }
+
+        auto
+            Point(
+                const TOptional<FVector>& InIdentical = {}) const
+            -> TOptional<FVector>
+        {
+            return ck_procedural_gait::Get_TiltedPlantSeedQueryPoint(Query, Paid, Plant, Lead, Plane,
+                Force, Search, Trial, Context, InIdentical);
+        }
+    };
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCkPlantQueryTiltedGeometry,
+    "Ck.ProceduralAnimation.Foothold.PlantQuery.TiltedGeometry",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+auto
+    FCkPlantQueryTiltedGeometry::
+    RunTest(
+        const FString&)
+    -> bool
+{
+    using namespace ck_procedural_gait_query_tests;
+    auto Input = FTiltedInput{};
+    const auto Point = Input.Point();
+    TestTrue(TEXT("Tilted production helper admits one rounded paid-XY point on the fresh plant plane"), Point.IsSet());
+    if (Point.IsSet())
+    {
+        TestEqual(TEXT("Only the defined projection is returned"), Point.GetValue(), FVector(10.0, 50.0, 0.0));
+        TestTrue(TEXT("Old trial plant is outside physical boundary"), FVector::Dist(
+            Input.Query.Basis.Inverse().RotateVector(Input.Plant), Input.Trial.Get_Hip()) > 100.001);
+        TestTrue(TEXT("Projected point fits simulation and posed physical trials"), FVector::Dist(
+            Input.Query.Basis.Inverse().RotateVector(Point.GetValue()), Input.Trial.Get_Hip()) <= 100.001);
+        TestFalse(TEXT("Identical complete paid-query point is not repeated"), Input.Point(Point).IsSet());
+    }
+    Input.Paid.X = 20.0;
+    TestTrue(TEXT("Full original lead dot endpoint is inclusive"), Input.Point().IsSet());
+    Input.Paid.X = 9.0;
+    TestFalse(TEXT("Less than half original lead dot is rejected"), Input.Point().IsSet());
+    Input.Paid.X = 21.0;
+    TestFalse(TEXT("Beyond full original lead dot is rejected"), Input.Point().IsSet());
+    auto Flat = FInput{};
+    Flat.Hip.Z = 50.0;
+    const auto OldPoint = Flat.Query();
+    TestTrue(TEXT("Compatible flat original constructor still returns its point"), OldPoint.IsSet());
+    Input = FTiltedInput{};
+    Input.Query.Basis = FQuat::Identity;
+    TestFalse(TEXT("New helper leaves flat behavior to original constructors"), Input.Point().IsSet());
+    const auto OldAgain = Flat.Query();
+    TestTrue(TEXT("Flat original result is exactly unchanged"), OldPoint.IsSet() && OldAgain.IsSet()
+        && OldPoint.GetValue() == OldAgain.GetValue());
+    return NOT HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCkPlantQueryTiltedInvalid,
+    "Ck.ProceduralAnimation.Foothold.PlantQuery.TiltedInvalid",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+auto
+    FCkPlantQueryTiltedInvalid::
+    RunTest(
+        const FString&)
+    -> bool
+{
+    using namespace ck_procedural_gait_query_tests;
+    TestFalse(TEXT("Default context rejects without geometry or queries"), ck_procedural_gait::Get_TiltedPlantSeedQueryPoint(
+        {}, {}, {}, {}, {}, 0.0f, 0.0f, {}, {}, {}).IsSet());
+    auto Input = FTiltedInput{};
+    Input.Context.PaidNativeDownUnreachable = false;
+    TestFalse(TEXT("Miss or Usable-but-trial-failed paid call cannot qualify"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Context.SearchGranted = false;
+    TestFalse(TEXT("No actual ordinary grant cannot qualify"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Context.RemainingSlots = 0;
+    TestFalse(TEXT("No remaining slot cannot qualify"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Context.StagingAtEntry = true;
+    TestFalse(TEXT("Any non-Dormant entry staging excludes whole walker"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Context.StagingNow = true;
+    TestFalse(TEXT("Any non-Dormant current staging excludes whole walker"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Query.Basis.X = std::numeric_limits<double>::quiet_NaN();
+    TestFalse(TEXT("Malformed basis rejects before inverse or rotation"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Paid.X = std::numeric_limits<double>::max();
+    TestFalse(TEXT("Finite paid XY outside float range rejects before narrowing"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Plane.Point.Z = std::nextafter(1.0, 2.0);
+    TestFalse(TEXT("Plant plane Z must be exactly native-float representable"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Plane.Normal = Input.Query.Basis.GetAxisZ();
+    TestFalse(TEXT("Arbitrary tilted native plant plane remains unsupported"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Query.Outboard = FVector::ZeroVector;
+    TestFalse(TEXT("Zero outboard rejects before normalization"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Query.Outboard.X = std::numeric_limits<double>::max();
+    TestFalse(TEXT("Outboard squared overflow rejects before native predicate"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Query.RestDrop = std::numeric_limits<float>::quiet_NaN();
+    TestFalse(TEXT("Malformed body-band scalar rejects before conversion"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Trial.Set_PosedHip(FVector{1000.0, 0.0, 0.0});
+    TestFalse(TEXT("Posed physical trial rejects independently"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Force = 1.0f;
+    TestFalse(TEXT("Original native force radius is not enlarged"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Search = 1.0f;
+    TestFalse(TEXT("Original plant-centered search ball is retained"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Query.Outboard = FVector{0.0, -1.0, 0.0};
+    TestFalse(TEXT("Original own-side predicate rejects the only point"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Query.MaxHipLateral = 100.0f;
+    TestFalse(TEXT("Actual tilted native body-band predicate rejects the only point"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Trial.Set_Hip(FVector{1000.0, 0.0, 0.0});
+    TestFalse(TEXT("Simulation physical trial rejects independently"), Input.Point().IsSet());
+    Input = FTiltedInput{};
+    Input.Query.Reservations = TArrayView<const ck::FProceduralFootReservation>{
+        static_cast<const ck::FProceduralFootReservation*>(nullptr), 1};
+    TestFalse(TEXT("Nonempty null reservation view rejects before access"), Input.Point().IsSet());
+    return NOT HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCkPlantQueryTiltedReservations,
+    "Ck.ProceduralAnimation.Foothold.PlantQuery.TiltedReservations",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+auto
+    FCkPlantQueryTiltedReservations::
+    RunTest(
+        const FString&)
+    -> bool
+{
+    using namespace ck_procedural_gait_query_tests;
+    auto Input = FTiltedInput{};
+    Input.Query.FootContactRadius = 1.0f;
+    const auto Point = Input.Point();
+    TestTrue(TEXT("Unreserved tilted point is present before reservation controls"), Point.IsSet());
+    if (NOT Point.IsSet())
+    {
+        return false;
+    }
+    const TArray<ck::FProceduralFootReservation> Blocked{{Point.GetValue(), 1.0f, 2}};
+    Input.Query.Reservations = Blocked;
+    TestFalse(TEXT("Current foreign reservation blocks the only point"), Input.Point().IsSet());
+    Input.Query.FootContactRadius = 0.0f;
+    TestTrue(TEXT("Zero own radius keeps the existing bypass"), Input.Point().IsSet());
+    Input.Query.FootContactRadius = 1.0f;
+    auto BadPosition = FVector::ZeroVector;
+    BadPosition.X = std::numeric_limits<double>::quiet_NaN();
+    const TArray<ck::FProceduralFootReservation> BadSelf{{BadPosition, -1.0f, 1}};
+    Input.Query.Reservations = BadSelf;
+    TestFalse(TEXT("Malformed radius rejects before same-leg exclusion"), Input.Point().IsSet());
+    const TArray<ck::FProceduralFootReservation> Self{{BadPosition, 1.0f, 1}};
+    Input.Query.Reservations = Self;
+    TestTrue(TEXT("Valid same-leg radius ignores its unused malformed position"), Input.Point().IsSet());
+    const TArray<ck::FProceduralFootReservation> Zero{{BadPosition, 0.0f, -1}};
+    Input.Query.Reservations = Zero;
+    TestTrue(TEXT("Zero reserved radius keeps the existing bypass"), Input.Point().IsSet());
+    const TArray<ck::FProceduralFootReservation> Active{{BadPosition, 1.0f, 2}};
+    Input.Query.Reservations = Active;
+    TestFalse(TEXT("Malformed active reservation cannot reach native predicate"), Input.Point().IsSet());
+    TArray<ck::FProceduralFootReservation> Full;
+    for (auto Index = 0; Index < 64; ++Index)
+    {
+        Full.Emplace(FVector{-1000.0 - Index, 0.0, 0.0}, 1.0f, 2);
+    }
+    Input.Query.Reservations = Full;
+    TestTrue(TEXT("Complete64 reservation view is evaluated without truncation"), Input.Point().IsSet());
+    Full.Emplace(FVector::ZeroVector, 0.0f, 1);
+    Input.Query.Reservations = Full;
+    TestFalse(TEXT("Oversized reservation view rejects before iteration"), Input.Point().IsSet());
     return NOT HasAnyErrors();
 }
 #endif
