@@ -241,8 +241,17 @@ namespace ck
         const auto Dt = InDeltaT.Get_Seconds();
         if (NOT FMath::IsFinite(Dt) || Dt <= 0.0 || NOT FMath::IsFinite(1.0 / Dt))
         {
-            if (Staging._TwoPlacement)
-            { Staging._Phase = EProceduralContactStagingPhase::Exhausted; }
+            const auto Preparation = InHandle.Has<FFragment_ProceduralContactStagingFence>()
+                && InHandle.Get<FFragment_ProceduralContactStagingFence>()._Mode == EProceduralContactStagingFenceMode::Preparation
+                && InHandle.Get<FFragment_ProceduralContactStagingFence>()._Spent
+                && InHandle.Get<FFragment_ProceduralContactStagingFence>()._Episode == Staging._Episode;
+            if (Staging._TwoPlacement || Preparation)
+            {
+                Staging._Phase = EProceduralContactStagingPhase::Exhausted;
+                Staging._PendingBody.Reset();
+                if (Preparation)
+                { InHandle.Get<FFragment_ProceduralContactStagingFence>()._AbortRecorded = true; }
+            }
             return;
         }
 
@@ -597,7 +606,8 @@ namespace ck
         }
         const auto ExhaustStaging = [&]()
         {
-            if (Staging._TwoPlacement && StagingFence != nullptr && StagingFence->_Spent
+            if (StagingFence != nullptr && StagingFence->_Spent
+                && (Staging._TwoPlacement || StagingFence->_Mode == EProceduralContactStagingFenceMode::Preparation)
                 && StagingFence->_Episode == Staging._Episode && NOT StagingFence->_AbortRecorded)
             {
                 StagingFence->_AbortRecorded = true;
@@ -611,8 +621,135 @@ namespace ck
             Staging._ReservedRays = 0;
             Staging._PendingBody.Reset();
         };
+        const auto IsPreparation = [&]() -> bool
+        {
+            return StagingFence != nullptr && StagingFence->_Spent
+                && StagingFence->_Mode == EProceduralContactStagingFenceMode::Preparation
+                && StagingFence->_Owner == InHandle.ConvertToHandle() && StagingFence->_World.Get() == World
+                && StagingFence->_Episode == Staging._Episode;
+        };
+        const auto RunPreparationPhase = [&](bool InAlreadyCharged) -> bool
+        {
+            StagingOwnsMotion = true;
+            if (NOT IsPreparation() || NOT HasGait || NOT Adaptive.Get_Enabled()
+                || NOT InSupportComp._State.Get_Grounded() || GFrameCounter == 0 || GFrameCounter == MAX_uint64
+                || PreviousPaceState == ECk_SurfaceMotion_ReachPaceState::PhysicalOverride
+                || NOT InHandle.Has<FFragment_ProceduralGait_Tunables>()
+                || NOT Staging._Direction.Equals(InMotionComp._Direction, 0.0) || Staging._Speed != InMotionComp._Speed
+                || Staging._Up != Up || Body.ContainsNaN() || Staging._BlockedBody.ContainsNaN()
+                || NOT Body.GetRotation().Equals(Staging._BlockedBody.GetRotation(), 0.0)
+                || NOT Body.GetScale3D().Equals(Staging._BlockedBody.GetScale3D(), 0.0)
+                || NOT FVector::VectorPlaneProject(Body.GetLocation() - Staging._BlockedBody.GetLocation(), Staging._Direction).IsNearlyZero(1.0e-6))
+            { ExhaustStaging(); return false; }
+            const auto& Gait = InHandle.Get<FFragment_ProceduralGait>();
+            const auto& Tunables = InHandle.Get<FFragment_ProceduralGait_Tunables>();
+            auto& Fence = *StagingFence;
+            auto& Prep = Fence._Preparation;
+            if (Gait._SolveSequence == MAX_uint64 || NOT Prep.Get_IsLedgerValid()
+                || NOT FCk_ProceduralGait_Timing::StaticStruct()->CompareScriptStruct(&Fence._Timing, &Tunables.Get_Timing(), 0)
+                || NOT FCk_ProceduralGait_Step::StaticStruct()->CompareScriptStruct(&Fence._Step, &Tunables.Get_Step(), 0)
+                || NOT FCk_ProceduralGait_Probe::StaticStruct()->CompareScriptStruct(&Fence._Probe, &Tunables.Get_Probe(), 0)
+                || NOT FCk_ProceduralGait_Foothold::StaticStruct()->CompareScriptStruct(&Fence._Foothold, &Tunables.Get_Foothold(), 0)
+                || NOT FCk_SurfaceMotion_Spec::StaticStruct()->CompareScriptStruct(&Fence._Surface, &InParams, 0)
+                || (Fence._InitiatedFrame != GFrameCounter
+                    && (Staging._ProducedFrame != GFrameCounter - 1 || Fence._LastAcknowledgedSolve != Gait._SolveSequence
+                        || Staging._ProducedSolve != Gait._SolveSequence || NOT Staging._ProducedBody.Equals(Body, 1.0e-6)))
+                || NOT Fence.TryAdvanceTime(GFrameCounter, Dt) || NOT FMath::IsFinite(Fence._Cycles)
+                || Fence._Cycles >= Fence._CycleLimit)
+            { ExhaustStaging(); return false; }
+            if (Staging._PendingBody.IsSet())
+            {
+                if (NOT Body.Equals(Staging._PendingBody.GetValue(), 1.0e-6)
+                    || Staging._ProducedFrame < Staging._PendingFrame || Staging._ProducedSolve <= Staging._PendingSolve
+                    || NOT Gait._ReachStance.Get_HasSample() || Gait._ReachStance.Get_SolveSequence() != Gait._SolveSequence
+                    || NOT Gait._ReachStance.Get_BodyAtSolve().Equals(Body, 1.0e-6))
+                { ExhaustStaging(); return false; }
+                Staging._PendingBody.Reset();
+            }
+            if (Staging._Phase == EProceduralContactStagingPhase::AuxiliaryHold && Prep._CompletedCount == 1)
+            { Staging._Phase = EProceduralContactStagingPhase::MoveB; }
+            if (Staging._Phase == EProceduralContactStagingPhase::MoveB && Body.Equals(Prep._Plan._BodyB, 1.0e-6))
+            { Staging._Phase = EProceduralContactStagingPhase::PrepareM; }
+            if (Staging._Phase == EProceduralContactStagingPhase::PrepareM && Prep._CompletedCount == 2)
+            { Staging._Phase = EProceduralContactStagingPhase::PrepareF; }
+            if (Staging._Phase == EProceduralContactStagingPhase::PrepareF && Prep._CompletedCount == 3)
+            { Staging._Phase = EProceduralContactStagingPhase::MoveC; }
+            if (Staging._Phase == EProceduralContactStagingPhase::MoveC && Body.Equals(Prep._Plan._BodyC, 1.0e-6))
+            { Staging._Phase = EProceduralContactStagingPhase::QualifyLegacy; }
+            if (Staging._Phase == EProceduralContactStagingPhase::QualifyLegacy)
+            {
+                if (NOT Get_IsProceduralContactPreparationOwnerValid(UCk_Utils_ProceduralGait_UE::CastChecked(InHandle), Body, CorePoseOffset))
+                { ExhaustStaging(); return false; }
+                // The original charged candidate prefix below owns this one fresh qualification; no acquisition query.
+                StagingOwnsMotion = false;
+                return false;
+            }
+            const auto Holding = Staging._Phase == EProceduralContactStagingPhase::AuxiliaryHold
+                || Staging._Phase == EProceduralContactStagingPhase::PrepareM
+                || Staging._Phase == EProceduralContactStagingPhase::PrepareF;
+            if (NOT Holding && Staging._Phase != EProceduralContactStagingPhase::MoveB
+                && Staging._Phase != EProceduralContactStagingPhase::MoveC)
+            { ExhaustStaging(); return false; }
+            if (NOT InAlreadyCharged && InSupportComp._HeightPlanningTrials >= MaxHeightTrials)
+            { ExhaustStaging(); return false; }
+            if (NOT InAlreadyCharged)
+            { ++InSupportComp._HeightPlanningTrials; }
+            Staging._IntentFrame = GFrameCounter;
+            Staging._ConsumerSolve = Gait._SolveSequence;
+            Staging._IntentBody = Body;
+            Staging._IntentPoseOffset = CorePoseOffset;
+            const auto& Goal = Holding ? Body : Staging._Phase == EProceduralContactStagingPhase::MoveB
+                ? Prep._Plan._BodyB : Prep._Plan._BodyC;
+            const auto Proofs = Holding ? 1 : 2;
+            if (InSupportComp._HeightPlanningRays < 0 || InSupportComp._HeightPlanningRays > MaxPlanningRays - 12 * Proofs
+                || InSupportComp._HeightEnvelopeQueries > EnvelopeQueryLimit - (HasPose ? 6 : 3) * Proofs
+                || (NOT Holding && (Prep._StartedCount != Prep._CompletedCount || CoreAnchors.Num() != 4 || NOT CoreLandings.IsEmpty())))
+            { ExhaustStaging(); return false; }
+            const auto GaitHandle = UCk_Utils_ProceduralGait_UE::CastChecked(InHandle);
+            if (NOT FitsLandings(Goal)
+                || NOT Get_IsProceduralContactPreparationBodyAdmitted(GaitHandle, Goal, CorePoseOffset,
+                    InSupportComp._HeightPlanningRays, MaxPlanningRays)
+                || NOT EnvelopeClear(Body, Goal, ck_surface_motion::EEnvelopeScope::SimulationAndPresentation))
+            { ExhaustStaging(); return false; }
+            if (Holding)
+            {
+                if (Prep._StartedCount == Prep._CompletedCount && Prep._StartedCount < 3
+                    && InSupportComp._HeightPlanningRays < MaxPlanningRays)
+                {
+                    const auto Index = Prep.Get_RosterIndex(Prep._StartedCount);
+                    if (Index < 0 || Index >= 4)
+                    { ExhaustStaging(); return false; }
+                    Staging._PoseRayTickets.Add(Prep._Roster[Index]);
+                    Staging._ReservedRays = 1;
+                }
+                StagingBodyAccepted = true;
+                return true;
+            }
+            const auto StepDistance = FMath::Min(static_cast<double>(InMotionComp._Speed),
+                static_cast<double>(Settings.Get_ClearanceSpeed())) * Dt;
+            const auto Remaining = FVector::DotProduct(Goal.GetLocation() - Body.GetLocation(), Staging._Direction);
+            if (NOT FMath::IsFinite(StepDistance) || StepDistance <= 0.0 || NOT FMath::IsFinite(Remaining))
+            { ExhaustStaging(); return false; }
+            auto Increment = Body;
+            Increment.AddToTranslation(Staging._Direction * FMath::Clamp(Remaining, -StepDistance, StepDistance));
+            if (NOT FitsLandings(Increment)
+                || NOT Get_IsProceduralContactPreparationBodyAdmitted(GaitHandle, Increment, CorePoseOffset,
+                    InSupportComp._HeightPlanningRays, MaxPlanningRays)
+                || NOT EnvelopeClear(Body, Increment, ck_surface_motion::EEnvelopeScope::SimulationAndPresentation))
+            { ExhaustStaging(); return false; }
+            Body = Increment;
+            Staging._PendingBody = Body;
+            Staging._PendingFrame = GFrameCounter;
+            Staging._PendingSolve = Gait._SolveSequence;
+            Staging._IntentBody = Body;
+            Staging._IntentPoseOffset = CorePoseOffset;
+            StagingBodyAccepted = true;
+            return true;
+        };
         const auto RunStagingPhase = [&](bool InAlreadyCharged = false) -> bool
         {
+            if (IsPreparation() && NOT StagingFence->_Preparation._LegacyAdopted)
+            { return RunPreparationPhase(InAlreadyCharged); }
             StagingOwnsMotion = true;
             if (NOT HasGait || NOT Adaptive.Get_Enabled() || NOT InSupportComp._State.Get_Grounded()
                 || GFrameCounter == 0 || GFrameCounter == MAX_uint64
@@ -625,6 +762,23 @@ namespace ck
             const auto& Gait = InHandle.Get<FFragment_ProceduralGait>();
             if (Gait._SolveSequence == MAX_uint64)
             { ExhaustStaging(); return false; }
+            if (IsPreparation())
+            {
+                const auto& Tunables = InHandle.Get<FFragment_ProceduralGait_Tunables>();
+                auto& Fence = *StagingFence;
+                if (NOT Fence.Get_HasValidLimits() || NOT Fence._Preparation._LegacyAdopted
+                    || NOT FCk_ProceduralGait_Timing::StaticStruct()->CompareScriptStruct(&Fence._Timing, &Tunables.Get_Timing(), 0)
+                    || NOT FCk_ProceduralGait_Step::StaticStruct()->CompareScriptStruct(&Fence._Step, &Tunables.Get_Step(), 0)
+                    || NOT FCk_ProceduralGait_Probe::StaticStruct()->CompareScriptStruct(&Fence._Probe, &Tunables.Get_Probe(), 0)
+                    || NOT FCk_ProceduralGait_Foothold::StaticStruct()->CompareScriptStruct(&Fence._Foothold, &Tunables.Get_Foothold(), 0)
+                    || NOT FCk_SurfaceMotion_Spec::StaticStruct()->CompareScriptStruct(&Fence._Surface, &InParams, 0)
+                    || (Fence._LastSurfaceFrame != GFrameCounter
+                        && (Staging._ProducedFrame != GFrameCounter - 1 || Staging._ProducedSolve != Gait._SolveSequence
+                            || Fence._LastAcknowledgedSolve != Gait._SolveSequence || NOT Staging._ProducedBody.Equals(Body, 1.0e-6)
+                            || NOT Fence.TryAdvanceTime(GFrameCounter, Dt)))
+                    || NOT FMath::IsFinite(Fence._Cycles) || Fence._Cycles >= 5.0)
+                { ExhaustStaging(); return false; }
+            }
             if (Staging._TwoPlacement)
             {
                 if (StagingFence == nullptr || NOT StagingFence->_Spent
@@ -710,10 +864,13 @@ namespace ck
             if (Staging._Phase == EProceduralContactStagingPhase::Retreat && Body.Equals(Staging._RetreatBody, 1.0e-6))
             {
                 Staging._Phase = EProceduralContactStagingPhase::Replant;
-                Staging._LastClock = Gait._Solver.GetGaitClock();
-                Staging._ClockAtProgress = Staging._LastClock;
-                Staging._ClockWrapsWithoutProgress = 0;
-                Staging._ClockTravelWithoutProgress = 0.0;
+                if (NOT IsPreparation())
+                {
+                    Staging._LastClock = Gait._Solver.GetGaitClock();
+                    Staging._ClockAtProgress = Staging._LastClock;
+                    Staging._ClockWrapsWithoutProgress = 0;
+                    Staging._ClockTravelWithoutProgress = 0.0;
+                }
             }
             if (Staging._Phase == EProceduralContactStagingPhase::Replant)
             {
@@ -765,6 +922,7 @@ namespace ck
             Staging._IntentFrame = GFrameCounter;
             Staging._ConsumerSolve = Gait._SolveSequence;
             Staging._IntentBody = Body;
+            Staging._IntentPoseOffset = CorePoseOffset;
             const auto GaitHandle = UCk_Utils_ProceduralGait_UE::CastChecked(InHandle);
             const auto Holding = Staging._Phase == EProceduralContactStagingPhase::Replant;
             const auto& Goal = Holding ? Body : Staging._Phase == EProceduralContactStagingPhase::Retreat
@@ -851,6 +1009,7 @@ namespace ck
             Staging._PendingFrame = GFrameCounter;
             Staging._PendingSolve = Gait._SolveSequence;
             Staging._IntentBody = Body;
+            Staging._IntentPoseOffset = CorePoseOffset;
             StagingBodyAccepted = true;
             return true;
         };
@@ -873,11 +1032,105 @@ namespace ck
         }
         const auto StagingWasActive = Staging._Phase == EProceduralContactStagingPhase::Retreat
             || Staging._Phase == EProceduralContactStagingPhase::Replant
-            || Staging._Phase == EProceduralContactStagingPhase::AdvanceExit;
+            || Staging._Phase == EProceduralContactStagingPhase::AdvanceExit
+            || (IsPreparation() && Staging._Phase != EProceduralContactStagingPhase::Dormant
+                && Staging._Phase != EProceduralContactStagingPhase::Exhausted);
+        const auto StartPreparation = [&](const FProceduralContactStagingInput& InInput,
+            const TArray<FProceduralContactStagingLeg>& InLegs) -> bool
+        {
+            const auto Plan = Get_ProceduralContactStagingPreparationPlan(InInput);
+            if (NOT Plan.IsSet() || InLegs.Num() != 4 || NOT HasGait
+                || NOT InHandle.Has<FFragment_ProceduralGait_Tunables>()
+                || InSupportComp._HeightPlanningTrials >= MaxHeightTrials)
+            { return false; }
+            const auto& Gait = InHandle.Get<FFragment_ProceduralGait>();
+            const auto& Tunables = InHandle.Get<FFragment_ProceduralGait_Tunables>();
+            const auto Duration = FMath::Max(Tunables.Get_Timing().Get_CycleDuration().Get_Seconds(),
+                Tunables.Get_Timing().Get_StepDuration().Get_Seconds());
+            const auto PreviousEpisode = FMath::Max(Staging._Episode, StagingFence != nullptr ? StagingFence->_Episode : uint64{0});
+            auto Authority = FProceduralSupportReturnObservation{};
+            if (Gait._Legs.Num() != 4 || Gait._Solver.NumLegs() != 4 || NOT Gait._ParticipationLeases.IsEmpty()
+                || Gait._UnplantedMask != 0 || NOT FMath::IsFinite(Duration) || Duration <= 0.0
+                || NOT FMath::IsFinite(5.0 * Duration) || PreviousEpisode == MAX_uint64 || NOT ReadRecoveryAuthority(Authority))
+            { return false; }
+            auto Preparation = FProceduralContactStagingPreparation{};
+            Preparation._Plan = Plan.GetValue();
+            Preparation._ClaimsRevision = Authority.ClaimsRevision;
+            for (auto Index = 0; Index < 4; ++Index)
+            {
+                const auto* Geometry = InLegs.FindByPredicate([&](const auto& InLeg) { return InLeg._RosterIndex == Index; });
+                const auto& Leg = Gait._Legs[Index];
+                if (Geometry == nullptr || NOT procedural_leg::Get_IsSupporting(Leg)
+                    || NOT Leg.Has<FFragment_ProceduralLeg_Params>() || Gait._Solver.HasPendingStep(Index)
+                    || Gait._Solver.GetLegState(Index).Get_Swing().Get_Active())
+                { return false; }
+                Preparation._Roster[Index] = Leg;
+                Preparation._Geometry[Index] = *Geometry;
+                Preparation._Ids[Index] = Leg.Get<FFragment_ProceduralLeg_Params>().Get_Id();
+                Preparation._Specs[Index] = Leg.Get<FFragment_ProceduralLeg_Params>();
+            }
+            // No native proof precedes this shared goal charge and owner-lifetime latch.
+            ++InSupportComp._HeightPlanningTrials;
+            auto& Fence = InHandle.AddOrGet<FFragment_ProceduralContactStagingFence>();
+            Fence = FFragment_ProceduralContactStagingFence{};
+            StagingFence = &Fence;
+            Fence._Mode = EProceduralContactStagingFenceMode::Preparation;
+            Fence._Spent = true;
+            Fence._Owner = InHandle.ConvertToHandle();
+            Fence._World = World;
+            Fence._Episode = PreviousEpisode + 1;
+            Staging._Episode = Fence._Episode;
+            Fence._Forward = InMotionComp._Direction;
+            Fence._Up = Up;
+            Fence._Exit = Plan->_LegacyPlan._ExitBody;
+            Fence._InitiatedFrame = GFrameCounter;
+            Fence._InitiatedSolve = Gait._SolveSequence;
+            Fence._LastAcknowledgedSolve = Gait._SolveSequence;
+            Fence._CycleLimit = 5.0;
+            Fence._ElapsedLimit = 5.0 * Duration;
+            Fence._Timing = Tunables.Get_Timing();
+            Fence._Step = Tunables.Get_Step();
+            Fence._Probe = Tunables.Get_Probe();
+            Fence._Foothold = Tunables.Get_Foothold();
+            Fence._Surface = InParams;
+            Fence._Preparation = MoveTemp(Preparation);
+#if WITH_DEV_AUTOMATION_TESTS
+            if (InHandle.Has<FFragment_ProceduralContactPreparation_Test>())
+            {
+                auto& Test = InHandle.Get<FFragment_ProceduralContactPreparation_Test>();
+                if (Test.ChargedEpisode == 0)
+                {
+                    Test.ChargedEpisode = Fence._Episode;
+                    Test.ChargedFrame = GFrameCounter;
+                    Test.ChargedInputSolve = Gait._SolveSequence;
+                    Test.ChargedRays = InSupportComp._HeightPlanningRays;
+                    Test.ChargedEnvelopes = InSupportComp._HeightEnvelopeQueries;
+                    Test.ChargedTrials = InSupportComp._HeightPlanningTrials;
+                }
+            }
+#endif
+            Staging._Owner = InHandle.ConvertToHandle();
+            Staging._Phase = EProceduralContactStagingPhase::AuxiliaryHold;
+            Staging._Direction = InMotionComp._Direction;
+            Staging._Up = Up;
+            Staging._Speed = InMotionComp._Speed;
+            Staging._BlockedBody = Body;
+            Staging._RetreatBody = Plan->_LegacyPlan._RetreatBody;
+            Staging._ExitBody = Plan->_LegacyPlan._ExitBody;
+            Staging._Required.Reset();
+            Staging._TwoPlacement = false;
+            Staging._LandedMask = 0;
+            Staging._StartedMask = 0;
+            Staging._LastClock = Gait._Solver.GetGaitClock();
+            Staging._ClockTravelWithoutProgress = 0.0;
+            return RunPreparationPhase(true);
+        };
         const auto StartStaging = [&]() -> bool
         {
-            if (Staging._Phase != EProceduralContactStagingPhase::Dormant || NOT HasGait
-                || (StagingFence != nullptr && StagingFence->_Spent)
+            const auto Adopting = IsPreparation() && Staging._Phase == EProceduralContactStagingPhase::QualifyLegacy
+                && NOT StagingFence->_Preparation._LegacyAdopted && StagingFence->_Preparation._CompletedCount == 3;
+            if ((Staging._Phase != EProceduralContactStagingPhase::Dormant && NOT Adopting) || NOT HasGait
+                || (StagingFence != nullptr && StagingFence->_Spent && NOT Adopting)
                 || InSupportComp._HeightPlanningTrials >= MaxHeightTrials || Staging._Episode == MAX_uint64)
             { return false; }
             const auto GaitHandle = UCk_Utils_ProceduralGait_UE::CastChecked(InHandle);
@@ -896,10 +1149,26 @@ namespace ck
                 Input._Face = {Observation._FacePoint, Observation._FaceNormal};
                 Input._Legs = MakeArrayView(Legs);
                 Input._Landings = MakeArrayView(CoreLandings);
-                const auto Plan = Get_ProceduralContactStagingTwoPlacementPlan(Input);
+                const auto Plan = Adopting ? Get_ProceduralContactStagingPlan(Input)
+                    : Get_ProceduralContactStagingTwoPlacementPlan(Input);
                 if (NOT Plan.IsSet())
-                { return false; }
+                {
+                    if (Adopting)
+                    { ExhaustStaging(); return false; }
+                    return StartPreparation(Input, Legs);
+                }
                 const auto& Gait = InHandle.Get<FFragment_ProceduralGait>();
+                if (Adopting)
+                {
+                    const auto& Fixed = StagingFence->_Preparation._Plan;
+                    if (Plan->_TwoPlacement || Plan->_RequiredCount != 1
+                        || Plan->_Required[0]._RosterIndex != Fixed._SpanRosterIndex
+                        || Plan->_Required[0]._ProposedQuery != Fixed._LegacyPlan._Required[0]._ProposedQuery
+                        || NOT Plan->_RetreatBody.Equals(Fixed._LegacyPlan._RetreatBody, 0.0)
+                        || NOT Plan->_ExitBody.Equals(Fixed._LegacyPlan._ExitBody, 0.0)
+                        || NOT Body.Equals(Fixed._BodyC, 1.0e-6))
+                    { ExhaustStaging(); return false; }
+                }
                 for (auto Index = 0; Index < Plan->_RequiredCount; ++Index)
                 {
                     const auto& Required = Plan->_Required[Index];
@@ -916,18 +1185,25 @@ namespace ck
                     { return false; }
                 }
                 Staging._Owner = InHandle.ConvertToHandle();
-                ++Staging._Episode;
+                if (NOT Adopting)
+                { ++Staging._Episode; }
                 Staging._Phase = EProceduralContactStagingPhase::Retreat;
                 Staging._Direction = InMotionComp._Direction;
                 Staging._Up = Up;
                 Staging._Speed = InMotionComp._Speed;
-                Staging._BlockedBody = Body;
+                if (NOT Adopting)
+                { Staging._BlockedBody = Body; }
                 Staging._RetreatBody = Plan->_RetreatBody;
                 Staging._ExitBody = Plan->_ExitBody;
                 Staging._TwoPlacement = Plan->_TwoPlacement;
                 Staging._Required.Reset();
                 Staging._LandedMask = 0;
                 Staging._StartedMask = 0;
+                if (Adopting)
+                {
+                    StagingFence->_Preparation._LegacyAdopted = true;
+                    StagingFence->_RequiredCount = 1;
+                }
                 for (auto Index = 0; Index < Plan->_RequiredCount; ++Index)
                 {
                     const auto& Required = Plan->_Required[Index];
@@ -1049,7 +1325,8 @@ namespace ck
             const auto CanPlan = HasGait && NOT CoreAnchors.IsEmpty() && InSupportComp._State.Get_Grounded()
                 && (InSupportComp._AdaptiveHeightActive || PreviousPaceState == ECk_SurfaceMotion_ReachPaceState::Pacing
                     || PreviousPaceState == ECk_SurfaceMotion_ReachPaceState::Blocked || ObstacleHeightDelta.IsSet());
-            if (CanPlan && NOT StagingWasActive)
+            if ((CanPlan && NOT StagingWasActive)
+                || (IsPreparation() && Staging._Phase == EProceduralContactStagingPhase::QualifyLegacy))
             {
                 auto FoundGoal = false;
                 const auto& Gait = InHandle.Get<FFragment_ProceduralGait>();
@@ -1802,6 +2079,13 @@ namespace ck
             }
             if (InSupportComp._AdaptiveHeightActive)
             { Settings.Set_HeightPlane(TOptional<FVector>{InSupportComp._AdaptiveHeightGoal}); }
+        }
+        if (IsPreparation() && Staging._Phase == EProceduralContactStagingPhase::QualifyLegacy
+            && NOT StagingFence->_Preparation._LegacyAdopted)
+        {
+            // A successful earlier ordinary goal keeps its adoption; missing fresh qualification exhausts only this owner.
+            ExhaustStaging();
+            StagingOwnsMotion = false;
         }
         if (StagingOwnsMotion)
         {

@@ -201,6 +201,10 @@ namespace ck
             const TArray<FProceduralContactStagingBoundary>&) -> TArray<FProceduralContactStagingLeg>;
         friend CKPROCEDURALANIMATION_API auto Get_IsProceduralContactStagingBodyAdmitted(FCk_Handle_ProceduralGait,
             const FTransform&, const TOptional<FTransform>&, int32&, int32) -> bool;
+        friend CKPROCEDURALANIMATION_API auto Get_IsProceduralContactPreparationBodyAdmitted(FCk_Handle_ProceduralGait,
+            const FTransform&, const TOptional<FTransform>&, int32&, int32) -> bool;
+        friend CKPROCEDURALANIMATION_API auto Get_IsProceduralContactPreparationOwnerValid(FCk_Handle_ProceduralGait,
+            const FTransform&, const TOptional<FTransform>&) -> bool;
         friend class FProcessor_SurfaceMotion_Update;
         friend class FProcessor_ProceduralBodyPose_Update;
         friend class FProcessor_ProceduralRig_Update;

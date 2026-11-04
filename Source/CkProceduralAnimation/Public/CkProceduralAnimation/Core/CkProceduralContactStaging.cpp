@@ -11,6 +11,13 @@ namespace ck_procedural_contact_staging
     constexpr auto PreferredTopInset = 1.0;
     constexpr auto OwnSideQueryMargin = 0.1;
 
+    enum class EPlanFailure : uint8
+    {
+        Other,
+        DirectQuerySpan,
+        CommonHoldEmpty
+    };
+
     auto
         Get_PhysicalReach(float InReach)
         -> double
@@ -319,6 +326,98 @@ namespace ck_procedural_contact_staging
             InBody.GetLocation() - InInput._Body.GetLocation()).TransformPosition(InLeg._Anchor.Get_HipLocal()),
                 InInput._PosedBody->TransformVectorNoScale(InInput._Body.InverseTransformVectorNoScale(InLeg._OutboardWorld)));
     }
+
+    auto
+        TryGet_RepresentedPoint(const FVector& InPoint)
+        -> TOptional<FVector>
+    {
+        if (NOT Get_IsVectorBounded(InPoint))
+        { return {}; }
+        const auto Point = FVector{static_cast<float>(InPoint.X), static_cast<float>(InPoint.Y),
+            static_cast<float>(InPoint.Z)};
+        return Get_IsVectorBounded(Point) ? TOptional<FVector>{Point} : TOptional<FVector>{};
+    }
+
+    auto
+        Get_FitsPreparationTarget(const ck::FProceduralContactStagingInput& InInput,
+            const FTransform& InBody, const ck::FProceduralContactStagingLeg& InLeg,
+            const FVector& InPoint, double InOwnSideMargin)
+        -> bool
+    {
+        const auto Fits = [&](const FVector& InHip, const FVector& InOutboard)
+        {
+            return Get_FitsSphere(InPoint, InHip, InLeg._ForceReach)
+                && FVector::DotProduct(InPoint - InHip, InOutboard.GetSafeNormal())
+                    >= -static_cast<double>(InLeg._OwnSideTolerance) + InOwnSideMargin;
+        };
+        if (NOT Fits(InBody.TransformPosition(InLeg._Anchor.Get_HipLocal()), InLeg._OutboardWorld))
+        { return false; }
+        return NOT InInput._PosedBody.IsSet() || Fits(Get_TranslatedBody(InInput._PosedBody.GetValue(),
+            InBody.GetLocation() - InInput._Body.GetLocation()).TransformPosition(InLeg._Anchor.Get_HipLocal()),
+                InInput._PosedBody->TransformVectorNoScale(InInput._Body.InverseTransformVectorNoScale(InLeg._OutboardWorld)));
+    }
+
+    auto
+        Get_IsPreparationStanceValid(const ck::FProceduralContactStagingInput& InInput,
+            const FTransform& InBody, const std::array<FVector, 4>& InPoints)
+        -> bool
+    {
+        for (auto Index = 0; Index < 4; ++Index)
+        {
+            const auto& Leg = InInput._Legs[Index];
+            if (NOT Get_FitsPhysical(InInput, InBody, InPoints[Index], Leg._Anchor.Get_HipLocal(),
+                Leg._Anchor.Get_Reach(), Get_PhysicalReach(Leg._Anchor.Get_Reach())))
+            { return false; }
+            for (auto Other = 0; Other < Index; ++Other)
+            {
+                const auto Radius = static_cast<double>(Leg._FootContactRadius)
+                    + InInput._Legs[Other]._FootContactRadius;
+                const auto Distance = FVector::DistSquared(InPoints[Index], InPoints[Other]);
+                if (NOT FMath::IsFinite(Distance) || Distance < Radius * Radius)
+                { return false; }
+            }
+        }
+        return true;
+    }
+
+    auto
+        TryGet_PreparationPoint(const ck::FProceduralContactStagingInput& InInput,
+            const ck::FProceduralContactStagingLeg& InLeg, const FTransform& InProspectiveHold,
+            const FVector& InSeed)
+        -> TOptional<FVector>
+    {
+        if (NOT Get_IsVectorBounded(InSeed))
+        { return {}; }
+        const auto Outboard = InLeg._OutboardWorld.GetSafeNormal();
+        const auto Tangent = Outboard - InInput._Up * FVector::DotProduct(Outboard, InInput._Up);
+        const auto Denominator = FVector::DotProduct(Tangent, Outboard);
+        const auto Own = FVector::DotProduct(InSeed - InProspectiveHold.TransformPosition(
+            InLeg._Anchor.Get_HipLocal()), Outboard);
+        if (NOT FMath::IsFinite(Own) || NOT FMath::IsFinite(Denominator) || Denominator <= 0.0)
+        { return {}; }
+        auto Point = InSeed;
+        if (Own < -static_cast<double>(InLeg._OwnSideTolerance))
+        {
+            const auto Scale = (-static_cast<double>(InLeg._OwnSideTolerance) + OwnSideQueryMargin - Own)
+                / Denominator;
+            if (NOT FMath::IsFinite(Scale))
+            { return {}; }
+            const auto Correction = Tangent * Scale;
+            if (NOT Get_IsVectorBounded(Correction))
+            { return {}; }
+            Point += Correction;
+        }
+        if (NOT Get_FitsSphere(Point, InLeg._Anchor.Get_FootWorld(), InLeg._SearchRadius)
+            || NOT Get_FitsPreparationTarget(InInput, InProspectiveHold, InLeg, Point, 0.0))
+        { return {}; }
+        const auto Represented = TryGet_RepresentedPoint(Point);
+        if (NOT Represented.IsSet()
+            || FVector::DotProduct(Represented.GetValue() - InLeg._Anchor.Get_FootWorld(), InInput._Up) != 0.0
+            || NOT Get_FitsSphere(Represented.GetValue(), InLeg._Anchor.Get_FootWorld(), InLeg._SearchRadius)
+            || NOT Get_FitsPreparationTarget(InInput, InProspectiveHold, InLeg, Represented.GetValue(), 0.0))
+        { return {}; }
+        return Represented;
+    }
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -363,11 +462,14 @@ namespace ck
 
     auto
         DoGet_ProceduralContactStagingPlan(
-            const FProceduralContactStagingInput& InInput, bool InAllowTwoPlacement, bool& OutDirectSphereFailure)
+            const FProceduralContactStagingInput& InInput, bool InAllowTwoPlacement, bool& OutDirectSphereFailure,
+            ck_procedural_contact_staging::EPlanFailure* OutFailure = nullptr)
         -> TOptional<FProceduralContactStagingPlan>
     {
         using namespace ck_procedural_contact_staging;
         OutDirectSphereFailure = false;
+        if (OutFailure != nullptr)
+        { *OutFailure = EPlanFailure::Other; }
         if (InInput._Legs.Num() <= 0 || InInput._Legs.Num() > MaximumCount
             || InInput._Landings.Num() < 0 || InInput._Landings.Num() > MaximumCount
             || InInput._Legs.GetData() == nullptr
@@ -441,6 +543,8 @@ namespace ck
             if (DirectSphereFailure && NOT InAllowTwoPlacement)
             {
                 OutDirectSphereFailure = true;
+                if (OutFailure != nullptr)
+                { *OutFailure = EPlanFailure::DirectQuerySpan; }
                 return {};
             }
             TOptional<FVector> Intermediate;
@@ -469,18 +573,24 @@ namespace ck
         }
 
         auto Retreat = FInterval{FMath::Max(FaceCoordinate, BodyCoordinate - HalfExtent), BodyCoordinate};
+        const auto RejectHold = [&]() -> TOptional<FProceduralContactStagingPlan>
+        {
+            if (OutFailure != nullptr && Result._TwoPlacement && Retreat._Lower >= Retreat._Upper)
+            { *OutFailure = EPlanFailure::CommonHoldEmpty; }
+            return {};
+        };
         for (const auto& Leg : InInput._Legs)
         {
             const auto& Anchor = Leg._Anchor;
             if (NOT DoIntersectPhysical(Retreat, InInput, Anchor.Get_FootWorld(), Anchor.Get_HipLocal(),
                 Anchor.Get_Reach(), Get_PhysicalReach(Anchor.Get_Reach()), BodyCoordinate))
-            { return {}; }
+            { return RejectHold(); }
         }
         for (const auto& Landing : InInput._Landings)
         {
             if (NOT DoIntersectPhysical(Retreat, InInput, Landing.Get_PointWorld(), Landing.Get_HipLocal(),
                 Landing.Get_Reach(), Landing.Get_AdmissionReach(), BodyCoordinate))
-            { return {}; }
+            { return RejectHold(); }
         }
         for (auto Index = 0; Index < Result._RequiredCount; ++Index)
         {
@@ -490,14 +600,14 @@ namespace ck
                 Leg._Anchor.Get_Reach(), Leg._ForceReach, BodyCoordinate)
                 || NOT DoIntersectOwnSide(Retreat, Point, InInput._Body.TransformPosition(Leg._Anchor.Get_HipLocal()),
                     Leg._OutboardWorld, Leg._OwnSideTolerance, BodyCoordinate, InInput._Forward))
-            { return {}; }
+            { return RejectHold(); }
         }
         if (Result._TwoPlacement)
         {
             for (const auto& Leg : InInput._Legs)
             {
                 if (NOT DoIntersectMilestone(Retreat, InInput, Leg, Leg._Anchor.Get_FootWorld(), BodyCoordinate))
-                { return {}; }
+                { return RejectHold(); }
             }
             for (auto Index = 0; Index < Result._RequiredCount; ++Index)
             {
@@ -506,7 +616,7 @@ namespace ck
                 if (NOT DoIntersectMilestone(Retreat, InInput, Leg, Required._ProposedQuery, BodyCoordinate)
                     || (Required._IntermediateQuery.IsSet() && NOT DoIntersectMilestone(Retreat, InInput,
                         Leg, Required._IntermediateQuery.GetValue(), BodyCoordinate)))
-                { return {}; }
+                { return RejectHold(); }
             }
         }
         const auto RetreatCoordinate = TryGet_RepresentedMidpoint(Retreat);
@@ -602,6 +712,180 @@ namespace ck
         if (Existing.IsSet() || NOT DirectSphereFailure)
         { return Existing; }
         return DoGet_ProceduralContactStagingPlan(InInput, true, DirectSphereFailure);
+    }
+
+    auto
+        Get_ProceduralContactStagingPreparationPlan(
+            const FProceduralContactStagingInput& InInput)
+        -> TOptional<FProceduralContactStagingPreparationPlan>
+    {
+        using namespace ck_procedural_contact_staging;
+        if (InInput._Legs.Num() != 4 || InInput._Legs.GetData() == nullptr || InInput._Landings.Num() != 0)
+        { return {}; }
+        auto DirectFailure = false;
+        auto Failure = EPlanFailure::Other;
+        if (DoGet_ProceduralContactStagingPlan(InInput, false, DirectFailure, &Failure).IsSet()
+            || Failure != EPlanFailure::DirectQuerySpan)
+        { return {}; }
+        if (DoGet_ProceduralContactStagingPlan(InInput, true, DirectFailure, &Failure).IsSet()
+            || Failure != EPlanFailure::CommonHoldEmpty)
+        { return {}; }
+
+        for (const auto& Leg : InInput._Legs)
+        {
+            if (NOT Leg._RetainedPlantNormal.IsSet() || Leg._RetainedPlantNormal.GetValue() != InInput._Up
+                || NOT Get_IsRadius(Leg._FootContactRadius)
+                || Leg._OutboardWorld.GetSafeNormal().IsNearlyZero())
+            { return {}; }
+        }
+        const auto A = FVector::DotProduct(InInput._Body.GetLocation(), InInput._Forward);
+        const auto B = FVector::DotProduct(InInput._Face._Point, InInput._Forward);
+        const auto HalfExtent = Get_Extent(InInput._Body, InInput._BodyHalfExtents, InInput._Forward);
+        const auto C = TryGet_RepresentedMidpoint(FInterval{B, A});
+        if (NOT C.IsSet() || A - B > HalfExtent)
+        { return {}; }
+        const auto Hold = TryGet_RepresentedMidpoint(FInterval{B, C.GetValue()});
+        if (NOT Hold.IsSet())
+        { return {}; }
+        const auto BodyB = Get_BodyAtCoordinate(InInput._Body, InInput._Forward, B);
+        const auto BodyC = Get_BodyAtCoordinate(InInput._Body, InInput._Forward, C.GetValue());
+        const auto BodyH = Get_BodyAtCoordinate(InInput._Body, InInput._Forward, Hold.GetValue());
+        const auto Padded = InInput._BodyHalfExtents + FVector{InInput._CollisionMargin + JPH::cDefaultConvexRadius};
+        auto Clearance = Get_Extent(InInput._Body, Padded, InInput._Forward);
+        if (InInput._PosedBody.IsSet())
+        {
+            Clearance = FMath::Max(Clearance, Get_Extent(InInput._PosedBody.GetValue(), Padded, InInput._Forward)
+                - FVector::DotProduct(InInput._PosedBody->GetLocation() - InInput._Body.GetLocation(), InInput._Forward));
+        }
+        const auto ClearanceBody = Get_BodyAtCoordinate(InInput._Body, InInput._Forward, B + Clearance);
+        auto RequiredCount = 0;
+        auto SpanIndex = int32{INDEX_NONE};
+        auto OtherIndex = int32{INDEX_NONE};
+        std::array<FVector, 4> Points;
+        std::array<FVector, 4> Queries;
+        std::array<bool, 4> Required{};
+        for (auto Index = 0; Index < 4; ++Index)
+        {
+            const auto& Leg = InInput._Legs[Index];
+            Points[Index] = Leg._Anchor.Get_FootWorld();
+            if (Get_FitsPhysical(InInput, ClearanceBody, Points[Index], Leg._Anchor.Get_HipLocal(),
+                Leg._Anchor.Get_Reach(), Get_PhysicalReach(Leg._Anchor.Get_Reach())))
+            { continue; }
+            Required[Index] = true;
+            ++RequiredCount;
+            auto SpanFailure = false;
+            const auto Query = TryGet_Query(InInput, Leg, B, SpanFailure);
+            if (NOT Query.IsSet())
+            { return {}; }
+            Queries[Index] = Query.GetValue();
+            auto& Slot = SpanFailure ? SpanIndex : OtherIndex;
+            if (Slot != INDEX_NONE)
+            { return {}; }
+            Slot = Index;
+        }
+        if (RequiredCount != 2 || SpanIndex == INDEX_NONE || OtherIndex == INDEX_NONE
+            || NOT Get_IsPreparationStanceValid(InInput, InInput._Body, Points))
+        { return {}; }
+        const auto& SpanLeg = InInput._Legs[SpanIndex];
+        const auto Step = 0.95f * SpanLeg._SearchRadius;
+        const auto M = TryGet_PreparationPoint(InInput, SpanLeg, BodyH,
+            Points[SpanIndex] + InInput._Forward * static_cast<double>(Step));
+        const auto F = TryGet_PreparationPoint(InInput, InInput._Legs[OtherIndex], BodyH, Queries[OtherIndex]);
+        if (NOT M.IsSet() || NOT F.IsSet()
+            || NOT Get_FitsPreparationTarget(InInput, BodyB, SpanLeg, M.GetValue(), OwnSideQueryMargin)
+            || NOT Get_FitsPreparationTarget(InInput, BodyB, InInput._Legs[OtherIndex], F.GetValue(), OwnSideQueryMargin))
+        { return {}; }
+
+        auto AuxiliaryIndex = int32{INDEX_NONE};
+        for (auto Index = 0; Index < 4; ++Index)
+        {
+            if (Index == SpanIndex)
+            { continue; }
+            const auto Radius = static_cast<double>(SpanLeg._FootContactRadius)
+                + InInput._Legs[Index]._FootContactRadius;
+            if (FVector::DistSquared(M.GetValue(), Points[Index]) >= Radius * Radius)
+            { continue; }
+            if (AuxiliaryIndex != INDEX_NONE || Required[Index])
+            { return {}; }
+            AuxiliaryIndex = Index;
+        }
+        if (AuxiliaryIndex == INDEX_NONE)
+        { return {}; }
+        auto LowerIndex = int32{INDEX_NONE};
+        for (auto Index = 0; Index < 4; ++Index)
+        {
+            if (FVector::DotProduct(Points[Index] - Points[AuxiliaryIndex], InInput._Up) >= 0.0)
+            { continue; }
+            if (LowerIndex != INDEX_NONE)
+            { return {}; }
+            LowerIndex = Index;
+        }
+        if (LowerIndex == INDEX_NONE)
+        { return {}; }
+        const auto& Auxiliary = InInput._Legs[AuxiliaryIndex];
+        const auto Horizontal = Auxiliary._OutboardWorld
+            - InInput._Up * FVector::DotProduct(Auxiliary._OutboardWorld, InInput._Up);
+        const auto AuxiliaryOutboard = Horizontal.GetSafeNormal();
+        if (AuxiliaryOutboard.IsNearlyZero())
+        { return {}; }
+        auto AuxiliarySeed = InInput._Body.TransformPosition(Auxiliary._Anchor.Get_HipLocal())
+            + AuxiliaryOutboard * static_cast<double>(Auxiliary._SearchRadius);
+        AuxiliarySeed += InInput._Up * FVector::DotProduct(Points[LowerIndex] - AuxiliarySeed, InInput._Up);
+        // Radius bounds this one seed construction before world-float conversion, not a new returned-hit sphere.
+        const auto R = TryGet_RepresentedPoint(AuxiliarySeed);
+        if (NOT R.IsSet() || FVector::DotProduct(R.GetValue() - Points[LowerIndex], InInput._Up) != 0.0
+            || NOT Get_FitsPreparationTarget(InInput, InInput._Body, Auxiliary, R.GetValue(), OwnSideQueryMargin))
+        { return {}; }
+        Points[AuxiliaryIndex] = R.GetValue();
+        if (NOT Get_IsPreparationStanceValid(InInput, InInput._Body, Points)
+            || NOT Get_IsPreparationStanceValid(InInput, BodyB, Points))
+        { return {}; }
+        Points[SpanIndex] = M.GetValue();
+        if (NOT Get_IsPreparationStanceValid(InInput, BodyB, Points))
+        { return {}; }
+        Points[OtherIndex] = F.GetValue();
+        if (NOT Get_IsPreparationStanceValid(InInput, BodyB, Points)
+            || NOT Get_IsPreparationStanceValid(InInput, BodyC, Points))
+        { return {}; }
+
+        std::array<FProceduralContactStagingLeg, 4> FutureLegs;
+        for (auto Index = 0; Index < 4; ++Index)
+        {
+            FutureLegs[Index] = InInput._Legs[Index];
+            const auto& Anchor = InInput._Legs[Index]._Anchor;
+            FutureLegs[Index]._Anchor = FProceduralSurfaceReachPaceAnchor{
+                Points[Index], Anchor.Get_HipLocal(), Anchor.Get_Reach()};
+        }
+        auto FutureInput = InInput;
+        FutureInput._Body = BodyC;
+        FutureInput._Legs = TArrayView<const FProceduralContactStagingLeg>{FutureLegs.data(), 4};
+        if (InInput._PosedBody.IsSet())
+        { FutureInput._PosedBody = Get_TranslatedBody(InInput._PosedBody.GetValue(), BodyC.GetLocation() - InInput._Body.GetLocation()); }
+        const auto Legacy = Get_ProceduralContactStagingPlan(FutureInput);
+        if (NOT Legacy.IsSet() || Legacy->_TwoPlacement || Legacy->_RequiredCount != 1
+            || Legacy->_Required[0]._RosterIndex != SpanLeg._RosterIndex
+            || Legacy->_RetreatBody.GetLocation() != BodyH.GetLocation()
+            || NOT Get_IsPreparationStanceValid(InInput, BodyH, Points)
+            || NOT Get_FitsPreparationTarget(InInput, BodyH, SpanLeg, Legacy->_Required[0]._ProposedQuery, OwnSideQueryMargin))
+        { return {}; }
+        Points[SpanIndex] = Legacy->_Required[0]._ProposedQuery;
+        if (NOT Get_IsPreparationStanceValid(InInput, BodyH, Points)
+            || NOT Get_IsPreparationStanceValid(InInput, Legacy->_ExitBody, Points))
+        { return {}; }
+        auto Result = FProceduralContactStagingPreparationPlan{};
+        Result._AuxiliaryRosterIndex = Auxiliary._RosterIndex;
+        Result._SpanRosterIndex = SpanLeg._RosterIndex;
+        Result._OtherRosterIndex = InInput._Legs[OtherIndex]._RosterIndex;
+        Result._LowerPlaneRosterIndex = InInput._Legs[LowerIndex]._RosterIndex;
+        Result._LowerPlane = FProceduralContactStagingPlane{InInput._Legs[LowerIndex]._Anchor.Get_FootWorld(),
+            InInput._Legs[LowerIndex]._RetainedPlantNormal.GetValue()};
+        Result._AuxiliaryQuery = R.GetValue();
+        Result._SpanPreparationQuery = M.GetValue();
+        Result._OtherPreparationQuery = F.GetValue();
+        Result._BodyB = BodyB;
+        Result._BodyC = BodyC;
+        Result._LegacyPlan = Legacy.GetValue();
+        return Result;
     }
 
     auto

@@ -421,6 +421,7 @@ namespace ck_procedural_gait
         bool SimulationVisible = false;
         TOptional<FVector> VisiblePosedHip;
         bool StagingGeometry = false;
+        UWorld* World = nullptr;
     };
 
     struct FFootholdQuery
@@ -455,6 +456,12 @@ namespace ck_procedural_gait
         uint64 ReceiptInputSolve = 0;
         FTransform ReceiptBody = FTransform::Identity;
         bool CaptureTargetReceipt = false;
+        // Preparation reserves one existing boundary sample and shares one charged search with the ordinary fallback.
+        bool SharedSearchCharged = false;
+        bool ReservedPreparationSample = false;
+#if WITH_DEV_AUTOMATION_TESTS
+        int32* BoundarySamplesObserved = nullptr;
+#endif
 #if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
         ck_procedural_height_seed_test::FObservation* HeightSeedObservation = nullptr;
 #endif
@@ -1778,6 +1785,7 @@ namespace ck_procedural_gait
                 InQuery.ReceiptOwner, GFrameCounter, InQuery.ReceiptInputSolve, InQuery.ReceiptBody, InQuery.LegIndex,
                 InOutCandidate.Position, InOutCandidate.Normal, InQuery.Hip, InQuery.Probe->Get_QueryFilter(),
                 InOutCandidate.Cast, InStage == EFootholdStage::Search, true, {}};
+            InOutCandidate.NativeReceipt->World = InQuery.World;
         }
         if (InQuery.MatchingLandingReceipt != nullptr && InQuery.CommittedPoint.IsSet()
             && InOutCandidate.Position.Equals(InQuery.CommittedPoint.GetValue(), 1.0e-3))
@@ -2082,6 +2090,14 @@ namespace ck_procedural_gait
             FCk_ProceduralAnimation_DebugLeg* InOutDebugLeg)
         -> FFoothold
     {
+        auto BoundarySamples = 0;
+#if WITH_DEV_AUTOMATION_TESTS
+        ON_SCOPE_EXIT
+        {
+            if (InQuery.BoundarySamplesObserved != nullptr)
+            { *InQuery.BoundarySamplesObserved = BoundarySamples; }
+        };
+#endif
         auto Candidates = TArray<FFootholdCandidate, TInlineAllocator<24>>{};
         if (ck::IsValid(InOutDebugLeg, ck::IsValid_Policy_NullptrOnly{}))
         {
@@ -2235,8 +2251,9 @@ namespace ck_procedural_gait
 
         const auto NothingUsable = FFoothold{InQuery.Ideal, Up, ck::EProceduralFootholdSource::None, Ideal.Verdict};
         const auto& SearchedSolve = InOutState.Get_SearchedSolve();
-        const auto BackingOff = SearchedSolve.IsSet() && InOutBudget.Solve - SearchedSolve.GetValue() <= SearchBackoffSolves;
-        if (BackingOff || InOutBudget.RemainingLegs <= 0)
+        const auto BackingOff = NOT InQuery.SharedSearchCharged && SearchedSolve.IsSet()
+            && InOutBudget.Solve - SearchedSolve.GetValue() <= SearchBackoffSolves;
+        if (BackingOff || (NOT InQuery.SharedSearchCharged && InOutBudget.RemainingLegs <= 0))
         {
             if (AcquireAdaptiveTop)
             {
@@ -2248,7 +2265,8 @@ namespace ck_procedural_gait
             return IdealOnAFace ? DoFinish(Ideal, IdealIndex, Ideal.Verdict, InOutDebugLeg) : NothingUsable;
         }
 
-        --InOutBudget.RemainingLegs;
+        if (NOT InQuery.SharedSearchCharged)
+        { --InOutBudget.RemainingLegs; }
         const auto SearchRadius = FootholdTuning.Get_SearchRadius() > 0.0f
             ? FootholdTuning.Get_SearchRadius()
             : DerivedSearchRadiusShareOfReach * InQuery.Reach;
@@ -2525,10 +2543,9 @@ namespace ck_procedural_gait
             }
         }
 
-        constexpr auto MaxBoundarySamples = 4;
+        const auto MaxBoundarySamples = InQuery.ReservedPreparationSample ? 3 : 4;
         constexpr auto ReservationBoundaryMargin = 0.1;
         const auto OrdinaryCandidateCount = Candidates.Num();
-        auto BoundarySamples = 0;
         // A narrow usable strip can fall between the ring points while their nearby hits are reserved. Only after the
         // ordinary search fails, sample the edge of the first blocking reservation around at most two down-ray hits.
         // These are new queries, not adjusted plants: every actual hit still passes the ordinary admission checks.
@@ -3226,6 +3243,136 @@ namespace ck_procedural_gait
 
 namespace ck_procedural_gait
 {
+    // Insert in namespace ck_procedural_gait before namespace ck public admission definitions.
+    auto
+        Get_IsPreparationFixedGeometryValid(
+            const ck::FProceduralContactStagingPreparation& Prep,
+            const FTransform& InInitialBody,
+            const FTransform& InExit,
+            const TOptional<FTransform>& InPoseOffset)
+        -> bool
+    {
+        const auto& Plan = Prep._Plan;
+        const auto BodyValid = [&](const FTransform& InAt) -> bool
+        {
+            return NOT InAt.ContainsNaN() && InAt.GetRotation().IsNormalized()
+                && InAt.GetRotation().Equals(InInitialBody.GetRotation(), 0.0)
+                && InAt.GetScale3D().Equals(InInitialBody.GetScale3D(), 0.0);
+        };
+        if (NOT BodyValid(InInitialBody) || NOT BodyValid(Plan._BodyB) || NOT BodyValid(Plan._BodyC)
+            || NOT BodyValid(Plan._LegacyPlan._RetreatBody) || NOT BodyValid(Plan._LegacyPlan._ExitBody))
+        {
+            return false;
+        }
+        // Arithmetic only: recheck fixed future plants at fixed B/C/H/E under the CURRENT ready pose. Never query a future plant.
+        auto FuturePoints = std::array<FVector, 4>{};
+        for (auto Index = 0; Index < 4; ++Index)
+        {
+            FuturePoints[Index] = Prep._Geometry[Index]._Anchor.Get_FootWorld();
+        }
+        const auto FitsFuture = [&](const FTransform& InFutureBody) -> bool
+        {
+            if (InFutureBody.ContainsNaN() || NOT InFutureBody.GetRotation().Equals(InInitialBody.GetRotation(), 0.0)
+                || NOT InFutureBody.GetScale3D().Equals(InInitialBody.GetScale3D(), 0.0))
+            {
+                return false;
+            }
+            const auto Posed = InPoseOffset.IsSet() ? InPoseOffset.GetValue() * InFutureBody : InFutureBody;
+            if (Posed.ContainsNaN())
+            {
+                return false;
+            }
+            for (auto Index = 0; Index < 4; ++Index)
+            {
+                const auto& Geometry = Prep._Geometry[Index];
+                const auto Radius = Geometry._Anchor.Get_Reach() + 1.0e-3;
+                if (FuturePoints[Index].ContainsNaN()
+                    || FVector::Dist(InFutureBody.TransformPosition(Geometry._Anchor.Get_HipLocal()), FuturePoints[Index]) > Radius
+                    || FVector::Dist(Posed.TransformPosition(Geometry._Anchor.Get_HipLocal()), FuturePoints[Index]) > Radius)
+                {
+                    return false;
+                }
+                for (auto Other = 0; Other < Index; ++Other)
+                {
+                    const auto Sum = static_cast<double>(Geometry._FootContactRadius) + Prep._Geometry[Other]._FootContactRadius;
+                    if (FVector::DistSquared(FuturePoints[Index], FuturePoints[Other]) < Sum * Sum)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        };
+        if (Plan._AuxiliaryRosterIndex < 0 || Plan._AuxiliaryRosterIndex >= 4
+            || Plan._SpanRosterIndex < 0 || Plan._SpanRosterIndex >= 4 || Plan._OtherRosterIndex < 0 || Plan._OtherRosterIndex >= 4
+            || Plan._AuxiliaryRosterIndex == Plan._SpanRosterIndex || Plan._AuxiliaryRosterIndex == Plan._OtherRosterIndex
+            || Plan._SpanRosterIndex == Plan._OtherRosterIndex || Plan._LegacyPlan._RequiredCount != 1 || Plan._LegacyPlan._TwoPlacement
+            || Plan._LegacyPlan._Required[0]._RosterIndex != Plan._SpanRosterIndex || NOT InExit.Equals(Plan._LegacyPlan._ExitBody, 0.0)
+            || NOT FitsFuture(InInitialBody))
+        {
+            return false;
+        }
+        // Fixed numeric target obligations only; these never promote a point to a native landing.
+        const auto FitsTarget = [&](int32 InIndex, const FVector& InPoint, const FTransform& InAtBody, double InMargin) -> bool
+        {
+            const auto& Geometry = Prep._Geometry[InIndex];
+            const auto Posed = InPoseOffset.IsSet() ? InPoseOffset.GetValue() * InAtBody : InAtBody;
+            const auto Fits = [&](const FTransform& InAt, const FVector& InOutboard) -> bool
+            {
+                const auto Hip = InAt.TransformPosition(Geometry._Anchor.Get_HipLocal());
+                return NOT InPoint.ContainsNaN() && NOT Hip.ContainsNaN() && NOT InOutboard.ContainsNaN()
+                    && FMath::IsFinite(Geometry._ForceReach) && Geometry._ForceReach > 0.0f
+                    && FMath::IsFinite(Geometry._OwnSideTolerance) && Geometry._OwnSideTolerance >= 0.0f
+                    && FVector::Dist(InPoint, Hip) <= static_cast<double>(Geometry._ForceReach)
+                    && FVector::DotProduct(InPoint - Hip, InOutboard.GetSafeNormal())
+                        >= -static_cast<double>(Geometry._OwnSideTolerance) + InMargin;
+            };
+            return NOT Posed.ContainsNaN() && Fits(InAtBody, Geometry._OutboardWorld)
+                && (NOT InPoseOffset.IsSet() || Fits(Posed,
+                    Posed.TransformVectorNoScale(InAtBody.InverseTransformVectorNoScale(Geometry._OutboardWorld))));
+        };
+        const auto FitsSearch = [&](int32 InIndex, const FVector& InFrom, const FVector& InTo) -> bool
+        {
+            const auto Radius = Prep._Geometry[InIndex]._SearchRadius;
+            return FMath::IsFinite(Radius) && Radius > 0.0f && NOT InFrom.ContainsNaN() && NOT InTo.ContainsNaN()
+                && FVector::Dist(InFrom, InTo) <= static_cast<double>(Radius);
+        };
+        if (NOT FitsTarget(Plan._AuxiliaryRosterIndex, Plan._AuxiliaryQuery, InInitialBody, 0.1)
+            || NOT FitsTarget(Plan._SpanRosterIndex, Plan._SpanPreparationQuery, Plan._BodyB, 0.1)
+            || NOT FitsTarget(Plan._OtherRosterIndex, Plan._OtherPreparationQuery, Plan._BodyB, 0.1)
+            || NOT FitsTarget(Plan._SpanRosterIndex, Plan._SpanPreparationQuery, Plan._LegacyPlan._RetreatBody, 0.0)
+            || NOT FitsTarget(Plan._OtherRosterIndex, Plan._OtherPreparationQuery, Plan._LegacyPlan._RetreatBody, 0.0)
+            || NOT FitsTarget(Plan._SpanRosterIndex, Plan._LegacyPlan._Required[0]._ProposedQuery, Plan._LegacyPlan._RetreatBody, 0.1)
+            || NOT FitsSearch(Plan._SpanRosterIndex, Prep._Geometry[Plan._SpanRosterIndex]._Anchor.Get_FootWorld(), Plan._SpanPreparationQuery)
+            || NOT FitsSearch(Plan._OtherRosterIndex, Prep._Geometry[Plan._OtherRosterIndex]._Anchor.Get_FootWorld(), Plan._OtherPreparationQuery)
+            || NOT FitsSearch(Plan._SpanRosterIndex, Plan._SpanPreparationQuery, Plan._LegacyPlan._Required[0]._ProposedQuery))
+        {
+            return false;
+        }
+        // R's SearchRadius is the pre-representation construction domain; do not invent a post-rounding radius predicate.
+        FuturePoints[Plan._AuxiliaryRosterIndex] = Plan._AuxiliaryQuery;
+        if (NOT FitsFuture(InInitialBody) || NOT FitsFuture(Plan._BodyB))
+        {
+            return false;
+        }
+        FuturePoints[Plan._SpanRosterIndex] = Plan._SpanPreparationQuery;
+        if (NOT FitsFuture(Plan._BodyB))
+        {
+            return false;
+        }
+        FuturePoints[Plan._OtherRosterIndex] = Plan._OtherPreparationQuery;
+        if (NOT FitsFuture(Plan._BodyB) || NOT FitsFuture(Plan._BodyC) || NOT FitsFuture(Plan._LegacyPlan._RetreatBody))
+        {
+            return false;
+        }
+        FuturePoints[Plan._SpanRosterIndex] = Plan._LegacyPlan._Required[0]._ProposedQuery;
+        if (NOT FitsFuture(Plan._LegacyPlan._RetreatBody) || NOT FitsFuture(Plan._LegacyPlan._ExitBody))
+        {
+            return false;
+        }
+        return true;
+    }
+
     auto
         Get_LandingClaimsRevision(
             const FCk_Handle_ProceduralGait& InGait,
@@ -4014,6 +4161,8 @@ namespace ck
             Geometry._SearchRadius = Tunables.Get_Foothold().Get_SearchRadius() > 0.0f
                 ? Tunables.Get_Foothold().Get_SearchRadius() : ck_procedural_gait::DerivedSearchRadiusShareOfReach * Reach;
             Geometry._OwnSideTolerance = ck_procedural_gait::InboardToleranceShareOfReach * Reach;
+            Geometry._RetainedPlantNormal = Foot.Get_Normal();
+            Geometry._FootContactRadius = Params.Get_FootContactRadius();
             const auto* Boundary = InBoundaries.FindByPredicate([&](const auto& InBoundary)
                 { return InBoundary._Leg == Leg && InBoundary._Plant == Foot.Get_Position(); });
             if (Boundary != nullptr && ck::IsValid(Boundary->_Attribution)
@@ -4025,6 +4174,145 @@ namespace ck
             || PlantCount != Stance.Get_Anchors().Num() || PlantCount == 0)
         { return {}; }
         return Result;
+    }
+
+    // Insert inside namespace ck before both body admission functions. Add the matching FFragment_ProceduralGait friend.
+    // Call for Preparation mode at the top of LEGACY admission too; do not replace its original predicates.
+    auto
+        Get_IsProceduralContactPreparationOwnerValid(
+            FCk_Handle_ProceduralGait InGait,
+            const FTransform& InBody,
+            const TOptional<FTransform>& InPoseOffset)
+        -> bool
+    {
+        if (ck::Is_NOT_Valid(InGait) || NOT InGait.Has<FFragment_ProceduralGait>()
+            || NOT InGait.Has<FFragment_ProceduralGait_Tunables>() || NOT InGait.Has<FFragment_SurfaceMotion_Params>()
+            || NOT InGait.Has<FFragment_SurfaceMotion>() || NOT InGait.Has<FFragment_SurfaceMotion_Support>()
+            || NOT InGait.Has<FFragment_Transform>() || NOT InGait.Has<FFragment_ProceduralContactStagingFence>()
+            || InBody.ContainsNaN() || NOT InBody.GetRotation().IsNormalized()
+            || InGait.Has<FTag_DestroyEntity_Initiate>() || GFrameCounter == 0 || GFrameCounter == MAX_uint64
+            || (InPoseOffset.IsSet() && (InPoseOffset->ContainsNaN() || NOT InPoseOffset->GetRotation().IsNormalized()
+                || NOT InPoseOffset->GetScale3D().Equals(FVector::OneVector, 0.0))))
+        {
+            return false;
+        }
+        const auto& Gait = InGait.Get<FFragment_ProceduralGait>();
+        const auto& Tunables = InGait.Get<FFragment_ProceduralGait_Tunables>();
+        const auto& Fence = InGait.Get<FFragment_ProceduralContactStagingFence>();
+        const auto& Prep = Fence._Preparation;
+        const auto& State = InGait.Get<FFragment_SurfaceMotion_Support>().Get_ContactStaging();
+        const auto& Body = InGait.Get<FFragment_Transform>().Get_Transform();
+        const auto& Motion = InGait.Get<FFragment_SurfaceMotion>();
+        auto* World = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InGait);
+        if (ck::Is_NOT_Valid(World) || Fence._World.Get() != World || NOT Fence._Spent || Fence._AbortRecorded
+            || Fence._Mode != EProceduralContactStagingFenceMode::Preparation || Fence._Owner != InGait.ConvertToHandle()
+            || Fence._Episode == 0 || State._Owner != Fence._Owner || State._Episode != Fence._Episode
+            || NOT Fence.Get_HasValidLimits() || NOT Prep.Get_IsLedgerValid()
+            || Body.ContainsNaN() || NOT Body.GetRotation().IsNormalized() || NOT Body.GetScale3D().Equals(FVector::OneVector, 0.0)
+            || State._BlockedBody.ContainsNaN() || NOT State._BlockedBody.GetRotation().IsNormalized()
+            || NOT Body.GetRotation().Equals(State._BlockedBody.GetRotation(), 0.0)
+            || NOT Body.GetScale3D().Equals(State._BlockedBody.GetScale3D(), 0.0)
+            || Fence._Forward.ContainsNaN() || NOT Fence._Forward.IsNormalized() || Fence._Up.ContainsNaN() || NOT Fence._Up.IsNormalized()
+            || State._Direction != Fence._Forward || State._Up != Fence._Up
+            || NOT FVector::VectorPlaneProject(Body.GetLocation() - State._BlockedBody.GetLocation(), Fence._Forward).IsNearlyZero(1.0e-6)
+            || NOT State._Direction.Equals(Motion.Get_Direction(), 0.0) || State._Speed != Motion.Get_Speed()
+            || NOT FMath::IsFinite(State._Speed) || State._Speed <= 0.0f
+            || Fence._LastSurfaceFrame != GFrameCounter || Fence._LastAcknowledgedSolve != Gait._SolveSequence
+            || NOT FMath::IsFinite(Fence._Elapsed) || Fence._Elapsed < 0.0 || NOT FMath::IsFinite(Fence._ElapsedLimit)
+            || Fence._ElapsedLimit <= 0.0 || Fence._Elapsed >= Fence._ElapsedLimit
+            || NOT FMath::IsFinite(Fence._Cycles) || Fence._Cycles < 0.0 || Fence._Cycles >= Fence._CycleLimit
+            || Gait._Basis.ContainsNaN() || NOT Gait._Basis.IsNormalized() || Gait._Solver.IsAirborne()
+            || Gait._Legs.Num() != 4 || Gait._Solver.NumLegs() != 4 || Gait._SolveSequence == MAX_uint64
+            || NOT FCk_ProceduralGait_Timing::StaticStruct()->CompareScriptStruct(&Fence._Timing, &Tunables.Get_Timing(), 0)
+            || NOT FCk_ProceduralGait_Step::StaticStruct()->CompareScriptStruct(&Fence._Step, &Tunables.Get_Step(), 0)
+            || NOT FCk_ProceduralGait_Probe::StaticStruct()->CompareScriptStruct(&Fence._Probe, &Tunables.Get_Probe(), 0)
+            || NOT FCk_ProceduralGait_Foothold::StaticStruct()->CompareScriptStruct(&Fence._Foothold, &Tunables.Get_Foothold(), 0)
+            || NOT FCk_SurfaceMotion_Spec::StaticStruct()->CompareScriptStruct(&Fence._Surface, &InGait.Get<FFragment_SurfaceMotion_Params>(), 0))
+        {
+            return false;
+        }
+        auto ClaimsRevision = TOptional<uint64>{};
+        if (NOT ck_procedural_gait::Get_LandingClaimsRevision(InGait, ClaimsRevision) || ClaimsRevision != Prep._ClaimsRevision
+            || InGait.Has<FFragment_ProceduralBodyPose>() != InPoseOffset.IsSet())
+        {
+            return false;
+        }
+        if (InPoseOffset.IsSet())
+        {
+            const auto Pose = UCk_Utils_ProceduralBodyPose_UE::Cast(InGait);
+            if (UCk_Utils_ProceduralBodyPose_UE::Get_Status(Pose) != ECk_ProceduralAnimation_Status::Ready
+                || NOT UCk_Utils_ProceduralBodyPose_UE::Get_Offset(Pose).Equals(InPoseOffset.GetValue(), 1.0e-6))
+            {
+                return false;
+            }
+        }
+        for (auto Index = 0; Index < 4; ++Index)
+        {
+            const auto& Leg = Gait._Legs[Index];
+            if (Leg != Prep._Roster[Index] || ck::Is_NOT_Valid(Leg) || NOT Leg.Has<FFragment_ProceduralLeg_Params>()
+                || NOT Leg.Has<FFragment_ProceduralLeg>() || NOT Leg.Has<FFragment_LifetimeOwner>()
+                || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Leg) != InGait.ConvertToHandle()
+                || NOT procedural_leg::Get_IsSupporting(Leg) || Leg.Has<FTag_DestroyEntity_Initiate>()
+                || NOT Gait._Solver.IsLegParticipating(Index) || Gait._ParticipationLeases.ContainsByPredicate([&](const auto& InLease)
+                    { return InLease.Get_LegIndices().Contains(Index); }))
+            {
+                return false;
+            }
+            const auto& Params = Leg.Get<FFragment_ProceduralLeg_Params>();
+            const auto& Geometry = Prep._Geometry[Index];
+            if (Params.Get_Placement().Get_HipLocal().ContainsNaN() || Params.Get_Placement().Get_RestFootLocal().ContainsNaN())
+            {
+                return false;
+            }
+            const auto& LegState = Gait._Solver.GetLegState(Index);
+            const auto& Foot = Leg.Get<FFragment_ProceduralLeg>().Get_Foot();
+            const auto Emitted = Gait._Basis.RotateVector(LegState.Get_Emitted().Get_Position());
+            const auto Presented = InPoseOffset.IsSet() ? InPoseOffset.GetValue() * InBody : InBody;
+            const auto Reach = ck_procedural_gait_utils::Get_Reach(Params.Get_Chain());
+            const auto Hip = InBody.TransformPosition(Params.Get_Placement().Get_HipLocal());
+            if (NOT Gait._Basis.IsNormalized() || Emitted.ContainsNaN() || Foot.Get_Position().ContainsNaN()
+                || NOT Emitted.Equals(Foot.Get_Position(), 1.0e-3) || Hip.ContainsNaN() || Presented.ContainsNaN()
+                || NOT FMath::IsFinite(Reach) || Reach <= 0.0f
+                || FVector::Dist(Hip, Emitted) > static_cast<double>(Reach) + 1.0e-3
+                || FVector::Dist(Presented.TransformPosition(Params.Get_Placement().Get_HipLocal()), Emitted) > static_cast<double>(Reach) + 1.0e-3)
+            {
+                return false;
+            }
+            if (Params.Get_Id() != Prep._Ids[Index]
+                || NOT FCk_ProceduralLeg_Spec::StaticStruct()->CompareScriptStruct(&Prep._Specs[Index], &Params, 0)
+                || Geometry._RosterIndex != Index || Geometry._Anchor.Get_FootWorld().ContainsNaN()
+                || Geometry._Anchor.Get_HipLocal() != Params.Get_Placement().Get_HipLocal() || Geometry._Anchor.Get_Reach() != Reach
+                || Geometry._FootContactRadius != Params.Get_FootContactRadius()
+                || Geometry._ForceReach != Tunables.Get_Step().Get_ForceStepReachFraction() * Reach
+                || Geometry._SearchRadius != (Tunables.Get_Foothold().Get_SearchRadius() > 0.0f ? Tunables.Get_Foothold().Get_SearchRadius()
+                    : ck_procedural_gait::DerivedSearchRadiusShareOfReach * Reach)
+                || Geometry._OwnSideTolerance != ck_procedural_gait::InboardToleranceShareOfReach * Reach
+                || Geometry._OutboardWorld.ContainsNaN() || NOT FMath::IsFinite(Geometry._ForceReach) || Geometry._ForceReach <= 0.0f
+                || Geometry._OutboardWorld != ck_procedural_gait::Get_Outboard(Body.TransformPosition(Params.Get_Placement().Get_HipLocal()),
+                    Body.TransformPosition(Params.Get_Placement().Get_RestFootLocal()), State._Up)
+                || Geometry._Anchor.Get_HipLocal().ContainsNaN() || NOT FMath::IsFinite(Geometry._Anchor.Get_Reach())
+                || Geometry._Anchor.Get_Reach() <= 0.0f || NOT FMath::IsFinite(Geometry._FootContactRadius) || Geometry._FootContactRadius <= 0.0f)
+            {
+                return false;
+            }
+            for (auto Other = 0; Other < Index; ++Other)
+            {
+                if (Leg == Prep._Roster[Other] || Prep._Ids[Index] == Prep._Ids[Other])
+                {
+                    return false;
+                }
+            }
+            if (InGait.Has<FFragment_ProceduralArticulation_Claims>())
+            {
+                constexpr auto LimbChannel = false;
+                if (FCk_ProceduralArticulation_Control::GetClaimant(UCk_Utils_ProceduralArticulation_UE::Cast(InGait),
+                        Params.Get_Id(), LimbChannel) != FCk_ArticulationControlToken{})
+                {
+                    return false;
+                }
+            }
+        }
+        return ck_procedural_gait::Get_IsPreparationFixedGeometryValid(Prep, State._BlockedBody, Fence._Exit, InPoseOffset);
     }
 
     auto
@@ -4040,6 +4328,10 @@ namespace ck
             || NOT InGait.Has<FFragment_SurfaceMotion>() || InBody.ContainsNaN()
             || NOT InBody.GetRotation().IsNormalized() || InOutRays < 0 || InOutRays > InRayLimit
             || (InPoseOffset.IsSet() && (InPoseOffset->ContainsNaN() || NOT InPoseOffset->GetRotation().IsNormalized())))
+        { return false; }
+        if (InGait.Has<FFragment_ProceduralContactStagingFence>()
+            && InGait.Get<FFragment_ProceduralContactStagingFence>()._Mode == EProceduralContactStagingFenceMode::Preparation
+            && NOT Get_IsProceduralContactPreparationOwnerValid(InGait, InBody, InPoseOffset))
         { return false; }
         const auto Legs = Get_ProceduralContactStagingLegs(InGait, {});
         if (Legs.IsEmpty())
@@ -4179,6 +4471,354 @@ namespace ck
             Query.Hip = PosedHip;
             if (ck_procedural_gait::Get_Occluder(Query, Anchor.Get_FootWorld(), InOutRays).IsSet())
             { return false; }
+        }
+        return true;
+    }
+
+    // Insert inside namespace ck in CkProceduralGait_Processor.cpp, after legacy body admission.
+    // Requires the declaration/friend listed in Integration.md. No legacy implementation replacement.
+    auto
+        Get_IsProceduralContactPreparationBodyAdmitted(
+            FCk_Handle_ProceduralGait InGait,
+            const FTransform& InBody,
+            const TOptional<FTransform>& InPoseOffset,
+            int32& InOutRays,
+            int32 InRayLimit)
+        -> bool
+    {
+        if (NOT Get_IsProceduralContactPreparationOwnerValid(InGait, InBody, InPoseOffset) || ck::Is_NOT_Valid(InGait) || InGait.Has<FTag_DestroyEntity_Initiate>()
+            || NOT InGait.Has<FFragment_ProceduralGait>() || NOT InGait.Has<FFragment_ProceduralGait_Tunables>()
+            || NOT InGait.Has<FFragment_Transform>() || NOT InGait.Has<FFragment_SurfaceMotion>()
+            || NOT InGait.Has<FFragment_SurfaceMotion_Params>() || NOT InGait.Has<FFragment_SurfaceMotion_Support>()
+            || NOT InGait.Has<FFragment_ProceduralContactStagingFence>() || NOT UCk_Utils_SurfaceMotion_UE::Has(InGait)
+            || InBody.ContainsNaN() || NOT InBody.GetRotation().IsNormalized()
+            || InOutRays < 0 || InRayLimit < 0 || InOutRays > InRayLimit
+            || GFrameCounter == 0 || GFrameCounter == MAX_uint64
+            || (InPoseOffset.IsSet() && (InPoseOffset->ContainsNaN() || NOT InPoseOffset->GetRotation().IsNormalized()
+                || NOT InPoseOffset->GetScale3D().Equals(FVector::OneVector, 0.0))))
+        {
+            return false;
+        }
+        const auto& Gait = InGait.Get<FFragment_ProceduralGait>();
+        const auto& Tunables = InGait.Get<FFragment_ProceduralGait_Tunables>();
+        const auto& Body = InGait.Get<FFragment_Transform>().Get_Transform();
+        const auto& Support = InGait.Get<FFragment_SurfaceMotion_Support>();
+        const auto& Staging = Support.Get_ContactStaging();
+        const auto& Fence = InGait.Get<FFragment_ProceduralContactStagingFence>();
+        const auto& Prep = Fence._Preparation;
+        const auto& Plan = Prep._Plan;
+        const auto& Motion = InGait.Get<FFragment_SurfaceMotion>();
+        auto* World = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InGait);
+        if (ck::Is_NOT_Valid(World) || Body.ContainsNaN() || NOT Body.GetRotation().IsNormalized()
+            || NOT Body.GetScale3D().Equals(FVector::OneVector, 0.0)
+            || UCk_Utils_ProceduralGait_UE::Get_Status(InGait) != ECk_ProceduralAnimation_Status::Ready
+            || UCk_Utils_SurfaceMotion_UE::Get_Status(UCk_Utils_SurfaceMotion_UE::Cast(InGait)) != ECk_ProceduralAnimation_Status::Ready
+            || UCk_Utils_SurfaceMotion_UE::Get_Support(UCk_Utils_SurfaceMotion_UE::Cast(InGait)) != ECk_SurfaceMotion_Support::Grounded
+            || NOT InGait.Get<FFragment_SurfaceMotion_Params>().Get_AdaptiveHeight().Get_Enabled()
+            || Fence._Mode != EProceduralContactStagingFenceMode::Preparation || NOT Fence._Spent || Fence._AbortRecorded
+            || Fence._Owner != InGait.ConvertToHandle() || Fence._World.Get() != World || Fence._Episode == 0
+            || Fence._Episode != Staging._Episode || Staging._Owner != InGait.ConvertToHandle()
+            || NOT Fence.Get_HasValidLimits() || NOT Prep.Get_IsLedgerValid() || Prep._LegacyAdopted
+            || Fence._LastSurfaceFrame != GFrameCounter || Fence._LastAcknowledgedSolve != Gait._SolveSequence
+            || NOT FMath::IsFinite(Fence._Elapsed) || Fence._Elapsed < 0.0 || NOT FMath::IsFinite(Fence._ElapsedLimit)
+            || Fence._ElapsedLimit <= 0.0 || Fence._Elapsed >= Fence._ElapsedLimit
+            || NOT FMath::IsFinite(Fence._Cycles) || Fence._Cycles < 0.0 || Fence._Cycles >= Fence._CycleLimit
+            || Staging._PendingBody.IsSet() || Staging._IntentFrame != GFrameCounter
+            || Staging._ConsumerSolve != Gait._SolveSequence || NOT Staging._IntentBody.Equals(Body, 1.0e-6)
+            || Staging._ReservedRays < 0 || Staging._ReservedRays > 2
+            || Staging._Direction.ContainsNaN() || NOT Staging._Direction.IsNormalized()
+            || Staging._Up.ContainsNaN() || NOT Staging._Up.IsNormalized()
+            || Staging._Direction != Fence._Forward || Staging._Up != Fence._Up
+            || NOT Staging._Direction.Equals(Motion.Get_Direction(), 0.0) || Staging._Speed != Motion.Get_Speed()
+            || NOT FMath::IsFinite(Staging._Speed) || Staging._Speed <= 0.0f
+            || Gait._Legs.Num() != 4 || Gait._Solver.NumLegs() != 4 || Gait._Solver.IsAirborne()
+            || Gait._SolveSequence == MAX_uint64 || NOT Gait._Basis.IsNormalized()
+            || NOT FCk_ProceduralGait_Timing::StaticStruct()->CompareScriptStruct(&Fence._Timing, &Tunables.Get_Timing(), 0)
+            || NOT FCk_ProceduralGait_Step::StaticStruct()->CompareScriptStruct(&Fence._Step, &Tunables.Get_Step(), 0)
+            || NOT FCk_ProceduralGait_Probe::StaticStruct()->CompareScriptStruct(&Fence._Probe, &Tunables.Get_Probe(), 0)
+            || NOT FCk_ProceduralGait_Foothold::StaticStruct()->CompareScriptStruct(&Fence._Foothold, &Tunables.Get_Foothold(), 0)
+            || NOT FCk_SurfaceMotion_Spec::StaticStruct()->CompareScriptStruct(&Fence._Surface, &InGait.Get<FFragment_SurfaceMotion_Params>(), 0))
+        {
+            return false;
+        }
+        const auto HasPose = InGait.Has<FFragment_ProceduralBodyPose>();
+        if (HasPose != InPoseOffset.IsSet())
+        {
+            return false;
+        }
+        if (HasPose)
+        {
+            const auto Pose = UCk_Utils_ProceduralBodyPose_UE::Cast(InGait);
+            if (UCk_Utils_ProceduralBodyPose_UE::Get_Status(Pose) != ECk_ProceduralAnimation_Status::Ready
+                || NOT UCk_Utils_ProceduralBodyPose_UE::Get_Offset(Pose).Equals(InPoseOffset.GetValue(), 1.0e-6))
+            {
+                return false;
+            }
+        }
+        const auto& Height = Gait._HeightPlanning;
+        const auto& Stance = Gait._ReachStance;
+        const auto& LandingPlanning = Gait._LandingPlanning;
+        auto ClaimsRevision = TOptional<uint64>{};
+        if (NOT Height.Get_HasSample() || NOT Stance.Get_HasSample() || NOT LandingPlanning.Get_HasSample()
+            || Height.Get_Frame() != GFrameCounter - 1 || LandingPlanning.Get_Frame() != GFrameCounter - 1
+            || Height.Get_SolveSequence() != Gait._SolveSequence || Stance.Get_SolveSequence() != Gait._SolveSequence
+            || LandingPlanning.Get_SolveSequence() != Gait._SolveSequence
+            || NOT Height.Get_BodyAtSolve().Equals(Body, 1.0e-6) || NOT Stance.Get_BodyAtSolve().Equals(Body, 1.0e-6)
+            || NOT LandingPlanning.Get_BodyAtSolve().Equals(Body, 1.0e-6)
+            || Support.Get_EvaluatedFrame() != GFrameCounter - 1 || NOT Support.Get_EvaluatedBody().Equals(Body, 1.0e-6)
+            || NOT Height.Get_Direction().Equals(Motion.Get_Direction(), 0.0) || Height.Get_Speed() != Motion.Get_Speed()
+            || NOT ck_procedural_gait::Get_LandingClaimsRevision(InGait, ClaimsRevision)
+            || ClaimsRevision != Prep._ClaimsRevision || ClaimsRevision != LandingPlanning.Get_ClaimsRevision()
+            || (Fence._InitiatedFrame != GFrameCounter && (Staging._ProducedFrame != GFrameCounter - 1
+                || Staging._ProducedSolve != Gait._SolveSequence || NOT Staging._ProducedBody.Equals(Body, 1.0e-6))))
+        {
+            return false;
+        }
+        // A phase defines only its current hold or next locked move. Legacy H/Q/E native predicates stay in the legacy API.
+        auto Completed = int32{INDEX_NONE};
+        auto Holding = false;
+        const FTransform* Endpoint = nullptr;
+        switch (Staging._Phase)
+        {
+            case EProceduralContactStagingPhase::AuxiliaryHold:
+                Completed = 0;
+                Holding = true;
+                Endpoint = &Staging._BlockedBody;
+                break;
+            case EProceduralContactStagingPhase::MoveB:
+                Completed = 1;
+                Endpoint = &Plan._BodyB;
+                break;
+            case EProceduralContactStagingPhase::PrepareM:
+                Completed = 1;
+                Holding = true;
+                Endpoint = &Plan._BodyB;
+                break;
+            case EProceduralContactStagingPhase::PrepareF:
+                Completed = 2;
+                Holding = true;
+                Endpoint = &Plan._BodyB;
+                break;
+            case EProceduralContactStagingPhase::MoveC:
+                Completed = 3;
+                Endpoint = &Plan._BodyC;
+                break;
+            default:
+                return false;
+        }
+        if (Prep._CompletedCount != Completed || Endpoint->ContainsNaN() || NOT Endpoint->GetRotation().IsNormalized()
+            || Staging._BlockedBody.ContainsNaN() || NOT Staging._BlockedBody.GetRotation().IsNormalized()
+            || NOT Body.GetRotation().Equals(Staging._BlockedBody.GetRotation(), 0.0)
+            || NOT Body.GetScale3D().Equals(Staging._BlockedBody.GetScale3D(), 0.0)
+            || NOT Body.GetRotation().Equals(InBody.GetRotation(), 0.0) || NOT Body.GetScale3D().Equals(InBody.GetScale3D(), 0.0)
+            || NOT FVector::VectorPlaneProject(Body.GetLocation() - Staging._BlockedBody.GetLocation(), Fence._Forward).IsNearlyZero(1.0e-6)
+            || NOT FVector::VectorPlaneProject(InBody.GetLocation() - Body.GetLocation(), Fence._Forward).IsNearlyZero(1.0e-6)
+            || (Holding && (NOT Body.Equals(*Endpoint, 1.0e-6) || NOT InBody.Equals(Body, 1.0e-6)))
+            || (NOT Holding && Prep._StartedCount != Prep._CompletedCount))
+        {
+            return false;
+        }
+        const auto Delta = FVector::DotProduct(InBody.GetLocation() - Body.GetLocation(), Fence._Forward);
+        const auto Remaining = FVector::DotProduct(Endpoint->GetLocation() - Body.GetLocation(), Fence._Forward);
+        if (NOT FMath::IsFinite(Delta) || NOT FMath::IsFinite(Remaining)
+            || (NOT Holding && (Remaining < 0.0 ? Delta > 0.0 || Delta < Remaining : Delta < 0.0 || Delta > Remaining)))
+        {
+            return false;
+        }
+        const auto PresentationBody = InPoseOffset.IsSet() ? InPoseOffset.GetValue() * InBody : InBody;
+        if (PresentationBody.ContainsNaN())
+        {
+            return false;
+        }
+        auto RetainedCount = 0;
+        auto ActiveCount = 0;
+        auto ActiveIndex = int32{INDEX_NONE};
+        auto EnabledMask = uint64{0};
+        auto SupportingMask = uint64{0};
+        for (auto Index = 0; Index < 4; ++Index)
+        {
+            const auto& Leg = Gait._Legs[Index];
+            const auto& Geometry = Prep._Geometry[Index];
+            if (Leg != Prep._Roster[Index] || ck::Is_NOT_Valid(Leg) || Leg.Has<FTag_DestroyEntity_Initiate>()
+                || NOT Leg.Has<FFragment_ProceduralLeg>() || NOT Leg.Has<FFragment_ProceduralLeg_Params>()
+                || NOT Leg.Has<FFragment_LifetimeOwner>() || UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(Leg) != InGait.ConvertToHandle()
+                || NOT procedural_leg::Get_IsSupporting(Leg) || NOT ck_procedural_gait::Get_IsLegEnabled(Leg)
+                || NOT Gait._Solver.IsLegParticipating(Index) || Gait._Solver.HasPendingStep(Index)
+                || (Gait._UnplantedMask & ck_procedural_gait::Get_LegBit(Index)) != 0
+                || Gait._ParticipationLeases.ContainsByPredicate([&](const auto& InLease)
+                    { return InLease.Get_LegIndices().Contains(Index); }))
+            {
+                return false;
+            }
+            for (auto Other = 0; Other < Index; ++Other)
+            {
+                if (Leg == Prep._Roster[Other] || Prep._Ids[Index] == Prep._Ids[Other])
+                {
+                    return false;
+                }
+            }
+            const auto& Params = Leg.Get<FFragment_ProceduralLeg_Params>();
+            const auto& Placement = Params.Get_Placement();
+            const auto Reach = ck_procedural_gait_utils::Get_Reach(Params.Get_Chain());
+            const auto Search = Tunables.Get_Foothold().Get_SearchRadius() > 0.0f ? Tunables.Get_Foothold().Get_SearchRadius()
+                : ck_procedural_gait::DerivedSearchRadiusShareOfReach * Reach;
+            const auto ActualOutboard = ck_procedural_gait::Get_Outboard(Body.TransformPosition(Placement.Get_HipLocal()),
+                Body.TransformPosition(Placement.Get_RestFootLocal()), Staging._Up);
+            if (NOT FCk_ProceduralLeg_Spec::StaticStruct()->CompareScriptStruct(&Prep._Specs[Index], &Params, 0)
+                || Prep._Ids[Index] != Params.Get_Id() || Geometry._RosterIndex != Index
+                || NOT FMath::IsFinite(Reach) || Reach <= 0.0f || Geometry._Anchor.Get_Reach() != Reach
+                || Geometry._Anchor.Get_HipLocal() != Placement.Get_HipLocal() || Geometry._OutboardWorld != ActualOutboard
+                || Geometry._ForceReach != Tunables.Get_Step().Get_ForceStepReachFraction() * Reach
+                || Geometry._SearchRadius != Search || Geometry._OwnSideTolerance != ck_procedural_gait::InboardToleranceShareOfReach * Reach
+                || NOT FMath::IsFinite(Params.Get_FootContactRadius()) || Params.Get_FootContactRadius() <= 0.0f
+                || Geometry._FootContactRadius != Params.Get_FootContactRadius())
+            {
+                return false;
+            }
+            if (InGait.Has<FFragment_ProceduralArticulation_Claims>())
+            {
+                constexpr auto LimbChannel = false;
+                if (FCk_ProceduralArticulation_Control::GetClaimant(UCk_Utils_ProceduralArticulation_UE::Cast(InGait),
+                    Params.Get_Id(), LimbChannel) != FCk_ArticulationControlToken{})
+                {
+                    return false;
+                }
+            }
+            EnabledMask |= ck_procedural_gait::Get_LegBit(Index);
+            SupportingMask |= ck_procedural_gait::Get_LegBit(Index);
+            const auto& State = Gait._Solver.GetLegState(Index);
+            const auto& Foot = Leg.Get<FFragment_ProceduralLeg>().Get_Foot();
+            const auto Emitted = Gait._Basis.RotateVector(State.Get_Emitted().Get_Position());
+            const auto Hip = InBody.TransformPosition(Placement.Get_HipLocal());
+            const auto PosedHip = PresentationBody.TransformPosition(Placement.Get_HipLocal());
+            if (Foot.Get_Position().ContainsNaN() || Emitted.ContainsNaN() || NOT Foot.Get_Position().Equals(Emitted, 1.0e-3)
+                || Hip.ContainsNaN() || PosedHip.ContainsNaN() || State.Get_AutomaticRecovery() != EProceduralGaitAutomaticRecovery::None
+                || FVector::Dist(Hip, Emitted) > Reach + 1.0e-3 || FVector::Dist(PosedHip, Emitted) > Reach + 1.0e-3)
+            {
+                return false;
+            }
+            if (State.Get_Swing().Get_Active())
+            {
+                ++ActiveCount;
+                ActiveIndex = Index;
+                if (NOT Holding || Foot.Get_Phase() != ECk_ProceduralLeg_FootPhase::Swinging
+                    || NOT ck_procedural_gait::Get_IsLandingLegEligible(InGait, Leg, Gait._Solver, Index))
+                {
+                    return false;
+                }
+                continue;
+            }
+            ++RetainedCount;
+            auto ExpectedPlant = Geometry._Anchor.Get_FootWorld();
+            if (NOT Geometry._RetainedPlantNormal.IsSet())
+            {
+                return false;
+            }
+            auto ExpectedNormal = Geometry._RetainedPlantNormal.GetValue();
+            for (auto Slot = 0; Slot < Prep._CompletedCount; ++Slot)
+            {
+                if (Prep.Get_RosterIndex(Slot) == Index)
+                {
+                    ExpectedPlant = Prep._Placements[Slot]._Plant;
+                    ExpectedNormal = Prep._Placements[Slot]._Normal;
+                }
+            }
+            const auto AnchorCount = algo::CountIf(Stance.Get_Anchors(), [&](const auto& InAnchor) { return InAnchor.Get_Leg() == Leg; });
+            const auto* Anchor = Stance.Get_Anchors().FindByPredicate([&](const auto& InAnchor) { return InAnchor.Get_Leg() == Leg; });
+            if (AnchorCount != 1 || Anchor == nullptr || NOT State.Get_Plant().Get_Trusted()
+                || Foot.Get_Phase() != ECk_ProceduralLeg_FootPhase::Planted || Foot.Get_Contact() != ECk_ProceduralLeg_FootContact::Trusted
+                || Foot.Get_Position() != ExpectedPlant || Foot.Get_Normal() != ExpectedNormal || NOT Foot.Get_Normal().IsNormalized()
+                || NOT Gait._Basis.RotateVector(State.Get_Plant().Get_Position()).Equals(Foot.Get_Position(), 1.0e-3)
+                || Anchor->Get_FootWorld() != Foot.Get_Position() || Anchor->Get_HipLocal() != Placement.Get_HipLocal() || Anchor->Get_Reach() != Reach)
+            {
+                return false;
+            }
+        }
+        if (EnabledMask != Height.Get_EnabledMask() || SupportingMask != Height.Get_SupportingMask()
+            || RetainedCount != Stance.Get_Anchors().Num() || ActiveCount > 1
+            || ActiveCount != Prep._StartedCount - Prep._CompletedCount || RetainedCount + ActiveCount != 4)
+        {
+            return false;
+        }
+        // This getter validates stored landing frame/body/claims and native force/target admission at the CURRENT body.
+        const auto Landings = Get_ProceduralGaitLandingConstraints(InGait, Body, EProceduralGaitLandingConsumer::SurfaceMotion);
+        if (Landings.Num() != ActiveCount || LandingPlanning.Get_Landings().Num() != ActiveCount)
+        {
+            return false;
+        }
+        for (auto Slot = 0; Slot < Prep._StartedCount; ++Slot)
+        {
+            const auto& Record = Prep._Placements[Slot];
+            const auto Query = Prep.Get_Query(Slot);
+            const auto Index = Prep.Get_RosterIndex(Slot);
+            if (Index < 0 || Index >= 4 || NOT Query.IsSet() || Record._Target != Query.GetValue()
+                || Record._Target.ContainsNaN() || Record._ClaimsRevision != ClaimsRevision || Record._Frame == 0
+                || Record._Frame > GFrameCounter || Record._InputSolve == MAX_uint64 || Record._InputSolve >= Gait._SolveSequence
+                || Record._Body.ContainsNaN() || NOT Record._Body.Equals(Slot == 0 ? Staging._BlockedBody : Plan._BodyB, 1.0e-6)
+                || (Record._Completed && (Record._CompletedFrame < Record._Frame || Record._CompletedFrame >= GFrameCounter
+                    || Record._CompletedSolve <= Record._InputSolve || Record._CompletedSolve > Gait._SolveSequence
+                    || Record._Plant != Record._Target || NOT Record._Normal.IsNormalized())))
+            {
+                return false;
+            }
+        }
+        const auto Reservations = ck_procedural_gait::Get_FootReservations(Gait._Legs, Gait._Solver, Gait._Basis);
+        if (ActiveCount == 1)
+        {
+            const auto Slot = Prep._CompletedCount;
+            const auto& Record = Prep._Placements[Slot];
+            const auto& Landing = Landings[0];
+            if (Prep.Get_RosterIndex(Slot) != ActiveIndex || Landing.Get_Leg() != Prep._Roster[ActiveIndex]
+                || Landing.Get_Constraint().Get_PointWorld() != Record._Target
+                || NOT Get_IsProceduralSurfaceLandingReachValid(InBody, InPoseOffset, Landing.Get_Constraint())
+                || NOT Get_IsProceduralFootContactAvailable(Landing.Get_Constraint().Get_PointWorld(),
+                    Prep._Geometry[ActiveIndex]._FootContactRadius, ActiveIndex, Reservations))
+            {
+                return false;
+            }
+        }
+        if (Staging._ReservedRays > InRayLimit - InOutRays
+            || 3 * RetainedCount > InRayLimit - InOutRays - Staging._ReservedRays)
+        {
+            return false;
+        }
+        // Same per-retained-leg native block as legacy: rehit, simulation visibility, presentation visibility. No future native proof.
+        const auto& Probe = Tunables.Get_Probe();
+        const auto& Foothold = Tunables.Get_Foothold();
+        for (auto Index = 0; Index < 4; ++Index)
+        {
+            if (Index == ActiveIndex)
+            {
+                continue;
+            }
+            const auto& Leg = Gait._Legs[Index];
+            const auto& Params = Leg.Get<FFragment_ProceduralLeg_Params>();
+            const auto& Foot = Leg.Get<FFragment_ProceduralLeg>().Get_Foot();
+            if (NOT Get_IsProceduralFootContactAvailable(Foot.Get_Position(), Params.Get_FootContactRadius(), Index, Reservations))
+            {
+                return false;
+            }
+            const auto Hit = UCk_Utils_JoltQuery_UE::Get_RayCast(World,
+                Foot.Get_Position() + Foot.Get_Normal() * ck_procedural_gait::FaceHoldProbeHalfSpan,
+                Foot.Get_Position() - Foot.Get_Normal() * ck_procedural_gait::FaceHoldProbeHalfSpan, Probe.Get_QueryFilter());
+            ++InOutRays;
+            if (NOT ck_procedural_gait::Get_TrustedHit(Hit, -Foot.Get_Normal())
+                || FVector::Dist(Hit.Get_Position(), Foot.Get_Position()) > Foothold.Get_OcclusionTolerance()
+                || FVector::DotProduct(Hit.Get_Normal(), Foot.Get_Normal()) <= 0.0f)
+            {
+                return false;
+            }
+            auto Query = ck_procedural_gait::FFootholdQuery{.World = World,
+                .Hip = InBody.TransformPosition(Params.Get_Placement().Get_HipLocal()), .Probe = &Probe, .Foothold = &Foothold};
+            if (ck_procedural_gait::Get_Occluder(Query, Foot.Get_Position(), InOutRays).IsSet())
+            {
+                return false;
+            }
+            Query.Hip = PresentationBody.TransformPosition(Params.Get_Placement().Get_HipLocal());
+            if (ck_procedural_gait::Get_Occluder(Query, Foot.Get_Position(), InOutRays).IsSet())
+            {
+                return false;
+            }
         }
         return true;
     }
@@ -4471,13 +5111,34 @@ namespace ck
             auto& Current = InHandle.Get<FFragment_SurfaceMotion_Support>()._ContactStaging;
             const auto& Entry = StagingAtEntry.GetValue();
             const auto ActualSolve = InHandle.Get<FFragment_ProceduralGait>()._SolveSequence;
+            const auto Preparation = InHandle.Has<FFragment_ProceduralContactStagingFence>()
+                && InHandle.Get<FFragment_ProceduralContactStagingFence>()._Mode == EProceduralContactStagingFenceMode::Preparation
+                && InHandle.Get<FFragment_ProceduralContactStagingFence>()._Spent
+                && InHandle.Get<FFragment_ProceduralContactStagingFence>()._Episode == Current._Episode;
+            if (Preparation)
+            {
+                const auto HasPoseFeature = InHandle.Has<FFragment_ProceduralBodyPose>();
+                if (HasPoseFeature != Current._IntentPoseOffset.IsSet()
+                    || HasPoseFeature != Entry._IntentPoseOffset.IsSet())
+                { return nullptr; }
+                if (HasPoseFeature)
+                {
+                    const auto Pose = UCk_Utils_ProceduralBodyPose_UE::Cast(InHandle);
+                    if (UCk_Utils_ProceduralBodyPose_UE::Get_Status(Pose) != ECk_ProceduralAnimation_Status::Ready
+                        || Current._IntentPoseOffset->ContainsNaN() || Entry._IntentPoseOffset->ContainsNaN()
+                        || NOT Current._IntentPoseOffset->Equals(Entry._IntentPoseOffset.GetValue(), 0.0)
+                        || NOT UCk_Utils_ProceduralBodyPose_UE::Get_Offset(Pose).Equals(Current._IntentPoseOffset.GetValue(), 0.0))
+                    { return nullptr; }
+                }
+            }
             if (Current._Owner != InHandle.ConvertToHandle() || Current._Owner != Entry._Owner
                 || Current._Episode == 0 || Current._Episode != Entry._Episode || Current._Phase != Entry._Phase
                 || Current._IntentFrame != Entry._IntentFrame || Current._IntentFrame != GFrameCounter
                 || Current._ConsumerSolve != Entry._ConsumerSolve
                 || (ActualSolve != Current._ConsumerSolve
                     && (Current._ConsumerSolve == MAX_uint64 || ActualSolve != Current._ConsumerSolve + 1))
-                || Current._Required.IsEmpty() || Current._Required.Num() > 2 || Current._Required.Num() != Entry._Required.Num()
+                || (Preparation ? Current._Required.Num() > 1 : (Current._Required.IsEmpty() || Current._Required.Num() > 2))
+                || Current._Required.Num() != Entry._Required.Num()
                 || NOT Current._IntentBody.Equals(Entry._IntentBody, 0.0)
                 || NOT InHandle.Get<FFragment_Transform>().Get_Transform().Equals(Current._IntentBody, 1.0e-3)
                 || NOT Current._Direction.Equals(InHandle.Get<FFragment_SurfaceMotion>().Get_Direction(), 1.0e-3)
@@ -4770,7 +5431,35 @@ namespace ck
         auto* StagingFence = InHandle.Has<FFragment_ProceduralContactStagingFence>()
             ? &InHandle.Get<FFragment_ProceduralContactStagingFence>() : nullptr;
         const auto ConsumerInputSolve = InGaitComp._SolveSequence;
+        const auto FreshPreparation = Dt > 0.0 && NativeMotionObservation && StagingFence != nullptr && Staging != nullptr
+            && StagingFence->_Mode == EProceduralContactStagingFenceMode::Preparation && StagingFence->_Spent
+            && StagingFence->_Owner == InHandle.ConvertToHandle() && StagingFence->_World.Get() == World
+            && StagingFence->_Episode == Staging->_Episode && StagingFence->Get_HasValidLimits()
+            && Staging->_Phase != EProceduralContactStagingPhase::Dormant && Staging->_Phase != EProceduralContactStagingPhase::Exhausted
+            && GetCurrentStaging() != nullptr
+            && InGaitComp._ParticipationLeases.IsEmpty() && InGaitComp._Legs.Num() == 4
+            && MotionAirborne.IsSet() && NOT MotionAirborne.GetValue() && (NOT InHandle.Has<FFragment_ProceduralBodyPose>() || HasPose);
+        const auto ExhaustPreparation = [&]()
+        {
+            if (StagingFence == nullptr || Staging == nullptr
+                || StagingFence->_Mode != EProceduralContactStagingFenceMode::Preparation || NOT StagingFence->_Spent
+                || StagingFence->_Owner != InHandle.ConvertToHandle() || StagingFence->_Episode != Staging->_Episode)
+            { return; }
+            StagingFence->_AbortRecorded = true;
+            Staging->_Phase = EProceduralContactStagingPhase::Exhausted;
+            Staging->_IntentFrame = 0;
+            Staging->_PoseRayTickets.Reset();
+            Staging->_ReservedRays = 0;
+            Staging->_PendingBody.Reset();
+        };
+        auto OwnedSelection = TOptional<FProceduralGaitOwnedSelection>{};
+        auto OwnedNativeReceipt = TOptional<ck_procedural_gait::FNativeTargetReceipt>{};
+        auto OwnedSource = EProceduralFootholdSource::None;
+        auto OrdinaryOwnedProbe = TOptional<FProceduralFootProbeState>{};
+        auto OwnedBeginEvents = uint8{0};
+        auto OwnedBeginLeg = int32{INDEX_NONE};
         const auto FreshStagingReplant = Staging != nullptr && Dt > 0.0 && NativeMotionObservation
+            && NOT FreshPreparation
             && GFrameCounter != 0 && GFrameCounter != MAX_uint64 && ConsumerInputSolve != MAX_uint64
             && MotionAirborne.IsSet() && NOT MotionAirborne.GetValue()
             && Staging->_Phase == EProceduralContactStagingPhase::Replant
@@ -4958,6 +5647,44 @@ namespace ck
             const auto CommittedPoint = Swing.Get_Active() && NOT Swing.Get_CatchStep() && Swing.Get_TargetTrusted()
                 && NOT Swing.Get_CommittedLandingPoint().ContainsNaN()
                 ? TOptional<FVector>{Basis.RotateVector(Swing.Get_CommittedLandingPoint())} : TOptional<FVector>{};
+#if WITH_DEV_AUTOMATION_TESTS
+            const auto SearchBeforePreparation = SearchBudget.RemainingLegs;
+#endif
+            auto PreparationGrant = false;
+            auto PreparationSlot = uint8{4};
+#if WITH_DEV_AUTOMATION_TESTS
+            auto OrdinaryPreparationBoundarySamples = int32{0};
+#endif
+            if (FreshPreparation && GetCurrentStaging() != nullptr)
+            {
+                const auto CurrentPose = HasPose ? TOptional<FTransform>{UCk_Utils_ProceduralBodyPose_UE::Get_Offset(
+                    UCk_Utils_ProceduralBodyPose_UE::Cast(InHandle))} : TOptional<FTransform>{};
+                if (NOT Get_IsProceduralContactPreparationOwnerValid(InHandle, Body, CurrentPose))
+                { ExhaustPreparation(); }
+            }
+            if (FreshPreparation && GetCurrentStaging() != nullptr)
+            {
+                auto& Prep = StagingFence->_Preparation;
+                const auto Slot = Prep._StartedCount;
+                const auto PhaseMatches = (Slot == 0 && Staging->_Phase == EProceduralContactStagingPhase::AuxiliaryHold)
+                    || (Slot == 1 && Staging->_Phase == EProceduralContactStagingPhase::PrepareM)
+                    || (Slot == 2 && Staging->_Phase == EProceduralContactStagingPhase::PrepareF)
+                    || (Slot == 3 && Prep._LegacyAdopted && Staging->_Phase == EProceduralContactStagingPhase::Replant);
+                const auto PreviousSearch = InGaitComp._Footholds[Index].Get_SearchedSolve();
+                const auto BackingOff = PreviousSearch.IsSet() && (ConsumerInputSolve < PreviousSearch.GetValue()
+                    || ConsumerInputSolve - PreviousSearch.GetValue() <= ck_procedural_gait::SearchBackoffSolves);
+                if (PhaseMatches && Prep._StartedCount == Prep._CompletedCount && Prep.Get_RosterIndex(Slot) == Index
+                    && Prep._Roster[Index] == Leg && Planted && NativeRecoveryInput && IsCurrentNativePlant(Leg, Index)
+                    && NOT Swing.Get_Active() && NOT InGaitComp._Solver.HasPendingStep(Index)
+                    && LegState.Get_AutomaticRecovery() == EProceduralGaitAutomaticRecovery::None
+                    && NOT BackingOff && SearchBudget.RemainingLegs > 0)
+                {
+                    PreparationSlot = Slot;
+                    PreparationGrant = true;
+                    --SearchBudget.RemainingLegs;
+                    LastSearchedLeg = Index;
+                }
+            }
             const auto FootholdQuery = ck_procedural_gait::FFootholdQuery{
                 .World = World,
                 .Basis = Basis,
@@ -4991,16 +5718,29 @@ namespace ck
                 .ReceiptOwner = InHandle.ConvertToHandle(),
                 .ReceiptInputSolve = ConsumerInputSolve,
                 .ReceiptBody = Body,
-                .CaptureTargetReceipt = StagingLeg};
-            const auto SearchesLeft = SearchBudget.RemainingLegs;
+                .CaptureTargetReceipt = StagingLeg || PreparationGrant,
+                .SharedSearchCharged = PreparationGrant,
+                .ReservedPreparationSample = PreparationGrant
+#if WITH_DEV_AUTOMATION_TESTS
+                , .BoundarySamplesObserved = &OrdinaryPreparationBoundarySamples
+#endif
+            };
+            const auto SearchesLeft = SearchBudget.RemainingLegs + (PreparationGrant ? 1 : 0);
             auto Foothold = ck_procedural_gait::Get_Foothold(FootholdQuery, InGaitComp._Footholds[Index], SearchBudget, RayCount,
                 &DebugLeg);
+            if (PreparationGrant)
+            { InGaitComp._Footholds[Index].Set_SearchedSolve(ConsumerInputSolve); }
             if (SearchBudget.RemainingLegs < SearchesLeft)
             { LastSearchedLeg = Index; }
-            if (Foothold.Source == EProceduralFootholdSource::None && NOT Withdrawn && NOT Unplanted
+            if ((Foothold.Source == EProceduralFootholdSource::None || Swing.Get_CommittedNativeContact()) && NOT Withdrawn && NOT Unplanted
                 && InGaitComp._Solver.IsLegParticipating(Index) && Swing.Get_Active() && NOT Swing.Get_CatchStep()
                 && Swing.Get_TargetTrusted() && NOT (MotionAirborne.IsSet() && MotionAirborne.GetValue()))
             {
+                if (Swing.Get_CommittedNativeContact())
+                {
+                    Foothold = ck_procedural_gait::FFoothold{Ideal, Up, EProceduralFootholdSource::None, Foothold.IdealVerdict};
+                    MatchingLandingReceipts[Index].Reset();
+                }
                 const auto Landing = Swing.Get_CommittedLandingPoint();
                 const auto& LandingNormal = Swing.Get_TargetNormal();
                 CK_ENSURE_IF_NOT(NOT Landing.ContainsNaN() && NOT LandingNormal.ContainsNaN() && LandingNormal.IsNormalized(),
@@ -5144,6 +5884,10 @@ namespace ck
                     }
                     const auto PaidSeedProbe = *FootholdQuery.Probe;
                     --Foothold.UnusedBoundarySamples;
+#if WITH_DEV_AUTOMATION_TESTS
+                    if (PreparationGrant)
+                    { ++OrdinaryPreparationBoundarySamples; }
+#endif
                     DebugLeg.Set_ActualPlantSeedAttempted(true);
                     DebugLeg.Set_ActualPlantSeedForceAdjusted(SeedDisplacement != HalfLead);
                     const auto Candidate = ck_procedural_gait::DoProbe_Down(FootholdQuery, SeedPoint,
@@ -5211,6 +5955,10 @@ namespace ck
                         if (Foothold.UnusedBoundarySamples <= 0)
                         { break; }
                         --Foothold.UnusedBoundarySamples;
+#if WITH_DEV_AUTOMATION_TESTS
+                    if (PreparationGrant)
+                    { ++OrdinaryPreparationBoundarySamples; }
+#endif
                         // At most two ground attempts plus the existing visibility ray. No reach re-probe,
                         // recursive seed or new search budget is introduced; the fresh native hit owns admission.
                         const auto Candidate = ck_procedural_gait::DoProbe_Down(TopQuery, Receipt.Point,
@@ -5269,6 +6017,10 @@ namespace ck
                         auto TopQuery = FootholdQuery;
                         TopQuery.Probe = &StraightProbe;
                         --Foothold.UnusedBoundarySamples;
+#if WITH_DEV_AUTOMATION_TESTS
+                    if (PreparationGrant)
+                    { ++OrdinaryPreparationBoundarySamples; }
+#endif
                         auto Candidate = ck_procedural_gait::DoProbe_Down(TopQuery, Point.GetValue(),
                             EProceduralFootholdSource::Inward, ck_procedural_gait::EGroundProbeAttempts::RetryFromInsideSolid,
                             ck_procedural_gait::EFootholdReprobe::None, ck_procedural_gait::EFootholdStage::Search, RayCount, nullptr);
@@ -5278,6 +6030,10 @@ namespace ck
                         if (Candidate.Verdict == EProceduralFootholdVerdict::Unreachable && Foothold.UnusedBoundarySamples > 0)
                         {
                             --Foothold.UnusedBoundarySamples;
+#if WITH_DEV_AUTOMATION_TESTS
+                    if (PreparationGrant)
+                    { ++OrdinaryPreparationBoundarySamples; }
+#endif
                             Candidate = ck_procedural_gait::DoReprobe_DownTowardHip(TopQuery, Candidate,
                                 ck_procedural_gait::EGroundProbeAttempts::RetryFromInsideSolid,
                                 ck_procedural_gait::EFootholdStage::Search, RayCount, nullptr);
@@ -5372,6 +6128,10 @@ namespace ck
                 }
 #endif
                 --Foothold.UnusedBoundarySamples;
+#if WITH_DEV_AUTOMATION_TESTS
+                    if (PreparationGrant)
+                    { ++OrdinaryPreparationBoundarySamples; }
+#endif
                 DebugLeg.Set_ActualPlantSeedAttempted(true);
                 DebugLeg.Set_ActualPlantSeedForceAdjusted(true);
                 const auto Candidate = ck_procedural_gait::DoProbe_Down(BoundaryQuery, BoundarySeedPoint.GetValue(),
@@ -5518,6 +6278,10 @@ namespace ck
                 auto StagingQuery = FootholdQuery;
                 StagingQuery.Probe = &StraightProbe;
                 --Foothold.UnusedBoundarySamples;
+#if WITH_DEV_AUTOMATION_TESTS
+                    if (PreparationGrant)
+                    { ++OrdinaryPreparationBoundarySamples; }
+#endif
                 const auto& Required = Staging->_Required[RequiredIndex];
                 const auto QueryPoint = Staging->_TwoPlacement
                     && StagingFence->_Legs[RequiredIndex]._Next == EProceduralContactStagingMilestone::Intermediate
@@ -5600,6 +6364,10 @@ namespace ck
                 if (Point.IsSet())
                 {
                     --Foothold.UnusedBoundarySamples;
+#if WITH_DEV_AUTOMATION_TESTS
+                    if (PreparationGrant)
+                    { ++OrdinaryPreparationBoundarySamples; }
+#endif
 #if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
                     if (HipObservation.Enabled && NOT HipObservation.Tilted)
                     {
@@ -5686,6 +6454,7 @@ namespace ck
                     Foothold.Position, Foothold.Normal, Foothold.Cast};
             }
             // Final selection owns the one grace update, including any newly observed occupied terrain.
+            const auto ProbeBeforeSelection = InGaitComp._Probes[Index];
             const auto ProbeAdvanced = InGaitComp._Probes[Index].Advance(Trusted || RejectedReservation, InDeltaT, Probe.Get_ContactGrace());
             CK_ENSURE_IF_NOT(ProbeAdvanced,
                 TEXT("Procedural gait [{}] foot probe of leg [{}] rejected its elapsed time or contact grace; feature is failed."),
@@ -5814,6 +6583,167 @@ namespace ck
             DebugLeg.Get_Foot().Set_ContactTrusted(Trusted);
             DebugLeg.Get_Probe().Set_State(ProbeState)
                 .Set_MissingContact(InGaitComp._Probes[Index].Get_MissingDuration());
+            if (PreparationGrant && GetCurrentStaging() != nullptr)
+            {
+#if WITH_DEV_AUTOMATION_TESTS
+                auto* SelectionTest = InHandle.Has<FFragment_ProceduralContactPreparation_Test>()
+                    ? &InHandle.Get<FFragment_ProceduralContactPreparation_Test>() : nullptr;
+                if (SelectionTest != nullptr && SelectionTest->ChargedEpisode != Staging->_Episode)
+                { SelectionTest = nullptr; }
+                if (SelectionTest != nullptr && SelectionTest->ChargedEpisode == Staging->_Episode)
+                {
+                    auto& Copy = SelectionTest->Last;
+                    Copy = FProceduralContactPreparationTestSelection{};
+                    Copy.Frame = GFrameCounter; Copy.InputSolve = ConsumerInputSolve; Copy.Episode = Staging->_Episode;
+                    Copy.LegIndex = Index; Copy.Slot = PreparationSlot; Copy.Body = Body;
+                    Copy.OrdinaryPoint = Position; Copy.OrdinarySource = static_cast<uint8>(Foothold.Source);
+                    Copy.OrdinaryValid = Input.Get_TargetValid(); Copy.OrdinaryTrusted = Input.Get_TargetTrusted();
+                    Copy.SearchBefore = SearchBeforePreparation; Copy.OrdinaryBoundaryLimit = 3;
+                    Copy.OrdinaryBoundaryUsed = OrdinaryPreparationBoundarySamples; Copy.RaysBefore = RayCount;
+                }
+                ON_SCOPE_EXIT
+                {
+                    if (SelectionTest != nullptr && SelectionTest->Last.Episode == StagingFence->_Episode)
+                    {
+                        SelectionTest->Last.RaysAfter = RayCount;
+                        SelectionTest->Last.SearchAfter = SearchBudget.RemainingLegs;
+                    }
+                };
+#endif
+                // The ordinary result, cache and input above remain independently selected. Only this scoped overlay
+                // can carry an unstarted fixed point; its real swing acquires landing authority at the begin boundary.
+                InGaitComp._Footholds[Index].Set_SearchedSolve(ConsumerInputSolve);
+                const auto Fixed = StagingFence->_Preparation.Get_Query(PreparationSlot);
+                auto ClaimsRevision = TOptional<uint64>{};
+                const auto CurrentPose = HasPose ? TOptional<FTransform>{UCk_Utils_ProceduralBodyPose_UE::Get_Offset(
+                    UCk_Utils_ProceduralBodyPose_UE::Cast(InHandle))} : TOptional<FTransform>{};
+                if (NOT Get_IsProceduralContactPreparationOwnerValid(InHandle, Body, CurrentPose)
+                    || NOT Fixed.IsSet() || NOT ck_procedural_gait::Get_LandingClaimsRevision(InHandle, ClaimsRevision)
+                    || ClaimsRevision != StagingFence->_Preparation._ClaimsRevision)
+                { ExhaustPreparation(); continue; }
+                const auto SearchPredicates = [&](const FVector& InPoint, const FVector& InNormal) -> bool
+                {
+                    if (InPoint.ContainsNaN() || InNormal.ContainsNaN() || NOT InNormal.IsNormalized()
+                        || NOT Get_IsFootholdLevelEnough(InverseBasis.RotateVector(InNormal), InTunables.Get_Foothold().Get_MaxAngle())
+                        || NOT Get_IsFootholdOnOwnSide(InPoint - Hip, FootholdQuery.Outboard,
+                            ck_procedural_gait::InboardToleranceShareOfReach * Reach))
+                    { return false; }
+                    const auto FromBody = InverseBasis.RotateVector(InPoint - Body.GetLocation());
+                    const auto FromHip = InverseBasis.RotateVector(InPoint - Hip);
+                    return NOT Get_IsFootholdUnderBody(static_cast<float>(FromBody.Y), static_cast<float>(-FromHip.Z),
+                        MaxHipLateral, FootholdQuery.RestDrop, ck_procedural_gait::UnderBodyMargin);
+                };
+                auto Candidate = ck_procedural_gait::FFootholdCandidate{};
+                const auto& OrdinaryReceipt = Foothold.NativeReceipt;
+                if (Trusted && OrdinaryReceipt.IsSet() && OrdinaryReceipt->World == World
+                    && OrdinaryReceipt->Point == Fixed.GetValue() && OrdinaryReceipt->SimulationVisible
+                    && OrdinaryReceipt->Cast == EProceduralFootholdCast::Down
+                    && SearchPredicates(OrdinaryReceipt->Point, OrdinaryReceipt->Normal))
+                {
+                    Candidate.Position = Foothold.Position;
+                    Candidate.Normal = Foothold.Normal;
+                    Candidate.Cast = Foothold.Cast;
+                    Candidate.Source = Foothold.Source;
+                    Candidate.Verdict = EProceduralFootholdVerdict::Usable;
+                    Candidate.NativeHit = true;
+                    Candidate.NativeReceipt = OrdinaryReceipt;
+                    Candidate.NativeReceipt->SearchPredicates = true;
+#if WITH_DEV_AUTOMATION_TESTS
+                    if (SelectionTest != nullptr)
+                    { SelectionTest->Last.ReusedNative = true; }
+#endif
+                }
+                else
+                {
+                    auto OwnedQuery = FootholdQuery;
+                    auto OwnedReservationRejected = false;
+                    OwnedQuery.RejectedReservation = &OwnedReservationRejected;
+                    OwnedQuery.HeightObservations = nullptr;
+                    OwnedQuery.MatchingLandingReceipt = nullptr;
+                    Candidate = ck_procedural_gait::DoProbe_Down(OwnedQuery, Fixed.GetValue(), EProceduralFootholdSource::Ring,
+                        ck_procedural_gait::EGroundProbeAttempts::RetryFromInsideSolid, ck_procedural_gait::EFootholdReprobe::None,
+                        ck_procedural_gait::EFootholdStage::Search, RayCount, nullptr);
+#if WITH_DEV_AUTOMATION_TESTS
+                    if (SelectionTest != nullptr)
+                    { SelectionTest->Last.FixedSamples = 1; }
+#endif
+                }
+                if (Candidate.Verdict != EProceduralFootholdVerdict::Usable || NOT Candidate.NativeHit
+                    || NOT Candidate.NativeReceipt.IsSet() || Candidate.Position != Fixed.GetValue() || Candidate.Normal != Up)
+                { ExhaustPreparation(); continue; }
+                auto& Receipt = Candidate.NativeReceipt.GetValue();
+#if WITH_DEV_AUTOMATION_TESTS
+                if (SelectionTest != nullptr)
+                {
+                    SelectionTest->Last.NativeAccepted = true;
+                    SelectionTest->Last.NativePoint = Candidate.Position;
+                    SelectionTest->Last.NativeNormal = Candidate.Normal;
+                }
+#endif
+                const auto PosedHip = HasPose ? PresentationBody.TransformPosition(Placement.Get_HipLocal()) : Hip;
+                auto PosedVisible = PosedHip == Receipt.SimulationHip
+                    || (Receipt.VisiblePosedHip.IsSet() && Receipt.VisiblePosedHip.GetValue() == PosedHip);
+                if (NOT PosedVisible)
+                {
+                    auto& Support = InHandle.Get<FFragment_SurfaceMotion_Support>();
+                    const auto Ticket = Staging->_PoseRayTickets.IndexOfByKey(Leg);
+                    if (Ticket != INDEX_NONE && Staging->_ReservedRays == Staging->_PoseRayTickets.Num()
+                        && Staging->_ReservedRays > 0 && Support._HeightPlanningRays >= 0
+                        && Support._HeightPlanningRays + Staging->_ReservedRays <= 2048)
+                    {
+                        Staging->_PoseRayTickets.RemoveAt(Ticket);
+                        --Staging->_ReservedRays;
+                        ++Support._HeightPlanningRays;
+#if WITH_DEV_AUTOMATION_TESTS
+                        if (SelectionTest != nullptr)
+                        { SelectionTest->Last.PosedTicketConsumed = true; }
+#endif
+                        auto PosedQuery = FootholdQuery;
+                        PosedQuery.Hip = PosedHip;
+                        PosedVisible = NOT ck_procedural_gait::Get_Occluder(PosedQuery, Candidate.Position, RayCount).IsSet();
+                    }
+                }
+                if (NOT PosedVisible || FVector::Dist(Candidate.Position, PosedHip) > Step.Get_ForceStepReachFraction() * Reach
+                    || NOT Get_IsProceduralFootContactAvailable(Candidate.Position, Params.Get_FootContactRadius(), Index, Reservations))
+                { ExhaustPreparation(); continue; }
+                Receipt.VisiblePosedHip = PosedHip;
+                auto SelectedProbe = ProbeBeforeSelection;
+                if (NOT SelectedProbe.Advance(true, InDeltaT, Probe.Get_ContactGrace())
+                    || SelectedProbe.Get_State() == EProceduralFootProbeState::Guessing)
+                { ExhaustPreparation(); continue; }
+                auto Selection = FProceduralGaitOwnedSelection{};
+                Selection.LegIndex = Index;
+                Selection.Input = Input;
+                Selection.Input.Set_IdealTarget(InverseBasis.RotateVector(Candidate.Position))
+                    .Set_GroundNormal(InverseBasis.RotateVector(Candidate.Normal))
+                    .Set_TargetValid(true).Set_TargetTrusted(true).Set_TargetIsFoothold(true)
+                    .Set_PlannedReplantIntent(TOptional<FProceduralGaitPlannedReplantIntent>{});
+                Selection.ExpectedPlant = LegState.Get_Plant().Get_Position();
+                Selection.Token = {Staging->_Episode, GFrameCounter, ConsumerInputSolve, PreparationSlot};
+                Selection.Purpose = PreparationSlot == 0 ? EProceduralGaitOwnedPurpose::AuxiliaryEmergency
+                    : PreparationSlot == 3 ? EProceduralGaitOwnedPurpose::LegacyFinal : EProceduralGaitOwnedPurpose::Preparation;
+                if (PreparationSlot == 3)
+                {
+                    auto Intent = FProceduralGaitPlannedReplantIntent{}.Set_Episode(Staging->_Episode)
+                        .Set_ExpectedPlant(Selection.ExpectedPlant).Set_Target(Selection.Input.Get_IdealTarget())
+                        .Set_ExitHip(InverseBasis.RotateVector(Staging->_ExitBody.TransformPosition(Placement.Get_HipLocal())))
+                        .Set_Frame(GFrameCounter).Set_ConsumerInputSolve(ConsumerInputSolve);
+                    if (HasPose)
+                    { Intent.Set_ExitPosedHip(TOptional<FVector>{InverseBasis.RotateVector(
+                        (UCk_Utils_ProceduralBodyPose_UE::Get_Offset(UCk_Utils_ProceduralBodyPose_UE::Cast(InHandle))
+                            * Staging->_ExitBody).TransformPosition(Placement.Get_HipLocal()))}); }
+                    Selection.Input.Set_PlannedReplantIntent(Intent);
+                }
+                OrdinaryOwnedProbe = InGaitComp._Probes[Index];
+                InGaitComp._Probes[Index] = SelectedProbe;
+                OwnedNativeReceipt = Receipt;
+                OwnedSource = Candidate.Source;
+                OwnedSelection = MoveTemp(Selection);
+#if WITH_DEV_AUTOMATION_TESTS
+                if (SelectionTest != nullptr)
+                { SelectionTest->Last.OverlaySelected = true; }
+#endif
+            }
         }
         InDebugComp._RaysLastSolve = RayCount;
         if (LastSearchedLeg != INDEX_NONE)
@@ -5850,7 +6780,7 @@ namespace ck
                     static_cast<double>(Support._AttemptedStanceSpeed)));
             }
         }
-        if (FreshStagingReplant && NOT Airborne)
+        if ((FreshStagingReplant || (FreshPreparation && GetCurrentStaging() != nullptr)) && NOT Airborne)
         {
             CadenceDriveSpeed = static_cast<float>(FMath::Max(CadenceSpeed, static_cast<double>(Staging->_Speed)));
         }
@@ -5909,6 +6839,128 @@ namespace ck
         auto Solved = false;
         auto DeniedTakeoffs = TArray<FProceduralGaitDeniedTakeoff>{};
         auto RecoveryTouchdownRays = int32{0};
+        const auto PreparationIsCurrent = [&]() -> bool
+        {
+            if (NOT FreshPreparation || GetCurrentStaging() == nullptr || StagingFence->_AbortRecorded
+                || NOT StagingFence->_Spent || StagingFence->_World.Get() != World
+                || StagingFence->_Owner != InHandle.ConvertToHandle() || StagingFence->_Episode != Staging->_Episode
+                || NOT StagingFence->Get_HasValidLimits() || StagingFence->_LastSurfaceFrame != GFrameCounter
+                || StagingFence->_Elapsed >= StagingFence->_ElapsedLimit || StagingFence->_Cycles >= 5.0
+                || NOT InGaitComp._ParticipationLeases.IsEmpty() || NOT InHandle.Has<FFragment_SurfaceMotion_Params>()
+                || NOT FCk_ProceduralGait_Timing::StaticStruct()->CompareScriptStruct(&StagingFence->_Timing, &InTunables.Get_Timing(), 0)
+                || NOT FCk_ProceduralGait_Step::StaticStruct()->CompareScriptStruct(&StagingFence->_Step, &InTunables.Get_Step(), 0)
+                || NOT FCk_ProceduralGait_Probe::StaticStruct()->CompareScriptStruct(&StagingFence->_Probe, &InTunables.Get_Probe(), 0)
+                || NOT FCk_ProceduralGait_Foothold::StaticStruct()->CompareScriptStruct(&StagingFence->_Foothold, &InTunables.Get_Foothold(), 0)
+                || NOT FCk_SurfaceMotion_Spec::StaticStruct()->CompareScriptStruct(&StagingFence->_Surface,
+                    &InHandle.Get<FFragment_SurfaceMotion_Params>(), 0))
+            { return false; }
+            auto ClaimsRevision = TOptional<uint64>{};
+            if (NOT ck_procedural_gait::Get_LandingClaimsRevision(InHandle, ClaimsRevision)
+                || ClaimsRevision != StagingFence->_Preparation._ClaimsRevision)
+            { return false; }
+            for (auto Index = 0; Index < 4; ++Index)
+            {
+                const auto& Leg = InGaitComp._Legs[Index];
+                if (Leg != StagingFence->_Preparation._Roster[Index] || NOT procedural_leg::Get_IsSupporting(Leg)
+                    || NOT Leg.Has<FFragment_ProceduralLeg_Params>()
+                    || NOT FCk_ProceduralLeg_Spec::StaticStruct()->CompareScriptStruct(
+                        &StagingFence->_Preparation._Specs[Index], &Leg.Get<FFragment_ProceduralLeg_Params>(), 0))
+                { return false; }
+            }
+            if (OwnedSelection.IsSet())
+            {
+                const auto& Selected = OwnedSelection.GetValue();
+                if (NOT OwnedNativeReceipt.IsSet() || OwnedNativeReceipt->World != World
+                    || OwnedNativeReceipt->Owner != InHandle.ConvertToHandle() || OwnedNativeReceipt->Frame != GFrameCounter
+                    || OwnedNativeReceipt->InputSolve != ConsumerInputSolve || OwnedNativeReceipt->LegIndex != Selected.LegIndex
+                    || NOT OwnedNativeReceipt->Body.Equals(Body, 0.0) || NOT OwnedNativeReceipt->SearchPredicates
+                    || NOT OwnedNativeReceipt->SimulationVisible || NOT OwnedNativeReceipt->VisiblePosedHip.IsSet())
+                { return false; }
+                const auto& Placement = InGaitComp._Legs[Selected.LegIndex].Get<FFragment_ProceduralLeg_Params>().Get_Placement();
+                if (HasPose)
+                {
+                    const auto Pose = UCk_Utils_ProceduralBodyPose_UE::Cast(InHandle);
+                    if (UCk_Utils_ProceduralBodyPose_UE::Get_Status(Pose) != ECk_ProceduralAnimation_Status::Ready)
+                    { return false; }
+                    const auto Offset = UCk_Utils_ProceduralBodyPose_UE::Get_Offset(Pose);
+                    if (Offset.ContainsNaN() || (Offset * Body).TransformPosition(Placement.Get_HipLocal())
+                        != OwnedNativeReceipt->VisiblePosedHip.GetValue())
+                    { return false; }
+                }
+            }
+            return true;
+        };
+        const auto RejectPreparation = [&](EProceduralGaitOwnerRejection)
+        {
+#if WITH_DEV_AUTOMATION_TESTS
+            if (InHandle.Has<FFragment_ProceduralContactPreparation_Test>())
+            {
+                auto& Test = InHandle.Get<FFragment_ProceduralContactPreparation_Test>();
+                if (Test.ChargedEpisode == StagingFence->_Episode && NOT StagingFence->_AbortRecorded)
+                {
+                    if (Test.Revocations == MAX_uint32)
+                    { Test.Overflow = true; }
+                    else
+                    { ++Test.Revocations; }
+                }
+            }
+#endif
+            if (OwnedBeginEvents == 0 && OwnedSelection.IsSet() && OrdinaryOwnedProbe.IsSet())
+            { InGaitComp._Probes[OwnedSelection->LegIndex] = OrdinaryOwnedProbe.GetValue(); }
+            ExhaustPreparation();
+        };
+        const auto BeforePreparationBegin = [&](const FProceduralGaitBeginEvent& InEvent) -> bool
+        {
+            if (NOT InEvent.Owned)
+            {
+                RejectPreparation(EProceduralGaitOwnerRejection::ConflictingBegin);
+                return true;
+            }
+            if (NOT PreparationIsCurrent() || NOT OwnedSelection.IsSet() || NOT OwnedNativeReceipt.IsSet()
+                || OwnedBeginEvents != 0 || InEvent.Kind != EProceduralGaitBeginKind::Normal
+                || InEvent.LegIndex != OwnedSelection->LegIndex || InEvent.Token.Episode != Staging->_Episode
+                || InEvent.Purpose != OwnedSelection->Purpose
+                || InEvent.Token.Slot != OwnedSelection->Token.Slot || InEvent.Token.Frame != GFrameCounter
+                || InEvent.Token.InputSolve != ConsumerInputSolve || InEvent.Origin != OwnedSelection->ExpectedPlant
+                || InEvent.Target != OwnedSelection->Input.Get_IdealTarget()
+                || InEvent.Normal != OwnedSelection->Input.Get_GroundNormal() || NOT InEvent.Trusted)
+            { RejectPreparation(EProceduralGaitOwnerRejection::BeginDenied); return false; }
+            auto& Prep = StagingFence->_Preparation;
+            if (InEvent.Token.Slot != Prep._StartedCount || NOT Prep.TryRecordStart(InEvent.Token.Slot,
+                    GFrameCounter, ConsumerInputSolve, Body, OwnedNativeReceipt->Point, OwnedNativeReceipt->Normal, Prep._ClaimsRevision))
+            { RejectPreparation(EProceduralGaitOwnerRejection::BeginDenied); return false; }
+            ++OwnedBeginEvents;
+            OwnedBeginLeg = InEvent.LegIndex;
+            SelectedLandingReceipts[InEvent.LegIndex] = ck_procedural_gait::FNativeLandingReceipt{
+                OwnedNativeReceipt->Point, OwnedNativeReceipt->Normal, OwnedNativeReceipt->Cast};
+#if WITH_DEV_AUTOMATION_TESTS
+            if (InHandle.Has<FFragment_ProceduralContactPreparation_Test>())
+            {
+                auto& Test = InHandle.Get<FFragment_ProceduralContactPreparation_Test>();
+                const auto Slot = InEvent.Token.Slot;
+                if (Test.ChargedEpisode == InEvent.Token.Episode)
+                {
+                    const auto Bit = Slot < 4 ? static_cast<uint8>(uint8{1} << Slot) : uint8{0};
+                    if (Slot >= 4 || (Test.StartedMask & Bit) != 0 || Test.Last.Frame != GFrameCounter
+                        || Test.Last.InputSolve != ConsumerInputSolve || Test.Last.Episode != InEvent.Token.Episode
+                        || Test.Last.Slot != Slot || Test.Last.LegIndex != InEvent.LegIndex)
+                    { Test.Overflow = true; }
+                    else
+                    {
+                        auto& Copy = Test.Starts[Slot];
+                        Copy = Test.Last;
+                        Copy.ActualBegin = true; Copy.Emergency = InEvent.Emergency; Copy.WindowOpen = InEvent.WindowOpen;
+                        Copy.Budget = InEvent.Budget; Copy.OnSchedule = InEvent.OnSchedule; Copy.CatchStep = InEvent.CatchStep;
+                        Copy.RecoveryWants = InEvent.RecoveryWants; Copy.ReachPaceRelief = InEvent.ReachPaceRelief;
+                        Copy.BeyondSchedule = InEvent.BeyondSchedule;
+                        Test.StartedMask |= Bit;
+                    }
+                }
+            }
+#endif
+            // Core immediately begins after this true result. No fallible operation or liveness veto follows this charge.
+            return true;
+        };
         const auto ResolveNativeRecovery = [&](const FProceduralGaitSolver& InSolver, int32 InIndex,
             const FVector& InProposed, const FVector& InValidated, const FVector& InNormal)
             -> TOptional<FProceduralGaitNativeTouchdown>
@@ -5930,7 +6982,23 @@ namespace ck
                 InverseBasis.RotateVector(Touchdown.Get_Normal()).GetSafeNormal(), true};
         };
         const auto NativeResolver = TOptional<FProceduralGaitNativeRecoveryResolver>{ResolveNativeRecovery};
-        if (InGaitComp._ParticipationLeases.IsEmpty())
+        if (FreshPreparation)
+        {
+            const auto OwnerContext = FProceduralGaitOwnerContext{
+                PreparationIsCurrent, RejectPreparation, BeforePreparationBegin, OwnedSelection};
+            Solved = InGaitComp._Solver.StepWithTakeoffGuardAndOwner(InDeltaT, CadenceSpeed, PlanarVelocity, Inputs, Outputs,
+                Airborne, CadenceDriveSpeed, [&](const FProceduralGaitSolver& InSolver, int32 InIndex, bool)
+                {
+                    if (InGaitComp._ParticipationLeases.IsEmpty())
+                    { return true; }
+                    auto Snapshot = FCk_ProceduralGaitParticipation_Snapshot{};
+                    return FCk_ProceduralGaitParticipation_Control::GetSnapshot(InHandle, Snapshot)
+                        == ECk_ProceduralGaitParticipation_Result::Accepted
+                        && FCk_ProceduralGaitParticipation_Control::CanTakeoff(InHandle, InSolver, InIndex, Snapshot);
+                },
+                DeniedTakeoffs, OwnerContext, NativeResolver);
+        }
+        else if (InGaitComp._ParticipationLeases.IsEmpty())
         {
             Solved = InGaitComp._Solver.Step(InDeltaT, CadenceSpeed, PlanarVelocity, Inputs, Outputs,
                 Airborne, CadenceDriveSpeed, NativeResolver);
@@ -5946,10 +7014,45 @@ namespace ck
                 { return Fresh && FCk_ProceduralGaitParticipation_Control::CanTakeoff(InHandle, InSolver, InIndex, Snapshot); },
                 DeniedTakeoffs, NativeResolver);
         }
+#if WITH_DEV_AUTOMATION_TESTS
+        if (FreshPreparation && OwnedSelection.IsSet() && OwnedBeginEvents == 0
+            && InHandle.Has<FFragment_ProceduralContactPreparation_Test>()
+            && DeniedTakeoffs.ContainsByPredicate([&](const auto& InDenied) { return InDenied.Get_LegIndex() == OwnedSelection->LegIndex; }))
+        {
+            auto& Test = InHandle.Get<FFragment_ProceduralContactPreparation_Test>();
+            if (Test.DeniedTakeoffs == MAX_uint32)
+            { Test.Overflow = true; }
+            else
+            { ++Test.DeniedTakeoffs; }
+        }
+#endif
         CK_ENSURE_IF_NOT(Solved, TEXT("Procedural gait [{}] solver rejected runtime inputs; feature is failed, planted state retained."), InHandle)
         {
+            if (FreshPreparation)
+            { RejectPreparation(EProceduralGaitOwnerRejection::Unavailable); }
             InHandle.Add<FFragment_ProceduralGait_Failure>(ECk_ProceduralGait_Failure::SolverStep);
             return;
+        }
+        if (FreshPreparation && GetCurrentStaging() != nullptr)
+        {
+            auto ActualStarts = 0;
+            for (auto Index = 0; Index < InGaitComp._Solver.NumLegs(); ++Index)
+            {
+                const auto& State = InGaitComp._Solver.GetLegState(Index);
+                ActualStarts += State.Get_StartsThisStep();
+                if (State.Get_StartsThisStep() > 0 && (Index != OwnedBeginLeg || State.Get_StartsThisStep() != 1
+                    || NOT OwnedSelection.IsSet() || State.Get_LastStartedTarget() != OwnedSelection->Input.Get_IdealTarget()))
+                { ExhaustPreparation(); }
+            }
+            if (ActualStarts != OwnedBeginEvents)
+            { ExhaustPreparation(); }
+        }
+        if (OwnedBeginEvents == 1 && OwnedBeginLeg >= 0 && OwnedBeginLeg < InGaitComp._Legs.Num()
+            && procedural_leg::Get_IsLive(InGaitComp._Legs[OwnedBeginLeg])
+            && InGaitComp._Legs[OwnedBeginLeg].Has<FFragment_ProceduralLeg>())
+        {
+            InGaitComp._Legs[OwnedBeginLeg].Get<FFragment_ProceduralLeg>()._Foot.Set_Foothold(
+                ck_procedural_gait::Get_LegFoothold(OwnedSource));
         }
         const auto ExhaustTwoPlacement = [&]()
         {
@@ -6411,6 +7514,62 @@ namespace ck
                         || StagingFence->_Episode != PublishedStaging->_Episode
                         || NOT StagingFence->TryAcknowledge(GFrameCounter, ConsumerInputSolve, PublishedGait._SolveSequence, Advance))
                     { ExhaustTwoPlacement(); }
+                }
+            }
+
+            if (FreshPreparation && GetCurrentStaging() != nullptr)
+            {
+                auto& Prep = StagingFence->_Preparation;
+                auto PreparationPublicationClaimsRevision = TOptional<uint64>{};
+                const auto Joined = Staging->_ProducedFrame == GFrameCounter
+                    && Staging->_ProducedSolve == ConsumerInputSolve + 1 && Staging->_ProducedSolve == InGaitComp._SolveSequence
+                    && Staging->_ProducedBody.Equals(Body, 0.0) && InGaitComp._ReachStance.Get_HasSample()
+                    && InGaitComp._ReachStance.Get_SolveSequence() == InGaitComp._SolveSequence
+                    && InGaitComp._ReachStance.Get_BodyAtSolve().Equals(Body, 0.0)
+                    && ck_procedural_gait::Get_LandingClaimsRevision(InHandle, PreparationPublicationClaimsRevision)
+                    && PreparationPublicationClaimsRevision == Prep._ClaimsRevision && Prep.Get_IsLedgerValid();
+                if (NOT Joined)
+                { ExhaustPreparation(); }
+                else if (Prep._StartedCount == Prep._CompletedCount + 1)
+                {
+                    const auto Slot = Prep._CompletedCount;
+                    const auto Index = Prep.Get_RosterIndex(Slot);
+                    if (Index < 0 || Index >= LegCount || Prep._Roster[Index] != InGaitComp._Legs[Index])
+                    { ExhaustPreparation(); }
+                    else
+                    {
+                        const auto& Output = Outputs[Index];
+                        const auto& Foot = InGaitComp._Legs[Index].Get<FFragment_ProceduralLeg>().Get_Foot();
+                        const auto& Record = Prep._Placements[Slot];
+                        if ((Output.Get_NativeTouchdownAttempted() && NOT Output.Get_NativeTouchdownResolved())
+                            || NOT Record._Body.Equals(Body, 0.0))
+                        { ExhaustPreparation(); }
+                        else if (Output.Get_Planted())
+                        {
+                            if (NOT Output.Get_NativeTouchdownAttempted() || NOT Output.Get_NativeTouchdownResolved()
+                                || Foot.Get_Phase() != ECk_ProceduralLeg_FootPhase::Planted
+                                || Foot.Get_Contact() != ECk_ProceduralLeg_FootContact::Trusted
+                                || NOT InGaitComp._ReachStance.Get_Anchors().ContainsByPredicate([&](const auto& InAnchor)
+                                    { return InAnchor.Get_Leg() == InGaitComp._Legs[Index] && InAnchor.Get_FootWorld() == Foot.Get_Position(); })
+                                || NOT Prep.TryRecordTouchdown(Slot, GFrameCounter, InGaitComp._SolveSequence,
+                                    Foot.Get_Position(), Foot.Get_Normal(), PreparationPublicationClaimsRevision))
+                            { ExhaustPreparation(); }
+                            else if (Slot == 3)
+                            { Staging->_LandedMask = 1; }
+                        }
+                    }
+                }
+                if (GetCurrentStaging() != nullptr)
+                {
+                    const auto Advance = InGaitComp._Solver.GetLastClockAdvance();
+                    if (OwnedBeginEvents > 0)
+                    { Staging->_ClockTravelWithoutProgress = 0.0; }
+                    else
+                    { Staging->_ClockTravelWithoutProgress += Advance; }
+                    if (NOT FMath::IsFinite(Staging->_ClockTravelWithoutProgress)
+                        || Staging->_ClockTravelWithoutProgress < 0.0 || Staging->_ClockTravelWithoutProgress >= 1.0
+                        || NOT StagingFence->TryAcknowledge(GFrameCounter, ConsumerInputSolve, InGaitComp._SolveSequence, Advance))
+                    { ExhaustPreparation(); }
                 }
             }
 

@@ -26,6 +26,9 @@ namespace ck
         float _SearchRadius = 0.0f;
         float _OwnSideTolerance = 0.0f;
         TOptional<FProceduralContactStagingPlane> _NativeTop;
+        // Borrowed actual retained-contact geometry for preparation only; old selectors ignore these fields.
+        TOptional<FVector> _RetainedPlantNormal;
+        float _FootContactRadius = 0.0f;
     };
 
     struct FProceduralContactStagingInput
@@ -59,6 +62,29 @@ namespace ck
         int32 _RequiredCount = 0;
         bool _TwoPlacement = false;
     };
+
+    struct FProceduralContactStagingPreparationPlan
+    {
+        int32 _AuxiliaryRosterIndex = INDEX_NONE;
+        int32 _SpanRosterIndex = INDEX_NONE;
+        int32 _OtherRosterIndex = INDEX_NONE;
+        int32 _LowerPlaneRosterIndex = INDEX_NONE;
+        FProceduralContactStagingPlane _LowerPlane;
+        FVector _AuxiliaryQuery = FVector::ZeroVector;
+        FVector _SpanPreparationQuery = FVector::ZeroVector;
+        FVector _OtherPreparationQuery = FVector::ZeroVector;
+        FTransform _BodyB = FTransform::Identity;
+        FTransform _BodyC = FTransform::Identity;
+        // Numeric future-foot certificate only. Runtime must qualify this old one-leg plan again from actuals.
+        FProceduralContactStagingPlan _LegacyPlan;
+    };
+
+    // One fixed four-leg preparation formula after exact old span/common-hold failures; no native authority.
+    // Caller owns live/trusted/supporting roster, claims, paid-observation and episode eligibility proofs.
+    CKPROCEDURALANIMATION_API auto
+        Get_ProceduralContactStagingPreparationPlan(
+            const FProceduralContactStagingInput& InInput)
+        -> TOptional<FProceduralContactStagingPreparationPlan>;
 
     // One cardinal, unit-scale geometry proposal, at most 64 legs/landings and two required replacements.
     // No native query, contact admission, hypothetical stance publication or numerical widening occurs here.

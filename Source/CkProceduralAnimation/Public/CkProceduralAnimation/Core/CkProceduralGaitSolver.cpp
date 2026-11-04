@@ -756,16 +756,57 @@ namespace ck
             TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery)
         -> bool
     {
-        _LastClockAdvance = 0.0;
+        return DoStepWithTakeoffGuard(InDeltaTime, InBodyPlanarSpeed, InBodyPlanarVelocity, InInputs, OutOutputs,
+            InAirborne, InCadenceDriveSpeed, InCanTakeoff, OutDeniedTakeoffs, InResolveNativeRecovery, nullptr);
+    }
+
+    auto
+        FProceduralGaitSolver::
+        StepWithTakeoffGuardAndOwner(
+            FCk_Time InDeltaTime,
+            float InBodyPlanarSpeed,
+            const FVector& InBodyPlanarVelocity,
+            TArrayView<const FProceduralGaitLegInput> InInputs,
+            TArrayView<FProceduralGaitLegOutput> OutOutputs,
+            bool InAirborne,
+            TOptional<float> InCadenceDriveSpeed,
+            TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs,
+            const FProceduralGaitOwnerContext& InOwner,
+            TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery)
+        -> bool
+    {
+        return DoStepWithTakeoffGuard(InDeltaTime, InBodyPlanarSpeed, InBodyPlanarVelocity, InInputs, OutOutputs,
+            InAirborne, InCadenceDriveSpeed, InCanTakeoff, OutDeniedTakeoffs, InResolveNativeRecovery, &InOwner);
+    }
+
+    auto
+        FProceduralGaitSolver::
+        DoStepWithTakeoffGuard(
+            FCk_Time InDeltaTime,
+            float InBodyPlanarSpeed,
+            const FVector& InBodyPlanarVelocity,
+            TArrayView<const FProceduralGaitLegInput> InInputs,
+            TArrayView<FProceduralGaitLegOutput> OutOutputs,
+            bool InAirborne,
+            TOptional<float> InCadenceDriveSpeed,
+            TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs,
+            TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery,
+            const FProceduralGaitOwnerContext* InOwner)
+        -> bool
+    {
+        if (InOwner == nullptr)
+        { _LastClockAdvance = 0.0; }
         if (InInputs.Num() != OutOutputs.Num() || InInputs.Num() != _LegStates.Num()
             || NOT FMath::IsFinite(InDeltaTime.Get_Seconds()) || NOT FMath::IsFinite(InBodyPlanarSpeed)
             || InBodyPlanarSpeed < 0.0f || InBodyPlanarVelocity.ContainsNaN() || NOT ValidateSettings(_Settings)
             || (InCadenceDriveSpeed.IsSet()
                 && (NOT FMath::IsFinite(InCadenceDriveSpeed.GetValue()) || InCadenceDriveSpeed.GetValue() < 0.0f)))
         { return false; }
-        for (const auto& Input : InInputs)
+        const auto InputValid = [](const FProceduralGaitLegInput& Input) -> bool
         {
-            if (Input._IdealTarget.ContainsNaN() || Input._GroundNormal.ContainsNaN()
+            return NOT (Input._IdealTarget.ContainsNaN() || Input._GroundNormal.ContainsNaN()
                 || Input._FacingDirection.ContainsNaN() || NOT FMath::IsFinite(Input._PhaseOffset)
                 || Input._PhaseOffset < 0.0f || Input._PhaseOffset >= 1.0f
                 || NOT FMath::IsFinite(Input._StepThresholdScale) || Input._StepThresholdScale <= 0.0f
@@ -778,9 +819,54 @@ namespace ck
                             && Input._ReachPaceTrial.GetValue().Get_PosedHip().GetValue().ContainsNaN())))
                 || NOT FMath::IsFinite(Input._Reach) || Input._Reach < 0.0f
                 || NOT FMath::IsFinite(Input._FootContactRadius) || Input._FootContactRadius < 0.0f
-                || (Input._NativeRecoveryEnabled && (Input._Reach <= 0.0f || Input._FootContactRadius <= 0.0f)))
+                || (Input._NativeRecoveryEnabled && (Input._Reach <= 0.0f || Input._FootContactRadius <= 0.0f)));
+        };
+        for (const auto& Input : InInputs)
+        {
+            if (NOT InputValid(Input))
             { return false; }
         }
+        if (InOwner != nullptr && InOwner->Selection.IsSet())
+        {
+            const auto& Owned = InOwner->Selection.GetValue();
+            if ((Owned.LegIndex < 0 || Owned.LegIndex >= InInputs.Num()) || NOT InputValid(Owned.Input)
+                || Owned.ExpectedPlant.ContainsNaN() || Owned.Token.Episode == 0 || Owned.Token.Frame == 0
+                || Owned.Token.InputSolve == MAX_uint64 || Owned.Token.Slot >= 4
+                || Owned.Purpose > EProceduralGaitOwnedPurpose::LegacyFinal)
+            { return false; }
+            if (Owned.Input._PlannedReplantIntent.IsSet())
+            {
+                const auto& Intent = Owned.Input._PlannedReplantIntent.GetValue();
+                if (Intent.Get_ExpectedPlant().ContainsNaN() || Intent.Get_Target().ContainsNaN()
+                    || Intent.Get_ExitHip().ContainsNaN() || Intent.Get_FinalQuery().ContainsNaN()
+                    || Intent.Get_Forward().ContainsNaN() || NOT FMath::IsFinite(Intent.Get_SearchRadius())
+                    || (Intent.Get_ExitPosedHip().IsSet() && Intent.Get_ExitPosedHip()->ContainsNaN())
+                    || Intent.Get_Milestone() > EProceduralGaitReplantMilestone::Intermediate)
+                { return false; }
+            }
+            const auto& Ordinary = InInputs[Owned.LegIndex];
+            const auto& Input = Owned.Input;
+            const auto SameOptionalVector = [](const TOptional<FVector>& A, const TOptional<FVector>& B)
+            {
+                return A.IsSet() == B.IsSet() && (NOT A.IsSet() || A.GetValue() == B.GetValue());
+            };
+            if (Input._PhaseOffset != Ordinary._PhaseOffset || Input._StepThresholdScale != Ordinary._StepThresholdScale
+                || Input._FacingDirection != Ordinary._FacingDirection || Input._ClearanceGroundZ != Ordinary._ClearanceGroundZ
+                || Input._Enabled != Ordinary._Enabled || Input._Participating != Ordinary._Participating
+                || Input._Hip != Ordinary._Hip || NOT SameOptionalVector(Input._PosedHip, Ordinary._PosedHip)
+                || Input._Reach != Ordinary._Reach || Input._LandingGround != Ordinary._LandingGround
+                || Input._LandingGroundZ != Ordinary._LandingGroundZ || Input._PlantOccluded != Ordinary._PlantOccluded
+                || Input._FootContactRadius != Ordinary._FootContactRadius || Input._PlantCrowded != Ordinary._PlantCrowded
+                || Input._NativeRecoveryEnabled != Ordinary._NativeRecoveryEnabled
+                || Input._ReachPaceTrial.IsSet() != Ordinary._ReachPaceTrial.IsSet())
+            { return false; }
+            if (Input._ReachPaceTrial.IsSet()
+                && (Input._ReachPaceTrial->Get_Hip() != Ordinary._ReachPaceTrial->Get_Hip()
+                    || NOT SameOptionalVector(Input._ReachPaceTrial->Get_PosedHip(), Ordinary._ReachPaceTrial->Get_PosedHip())))
+            { return false; }
+        }
+        if (InOwner != nullptr)
+        { _LastClockAdvance = 0.0; }
 
         auto EffectiveInputs = TArray<FProceduralGaitLegInput, TInlineAllocator<16>>{};
         EffectiveInputs.Reserve(InInputs.Num());
@@ -794,13 +880,17 @@ namespace ck
         {
             auto ReadOnlySolver = *this;
             const auto Evaluated = ReadOnlySolver.DoStep(InDeltaTime, InBodyPlanarSpeed, CadenceDriveSpeed,
-                InBodyPlanarVelocity, EffectiveInputs, OutOutputs, InAirborne, InCanTakeoff, Denied, {});
+                InBodyPlanarVelocity, EffectiveInputs, OutOutputs, InAirborne, InCanTakeoff, Denied, {}, EffectiveInputs, nullptr);
             if (Evaluated)
             { OutDeniedTakeoffs.Reset(); }
             return Evaluated;
         }
+        auto OrdinaryInputs = TArray<FProceduralGaitLegInput, TInlineAllocator<16>>{};
+        if (InOwner != nullptr)
+        { OrdinaryInputs = EffectiveInputs; }
         const auto Advanced = DoStep(InDeltaTime, InBodyPlanarSpeed, CadenceDriveSpeed, InBodyPlanarVelocity,
-            EffectiveInputs, OutOutputs, InAirborne, InCanTakeoff, Denied, InResolveNativeRecovery);
+            EffectiveInputs, OutOutputs, InAirborne, InCanTakeoff, Denied, InResolveNativeRecovery,
+            InOwner != nullptr ? MakeArrayView(OrdinaryInputs) : MakeArrayView(EffectiveInputs), InOwner);
         if (Advanced)
         {
             for (auto LegIndex = 0; LegIndex < OutOutputs.Num(); ++LegIndex)
@@ -822,14 +912,49 @@ namespace ck
             float InBodyPlanarSpeed,
             float InCadenceDriveSpeed,
             const FVector& InBodyPlanarVelocity,
-            TArrayView<const FProceduralGaitLegInput> InInputs,
+            TArrayView<FProceduralGaitLegInput> InInputs,
             TArrayView<FProceduralGaitLegOutput> OutOutputs,
             bool InAirborne,
             TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
             TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs,
-            TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery)
+            TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery,
+            TArrayView<const FProceduralGaitLegInput> InOrdinaryInputs,
+            const FProceduralGaitOwnerContext* InOwner)
         -> bool
     {
+        const auto OwnedSelection = InOwner != nullptr ? InOwner->Selection : TOptional<FProceduralGaitOwnedSelection>{};
+        auto OwnerRevoked = false;
+        auto OwnerApplied = false;
+        auto OwnerBegan = false;
+        const auto RestoreOrdinary = [&]()
+        {
+            if (OwnerApplied && NOT OwnerBegan)
+            { InInputs[OwnedSelection->LegIndex] = InOrdinaryInputs[OwnedSelection->LegIndex]; }
+            OwnerApplied = false;
+        };
+        const auto RejectOwner = [&](EProceduralGaitOwnerRejection InReason)
+        {
+            if (InOwner == nullptr || OwnerRevoked)
+            { return; }
+            OwnerRevoked = true;
+            RestoreOrdinary();
+            InOwner->Reject(InReason);
+        };
+        const auto OwnerCurrent = [&]() -> bool
+        {
+            if (InOwner == nullptr || OwnerRevoked)
+            { return false; }
+            if (NOT InOwner->IsCurrent())
+            { RejectOwner(EProceduralGaitOwnerRejection::NotCurrent); }
+            return NOT OwnerRevoked;
+        };
+        const auto ObserveOrdinaryBegin = [&](const FProceduralGaitBeginEvent& InEvent)
+        {
+            if (NOT OwnerCurrent())
+            { return; }
+            InOwner->BeforeBegin(InEvent); // Observational; an ordinary admitted begin cannot be vetoed.
+            RejectOwner(EProceduralGaitOwnerRejection::ConflictingBegin);
+        };
         const auto Advance = InDeltaTime > FCk_Time{};
         for (auto& State : _LegStates)
         { State._StartsThisStep = 0; }
@@ -848,6 +973,7 @@ namespace ck
             {
                 State._Participating = ReconciledInput._Participating;
                 State._Swing._Active = false;
+                State._Swing._CommittedNativeContact = false;
                 State._PendingStep._Time = FCk_Time{};
                 State._AutomaticRecovery = EProceduralGaitAutomaticRecovery::None;
                 State._AutomaticRecoveryFlightSuppressed = true;
@@ -860,7 +986,8 @@ namespace ck
                 && NOT DoGet_IsContactAvailable(LegIndex,
                     DoClampTarget(ReconciledInput, ReconciledInput._IdealTarget, ReconciledInput._TargetTrusted), InInputs))
             { ReconciledInput._TargetValid = false; }
-            if (DoReconcileEnabled(State, ReconciledInput, LegIndex, InCanTakeoff, OutDeniedTakeoffs))
+            if (DoReconcileEnabled(State, ReconciledInput, LegIndex, InCanTakeoff, OutDeniedTakeoffs,
+                    Advance && InOwner != nullptr ? TOptional<FProceduralGaitBeginObserver>{ObserveOrdinaryBegin} : TOptional<FProceduralGaitBeginObserver>{}))
             {
                 EnabledSetChanged = true;
                 if (State._Swing._Active)
@@ -940,6 +1067,7 @@ namespace ck
                 State._Emitted._AirPosition = State._Emitted._Position;
                 State._Plant._Rotation = State._Emitted._Rotation;
                 State._Swing._Active = false;
+                State._Swing._CommittedNativeContact = false;
                 State._Swing._Phase = 0.0f;
                 State._Swing._TargetFrozen = false;
                 State._Swing._Overshoot = false;
@@ -977,16 +1105,28 @@ namespace ck
                     { OutDeniedTakeoffs.Emplace(LegIndex, false); }
                     continue;
                 }
+                const auto ReturnTarget = DoClampTarget(In, In._TargetValid ? In._IdealTarget : State._Emitted._AirPosition,
+                    In._TargetValid && In._TargetTrusted);
+                const auto ReturnTrusted = In._TargetValid && In._TargetTrusted
+                    && DoGet_IsContactAvailable(LegIndex, ReturnTarget, InInputs);
+                if (InOwner != nullptr)
+                {
+                    auto Event = FProceduralGaitBeginEvent{};
+                    Event.Kind = EProceduralGaitBeginKind::AirReturn; Event.LegIndex = LegIndex;
+                    Event.Origin = State._Emitted._AirPosition;
+                    Event.Target = ReturnTarget;
+                    Event.Normal = In._TargetValid ? In._GroundNormal : State._Plant._Normal;
+                    Event.Trusted = ReturnTrusted;
+                    ObserveOrdinaryBegin(Event);
+                }
                 State._Swing._Active = true;
                 State._Swing._Phase = 0.0f;
                 State._Swing._StartPosition = State._Emitted._AirPosition;
                 State._Swing._StartRotation = State._Plant._Rotation;
-                State._Swing._Target = DoClampTarget(In, In._TargetValid ? In._IdealTarget : State._Emitted._AirPosition,
-                    In._TargetValid && In._TargetTrusted);
+                State._Swing._Target = ReturnTarget;
                 State._Swing._LandingPoint = State._Swing._Target;
                 State._Swing._ValidatedTarget = State._Swing._Target;
-                State._Swing._TargetTrusted = In._TargetValid && In._TargetTrusted
-                    && DoGet_IsContactAvailable(LegIndex, State._Swing._Target, InInputs);
+                State._Swing._TargetTrusted = ReturnTrusted;
                 State._Swing._TargetNormal = In._TargetValid ? In._GroundNormal : State._Plant._Normal;
                 State._Swing._TargetOnAFace = In._TargetValid && Get_IsFaceNormal(In._GroundNormal, FVector::UpVector);
                 State._Swing._LandsOnTarget = In._FootContactRadius > 0.0f;
@@ -1067,6 +1207,13 @@ namespace ck
                     OutDeniedTakeoffs.Emplace(LegIndex, false);
                     continue;
                 }
+                if (InOwner != nullptr)
+                {
+                    auto Event = FProceduralGaitBeginEvent{};
+                    Event.Kind = EProceduralGaitBeginKind::NativeRecovery; Event.LegIndex = LegIndex;
+                    Event.Origin = State._Emitted._Position; Event.Target = Target; Event.Normal = In._GroundNormal; Event.Trusted = true;
+                    ObserveOrdinaryBegin(Event);
+                }
                 DoBeginSwing(State, State._Emitted._Position, State._Emitted._Rotation, Target, true, In._GroundNormal);
                 State._Swing._TargetFrozen = false;
                 State._Swing._TargetOnAFace = Get_IsFaceNormal(In._GroundNormal, FVector::UpVector);
@@ -1131,6 +1278,38 @@ namespace ck
             });
         };
 
+        if (Advance && OwnerCurrent() && OwnedSelection.IsSet())
+        {
+            const auto& Selection = OwnedSelection.GetValue();
+            const auto& State = _LegStates[Selection.LegIndex];
+            const auto Effective = DoGet_EffectiveInput(Selection.Input);
+            if (NOT State._Enabled || NOT State._Participating || NOT State._Plant._Trusted
+                || State._Swing._Active || State._PendingStep._Time > FCk_Time{}
+                || State._AutomaticRecovery != EProceduralGaitAutomaticRecovery::None
+                || State._Plant._Position != Selection.ExpectedPlant || NOT Effective._TargetValid || NOT Effective._TargetTrusted
+                || NOT Effective._NativeRecoveryEnabled || NOT InResolveNativeRecovery.IsSet())
+            { RejectOwner(EProceduralGaitOwnerRejection::Unavailable); }
+            else
+            {
+                const auto FinalIntent = Effective._PlannedReplantIntent.IsSet()
+                    && Effective._PlannedReplantIntent->Get_Milestone() == EProceduralGaitReplantMilestone::Final
+                    && Effective._PlannedReplantIntent->Get_Episode() == Selection.Token.Episode
+                    && Effective._PlannedReplantIntent->Get_Frame() == Selection.Token.Frame
+                    && Effective._PlannedReplantIntent->Get_ConsumerInputSolve() == Selection.Token.InputSolve
+                    && DoGet_IsPlannedReplant(State, Effective);
+                const auto EmergencyCandidate = DoGet_IsEmergency(State, Effective);
+                const auto OrdinaryAlternative = EmergencyCandidate || DoGet_IsReachPaceRelief(State, Effective);
+                const auto PurposeValid = Selection.Purpose == EProceduralGaitOwnedPurpose::LegacyFinal ? FinalIntent && NOT OrdinaryAlternative
+                    : NOT Effective._PlannedReplantIntent.IsSet()
+                        && (Selection.Purpose == EProceduralGaitOwnedPurpose::AuxiliaryEmergency
+                            ? EmergencyCandidate : NOT OrdinaryAlternative);
+                if (NOT PurposeValid)
+                { RejectOwner(EProceduralGaitOwnerRejection::InvalidPurpose); }
+                else
+                { InInputs[Selection.LegIndex] = Effective; OwnerApplied = true; }
+            }
+        }
+
         if (Advance && _Settings._Schedule._AdvanceFraction > 0.0f && _Settings._Schedule._AdvanceRate > 0.0f)
         {
             const auto AdvanceTrigger = FMath::Max(_Settings._Step._EmergencyFactor, 1.0f)
@@ -1180,67 +1359,98 @@ namespace ck
         // the reservation ends as soon as its leg starts, loses the target, or no longer receives fresh trial feedback.
         auto ReachPacePhaseOffset = TOptional<float>{};
         auto ReachPaceLegIndex = int32{INDEX_NONE};
-        auto ReachPaceRatio = 0.0;
-        for (auto LegIndex = 0; LegIndex < InInputs.Num(); ++LegIndex)
+        auto PriorityPhaseOffset = TOptional<float>{};
+        auto Visited = TArray<uint8, TInlineAllocator<16>>{};
+        if (InOwner != nullptr)
+        { Visited.SetNumZeroed(InInputs.Num()); }
+        const auto RefreshPriorities = [&](bool InUnvisitedOnly)
         {
-            const auto& In = InInputs[LegIndex];
-            const auto& State = _LegStates[LegIndex];
-            const auto Offset = _PatternBlend._EffectiveOffsets[LegIndex];
-            if (NOT State._Enabled || NOT State._Participating || State._Swing._Active
-                || State._AutomaticRecovery == EProceduralGaitAutomaticRecovery::WaitingForContact
-                || State._PendingStep._Time > FCk_Time{}
-                || HasSwingInGroup(Offset) || NOT DoGet_IsReachPaceRelief(State, In)
-                || (NOT BeyondScheduleOffsets.IsEmpty() && NOT ContainsGroup(BeyondScheduleOffsets, Offset))
-                || NOT DoGet_IsContactAvailable(LegIndex, In._IdealTarget, InInputs))
-            { continue; }
-
-            const auto& Trial = In._ReachPaceTrial.GetValue();
-            const auto SimDistance = FVector::Dist(State._Plant._Position, Trial.Get_Hip());
-            const auto Distance = Trial.Get_PosedHip().IsSet()
-                ? FMath::Max(SimDistance, FVector::Dist(State._Plant._Position, Trial.Get_PosedHip().GetValue())) : SimDistance;
-            const auto Ratio = Distance / In._Reach;
-            if (NOT ReachPacePhaseOffset.IsSet() || Ratio > ReachPaceRatio)
+            ReachPacePhaseOffset.Reset();
+            ReachPaceLegIndex = INDEX_NONE;
+            auto ReachPaceRatio = 0.0;
+            for (auto LegIndex = 0; LegIndex < InInputs.Num(); ++LegIndex)
             {
-                ReachPacePhaseOffset = Offset;
-                ReachPaceLegIndex = LegIndex;
-                ReachPaceRatio = Ratio;
-            }
-        }
+                if (InUnvisitedOnly && Visited[LegIndex] != 0)
+                { continue; }
+                const auto& In = InInputs[LegIndex];
+                const auto& State = _LegStates[LegIndex];
+                const auto Offset = _PatternBlend._EffectiveOffsets[LegIndex];
+                if (NOT State._Enabled || NOT State._Participating || State._Swing._Active
+                    || State._AutomaticRecovery == EProceduralGaitAutomaticRecovery::WaitingForContact
+                    || State._PendingStep._Time > FCk_Time{}
+                    || HasSwingInGroup(Offset) || NOT DoGet_IsReachPaceRelief(State, In)
+                    || (NOT BeyondScheduleOffsets.IsEmpty() && NOT ContainsGroup(BeyondScheduleOffsets, Offset))
+                    || NOT DoGet_IsContactAvailable(LegIndex, In._IdealTarget, InInputs))
+                { continue; }
 
-        // An Emergency leg waits on inhibition while other groups keep starting swings, and on the frame they drain,
-        // leg index order hands the slot to another group again. The Emergency leg whose group has nothing in flight
-        // therefore reserves the next new scheduled group's take-off, Emergency take-offs included: while the body turns
-        // in place every group is in Emergency at once, and index order would starve one of them. A hard-overstretched or
-        // occluded foot passes it beyond the schedule; an Emergency can join an active scheduled group only on the bounded
-        // remaining deadline below.
-        auto PriorityPhaseOffset = ReachPacePhaseOffset;
-        auto PriorityRatio = 0.0;
-        for (auto LegIndex = 0; LegIndex < InInputs.Num(); ++LegIndex)
+                const auto& Trial = In._ReachPaceTrial.GetValue();
+                const auto SimDistance = FVector::Dist(State._Plant._Position, Trial.Get_Hip());
+                const auto Distance = Trial.Get_PosedHip().IsSet()
+                    ? FMath::Max(SimDistance, FVector::Dist(State._Plant._Position, Trial.Get_PosedHip().GetValue())) : SimDistance;
+                const auto Ratio = Distance / In._Reach;
+                if (NOT ReachPacePhaseOffset.IsSet() || Ratio > ReachPaceRatio)
+                {
+                    ReachPacePhaseOffset = Offset;
+                    ReachPaceLegIndex = LegIndex;
+                    ReachPaceRatio = Ratio;
+                }
+            }
+
+            // An Emergency leg waits on inhibition while other groups keep starting swings, and on the frame they drain,
+            // leg index order hands the slot to another group again. The Emergency leg whose group has nothing in flight
+            // therefore reserves the next new scheduled group's take-off, Emergency take-offs included: while the body turns
+            // in place every group is in Emergency at once, and index order would starve one of them. A hard-overstretched or
+            // occluded foot passes it beyond the schedule; an Emergency can join an active scheduled group only on the bounded
+            // remaining deadline below.
+            PriorityPhaseOffset = ReachPacePhaseOffset;
+            auto PriorityRatio = 0.0;
+            for (auto LegIndex = 0; LegIndex < InInputs.Num(); ++LegIndex)
+            {
+                if (InUnvisitedOnly && Visited[LegIndex] != 0)
+                { continue; }
+                const auto& In = InInputs[LegIndex];
+                const auto& State = _LegStates[LegIndex];
+                const auto Offset = _PatternBlend._EffectiveOffsets[LegIndex];
+
+                if (ReachPacePhaseOffset.IsSet() || NOT State._Enabled || NOT State._Participating
+                    || State._AutomaticRecovery == EProceduralGaitAutomaticRecovery::WaitingForContact
+                    || State._Swing._Active || NOT In._TargetValid || HasSwingInGroup(Offset)
+                    || NOT DoGet_IsEmergency(State, In))
+                { continue; }
+
+                const auto Ratio = DoGet_EmergencyRatio(State, In);
+                if (NOT PriorityPhaseOffset.IsSet() || Ratio > PriorityRatio)
+                {
+                    PriorityPhaseOffset = Offset;
+                    PriorityRatio = Ratio;
+                }
+            }
+
+        };
+        RefreshPriorities(false);
+        auto VisitOrder = TArray<int32, TInlineAllocator<16>>{};
+        if (InOwner != nullptr)
         {
-            const auto& In = InInputs[LegIndex];
-            const auto& State = _LegStates[LegIndex];
-            const auto Offset = _PatternBlend._EffectiveOffsets[LegIndex];
-
-            if (ReachPacePhaseOffset.IsSet() || NOT State._Enabled || NOT State._Participating
-                || State._AutomaticRecovery == EProceduralGaitAutomaticRecovery::WaitingForContact
-                || State._Swing._Active || NOT In._TargetValid || HasSwingInGroup(Offset)
-                || NOT DoGet_IsEmergency(State, In))
-            { continue; }
-
-            const auto Ratio = DoGet_EmergencyRatio(State, In);
-            if (NOT PriorityPhaseOffset.IsSet() || Ratio > PriorityRatio)
-            {
-                PriorityPhaseOffset = Offset;
-                PriorityRatio = Ratio;
-            }
+            for (auto Visit = 0; Visit < InInputs.Num(); ++Visit)
+            { VisitOrder.Add(ReachPaceLegIndex == INDEX_NONE ? Visit
+                : Visit == 0 ? ReachPaceLegIndex : Visit <= ReachPaceLegIndex ? Visit - 1 : Visit); }
         }
+        auto PriorityRestored = false;
 
         // Visit the actual limiting leg before its same-phase peers can spend the last slot. Other legs retain their
         // original order, and without pressure feedback the traversal is unchanged.
         for (auto Visit = 0; Visit < InInputs.Num(); ++Visit)
         {
-            const auto LegIndex = ReachPaceLegIndex == INDEX_NONE ? Visit
+            if (InOwner != nullptr)
+            {
+                OwnerCurrent();
+                if (OwnerRevoked && NOT PriorityRestored)
+                { RefreshPriorities(true); PriorityRestored = true; }
+            }
+            const auto LegIndex = InOwner != nullptr ? VisitOrder[Visit] : ReachPaceLegIndex == INDEX_NONE ? Visit
                 : Visit == 0 ? ReachPaceLegIndex : Visit <= ReachPaceLegIndex ? Visit - 1 : Visit;
+            if (InOwner != nullptr)
+            { Visited[LegIndex] = 1; }
             const auto& In = InInputs[LegIndex];
             auto& State = _LegStates[LegIndex];
             auto& Out = OutOutputs[LegIndex];
@@ -1265,7 +1475,7 @@ namespace ck
             {
                 const auto SwingDuration = FMath::Max(_Settings._Step._Duration * State._Swing._DurationScale / CadenceScale, FCk_Time{KINDA_SMALL_NUMBER});
                 const auto PreviousPhase = State._Swing._Phase;
-                const auto CanRetarget = In._TargetValid
+                const auto CanRetarget = NOT State._Swing._CommittedNativeContact && In._TargetValid
                     && (State._AutomaticRecovery != EProceduralGaitAutomaticRecovery::Landing
                         || (In._NativeRecoveryEnabled && In._TargetTrusted))
                     && DoGet_IsContactAvailable(LegIndex, DoClampTarget(In, In._IdealTarget, In._TargetTrusted), InInputs);
@@ -1283,7 +1493,7 @@ namespace ck
                     // Nothing under the landing point means the overshoot and the freeze push carry the foot past the ground
                     // the caller validated (off a top's edge, into the air): before the freeze the swing gives both up, after
                     // it the landing is pulled back onto the validated target, for the rest of the swing either way.
-                    const auto NoLandingGround = NOT State._Swing._CatchStep && In._LandingGround == EProceduralGaitLandingGround::None;
+                    const auto NoLandingGround = NOT State._Swing._CommittedNativeContact && NOT State._Swing._CatchStep && In._LandingGround == EProceduralGaitLandingGround::None;
                     if (NoLandingGround && NOT State._Swing._TargetFrozen)
                     {
                         State._Swing._LandsOnTarget = true;
@@ -1342,7 +1552,7 @@ namespace ck
 
                 // The overshoot and the freeze push can carry a target probed on a lower tread past the next riser; the ground
                 // under the landing point then lies above it.
-                const auto HasLandingGround = NOT State._Swing._CatchStep && In._LandingGround == EProceduralGaitLandingGround::Found;
+                const auto HasLandingGround = NOT State._Swing._CommittedNativeContact && NOT State._Swing._CatchStep && In._LandingGround == EProceduralGaitLandingGround::Found;
                 const auto OnLandingGround = FVector{Target.X, Target.Y, In._LandingGroundZ};
                 const auto LandingContactAvailable = DoGet_IsContactAvailable(LegIndex, OnLandingGround, InInputs);
                 const auto LandingGroundAbove = HasLandingGround && LandingContactAvailable && In._LandingGroundZ > Target.Z
@@ -1366,7 +1576,7 @@ namespace ck
                 if (State._Swing._Phase >= 1.0f)
                 {
                     const auto NativeLanding = State._AutomaticRecovery == EProceduralGaitAutomaticRecovery::Landing
-                        || State._Swing._PlannedReplant;
+                        || State._Swing._PlannedReplant || State._Swing._CommittedNativeContact;
                     if (NativeLanding && NOT Advance)
                     {
                         Out._Position = State._Emitted._Position;
@@ -1409,6 +1619,7 @@ namespace ck
                             Out._NativeTouchdownAttempted = true;
                             Resolved = InResolveNativeRecovery.GetValue()(*this, LegIndex, Target,
                                 State._Swing._ValidatedTarget, State._Swing._TargetNormal);
+                            OwnerCurrent();
                         }
                         constexpr auto PhysicalTolerance = 1.0e-3;
                         const auto Limit = static_cast<double>(In._Reach) + PhysicalTolerance;
@@ -1440,6 +1651,7 @@ namespace ck
                         State._AutomaticRecovery = EProceduralGaitAutomaticRecovery::None;
                     }
                     State._Swing._Active = false;
+                    State._Swing._CommittedNativeContact = false;
                     State._Swing._Phase = 0.0f;
                     State._Swing._DurationScale = 1.0f;
                     State._Swing._Overshoot = false;
@@ -1472,6 +1684,11 @@ namespace ck
 
                 const auto Wants = In._TargetValid && Error > Threshold;
                 const auto StagingWants = InResolveNativeRecovery.IsSet() && DoGet_IsPlannedReplant(State, In);
+                const auto OwnedCandidate = OwnerApplied && NOT OwnerRevoked && NOT OwnerBegan
+                    && OwnedSelection->LegIndex == LegIndex;
+                const auto PreparationWants = OwnedCandidate
+                    && OwnedSelection->Purpose == EProceduralGaitOwnedPurpose::Preparation;
+                const auto WindowOpen = IsWindowOpen(LegPhaseOffset);
                 const auto RecoveryWants = In._TargetValid && In._TargetTrusted && NOT State._Plant._Trusted;
                 const auto Crowded = In._PlantCrowded && In._FootContactRadius > 0.0f;
                 const auto ReachPaceRelief = DoGet_IsReachPaceRelief(State, In);
@@ -1485,7 +1702,7 @@ namespace ck
                 const auto YieldsToPriority = PriorityPhaseOffset.IsSet() && NOT CatchStep
                     && NOT FMath::IsNearlyEqual(PriorityPhaseOffset.GetValue(), LegPhaseOffset, 1.0e-3f);
 
-                const auto Triggered = CatchStep || (Emergency && (NOT Crowded || Budget)) || ((Wants || StagingWants) && IsWindowOpen(LegPhaseOffset) && Budget)
+                const auto Triggered = CatchStep || (Emergency && (NOT Crowded || Budget)) || ((Wants || StagingWants || PreparationWants) && WindowOpen && Budget)
                     || (SettleWants && Budget) || (RecoveryWants && Budget);
                 auto JoinDurationScale = 0.0f;
                 if (Emergency && (YieldsToPriority || (ReachPaceRelief && ContainsGroup(ScheduledOffsets, LegPhaseOffset)))
@@ -1524,13 +1741,73 @@ namespace ck
                 const auto AlreadyDenied = OutDeniedTakeoffs.ContainsByPredicate(
                     [LegIndex](const FProceduralGaitDeniedTakeoff& InDenied)
                     { return InDenied.Get_LegIndex() == LegIndex; });
-                if (Advance && (OnSchedule || BeyondSchedule) && ContactAvailable && NOT AlreadyDenied
-                    && InCanTakeoff(*this, LegIndex, Emergency))
+                const auto OwnedSchedule = NOT OwnedCandidate
+                    || OwnedSelection->Purpose == EProceduralGaitOwnedPurpose::AuxiliaryEmergency
+                    || (WindowOpen && Budget && OnSchedule && NOT BeyondSchedule && NOT CatchStep
+                        && NOT Emergency && NOT RecoveryWants && NOT ReachPaceRelief);
+                const auto CanTryTakeoff = Advance && (OnSchedule || BeyondSchedule) && ContactAvailable && NOT AlreadyDenied && OwnedSchedule;
+                auto GuardAccepted = false;
+                auto DeferredOwned = false;
+                if (CanTryTakeoff)
+                {
+                    GuardAccepted = InCanTakeoff(*this, LegIndex, Emergency);
+                    if (InOwner != nullptr)
+                    {
+                        const auto CurrentAfterGuard = OwnerCurrent();
+                        DeferredOwned = OwnedCandidate && NOT CurrentAfterGuard;
+                    }
+                }
+                if (DeferredOwned)
+                {
+                    Out._Position = State._Plant._Position; Out._Normal = State._Plant._Normal;
+                    Out._Rotation = State._Plant._Rotation; Out._SwingAlpha = 0.0f; Out._Planted = true;
+                    continue;
+                }
+                if (CanTryTakeoff && GuardAccepted)
                 {
                     const auto WasWaiting = State._AutomaticRecovery == EProceduralGaitAutomaticRecovery::WaitingForContact;
+                    auto Event = FProceduralGaitBeginEvent{};
+                    if (InOwner != nullptr)
+                    {
+                        Event.LegIndex = LegIndex; Event.Origin = WasWaiting ? State._Emitted._Position : State._Plant._Position;
+                        Event.Target = SwingTarget; Event.Normal = In._TargetValid ? In._GroundNormal : State._Plant._Normal;
+                        Event.Trusted = TargetTrusted; Event.HasSchedule = true; Event.WindowOpen = WindowOpen; Event.Budget = Budget;
+                        Event.OnSchedule = OnSchedule; Event.Emergency = Emergency; Event.CatchStep = CatchStep;
+                        Event.RecoveryWants = RecoveryWants; Event.ReachPaceRelief = ReachPaceRelief;
+                        Event.SettleWants = SettleWants; Event.BeyondSchedule = BeyondSchedule;
+                    }
+                    if (OwnedCandidate)
+                    {
+                        const auto StillCurrent = OwnerCurrent(); // InCanTakeoff may revoke the lease.
+                        const auto PurposeAdmitted = OwnedSelection->Purpose == EProceduralGaitOwnedPurpose::AuxiliaryEmergency
+                            ? Emergency && NOT CatchStep && NOT RecoveryWants
+                            : WindowOpen && Budget && OnSchedule && NOT BeyondSchedule && NOT CatchStep
+                                && NOT Emergency && NOT RecoveryWants && NOT ReachPaceRelief
+                                && (PreparationWants || StagingWants);
+                        if (NOT StillCurrent || NOT PurposeAdmitted)
+                        {
+                            if (StillCurrent)
+                            { RejectOwner(EProceduralGaitOwnerRejection::InvalidPurpose); }
+                            Out._Position = State._Plant._Position; Out._Normal = State._Plant._Normal;
+                            Out._Rotation = State._Plant._Rotation; Out._SwingAlpha = 0.0f; Out._Planted = true;
+                            continue;
+                        }
+                        Event.Owned = true; Event.Token = OwnedSelection->Token; Event.Purpose = OwnedSelection->Purpose;
+                        if (NOT InOwner->BeforeBegin(Event))
+                        {
+                            RejectOwner(EProceduralGaitOwnerRejection::BeginDenied);
+                            Out._Position = State._Plant._Position; Out._Normal = State._Plant._Normal;
+                            Out._Rotation = State._Plant._Rotation; Out._SwingAlpha = 0.0f; Out._Planted = true;
+                            continue;
+                        }
+                    }
+                    else if (InOwner != nullptr)
+                    { ObserveOrdinaryBegin(Event); }
                     DoBeginSwing(State, WasWaiting ? State._Emitted._Position : State._Plant._Position,
                         WasWaiting ? State._Emitted._Rotation : State._Plant._Rotation, SwingTarget, TargetTrusted,
                         In._TargetValid ? In._GroundNormal : State._Plant._Normal);
+                    if (OwnedCandidate)
+                    { State._Swing._CommittedNativeContact = true; OwnerBegan = true; }
                     if (CatchStep)
                     { State._AutomaticRecovery = EProceduralGaitAutomaticRecovery::None; }
                     if (JoinsReservedGroup)
@@ -1561,7 +1838,7 @@ namespace ck
                 }
                 else
                 {
-                    if (Advance && (OnSchedule || BeyondSchedule) && ContactAvailable && NOT AlreadyDenied)
+                    if (CanTryTakeoff)
                     { OutDeniedTakeoffs.Emplace(LegIndex, Emergency); }
                     if (State._AutomaticRecovery == EProceduralGaitAutomaticRecovery::WaitingForContact)
                     {
@@ -1627,7 +1904,8 @@ namespace ck
             const FProceduralGaitLegInput& InInput,
             int32 InLegIndex,
             TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
-            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs) const
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs,
+            TOptional<FProceduralGaitBeginObserver> InObserveBegin) const
         -> bool
     {
         if (InOutState._Enabled == InInput._Enabled)
@@ -1638,6 +1916,7 @@ namespace ck
         if (NOT InInput._Enabled)
         {
             InOutState._Swing._Active = false;
+            InOutState._Swing._CommittedNativeContact = false;
             InOutState._Swing._TargetFrozen = false;
             InOutState._Swing._Overshoot = false;
             InOutState._Swing._CatchStep = false;
@@ -1662,6 +1941,14 @@ namespace ck
         {
             if (InCanTakeoff(*this, InLegIndex, false))
             {
+                if (InObserveBegin.IsSet())
+                {
+                    auto Event = FProceduralGaitBeginEvent{};
+                    Event.Kind = EProceduralGaitBeginKind::Reenabled; Event.LegIndex = InLegIndex;
+                    Event.Origin = InOutState._Emitted._Position; Event.Target = Target;
+                    Event.Normal = InInput._GroundNormal; Event.Trusted = InInput._TargetTrusted;
+                    InObserveBegin.GetValue()(Event);
+                }
                 DoBeginSwing(InOutState, InOutState._Emitted._Position, InOutState._Emitted._Rotation, Target,
                     InInput._TargetTrusted, InInput._GroundNormal);
                 return true;
@@ -1743,6 +2030,7 @@ namespace ck
         InOutState._Swing._ValidatedTarget = InTarget;
         InOutState._Swing._LandsOnTarget = false;
         InOutState._Swing._PlannedReplant = false;
+        InOutState._Swing._CommittedNativeContact = false;
         InOutState._Swing._PullBackStartAlpha = -1.0f;
         InOutState._Swing._TargetTrusted = InTargetTrusted;
         InOutState._Swing._TargetNormal = InTargetNormal;

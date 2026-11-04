@@ -530,6 +530,8 @@ namespace ck
         FVector _TargetNormal = FVector::UpVector;
         bool _TargetOnAFace = false;
         bool _PlannedReplant = false;
+        // Historical actual-begin fact, independent of the lifetime of an unstarted owner selection.
+        bool _CommittedNativeContact = false;
 
     public:
         CK_PROPERTY(_StartPosition);
@@ -553,6 +555,7 @@ namespace ck
         CK_PROPERTY(_TargetNormal);
         CK_PROPERTY(_TargetOnAFace);
         CK_PROPERTY_GET(_PlannedReplant);
+        CK_PROPERTY_GET(_CommittedNativeContact);
 
         // The forecast landing XY and accepted lift height. A later admitted report may remove the lift but cannot lower
         // the landing below its target. Its XY follows a pullback rather than retaining where a prior lift began.
@@ -692,6 +695,83 @@ namespace ck
     using FProceduralGaitNativeRecoveryResolver = TFunctionRef<TOptional<FProceduralGaitNativeTouchdown>(
         const FProceduralGaitSolver&, int32, const FVector&, const FVector&, const FVector&)>;
 
+    enum class EProceduralGaitOwnedPurpose : uint8
+    {
+        AuxiliaryEmergency,
+        Preparation,
+        LegacyFinal
+    };
+
+    enum class EProceduralGaitOwnerRejection : uint8
+    {
+        NotCurrent,
+        Unavailable,
+        InvalidPurpose,
+        ConflictingBegin,
+        BeginDenied
+    };
+
+    enum class EProceduralGaitBeginKind : uint8
+    {
+        Normal,
+        NativeRecovery,
+        Reenabled,
+        AirReturn
+    };
+
+    struct CKPROCEDURALANIMATION_API FProceduralGaitOwnerToken
+    {
+        uint64 Episode = 0;
+        uint64 Frame = 0;
+        uint64 InputSolve = 0;
+        uint8 Slot = 0;
+    };
+
+    struct CKPROCEDURALANIMATION_API FProceduralGaitOwnedSelection
+    {
+        int32 LegIndex = INDEX_NONE;
+        FProceduralGaitLegInput Input;
+        FVector ExpectedPlant = FVector::ZeroVector;
+        FProceduralGaitOwnerToken Token;
+        EProceduralGaitOwnedPurpose Purpose = EProceduralGaitOwnedPurpose::AuxiliaryEmergency;
+    };
+
+    struct CKPROCEDURALANIMATION_API FProceduralGaitBeginEvent
+    {
+        int32 LegIndex = INDEX_NONE;
+        EProceduralGaitBeginKind Kind = EProceduralGaitBeginKind::Normal;
+        bool Owned = false;
+        FProceduralGaitOwnerToken Token;
+        EProceduralGaitOwnedPurpose Purpose = EProceduralGaitOwnedPurpose::AuxiliaryEmergency;
+        FVector Origin = FVector::ZeroVector;
+        FVector Target = FVector::ZeroVector;
+        FVector Normal = FVector::UpVector;
+        bool Trusted = false;
+        bool HasSchedule = false;
+        bool WindowOpen = false;
+        bool Budget = false;
+        bool OnSchedule = false;
+        bool Emergency = false;
+        bool CatchStep = false;
+        bool RecoveryWants = false;
+        bool ReachPaceRelief = false;
+        bool SettleWants = false;
+        bool BeyondSchedule = false;
+    };
+
+    // Synchronous borrowed callbacks and at most one unstarted overlay. Never retained by the solver.
+    struct CKPROCEDURALANIMATION_API FProceduralGaitOwnerContext
+    {
+        TFunctionRef<bool()> IsCurrent;
+        TFunctionRef<void(EProceduralGaitOwnerRejection)> Reject;
+        TFunctionRef<bool(const FProceduralGaitBeginEvent&)> BeforeBegin;
+        TOptional<FProceduralGaitOwnedSelection> Selection;
+    };
+
+    using FProceduralGaitBeginObserver = TFunctionRef<void(const FProceduralGaitBeginEvent&)>;
+
+    // --------------------------------------------------------------------------------------------------------------------
+
     class CKPROCEDURALANIMATION_API FProceduralGaitVelocityTracker
     {
         CK_GENERATED_BODY(FProceduralGaitVelocityTracker);
@@ -783,6 +863,16 @@ namespace ck
             TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
             TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs,
             TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery = {}) -> bool;
+        // InInputs is always the independent ordinary fallback. Malformed owned payload rejects the whole call
+        // before callbacks or mutation. A stale valid lease restores fallback once; nonpositive time observes no owner.
+        auto StepWithTakeoffGuardAndOwner(FCk_Time InDeltaTime, float InBodyPlanarSpeed, const FVector& InBodyPlanarVelocity,
+            TArrayView<const FProceduralGaitLegInput> InInputs,
+            TArrayView<FProceduralGaitLegOutput> OutOutputs, bool InAirborne,
+            TOptional<float> InCadenceDriveSpeed,
+            TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs,
+            const FProceduralGaitOwnerContext& InOwner,
+            TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery = {}) -> bool;
         auto NumLegs() const -> int32 { return _LegStates.Num(); }
         auto IsLegEnabled(int32 InLegIndex) const -> bool;
         auto IsLegParticipating(int32 InLegIndex) const -> bool;
@@ -831,18 +921,28 @@ namespace ck
             const FVector& InUp, float InYawRate, FCk_Time InLeadTime, float InMaxLead) -> FVector;
 
     private:
+        auto DoStepWithTakeoffGuard(FCk_Time InDeltaTime, float InBodyPlanarSpeed, const FVector& InBodyPlanarVelocity,
+            TArrayView<const FProceduralGaitLegInput> InInputs, TArrayView<FProceduralGaitLegOutput> OutOutputs,
+            bool InAirborne, TOptional<float> InCadenceDriveSpeed,
+            TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs,
+            TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery,
+            const FProceduralGaitOwnerContext* InOwner) -> bool;
         auto DoStep(FCk_Time InDeltaTime, float InBodyPlanarSpeed, float InCadenceDriveSpeed,
             const FVector& InBodyPlanarVelocity,
-            TArrayView<const FProceduralGaitLegInput> InInputs, TArrayView<FProceduralGaitLegOutput> OutOutputs,
+            TArrayView<FProceduralGaitLegInput> InInputs, TArrayView<FProceduralGaitLegOutput> OutOutputs,
             bool InAirborne, TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
             TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs,
-            TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery) -> bool;
+            TOptional<FProceduralGaitNativeRecoveryResolver> InResolveNativeRecovery,
+            TArrayView<const FProceduralGaitLegInput> InOrdinaryInputs,
+            const FProceduralGaitOwnerContext* InOwner) -> bool;
         auto UpdatePatternSelection(FCk_Time InDeltaTime, float InBodyPlanarSpeed,
             TArrayView<const FProceduralGaitLegInput> InInputs, bool InAdvance) -> void;
         auto DoSelectPattern(float InBodyPlanarSpeed, bool InAdvance) -> void;
         auto DoReconcileEnabled(FProceduralGaitLegState& InOutState, const FProceduralGaitLegInput& InInput,
             int32 InLegIndex, TFunctionRef<bool(const FProceduralGaitSolver&, int32, bool)> InCanTakeoff,
-            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs) const -> bool;
+            TArray<FProceduralGaitDeniedTakeoff>& OutDeniedTakeoffs,
+            TOptional<FProceduralGaitBeginObserver> InObserveBegin) const -> bool;
         auto DoClampToReach(const FProceduralGaitLegInput& InInput, const FVector& InTarget) const -> FVector;
         auto DoClampTarget(const FProceduralGaitLegInput& InInput, const FVector& InTarget, bool InTrusted) const -> FVector;
         auto DoGet_DisplacedTarget(const FProceduralGaitLegInput& InInput, const FVector& InTarget, const FVector& InDisplacement,

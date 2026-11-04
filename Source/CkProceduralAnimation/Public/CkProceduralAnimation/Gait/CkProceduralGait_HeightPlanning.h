@@ -228,6 +228,23 @@ namespace ck
             int32 InRayLimit)
         -> bool;
 
+    // Phase-local preparation admission consumes only actual plants and real committed landings.
+    CKPROCEDURALANIMATION_API auto
+        Get_IsProceduralContactPreparationOwnerValid(
+            FCk_Handle_ProceduralGait InGait,
+            const FTransform& InBody,
+            const TOptional<FTransform>& InPoseOffset)
+        -> bool;
+
+    CKPROCEDURALANIMATION_API auto
+        Get_IsProceduralContactPreparationBodyAdmitted(
+            FCk_Handle_ProceduralGait InGait,
+            const FTransform& InBody,
+            const TOptional<FTransform>& InPoseOffset,
+            int32& InOutRays,
+            int32 InRayLimit)
+        -> bool;
+
 #if WITH_DEV_AUTOMATION_TESTS
     // Test-attached, copy-only receipts from actual Surface planning calls; never gameplay authority.
     struct CKPROCEDURALANIMATION_API FProceduralHeightPlanningTestAttempt

@@ -17,7 +17,13 @@ namespace ck
         Retreat,
         Replant,
         AdvanceExit,
-        Exhausted
+        Exhausted,
+        AuxiliaryHold,
+        MoveB,
+        PrepareM,
+        PrepareF,
+        MoveC,
+        QualifyLegacy
     };
 
     struct FProceduralContactStagingRequiredContact
@@ -61,9 +67,116 @@ namespace ck
         uint8 _StartedCount = 0;
     };
 
+    enum class EProceduralContactStagingFenceMode : uint8
+    {
+        Legacy,
+        Preparation
+    };
+
+    // A fixed certificate is proposal geometry. Only the separate actual-start/touchdown ledger is progress.
+    struct FProceduralContactStagingPreparation
+    {
+        FProceduralContactStagingPreparationPlan _Plan;
+        std::array<FCk_Handle_ProceduralLeg, 4> _Roster;
+        std::array<FName, 4> _Ids;
+        std::array<FCk_ProceduralLeg_Spec, 4> _Specs;
+        std::array<FProceduralContactStagingLeg, 4> _Geometry;
+        std::array<FProceduralContactStagingPlacement, 4> _Placements;
+        TOptional<uint64> _ClaimsRevision;
+        uint8 _StartedCount = 0;
+        uint8 _CompletedCount = 0;
+        bool _LegacyAdopted = false;
+
+        auto Get_IsLedgerValid() const -> bool
+        {
+            if (_CompletedCount > _StartedCount || _StartedCount > 4 || _StartedCount > _CompletedCount + 1)
+            { return false; }
+            for (auto Index = 0; Index < 4; ++Index)
+            {
+                if (_Placements[Index]._Started != (Index < _StartedCount)
+                    || _Placements[Index]._Completed != (Index < _CompletedCount))
+                { return false; }
+            }
+            return true;
+        }
+
+        auto Get_Query(uint8 InSlot) const -> TOptional<FVector>
+        {
+            switch (InSlot)
+            {
+                case 0: return _Plan._AuxiliaryQuery;
+                case 1: return _Plan._SpanPreparationQuery;
+                case 2: return _Plan._OtherPreparationQuery;
+                case 3:
+                    if (_Plan._LegacyPlan._RequiredCount == 1)
+                    { return _Plan._LegacyPlan._Required[0]._ProposedQuery; }
+                    return {};
+                default: return {};
+            }
+        }
+
+        auto Get_RosterIndex(uint8 InSlot) const -> int32
+        {
+            switch (InSlot)
+            {
+                case 0: return _Plan._AuxiliaryRosterIndex;
+                case 1: case 3: return _Plan._SpanRosterIndex;
+                case 2: return _Plan._OtherRosterIndex;
+                default: return INDEX_NONE;
+            }
+        }
+
+        // The caller validates current owner/phase/native receipt and all takeoff gates before this commit.
+        auto TryRecordStart(uint8 InSlot, uint64 InFrame, uint64 InInputSolve, const FTransform& InBody,
+            const FVector& InTarget, const FVector& InNormal, const TOptional<uint64>& InClaimsRevision) -> bool
+        {
+            const auto Query = Get_Query(InSlot);
+            if (NOT Get_IsLedgerValid() || InSlot >= 4 || InSlot != _StartedCount
+                || _StartedCount != _CompletedCount || (InSlot == 3 && NOT _LegacyAdopted)
+                || InFrame == 0 || InFrame == MAX_uint64 || InInputSolve == MAX_uint64
+                || InBody.ContainsNaN() || NOT InBody.GetRotation().IsNormalized()
+                || InTarget.ContainsNaN() || InNormal.ContainsNaN() || NOT InNormal.IsNormalized() || NOT Query.IsSet()
+                || InTarget != Query.GetValue() || InClaimsRevision != _ClaimsRevision)
+            { return false; }
+            auto& Record = _Placements[InSlot];
+            Record._Started = true;
+            Record._Final = InSlot == 3;
+            Record._Frame = InFrame;
+            Record._InputSolve = InInputSolve;
+            Record._Body = InBody;
+            Record._Target = InTarget;
+            Record._Normal = InNormal;
+            Record._ClaimsRevision = InClaimsRevision;
+            ++_StartedCount;
+            return true;
+        }
+
+        // Called only after actual native touchdown and successful body/stance publication, including same-solve landings.
+        auto TryRecordTouchdown(uint8 InSlot, uint64 InFrame, uint64 InProducedSolve, const FVector& InPlant,
+            const FVector& InNormal, const TOptional<uint64>& InClaimsRevision) -> bool
+        {
+            if (NOT Get_IsLedgerValid() || InSlot >= 4 || InSlot != _CompletedCount
+                || _StartedCount != _CompletedCount + 1 || InFrame == 0 || InFrame == MAX_uint64 || InProducedSolve == MAX_uint64
+                || InPlant.ContainsNaN() || InNormal.ContainsNaN() || NOT InNormal.IsNormalized())
+            { return false; }
+            auto& Record = _Placements[InSlot];
+            if (InFrame < Record._Frame || InProducedSolve <= Record._InputSolve
+                || InPlant != Record._Target || InNormal != Record._Normal || InClaimsRevision != Record._ClaimsRevision)
+            { return false; }
+            Record._Completed = true;
+            Record._CompletedFrame = InFrame;
+            Record._CompletedSolve = InProducedSolve;
+            Record._Plant = InPlant;
+            Record._Normal = InNormal;
+            ++_CompletedCount;
+            return true;
+        }
+    };
+
     // Owner-lifetime authority: removing SurfaceMotion does not replenish a charged staging attempt.
     struct FFragment_ProceduralContactStagingFence
     {
+        EProceduralContactStagingFenceMode _Mode = EProceduralContactStagingFenceMode::Legacy;
         bool _Spent = false;
         bool _AbortRecorded = false;
         FCk_Handle _Owner;
@@ -88,12 +201,24 @@ namespace ck
         FCk_ProceduralGait_Foothold _Foothold;
         FCk_SurfaceMotion_Spec _Surface;
         std::array<FProceduralContactStagingMilestones, 2> _Legs;
+        FProceduralContactStagingPreparation _Preparation;
+
+        auto Get_HasValidLimits() const -> bool
+        {
+            if (_Mode == EProceduralContactStagingFenceMode::Preparation)
+            {
+                return _CycleLimit == 5.0 && _Preparation.Get_IsLedgerValid()
+                    && (_Preparation._LegacyAdopted ? _RequiredCount == 1 : _RequiredCount == 0);
+            }
+            return _Mode == EProceduralContactStagingFenceMode::Legacy
+                && _RequiredCount >= 1 && _RequiredCount <= 2 && _CycleLimit == 2.0 * _RequiredCount + 1.0;
+        }
 
         auto TryAdvanceTime(uint64 InFrame, double InDelta) -> bool
         {
             if (NOT _Spent || InFrame == 0 || InFrame == MAX_uint64 || _LastSurfaceFrame >= InFrame
                 || (_LastSurfaceFrame != 0 && _LastAcknowledgedFrame != _LastSurfaceFrame)
-                || _RequiredCount < 1 || _RequiredCount > 2 || _CycleLimit != 2.0 * _RequiredCount + 1.0
+                || NOT Get_HasValidLimits()
                 || NOT FMath::IsFinite(InDelta) || InDelta <= 0.0
                 || NOT FMath::IsFinite(_Elapsed) || _Elapsed < 0.0
                 || NOT FMath::IsFinite(_ElapsedLimit) || _ElapsedLimit <= 0.0)
@@ -111,7 +236,7 @@ namespace ck
             if (NOT _Spent || InFrame == 0 || InFrame == MAX_uint64 || InFrame != _LastSurfaceFrame || InInputSolve == MAX_uint64
                 || InFrame <= _LastAcknowledgedFrame
                 || _LastAcknowledgedSolve != InInputSolve || InProducedSolve != InInputSolve + 1
-                || _RequiredCount < 1 || _RequiredCount > 2 || _CycleLimit != 2.0 * _RequiredCount + 1.0
+                || NOT Get_HasValidLimits()
                 || NOT FMath::IsFinite(InAdvance) || InAdvance <= 0.0
                 || NOT FMath::IsFinite(_Cycles) || _Cycles < 0.0)
             { return false; }
@@ -164,6 +289,7 @@ namespace ck
         uint64 _IntentFrame = 0;
         uint64 _ConsumerSolve = 0;
         FTransform _IntentBody = FTransform::Identity;
+        TOptional<FTransform> _IntentPoseOffset;
         TArray<FCk_Handle_ProceduralLeg, TInlineAllocator<2>> _PoseRayTickets;
         int32 _ReservedRays = 0;
         uint64 _ProducedFrame = 0;
@@ -177,4 +303,60 @@ namespace ck
         uint8 _ClockWrapsWithoutProgress = 0;
         bool _TwoPlacement = false;
     };
+
+#if WITH_DEV_AUTOMATION_TESTS
+    // Test-owned passive copies only. Presence never grants a query, candidate, start or phase transition.
+    struct FProceduralContactPreparationTestSelection
+    {
+        uint64 Frame = 0;
+        uint64 InputSolve = 0;
+        uint64 Episode = 0;
+        int32 LegIndex = INDEX_NONE;
+        uint8 Slot = 0;
+        FTransform Body = FTransform::Identity;
+        FVector OrdinaryPoint = FVector::ZeroVector;
+        FVector NativePoint = FVector::ZeroVector;
+        FVector NativeNormal = FVector::ZeroVector;
+        uint8 OrdinarySource = 0;
+        bool OrdinaryValid = false;
+        bool OrdinaryTrusted = false;
+        bool NativeAccepted = false;
+        bool ReusedNative = false;
+        bool PosedTicketConsumed = false;
+        bool OverlaySelected = false;
+        int32 SearchBefore = 0;
+        int32 SearchAfter = 0;
+        int32 OrdinaryBoundaryLimit = 0;
+        int32 OrdinaryBoundaryUsed = 0;
+        int32 FixedSamples = 0;
+        int32 RaysBefore = 0;
+        int32 RaysAfter = 0;
+        bool ActualBegin = false;
+        bool Emergency = false;
+        bool WindowOpen = false;
+        bool Budget = false;
+        bool OnSchedule = false;
+        bool CatchStep = false;
+        bool RecoveryWants = false;
+        bool ReachPaceRelief = false;
+        bool BeyondSchedule = false;
+    };
+
+    struct FFragment_ProceduralContactPreparation_Test
+    {
+        CK_GENERATED_BODY(FFragment_ProceduralContactPreparation_Test);
+        FProceduralContactPreparationTestSelection Last;
+        std::array<FProceduralContactPreparationTestSelection, 4> Starts;
+        uint8 StartedMask = 0;
+        uint32 Revocations = 0;
+        uint32 DeniedTakeoffs = 0;
+        bool Overflow = false;
+        uint64 ChargedEpisode = 0;
+        uint64 ChargedFrame = 0;
+        uint64 ChargedInputSolve = 0;
+        int32 ChargedRays = 0;
+        int32 ChargedEnvelopes = 0;
+        int32 ChargedTrials = 0;
+    };
+#endif
 }
