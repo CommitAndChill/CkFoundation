@@ -1,6 +1,7 @@
 #include "CkCoreEditor_Module.h"
 #include "UObject/UObjectIterator.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Misc/PackageName.h"
 
 #include "CkCore/Component/CkActorComponent.h"
 #include "CkCore/EditorOnly/CkEditorOnly_Utils.h"
@@ -189,6 +190,25 @@ auto
     -> void
 {
     if (InAssetData.AssetClassPath != UBlueprint::StaticClass()->GetClassPathName())
+    { return; }
+
+    // Already in memory (created, duplicated or renamed in the editor): processing it costs no load
+    if (const auto* LoadedAsset = InAssetData.FastGetAsset(false);
+        ck::IsValid(LoadedAsset))
+    {
+        TryUpdateVisualizer(LoadedAsset);
+        return;
+    }
+
+    // Not loaded yet: only component Blueprints register a visualizer of their own, so only they are worth a load here.
+    // Actor Blueprints are scanned through OnAssetLoaded when something else loads them.
+    auto NativeParentClassPath = FString{};
+    if (NOT InAssetData.GetTagValue(FBlueprintTags::NativeParentClassPath, NativeParentClassPath))
+    { return; }
+
+    const auto* NativeParentClass = FindObject<UClass>(nullptr, *FPackageName::ExportTextPathToObjectPath(NativeParentClassPath));
+
+    if (ck::Is_NOT_Valid(NativeParentClass) || NOT NativeParentClass->IsChildOf(UActorComponent::StaticClass()))
     { return; }
 
     TryUpdateVisualizer(InAssetData.GetAsset());
