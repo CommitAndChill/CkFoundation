@@ -22,6 +22,9 @@ These rules ship with CkFoundation; CkTests supplies optional examples and evide
 
 - **Engine (updated 2026-10-26):** UnrealEngine-Angelscript **5.8.4** (`main-ck`, Hazelight AngelScript fork). NOT
   stock UE — AngelScript is a first-class consumer of every public API.
+- **UE 5.7 compatibility (until Mars ports to 5.8):** Ck `dev` must still compile on UE 5.7, which Mars and the
+  other projects tracking origin `main-ck` are on. Wrap a 5.8-only engine API in
+  `#if !UE_VERSION_OLDER_THAN(5, 8, 0)` (`Misc/EngineVersionComparison.h`) with a comment saying when to drop it.
 - **ECS backend:** EnTT **3.16.0**, vendored at `Source/CkThirdParty/Public/CkThirdParty/entt-3.16.0/`
   (also vendored: JoltPhysics, fmt, cleantype, ctti, delegate, bitwise-enum). Note: `CkHandle.h:71-77`
   globally specializes `entt::component_traits` with `in_place_delete = true` — every fragment pool
