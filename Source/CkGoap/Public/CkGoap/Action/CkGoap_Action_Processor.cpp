@@ -499,6 +499,27 @@ auto
 					return;
 				}
 
+				// Setup resolves the authored goal once, against the keys registered at that moment, and
+				// drops the ones it cannot find. A key registered after Setup (an Action's effect, or a
+				// world state composed later in the frame) would leave a top-level planner, which is never
+				// re-resolved by activation, unable to plan forever. Re-resolve against the current registry
+				// before judging the goal; a key that is still unregistered is rejected below as before.
+				if (InGoal._Goal.Num() != InGoal._GoalAuthored.Num()
+					&& Source.template Has<FFragment_Goap_WorldState_KeyRegistry>())
+				{
+					const auto& Registry = Source.template Get<FFragment_Goap_WorldState_KeyRegistry>().Get_Registry();
+					auto ReResolved = TArray<goap::FWorldStateCondition>{};
+					for (const auto& Cond : InGoal._GoalAuthored)
+					{
+						const auto Key = Registry.Find(Cond.Get_Key());
+						if (Key == goap::InvalidGoapKey)
+						{ break; }
+						ReResolved.Add(goap::FWorldStateCondition{Key, Cond.Get_Value()});
+					}
+					if (ReResolved.Num() == InGoal._GoalAuthored.Num())
+					{ InGoal._Goal = MoveTemp(ReResolved); }
+				}
+
 				CK_ENSURE_IF_NOT(InGoal._Goal.Num() == InGoal._GoalAuthored.Num(),
 					TEXT("Cannot plan with an unresolved required GOAP goal key on [{}]"), InHandle)
 				{
