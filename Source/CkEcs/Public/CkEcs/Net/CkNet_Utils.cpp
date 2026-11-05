@@ -329,7 +329,12 @@ auto
     if (Has(InEntity))
     { return InEntity.Has<ck::FTag_HasAuthority>(); }
 
-    return Get_HasAuthority(UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InEntity));
+    const auto Found = UCk_Utils_EntityLifetime_UE::Get_EntityInOwnershipChain_If(InEntity,
+        [](const FCk_Handle& InCurrent)
+        {
+            return NOT ck::IsValid(InCurrent) || UCk_Utils_Net_UE::Has(InCurrent);
+        }, ECk_PendingKill_Policy::IncludePendingKill);
+    return ck::IsValid(Found) && Found.Has<ck::FTag_HasAuthority>();
 }
 
 auto

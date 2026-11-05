@@ -463,6 +463,9 @@ auto
         TEXT("Lifetime ownership would contain an invalid entity or cycle while resolving net role for [{}]"), InEntity)
     { return ECk_Net_EntityNetRole::None; }
 
+    if (NOT InEntity.Has<ck::FFragment_LifetimeOwner>())
+    { return ECk_Net_EntityNetRole::None; }
+
     return Get_EntityNetRole(Get_LifetimeOwner(InEntity));
 }
 
@@ -482,6 +485,9 @@ auto
 
     CK_ENSURE_IF_NOT(Get_IsOwnershipChainValid(InEntity, ECk_PendingKill_Policy::IncludePendingKill),
         TEXT("Lifetime ownership would contain an invalid entity or cycle while resolving net mode for [{}]"), InEntity)
+    { return ECk_Net_NetModeType::Unknown; }
+
+    if (NOT InEntity.Has<ck::FFragment_LifetimeOwner>())
     { return ECk_Net_NetModeType::Unknown; }
 
     return Get_EntityNetMode(Get_LifetimeOwner(InEntity));

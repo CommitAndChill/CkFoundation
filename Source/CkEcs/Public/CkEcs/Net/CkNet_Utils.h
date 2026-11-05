@@ -460,6 +460,13 @@ auto
         const TDataStruct& InInitialData)
     -> ECk_AddedOrNot
 {
+    // Optional replication: local-only and expired handles have no container to add.
+    if (ck::Is_NOT_Valid(InHandle))
+    { return ECk_AddedOrNot::NotAdded; }
+
+    if (NOT Has(InHandle))
+    { return ECk_AddedOrNot::NotAdded; }
+
     if (Get_EntityReplication(InHandle) == ECk_Replication::DoesNotReplicate)
     { return ECk_AddedOrNot::NotAdded; }
 
