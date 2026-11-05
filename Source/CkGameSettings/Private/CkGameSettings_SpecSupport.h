@@ -6,7 +6,12 @@
 #include "CkGameSettings/Storage/CkGameSettings_StorageProvider.h"
 #include "CkGameSettings/Subsystem/CkGameSettings_Subsystem.h"
 
+#include <UObject/StrongObjectPtr.h>
+
 #include "CkGameSettings_SpecSupport.generated.h"
+
+class UGameInstance;
+class UCk_GameSettings_TimeoutSpecFixture_UE;
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -95,6 +100,12 @@ struct FCk_GameSettings_SpecAccess
         UCk_GameSettings_Subsystem_UE* InSubsystem,
         UCk_GameSettings_StorageProvider_UE* InProvider)
         -> void;
+
+private:
+    friend class UCk_GameSettings_TimeoutSpecFixture_UE;
+
+    static auto Make_TickingSubsystem(UGameInstance* InGameInstance) -> UCk_GameSettings_Subsystem_UE*;
+    static auto Get_IsReleased(const UCk_GameSettings_Subsystem_UE& InSubsystem) -> bool;
 };
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -141,4 +152,34 @@ public:
     CK_PROPERTY_GET(_ObservedUnapplied);
     CK_PROPERTY_GET(_ExternalBool);
     CK_PROPERTY_GET(_ApplyCount);
+};
+
+// --------------------------------------------------------------------------------------------------------------------
+
+/** Owns a registry, in-memory provider and real ticker for the deferred-timeout AutoTest. */
+UCLASS(NotBlueprintable, BlueprintType, Transient)
+class UCk_GameSettings_TimeoutSpecFixture_UE : public UObject
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(UCk_GameSettings_TimeoutSpecFixture_UE);
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Ck|Tests|GameSettings", meta = (DevelopmentOnly))
+    UCk_GameSettings_Subsystem_UE*
+    Request_Start();
+
+    UFUNCTION(BlueprintCallable, Category = "Ck|Tests|GameSettings", meta = (DevelopmentOnly))
+    bool
+    Request_Release();
+
+    auto BeginDestroy() -> void override;
+
+private:
+    // Strong references keep the children alive through this object's BeginDestroy fallback.
+    // Their outer is the engine/private GameInstance, never this fixture (which would root a cycle).
+    TStrongObjectPtr<UGameInstance> _GameInstance;
+    TStrongObjectPtr<UCk_GameSettings_Subsystem_UE> _Subsystem;
+    bool _HasStarted = false;
 };

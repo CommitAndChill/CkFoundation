@@ -410,6 +410,7 @@ private:
     auto DoCommitValue(FName InKey, const FCk_GameSettings_SettingDefinition& InDefinition, const FString& InNewValueString) -> ECommitResult;
     auto DoRouteApply(FName InKey, const FCk_GameSettings_SettingDefinition& InDefinition, const FString& InValueString) -> void;
     auto DoAbsorbStoredValues() -> int32;
+    auto DoStartTicker() -> void;
     auto DoHandleTick() -> void;
     auto DoFlush() -> bool;
     auto DoHandlePreLoadMap(const FWorldContext& InWorldContext, const FString& InMapName) -> void;

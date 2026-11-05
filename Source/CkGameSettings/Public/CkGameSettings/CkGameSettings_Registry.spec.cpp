@@ -664,3 +664,103 @@ auto
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
+
+#if WITH_DEV_AUTOMATION_TESTS
+#include <HAL/IConsoleManager.h>
+#include <Misc/ScopeExit.h>
+#include <UObject/StrongObjectPtr.h>
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCkTest_GameSettings_TimeoutFixture_StartReleaseIsIdempotent,
+    "Ck.CkGameSettings.Registry.TimeoutFixture.StartReleaseIsIdempotent",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+auto
+    FCkTest_GameSettings_TimeoutFixture_StartReleaseIsIdempotent::
+    RunTest(
+        const FString&)
+    -> bool
+{
+    auto Fixture = TStrongObjectPtr<UCk_GameSettings_TimeoutSpecFixture_UE>{
+        NewObject<UCk_GameSettings_TimeoutSpecFixture_UE>()};
+    ON_SCOPE_EXIT { Fixture->Request_Release(); };
+    auto* Started = Fixture->Request_Start();
+    if (NOT TestNotNull(TEXT("actual isolated fixture starts"), Started))
+    { return false; }
+    const auto KeptSubsystem = TStrongObjectPtr<UCk_GameSettings_Subsystem_UE>{Started};
+    TestTrue(TEXT("repeated start returns the same live subsystem"), Fixture->Request_Start() == Started);
+    TestEqual(TEXT("new isolated registry starts empty"), Started->Get_AllSettingKeys().Num(), 0);
+    TestTrue(TEXT("release reports ticker, deferred queue and registry cleared by the existing fixture helper"),
+        Fixture->Request_Release());
+    TestTrue(TEXT("release is safely repeatable"), Fixture->Request_Release());
+    TestNull(TEXT("a released started fixture cannot start a second ticker"), Fixture->Request_Start());
+    TestEqual(TEXT("kept subsystem confirms released registry is empty"), Started->Get_AllSettingKeys().Num(), 0);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCkTest_GameSettings_TimeoutFixture_EarlyReleaseCancelsPendingAndIsolates,
+    "Ck.CkGameSettings.Registry.TimeoutFixture.EarlyReleaseCancelsPendingAndIsolates",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+auto
+    FCkTest_GameSettings_TimeoutFixture_EarlyReleaseCancelsPendingAndIsolates::
+    RunTest(
+        const FString&)
+    -> bool
+{
+    const auto MissingName = TEXT("ck.tests.registry.timeoutfixture.cleanup.missing");
+    if (NOT TestNull(TEXT("control CVar is actually absent; the test never registers it"),
+            IConsoleManager::Get().FindConsoleVariable(MissingName)))
+    { return false; }
+    auto First = TStrongObjectPtr<UCk_GameSettings_TimeoutSpecFixture_UE>{
+        NewObject<UCk_GameSettings_TimeoutSpecFixture_UE>()};
+    auto Other = TStrongObjectPtr<UCk_GameSettings_TimeoutSpecFixture_UE>{
+        NewObject<UCk_GameSettings_TimeoutSpecFixture_UE>()};
+    ON_SCOPE_EXIT
+    {
+        First->Request_Release();
+        Other->Request_Release();
+    };
+    auto* FirstSubsystem = First->Request_Start();
+    auto* OtherSubsystem = Other->Request_Start();
+    if (NOT TestNotNull(TEXT("first fixture starts"), FirstSubsystem)
+        || NOT TestNotNull(TEXT("other fixture starts"), OtherSubsystem))
+    { return false; }
+    const auto KeptFirst = TStrongObjectPtr<UCk_GameSettings_Subsystem_UE>{FirstSubsystem};
+    TestTrue(TEXT("fixtures own distinct registries"), FirstSubsystem != OtherSubsystem);
+    TestTrue(TEXT("fixtures own distinct in-memory providers"),
+        FirstSubsystem->Get_StorageProvider() != OtherSubsystem->Get_StorageProvider());
+    const auto Definition = FCk_GameSettings_SettingDefinition{
+        TEXT("cleanup.pending"), ECk_GameSettings_ValueType::Float, TEXT("0.25")}
+        .Set_ApplyBindingType(ECk_GameSettings_ApplyBindingType::CVar)
+        .Set_CVar(FCk_CVarRef{MissingName, ECk_CVarType::Float});
+    TestTrue(TEXT("actual missing-CVar definition registers"), FirstSubsystem->Request_RegisterSetting(Definition));
+    TestTrue(TEXT("actual public write queues deferred application"), FirstSubsystem->Request_SetSettingValue_Float(
+        FCk_Request_GameSettings_SetValue_Float{TEXT("cleanup.pending"), 0.75f}));
+    if (NOT TestTrue(TEXT("actual apply is pending before any ticker is pumped"),
+            FirstSubsystem->Get_HasPendingCVarApply(TEXT("cleanup.pending"))))
+    { return false; }
+    TestFalse(TEXT("other registry never acquired the first definition"),
+        OtherSubsystem->Get_IsSettingRegistered(TEXT("cleanup.pending")));
+    TestFalse(TEXT("other registry never acquired the first pending apply"),
+        OtherSubsystem->Get_HasPendingCVarApply(TEXT("cleanup.pending")));
+    TestTrue(TEXT("other registry accepts an independent ordinary value"), OtherSubsystem->Request_RegisterSetting(
+        FCk_GameSettings_SettingDefinition{TEXT("cleanup.other"), ECk_GameSettings_ValueType::Int32, TEXT("7")}));
+    // Synchronous test: no FTSTicker pump, sleep, manual timeout or extraction/replay of ticker logic.
+    TestTrue(TEXT("early release reports actual ticker, queue and registry cleanup"), First->Request_Release());
+    TestFalse(TEXT("kept first subsystem has no deferred apply after release"),
+        FirstSubsystem->Get_HasPendingCVarApply(TEXT("cleanup.pending")));
+    TestFalse(TEXT("kept first subsystem has no definition after release"),
+        FirstSubsystem->Get_IsSettingRegistered(TEXT("cleanup.pending")));
+    TestEqual(TEXT("first registry cardinality is zero after release"), FirstSubsystem->Get_AllSettingKeys().Num(), 0);
+    TestTrue(TEXT("repeat early release is safe"), First->Request_Release());
+    TestNull(TEXT("released first fixture stays stopped"), First->Request_Start());
+    TestTrue(TEXT("first release does not release the other fixture"), Other->Request_Start() == OtherSubsystem);
+    TestEqual(TEXT("other registry retains its independent value"),
+        OtherSubsystem->Get_SettingValue_Int32(TEXT("cleanup.other"), -1), 7);
+    TestTrue(TEXT("other fixture releases independently"), Other->Request_Release());
+    TestTrue(TEXT("other release is repeatable"), Other->Request_Release());
+    TestNull(TEXT("other started fixture also remains released"), Other->Request_Start());
+    TestNull(TEXT("control CVar remains unregistered"), IConsoleManager::Get().FindConsoleVariable(MissingName));
+    return true;
+}
+#endif

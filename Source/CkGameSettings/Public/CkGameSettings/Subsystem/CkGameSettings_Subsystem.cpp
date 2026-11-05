@@ -250,14 +250,7 @@ auto
     if (UCk_Utils_GameSettings_Settings_UE::Get_EnableVideoPack())
     { Request_RegisterVideoPack(); }
 
-    constexpr auto TickIntervalSeconds = 1.0f;
-    _TickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-        FTickerDelegate::CreateWeakLambda(this, [this](float)
-        {
-            DoHandleTick();
-            constexpr auto KeepTicking = true;
-            return KeepTicking;
-        }), TickIntervalSeconds);
+    DoStartTicker();
 
     _EnginePreExitHandle = FCoreDelegates::OnEnginePreExit.AddWeakLambda(this, [this]
     {
@@ -1720,6 +1713,22 @@ auto
     if (DoCommitValues(Values, false, false, &MachineOrphans, &PlayerOrphans) < 0)
     { return -1; }
     return Machine.Num() + Player.Num();
+}
+
+
+auto
+    UCk_GameSettings_Subsystem_UE::
+    DoStartTicker()
+    -> void
+{
+    constexpr auto TickIntervalSeconds = 1.0f;
+    _TickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+        FTickerDelegate::CreateWeakLambda(this, [this](float)
+        {
+            DoHandleTick();
+            constexpr auto KeepTicking = true;
+            return KeepTicking;
+        }), TickIntervalSeconds);
 }
 
 

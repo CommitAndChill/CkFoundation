@@ -1,5 +1,10 @@
 #include "CkGameSettings_SpecSupport.h"
 
+#include "CkCore/Ensure/CkEnsure.h"
+
+#include <Engine/Engine.h>
+#include <Engine/GameInstance.h>
+
 // --------------------------------------------------------------------------------------------------------------------
 
 auto
@@ -114,4 +119,86 @@ auto
     }
     _NestedAccepted = Get_Subsystem()->Request_SetSettingValue_String(
         FCk_Request_GameSettings_SetValue_String{TEXT("atomic.b"), TEXT("nested")});
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    FCk_GameSettings_SpecAccess::
+    Make_TickingSubsystem(
+        UGameInstance* InGameInstance)
+    -> UCk_GameSettings_Subsystem_UE*
+{
+    auto* Subsystem = NewObject<UCk_GameSettings_Subsystem_UE>(InGameInstance);
+    Request_SetProvider(Subsystem, NewObject<UCk_GameSettings_SpecStorageProvider_UE>(Subsystem));
+    Subsystem->DoStartTicker();
+    return Subsystem;
+}
+
+auto
+    FCk_GameSettings_SpecAccess::
+    Get_IsReleased(
+        const UCk_GameSettings_Subsystem_UE& InSubsystem)
+    -> bool
+{
+    return NOT InSubsystem._TickerHandle.IsValid() &&
+        InSubsystem._DeferredCVarApplies.IsEmpty() &&
+        InSubsystem._Definitions.IsEmpty() &&
+        InSubsystem._CurrentValues.IsEmpty() &&
+        InSubsystem._RegistrationOrder.IsEmpty();
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    UCk_GameSettings_TimeoutSpecFixture_UE::
+    Request_Start()
+    -> UCk_GameSettings_Subsystem_UE*
+{
+#if WITH_DEV_AUTOMATION_TESTS
+    if (_HasStarted)
+    { return _Subsystem.Get(); }
+
+    _HasStarted = true;
+    _GameInstance.Reset(NewObject<UGameInstance>(GEngine));
+    _Subsystem.Reset(FCk_GameSettings_SpecAccess::Make_TickingSubsystem(_GameInstance.Get()));
+    return _Subsystem.Get();
+#else
+    return nullptr;
+#endif
+}
+
+auto
+    UCk_GameSettings_TimeoutSpecFixture_UE::
+    Request_Release()
+    -> bool
+{
+    if (_Subsystem.Get() == nullptr)
+    {
+        _GameInstance.Reset();
+        return true;
+    }
+
+    _Subsystem->Deinitialize();
+    const auto Released = FCk_GameSettings_SpecAccess::Get_IsReleased(*_Subsystem);
+    if (Released)
+    {
+        _Subsystem.Reset();
+        _GameInstance.Reset();
+    }
+    return Released;
+}
+
+auto
+    UCk_GameSettings_TimeoutSpecFixture_UE::
+    BeginDestroy()
+    -> void
+{
+    const auto Released = Request_Release();
+    CK_ENSURE_IF_NOT(Released, TEXT("GameSettings timeout test fixture retained its ticker or registry during teardown"))
+    {
+        Super::BeginDestroy();
+        return;
+    }
+    Super::BeginDestroy();
 }
