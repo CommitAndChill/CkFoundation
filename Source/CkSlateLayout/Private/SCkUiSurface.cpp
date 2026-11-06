@@ -2302,7 +2302,7 @@ auto FCkUiView::StageNode(const FCkUiNode& InNode, FStagedDocument& InOutStaged,
                 .InitialText(_Data.Text.FindRef(InNode.Binding))
                 .OnTextChanged_Lambda([WeakView, SuppressInitialWrite, TextChanged, BoundText](const FText& InText)
                 {
-                    // UE 5.8 broadcasts OnTextChanged when a bound getter's value changes; drop that model echo.
+                    // UE 5.8 echoes bound-getter changes through OnTextChanged.
                     if (BoundText.IsBound() && InText.ToString().Equals(BoundText.Get().ToString(), ESearchCase::CaseSensitive)) { return; }
                     const TSharedPtr<FCkUiView> View = WeakView.Pin();
                     if (!*SuppressInitialWrite && View.IsValid() && View->CanDispatchEvents()) { TextChanged.ExecuteIfBound(InText); }

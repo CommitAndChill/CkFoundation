@@ -499,11 +499,9 @@ auto
 					return;
 				}
 
-				// Setup resolves the authored goal once, against the keys registered at that moment, and
-				// drops the ones it cannot find. A key registered after Setup (an Action's effect, or a
-				// world state composed later in the frame) would leave a top-level planner, which is never
-				// re-resolved by activation, unable to plan forever. Re-resolve against the current registry
-				// before judging the goal; a key that is still unregistered is rejected below as before.
+				// Setup drops goal keys that are not registered yet, and activation never re-resolves a
+				// top-level planner, so a key registered after Setup would leave it unable to plan.
+				// A key that is still unregistered is rejected below.
 				if (InGoal._Goal.Num() != InGoal._GoalAuthored.Num()
 					&& Source.template Has<FFragment_Goap_WorldState_KeyRegistry>())
 				{

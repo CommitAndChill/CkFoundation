@@ -115,7 +115,6 @@ public:
         , _Widget(InWidget)
     {
         // This viewport routes the legacy FWidget hit proxies and drag callbacks itself.
-        // UE 5.7 has no viewport ITF to opt out of; drop the guard once no consumer builds on 5.7.
 #if !UE_VERSION_OLDER_THAN(5, 8, 0)
         ModeTools->SetSupportsViewportITF(false);
 #endif

@@ -197,7 +197,6 @@ auto
         return;
     }
 
-    // UE 5.8 Build() warns "Navigation NOT building because navigation build is locked" when there is nothing to build.
     if (NOT NavSys->IsThereAnywhereToBuildNavigation())
     {
         ck::nav::Verbose(TEXT("Request_NavigationRebuild_ForTesting skipped Build() on world [{}]: no navigation bounds to build"), World);
