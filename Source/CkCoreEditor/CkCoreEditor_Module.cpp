@@ -192,7 +192,6 @@ auto
     if (InAssetData.AssetClassPath != UBlueprint::StaticClass()->GetClassPathName())
     { return; }
 
-    // Already in memory (created, duplicated or renamed in the editor): processing it costs no load
     if (const auto* LoadedAsset = InAssetData.FastGetAsset(false);
         ck::IsValid(LoadedAsset))
     {
@@ -200,8 +199,7 @@ auto
         return;
     }
 
-    // Not loaded yet: only component Blueprints register a visualizer of their own, so only they are worth a load here.
-    // Actor Blueprints are scanned through OnAssetLoaded when something else loads them.
+    // Only component Blueprints are worth a load here; actor Blueprints arrive through OnAssetLoaded.
     auto NativeParentClassPath = FString{};
     if (NOT InAssetData.GetTagValue(FBlueprintTags::NativeParentClassPath, NativeParentClassPath))
     { return; }
