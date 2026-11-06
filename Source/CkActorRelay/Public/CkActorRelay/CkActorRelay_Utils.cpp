@@ -209,7 +209,7 @@ auto
     if (ck::Is_NOT_Valid(InChannelResult))
     { return 0; }
 
-    return UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(InChannelResult.Get_ChannelEntity()).Num();
+    return UCk_Utils_EntityLifetime_UE::Get_LifetimeDependentsCount(InChannelResult.Get_ChannelEntity());
 }
 
 auto

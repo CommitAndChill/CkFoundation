@@ -205,17 +205,16 @@ namespace ck
                 }
 
                 // Sub-SM detection still needs the archetype (to read its InitialStateClass).
-                auto TaskChildren = UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(InTask);
-                for (const auto& RequestChild : TaskChildren)
+                UCk_Utils_EntityLifetime_UE::ForEach_LifetimeDependent(InTask, [&](const FCk_Handle& InRequestChild)
                 {
-                    if (NOT RequestChild.Has<FFragment_EntityScript_RequestSpawnEntity>())
-                    { continue; }
+                    if (NOT InRequestChild.Has<FFragment_EntityScript_RequestSpawnEntity>())
+                    { return; }
 
-                    const auto& Request = RequestChild.Get<FFragment_EntityScript_RequestSpawnEntity>();
+                    const auto& Request = InRequestChild.Get<FFragment_EntityScript_RequestSpawnEntity>();
                     auto* Archetype = Request.Get_EntityScriptClassArchetype().Get();
 
                     if (ck::Is_NOT_Valid(Archetype))
-                    { continue; }
+                    { return; }
 
                     auto* SubSmTask = Cast<UCk_SmTask_SubStateMachine>(Archetype);
                     if (ck::IsValid(SubSmTask) && ck::IsValid(SubSmTask->Get_InitialStateClass()))
@@ -225,7 +224,7 @@ namespace ck
                         Progress._PendingSubSmWalks.Add(
                             {Pending.StateClass, SubSmTask->Get_InitialStateClass()});
                     }
-                }
+                });
 
                 StateDef.Tasks.Add(MoveTemp(TaskDef));
             });

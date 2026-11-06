@@ -57,12 +57,14 @@ namespace ck_usf_outline_processor
         InVisited.Add(InTarget);
 
         ApplyCandidate(InTarget, InClaim, InDefinition, InOwnershipDistance);
-        for (auto Dependent : UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(InTarget))
+        UCk_Utils_EntityLifetime_UE::ForEach_LifetimeDependent(InTarget, [&](FCk_Handle& InDependent)
         {
-            if (ck::Is_NOT_Valid(Dependent)) { continue; }
+            if (ck::Is_NOT_Valid(InDependent))
+            { return; }
+
             ApplyClaimToLiveSubtree(
-                Dependent, InClaim, InDefinition, InOwnershipDistance + 1, InVisited);
-        }
+                InDependent, InClaim, InDefinition, InOwnershipDistance + 1, InVisited);
+        });
     }
 
     auto ClearActorOwners(const FCk_Handle& InHandle,

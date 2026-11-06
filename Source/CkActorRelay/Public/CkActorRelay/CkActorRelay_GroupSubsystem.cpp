@@ -407,7 +407,7 @@ auto
     if (ck::Is_NOT_Valid(ChannelEntity))
     { return 0; }
 
-    return UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(ChannelEntity).Num();
+    return UCk_Utils_EntityLifetime_UE::Get_LifetimeDependentsCount(ChannelEntity);
 }
 
 auto

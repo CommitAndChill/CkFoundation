@@ -3,6 +3,7 @@
 #include "CkEcs/Tag/CkTag.h"
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Fragment_Data.h"
 #include "CkEcs/Handle/CkHandle.h"
+#include "CkEcs/Registry/CkRegistry_SlotTable.h"
 
 #include "CkEcs/Signal/CkSignal_Macros.h"
 
@@ -45,9 +46,44 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
-    struct FFragment_LifetimeDependents
+    /**
+     * Head of the owner's dependents list. The list itself is intrusive: every same-registry dependent carries its
+     * sibling links in its own FFragment_LifetimeOwner, so attaching, detaching, and transferring a dependent are
+     * O(1) and allocation-free regardless of how many dependents the owner has or has ever had, and a dependent
+     * leaves the list the moment its FFragment_LifetimeOwner is destroyed. Iterate through
+     * UCk_Utils_EntityLifetime_UE (ForEach_LifetimeDependent and friends); the links are not a public contract.
+     *
+     * A dependent stays linked until it is finally destroyed, so the list can name entities that are already
+     * pending kill — the traversal utilities still visit those, as the former array did, and a caller that must
+     * not see them filters with ck::IsValid.
+     */
+    struct CKECS_API FFragment_LifetimeDependents
     {
         CK_GENERATED_BODY(FFragment_LifetimeDependents);
+
+        friend class UCk_Utils_EntityLifetime_UE;
+        friend struct FFragment_LifetimeOwner;
+
+    public:
+        // TODO: Use FCk_DebuggableEntity when available [OBS-845]
+        using EntityType = FCk_Handle;
+
+    private:
+        EntityType _FirstDependent;
+        EntityType _LastDependent;
+        int32 _LinkedCount = 0;
+
+    public:
+        CK_PROPERTY_GET(_FirstDependent);
+        CK_PROPERTY_GET(_LastDependent);
+        CK_PROPERTY_GET(_LinkedCount);
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    struct CKECS_API FFragment_LifetimeOwner
+    {
+        CK_GENERATED_BODY(FFragment_LifetimeOwner);
 
         friend class UCk_Utils_EntityLifetime_UE;
 
@@ -55,28 +91,43 @@ namespace ck
         // TODO: Use FCk_DebuggableEntity when available [OBS-845]
         using EntityType = FCk_Handle;
 
+    public:
+        // EnTT customization point (the name is EnTT's, not house style): a component type that declares a static
+        // on_destroy(Registry&, entity) has it connected to its storage's destruction signal automatically, so the
+        // dependent unlinks itself from its owner's list whenever this fragment goes away — entity destruction,
+        // registry clear, or an explicit remove — without any registry having to opt in.
+        static auto
+        on_destroy(
+            ck::registry_table::EnttRegistryType& InRegistry,
+            FCk_Entity::IdType InEntity) -> void;
+
     private:
-        TArray<EntityType> _Entities;
+        // The unlink works on the raw registry, never through a handle: it runs inside EnTT's destroy loop, where
+        // constructing an FCk_Handle on the game thread would attach handle-debug state to an entity whose pools
+        // are being emptied — a structural mutation mid-destroy.
+        static auto
+        DoUnlink(
+            ck::registry_table::EnttRegistryType& InRegistry,
+            FCk_Entity::IdType InDependent) -> void;
 
-    public:
-        CK_PROPERTY_GET(_Entities);
-    };
-
-    // --------------------------------------------------------------------------------------------------------------------
-
-    struct FFragment_LifetimeOwner
-    {
-        CK_GENERATED_BODY(FFragment_LifetimeOwner);
-
-    public:
-        // TODO: Use FCk_DebuggableEntity when available [OBS-845]
-        using EntityType = FCk_Handle;
+        template <typename T_Fragment>
+        [[nodiscard]]
+        static auto
+        DoTryGet_Linked(
+            ck::registry_table::EnttRegistryType& InRegistry,
+            const EntityType& InLinked) -> T_Fragment*;
 
     private:
         EntityType _Entity;
+        EntityType _PrevSibling;
+        EntityType _NextSibling;
+        bool _IsReverseLinked = false;
 
     public:
         CK_PROPERTY_GET(_Entity);
+        CK_PROPERTY_GET(_PrevSibling);
+        CK_PROPERTY_GET(_NextSibling);
+        CK_PROPERTY_GET(_IsReverseLinked);
 
         CK_DEFINE_CONSTRUCTORS(FFragment_LifetimeOwner, _Entity);
     };

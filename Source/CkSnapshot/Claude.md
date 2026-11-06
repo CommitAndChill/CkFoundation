@@ -712,9 +712,11 @@ as comments in `Subsystem/CkSnapshot_Subsystem.cpp`:
 `Verify_AllStoredHandlesResolve` (`Snapshot/CkSnapshot_RestoreInvariants.*`) reports every structurally-inconsistent
 stored handle in a restored registry: a dangling HARD ref (`LifetimeOwner` / `ContextOwner`), or a live
 `LifetimeDependent` whose own `LifetimeOwner` names someone else (aliasing / registry-rehome corruption). Unset and
-tombstone handles are skipped, and an empty result means the backbone is consistent. The dependents leg asserts
-**back-pointer consistency, not resolvability**: `FFragment_LifetimeDependents` is a lazily-pruned WEAK-ref list, so
-an entry pointing at a destroyed entity is by design and is not reported.
+tombstone handles are skipped, and an empty result means the backbone is consistent. The dependents leg walks the
+owner's intrusive sibling list (`FFragment_LifetimeDependents` head, `FFragment_LifetimeOwner` links) and reports a
+link that names a destroyed entity, a linked dependent that carries no reverse link, a back-pointer naming another
+owner, or a chain longer than the owner's linked count: a dependent unlinks itself when it is destroyed, so none of
+those can occur in a consistent registry.
 
 ---
 

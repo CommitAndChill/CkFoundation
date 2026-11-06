@@ -14,7 +14,6 @@
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Fragment.h" // FTag_DefinitionBuild_InProgress (construction-window stamp for labeled children)
 
 #include "CkCore/Ensure/CkEnsure.h"
-#include "CkCore/Algorithms/CkAlgorithms.h" // ck::algo::AnyOf (undrained-dependents recursion)
 
 #include "Misc/ScopeExit.h" // ON_SCOPE_EXIT (DefinitionBuild construction-window tag removal)
 
@@ -25,7 +24,6 @@
 
 #include <Engine/PackageMapClient.h>
 #include <Engine/NetDriver.h>
-#include <numeric>
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -108,12 +106,13 @@ static auto
         return 0;
     }
 
-    const auto& Dependents = UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(InHandle);
-
-    return std::accumulate(Dependents.begin(), Dependents.end(), 1, [&](const int32 Value, const FCk_Handle& Dependent)
+    auto Count = int32{1};
+    UCk_Utils_EntityLifetime_UE::ForEach_LifetimeDependent(InHandle, [&](const FCk_Handle& InDependent)
     {
-        return Value + DoCount_ReplicationDriversIncludingDependents(Dependent, InOutVisited);
+        Count += DoCount_ReplicationDriversIncludingDependents(InDependent, InOutVisited);
     });
+
+    return Count;
 }
 
 auto
@@ -149,8 +148,13 @@ static auto
         InHandle.Has<ck::FFragment_PendingHydration>())
     { return true; }
 
-    return ck::algo::AnyOf(UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(InHandle),
-        [&](const auto& InDependent) { return DoGet_HasUndrainedReplicatedFragments_Recursive(InDependent, InOutVisited); });
+    const auto FirstUndrainedBranch = UCk_Utils_EntityLifetime_UE::Get_LifetimeDependent_If(InHandle,
+        [&](const FCk_Handle& InDependent)
+        {
+            return DoGet_HasUndrainedReplicatedFragments_Recursive(InDependent, InOutVisited);
+        });
+
+    return ck::IsValid(FirstUndrainedBranch, ck::IsValid_Policy_IncludePendingKill{});
 }
 
 auto
@@ -181,14 +185,15 @@ static auto
         InHandle.Has<ck::FFragment_PendingHydration>())
     { return InHandle; }
 
-    for (const auto& Dependent : UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(InHandle))
-    {
-        if (const auto Found = DoGet_FirstUndrainedEntity_Recursive(Dependent, InOutVisited);
-            ck::IsValid(Found))
-        { return Found; }
-    }
+    auto Found = FCk_Handle{};
+    const auto FirstUndrainedBranch = UCk_Utils_EntityLifetime_UE::Get_LifetimeDependent_If(InHandle,
+        [&](const FCk_Handle& InDependent)
+        {
+            Found = DoGet_FirstUndrainedEntity_Recursive(InDependent, InOutVisited);
+            return ck::IsValid(Found);
+        });
 
-    return {};
+    return ck::IsValid(FirstUndrainedBranch, ck::IsValid_Policy_IncludePendingKill{}) ? Found : FCk_Handle{};
 }
 
 auto

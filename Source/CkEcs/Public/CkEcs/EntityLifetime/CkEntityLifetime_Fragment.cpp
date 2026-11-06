@@ -4,6 +4,82 @@
 
 // --------------------------------------------------------------------------------------------------------------------
 
+namespace ck
+{
+    auto
+        FFragment_LifetimeOwner::
+        on_destroy(
+            ck::registry_table::EnttRegistryType& InRegistry,
+            FCk_Entity::IdType InEntity)
+        -> void
+    {
+        DoUnlink(InRegistry, InEntity);
+    }
+
+    template <typename T_Fragment>
+    auto
+        FFragment_LifetimeOwner::
+        DoTryGet_Linked(
+            ck::registry_table::EnttRegistryType& InRegistry,
+            const EntityType& InLinked)
+        -> T_Fragment*
+    {
+        const auto Entity = InLinked.Get_Entity();
+        if (Entity.Get_IsTombstone() || NOT InRegistry.valid(Entity.Get_ID()))
+        { return nullptr; }
+
+        return InRegistry.try_get<T_Fragment>(Entity.Get_ID());
+    }
+
+    auto
+        FFragment_LifetimeOwner::
+        DoUnlink(
+            ck::registry_table::EnttRegistryType& InRegistry,
+            FCk_Entity::IdType InDependent)
+        -> void
+    {
+        // The dependent, its neighbours, and its owner may all be mid-destruction or already gone (a batch destroy
+        // pops each pool in turn), so every one of them is looked up before it is touched. A neighbour that is gone
+        // needs no patching: it unlinked itself when it went.
+        auto* Link = InRegistry.try_get<FFragment_LifetimeOwner>(InDependent);
+        if (Link == nullptr || NOT Link->_IsReverseLinked)
+        { return; }
+
+        const auto Prev = Link->_PrevSibling;
+        const auto Next = Link->_NextSibling;
+        const auto LifetimeOwner = Link->_Entity;
+
+        Link->_PrevSibling = {};
+        Link->_NextSibling = {};
+        Link->_IsReverseLinked = false;
+
+        if (auto* PrevLink = DoTryGet_Linked<FFragment_LifetimeOwner>(InRegistry, Prev))
+        { PrevLink->_NextSibling = Next; }
+
+        if (auto* NextLink = DoTryGet_Linked<FFragment_LifetimeOwner>(InRegistry, Next))
+        { NextLink->_PrevSibling = Prev; }
+
+        auto* Dependents = DoTryGet_Linked<FFragment_LifetimeDependents>(InRegistry, LifetimeOwner);
+        if (Dependents == nullptr)
+        { return; }
+
+        if (Dependents->_FirstDependent.Get_Entity().Get_ID() == InDependent)
+        { Dependents->_FirstDependent = Next; }
+
+        if (Dependents->_LastDependent.Get_Entity().Get_ID() == InDependent)
+        { Dependents->_LastDependent = Prev; }
+
+        CK_ENSURE_IF_NOT(Dependents->_LinkedCount > 0,
+            TEXT("Unlinking dependent [{}] from [{}] whose dependents count is already [{}]"),
+            FCk_Entity{InDependent}, LifetimeOwner, Dependents->_LinkedCount)
+        { return; }
+
+        --Dependents->_LinkedCount;
+    }
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
 namespace ck::algo
 {
     auto

@@ -38,27 +38,27 @@ namespace ck_usf_cel_pattern_utils
             ECk_Usf_CelPattern InPattern)
         -> void
     {
-        for (auto& Dependent : UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(InHandle))
+        UCk_Utils_EntityLifetime_UE::ForEach_LifetimeDependent(InHandle, [&](FCk_Handle& InDependent)
         {
-            if (ck::Is_NOT_Valid(Dependent))
-            { continue; }
+            if (ck::Is_NOT_Valid(InDependent))
+            { return; }
 
             // An outlined dependent already owns its Custom-Stencil byte. Skipped rather than refused:
             // the caller asked about the ROOT, and failing a whole cascade because one leaf happens to be
             // outlined would be worse than covering the rest. Logged so it is discoverable — the direct
             // request on such an entity is still rejected loudly.
-            if (UCk_Utils_Usf_Outline_UE::Has_Outline(Dependent))
+            if (UCk_Utils_Usf_Outline_UE::Has_Outline(InDependent))
             {
                 ck::usf::Verbose(TEXT("Cel pattern cascade skipped dependent [{}]: it carries an outline "
-                                      "target, which owns its Custom Stencil value"), Dependent);
+                                      "target, which owns its Custom Stencil value"), InDependent);
             }
             else
             {
-                DoStampTarget(Dependent, InPattern, true);
+                DoStampTarget(InDependent, InPattern, true);
             }
 
-            DoStampDependents_Recursive(Dependent, InPattern);
-        }
+            DoStampDependents_Recursive(InDependent, InPattern);
+        });
     }
 
     auto
@@ -66,19 +66,19 @@ namespace ck_usf_cel_pattern_utils
             const FCk_Handle& InHandle)
         -> void
     {
-        for (auto& Dependent : UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(InHandle))
+        UCk_Utils_EntityLifetime_UE::ForEach_LifetimeDependent(InHandle, [&](FCk_Handle& InDependent)
         {
-            if (ck::Is_NOT_Valid(Dependent))
-            { continue; }
+            if (ck::Is_NOT_Valid(InDependent))
+            { return; }
 
-            if (Dependent.Has<ck::FFragment_Usf_CelPatternTarget>() &&
-                Dependent.Get<ck::FFragment_Usf_CelPatternTarget>().Get_IsCascadeDerived())
+            if (InDependent.Has<ck::FFragment_Usf_CelPatternTarget>() &&
+                InDependent.Get<ck::FFragment_Usf_CelPatternTarget>().Get_IsCascadeDerived())
             {
-                Dependent.Remove<ck::FFragment_Usf_CelPatternTarget>();
+                InDependent.Remove<ck::FFragment_Usf_CelPatternTarget>();
             }
 
-            DoRemoveDerivedTargets_Recursive(Dependent);
-        }
+            DoRemoveDerivedTargets_Recursive(InDependent);
+        });
     }
 }
 

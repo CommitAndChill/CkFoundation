@@ -772,8 +772,8 @@ auto
         return;
     }
 
-    // Copy the roots BEFORE destroying — Request_DestroyEntity mutates the dependents list.
-    _PendingTeardownRoots = Transient.Get<ck::FFragment_LifetimeDependents>().Get_Entities();
+    // Copy the roots BEFORE destroying — a root's OnEntityBeginDestroy listeners may reparent its siblings.
+    _PendingTeardownRoots = UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(Transient);
 
     for (auto& Root : _PendingTeardownRoots)
     {
@@ -1046,20 +1046,19 @@ auto
                 // its refill child sharing one name) bind positionally: table order and LifetimeDependents order
                 // are both creation order.
                 const auto* Owner = _SavedIdMap.Find(Entry.Get_LifetimeOwnerSavedId());
-                if (Owner != nullptr && ck::IsValid(*Owner) && Owner->Has<ck::FFragment_LifetimeDependents>())
+                if (Owner != nullptr && ck::IsValid(*Owner))
                 {
                     const auto& Label = Entry.Get_Label();
-                    for (auto& Child : Owner->Get<ck::FFragment_LifetimeDependents>().Get_Entities())
+                    Resolved = UCk_Utils_EntityLifetime_UE::Get_LifetimeDependent_If(*Owner, [&](const FCk_Handle& InChild)
                     {
-                        if (ck::Is_NOT_Valid(Child) || NOT Child.Has<ck::FTag_ConstructSpawned>())
-                        { continue; }
-                        if (_MappedLiveEntities.Contains(Child))
-                        { continue; }
-                        if (NOT UCk_Utils_GameplayLabel_UE::Has(Child) || UCk_Utils_GameplayLabel_UE::Get_IsUnnamedLabel(Child))
-                        { continue; }
-                        if (UCk_Utils_GameplayLabel_UE::Get_Label(Child).ToString() == Label)
-                        { Resolved = Child; break; }
-                    }
+                        if (ck::Is_NOT_Valid(InChild) || NOT InChild.Has<ck::FTag_ConstructSpawned>())
+                        { return false; }
+                        if (_MappedLiveEntities.Contains(InChild))
+                        { return false; }
+                        if (NOT UCk_Utils_GameplayLabel_UE::Has(InChild) || UCk_Utils_GameplayLabel_UE::Get_IsUnnamedLabel(InChild))
+                        { return false; }
+                        return UCk_Utils_GameplayLabel_UE::Get_Label(InChild).ToString() == Label;
+                    });
                 }
                 break;
             }
@@ -3261,8 +3260,8 @@ auto
 
         const auto* SavedLabels = SavedChildLabelsByOwnerId.Find(OwnerSavedId);
 
-        // Copy — Request_DestroyEntity mutates the dependents list.
-        auto Children = Owner.Get<ck::FFragment_LifetimeDependents>().Get_Entities();
+        // Copy — a destroyed child's OnEntityBeginDestroy listeners may reparent its siblings.
+        auto Children = UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(Owner);
         for (auto& Child : Children)
         {
             if (ck::Is_NOT_Valid(Child) || NOT Child.Has<ck::FTag_ConstructSpawned>())

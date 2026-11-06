@@ -55,27 +55,27 @@ namespace ck_usf_stylize_mask_utils
             const FCk_Handle& InHandle)
         -> void
     {
-        for (auto& Dependent : UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(InHandle))
+        UCk_Utils_EntityLifetime_UE::ForEach_LifetimeDependent(InHandle, [&](FCk_Handle& InDependent)
         {
-            if (ck::Is_NOT_Valid(Dependent))
-            { continue; }
+            if (ck::Is_NOT_Valid(InDependent))
+            { return; }
 
             // A dependent already claiming the stencil byte with a higher-precedence feature keeps it.
             // Skipped rather than refused: the caller asked about the ROOT, and failing a whole cascade
             // because one leaf happens to be outlined would be worse than covering the rest. The direct
             // request on such an entity is still rejected loudly.
-            if (DoGet_ClaimsStencilAlready(Dependent))
+            if (DoGet_ClaimsStencilAlready(InDependent))
             {
                 ck::usf::Verbose(TEXT("Stylize mask cascade skipped dependent [{}]: it carries an outline or "
-                                      "cel-pattern target, which owns its Custom Stencil value"), Dependent);
+                                      "cel-pattern target, which owns its Custom Stencil value"), InDependent);
             }
             else
             {
-                DoStampTarget(Dependent, true);
+                DoStampTarget(InDependent, true);
             }
 
-            DoStampDependents_Recursive(Dependent);
-        }
+            DoStampDependents_Recursive(InDependent);
+        });
     }
 
     auto
@@ -83,19 +83,19 @@ namespace ck_usf_stylize_mask_utils
             const FCk_Handle& InHandle)
         -> void
     {
-        for (auto& Dependent : UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(InHandle))
+        UCk_Utils_EntityLifetime_UE::ForEach_LifetimeDependent(InHandle, [&](FCk_Handle& InDependent)
         {
-            if (ck::Is_NOT_Valid(Dependent))
-            { continue; }
+            if (ck::Is_NOT_Valid(InDependent))
+            { return; }
 
-            if (Dependent.Has<ck::FFragment_Usf_StylizeMaskTarget>() &&
-                Dependent.Get<ck::FFragment_Usf_StylizeMaskTarget>().Get_IsCascadeDerived())
+            if (InDependent.Has<ck::FFragment_Usf_StylizeMaskTarget>() &&
+                InDependent.Get<ck::FFragment_Usf_StylizeMaskTarget>().Get_IsCascadeDerived())
             {
-                Dependent.Remove<ck::FFragment_Usf_StylizeMaskTarget>();
+                InDependent.Remove<ck::FFragment_Usf_StylizeMaskTarget>();
             }
 
-            DoRemoveDerivedTargets_Recursive(Dependent);
-        }
+            DoRemoveDerivedTargets_Recursive(InDependent);
+        });
     }
 
     // The entity's world, or null when it has none — WITHOUT the diagnostic

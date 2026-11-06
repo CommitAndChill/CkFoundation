@@ -13,6 +13,7 @@
 #include "CkEcs/Handle/CkHandle_Utils.h"
 #include "CkEcs/Net/CkNet_Fragment.h"
 #include "CkEcs/Persistence/CkPersistenceHydration.h" // entries queued on a dying entity are a counted loss
+#include "CkEcs/Registry/CkRegistry_SlotTable.h"
 #include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
 #include "CkEcs/Tag/CkTag_EditorOnly.h"
 #include "CkEcs/Tag/CkTag_HydrationQuarantine.h" // leaving the quarantine is part of entering destruction
@@ -49,28 +50,6 @@ namespace ck_entity_lifetime_utils
 
         const auto* EcsWorld = World->GetSubsystem<UCk_EcsWorld_Subsystem_UE>();
         return ck::Is_NOT_Valid(EcsWorld) || EcsWorld->Get_LoadHold() != ECk_EcsWorld_LoadHold::Teardown;
-    }
-
-    auto
-        Get_HasDependentCount(
-            const FCk_Handle& InOwner,
-            const FCk_Handle& InDependent,
-            int32 InExpectedCount)
-        -> bool
-    {
-        if (ck::Is_NOT_Valid(InOwner, ck::IsValid_Policy_IncludePendingKill{}))
-        { return false; }
-
-        if (NOT InOwner.Has<ck::FFragment_LifetimeDependents>())
-        { return InExpectedCount == 0; }
-
-        auto Count = int32{0};
-        for (const auto& Dependent : InOwner.Get<ck::FFragment_LifetimeDependents>().Get_Entities())
-        {
-            if (Dependent == InDependent)
-            { ++Count; }
-        }
-        return Count == InExpectedCount;
     }
 
     // Entering destruction leaves the hydration quarantine, and that is what makes the 143 destruction-pipeline
@@ -203,10 +182,21 @@ auto
     ck_entity_lifetime_utils::DoEnter_Destruction(InHandle);
     INC_DWORD_STAT(STAT_CkEcs_EntitiesDestroyed);
 
-    auto LifetimeDependents = Get_LifetimeDependents(InHandle);
+    // Snapshot the dependents before cascading: each dependent's own OnEntityBeginDestroy listeners run inside
+    // the cascade and may reparent its siblings, which a live walk of the list could not survive.
+    constexpr auto InlineDependentsPerCascade = 16;
+    auto LifetimeDependents = TArray<FCk_Handle, TInlineAllocator<InlineDependentsPerCascade>>{};
+    ForEach_LifetimeDependent(InHandle, [&](const FCk_Handle& InDependent)
+    {
+        LifetimeDependents.Emplace(InDependent);
+    });
+
     {
         QUICK_SCOPE_CYCLE_COUNTER(EntityLifetime_RequestDestroyDependents)
-        Request_DestroyEntities(LifetimeDependents);
+        for (auto& Dependent : LifetimeDependents)
+        {
+            Request_DestroyEntity(Dependent);
+        }
     }
 
     // broadcast AFTER walking the dependents since destruction order should be leaf-to-root
@@ -292,28 +282,28 @@ auto
         const FCk_Handle& InHandle)
     -> TArray<FCk_Handle>
 {
-    if (NOT InHandle.Has<ck::FFragment_LifetimeDependents>())
-    { return {}; }
-
-    const auto& Dependents = InHandle.Get<ck::FFragment_LifetimeDependents>();
-
     auto Ret = TArray<FCk_Handle>{};
-
-    for (const auto Dependent : Dependents.Get_Entities())
+    ForEach_LifetimeDependent(InHandle, [&](const FCk_Handle& InDependent)
     {
-        // The owner's dependents array is deliberately never pruned (perf) — stale entries are
-        // skipped here instead.
-        //
-        // NOT ck::IsValid(...) rather than ck::Is_NOT_Valid(...): this is the two-argument
-        // (entity, context) overload, which only ck::IsValid provides — Is_NOT_Valid's second
-        // parameter is the validation POLICY, so the handle would bind there instead.
-        if (NOT ck::IsValid(Dependent, InHandle))
-        { continue; }
-
-        Ret.Emplace(Dependent);
-    }
+        Ret.Emplace(InDependent);
+    });
 
     return Ret;
+}
+
+auto
+    UCk_Utils_EntityLifetime_UE::
+    Get_LifetimeDependentsCount(
+        const FCk_Handle& InHandle)
+    -> int32
+{
+    auto Count = int32{0};
+    ForEach_LifetimeDependent(InHandle, [&](const FCk_Handle&)
+    {
+        ++Count;
+    });
+
+    return Count;
 }
 
 auto
@@ -639,6 +629,13 @@ auto
         InNewEntity, InLifetimeOwner)
     { return; }
 
+    // The reverse link exists ONLY for a same-registry dependent: the list is walked and unlinked through the
+    // owner's registry, where a foreign dependent's id names whichever unrelated entity happens to share it. A
+    // cross-registry dependent (a nested FEcsWorld's cell owned by a main-registry grid) is lifetime-managed by its
+    // own world; the forward link suffices.
+    const auto SameRegistry =
+        InNewEntity.Get_RegistryView().Get_RegistryHandle() == InLifetimeOwner.Get_RegistryView().Get_RegistryHandle();
+
     if (InNewEntity.Has<ck::FFragment_LifetimeOwner>())
     {
         CK_ENSURE_IF_NOT(InNewEntity.Get<ck::FFragment_LifetimeOwner>().Get_Entity() == InLifetimeOwner,
@@ -646,15 +643,14 @@ auto
             InNewEntity, InLifetimeOwner, InNewEntity.Get<ck::FFragment_LifetimeOwner>().Get_Entity())
         { return; }
 
-        CK_ENSURE_IF_NOT(ck_entity_lifetime_utils::Get_HasDependentCount(InLifetimeOwner, InNewEntity,
-            InNewEntity.Get_RegistryView().Get_RegistryHandle() == InLifetimeOwner.Get_RegistryView().Get_RegistryHandle() ? 1 : 0),
+        CK_ENSURE_IF_NOT(Get_IsLinkedAsLifetimeDependent(InLifetimeOwner, InNewEntity) == SameRegistry,
             TEXT("Lifetime ownership reverse link is inconsistent for [{}] and [{}]"), InNewEntity, InLifetimeOwner)
         { return; }
 
         return;
     }
 
-    CK_ENSURE_IF_NOT(ck_entity_lifetime_utils::Get_HasDependentCount(InLifetimeOwner, InNewEntity, 0),
+    CK_ENSURE_IF_NOT(NOT Get_IsLinkedAsLifetimeDependent(InLifetimeOwner, InNewEntity),
         TEXT("Lifetime ownership reverse link already exists before setup for [{}] and [{}]"), InNewEntity, InLifetimeOwner)
     { return; }
 
@@ -724,18 +720,8 @@ auto
     if (InLifetimeOwner.Has<ck::FTag_EditorOnlyEntity>())
     { InNewEntity.Add<ck::FTag_EditorOnlyEntity>(); }
 
-    // Register the reverse dependent link ONLY for a same-registry child: FFragment_LifetimeDependents (and its
-    // serialization) assumes same-registry handles, and a restored foreign handle re-homes onto an unrelated
-    // entity — including the owner itself, forming a self-cycle that stack-overflows the dependents walk.
-    const auto SameRegistry =
-        InNewEntity.Get_RegistryView().Get_RegistryHandle() == InLifetimeOwner.Get_RegistryView().Get_RegistryHandle();
     if (SameRegistry)
-    {
-        // Not doing something like this because it is undefined behavior: *const_cast<FCk_Handle*>(&InHandle)
-        auto NonConstLifetimeOwnerHandle = InLifetimeOwner;
-        NonConstLifetimeOwnerHandle.AddOrGet<ck::FFragment_LifetimeDependents,
-            ck::IsValid_Policy_IncludePendingKill>()._Entities.Emplace(InNewEntity);
-    }
+    { DoLink_LifetimeDependent(InNewEntity, InLifetimeOwner); }
 
     // Finish ownership and inherited fragments before Teardown makes the child invalid to regular mutations.
     if (InLifetimeOwner.Has_Any<ck::FTag_DestroyEntity_Initiate>())
@@ -778,32 +764,22 @@ auto
     const auto NewOwnerSameRegistry =
         InEntity.Get_RegistryView().Get_RegistryHandle() == InNewLifetimeOwner.Get_RegistryView().Get_RegistryHandle();
 
-    CK_ENSURE_IF_NOT(ck_entity_lifetime_utils::Get_HasDependentCount(CurrentLifetimeOwnerEntity,
-        InEntity, OldOwnerSameRegistry ? 1 : 0),
+    CK_ENSURE_IF_NOT(Get_IsLinkedAsLifetimeDependent(CurrentLifetimeOwnerEntity, InEntity) == OldOwnerSameRegistry,
         TEXT("Lifetime ownership reverse link is inconsistent for [{}] and [{}]"), InEntity, CurrentLifetimeOwnerEntity)
     { return; }
 
     if (InNewLifetimeOwner == CurrentLifetimeOwnerEntity)
     { return; }
 
-    CK_ENSURE_IF_NOT(ck_entity_lifetime_utils::Get_HasDependentCount(InNewLifetimeOwner, InEntity, 0),
+    CK_ENSURE_IF_NOT(NOT Get_IsLinkedAsLifetimeDependent(InNewLifetimeOwner, InEntity),
         TEXT("Lifetime ownership reverse link already exists before transfer for [{}] and [{}]"), InEntity, InNewLifetimeOwner)
     { return; }
 
-    if (OldOwnerSameRegistry)
-    {
-        CurrentLifetimeOwnerEntity.Get<ck::FFragment_LifetimeDependents,
-            ck::IsValid_Policy_IncludePendingKill>()._Entities.RemoveSingle(InEntity);
-    }
-
+    DoUnlink_LifetimeDependent(InEntity);
     InEntity.Replace<ck::FFragment_LifetimeOwner>(InNewLifetimeOwner);
 
     if (NewOwnerSameRegistry)
-    {
-        auto NonConstNewLifetimeOwnerHandle = InNewLifetimeOwner;
-        NonConstNewLifetimeOwnerHandle.AddOrGet<ck::FFragment_LifetimeDependents,
-            ck::IsValid_Policy_IncludePendingKill>()._Entities.Emplace(InEntity);
-    }
+    { DoLink_LifetimeDependent(InEntity, InNewLifetimeOwner); }
 
     if (InNewLifetimeOwner.Has_Any<ck::FTag_DestroyEntity_Initiate>())
     {
@@ -813,6 +789,105 @@ auto
 
     if (InNewLifetimeOwner.Has_Any<ck::FTag_DestroyEntity_Teardown>())
     { InEntity.AddOrGet<ck::FTag_DestroyEntity_Teardown>(); }
+}
+
+auto
+    UCk_Utils_EntityLifetime_UE::
+    DoLink_LifetimeDependent(
+        FCk_Handle& InDependent,
+        const FCk_Handle& InLifetimeOwner)
+    -> void
+{
+    auto& Link = InDependent.Get<ck::FFragment_LifetimeOwner, ck::IsValid_Policy_IncludePendingKill>();
+
+    CK_ENSURE_IF_NOT(NOT Link._IsReverseLinked && Link._Entity == InLifetimeOwner,
+        TEXT("Cannot link [{}] as a lifetime dependent of [{}]: it is already linked, or its owner fragment names [{}]"),
+        InDependent, InLifetimeOwner, Link._Entity)
+    { return; }
+
+    // Not doing something like this because it is undefined behavior: *const_cast<FCk_Handle*>(&InHandle)
+    auto LifetimeOwner = InLifetimeOwner;
+    auto& Dependents = LifetimeOwner.AddOrGet<ck::FFragment_LifetimeDependents, ck::IsValid_Policy_IncludePendingKill>();
+
+    Link._PrevSibling = Dependents._LastDependent;
+    Link._NextSibling = {};
+    Link._IsReverseLinked = true;
+
+    if (ck::IsValid(Dependents._LastDependent, ck::IsValid_Policy_IncludePendingKill{}))
+    {
+        Dependents._LastDependent.Get<ck::FFragment_LifetimeOwner, ck::IsValid_Policy_IncludePendingKill>()
+            ._NextSibling = InDependent;
+    }
+    else
+    {
+        Dependents._FirstDependent = InDependent;
+    }
+
+    Dependents._LastDependent = InDependent;
+    ++Dependents._LinkedCount;
+}
+
+auto
+    UCk_Utils_EntityLifetime_UE::
+    DoUnlink_LifetimeDependent(
+        FCk_Handle& InDependent)
+    -> void
+{
+    if (ck::Is_NOT_Valid(InDependent, ck::IsValid_Policy_IncludePendingKill{}))
+    { return; }
+
+    auto* Registry = ck::registry_table::Resolve(InDependent.Get_RegistryView().Get_RegistryHandle());
+    CK_ENSURE_IF_NOT(Registry != nullptr,
+        TEXT("Cannot unlink lifetime dependent [{}]: its registry handle is stale or unset"), InDependent)
+    { return; }
+
+    ck::FFragment_LifetimeOwner::DoUnlink(*Registry, InDependent.Get_Entity().Get_ID());
+}
+
+auto
+    UCk_Utils_EntityLifetime_UE::
+    Get_IsLinkedAsLifetimeDependent(
+        const FCk_Handle& InOwner,
+        const FCk_Handle& InDependent)
+    -> bool
+{
+    if (ck::Is_NOT_Valid(InDependent, ck::IsValid_Policy_IncludePendingKill{}) ||
+        NOT InDependent.Has<ck::FFragment_LifetimeOwner>())
+    { return false; }
+
+    const auto& Link = InDependent.Get<ck::FFragment_LifetimeOwner>();
+    if (NOT Link.Get_IsReverseLinked() || Link.Get_Entity() != InOwner)
+    { return false; }
+
+    if (ck::Is_NOT_Valid(InOwner, ck::IsValid_Policy_IncludePendingKill{}) ||
+        NOT InOwner.Has<ck::FFragment_LifetimeDependents>())
+    { return false; }
+
+    const auto& Prev = Link.Get_PrevSibling();
+    if (ck::IsValid(Prev, ck::IsValid_Policy_IncludePendingKill{}))
+    {
+        return Prev.Has<ck::FFragment_LifetimeOwner>() &&
+            Prev.Get<ck::FFragment_LifetimeOwner>().Get_NextSibling() == InDependent;
+    }
+
+    return InOwner.Get<ck::FFragment_LifetimeDependents>().Get_FirstDependent() == InDependent;
+}
+
+auto
+    UCk_Utils_EntityLifetime_UE::
+    Get_NextLinkedLifetimeDependent(
+        const FCk_Handle& InOwner,
+        const FCk_Handle& InLinked)
+    -> FCk_Handle
+{
+    CK_ENSURE_IF_NOT(ck::IsValid(InLinked, ck::IsValid_Policy_IncludePendingKill{}) &&
+        InLinked.Has<ck::FFragment_LifetimeOwner>() &&
+        InLinked.Get<ck::FFragment_LifetimeOwner>().Get_IsReverseLinked(),
+        TEXT("Lifetime dependents of [{}] name [{}], which is not a linked dependent: the sibling links are corrupted"),
+        InOwner, InLinked)
+    { return {}; }
+
+    return InLinked.Get<ck::FFragment_LifetimeOwner>().Get_NextSibling();
 }
 
 // --------------------------------------------------------------------------------------------------------------------

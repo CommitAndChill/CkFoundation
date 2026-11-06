@@ -55,24 +55,15 @@ auto
 
     InEntity.Replace<ck::FFragment_ContextOwner>(InNewContextOwner);
 
-    for (auto LifetimeDependents = UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(InEntity);
-        auto& Dependent : LifetimeDependents)
+    UCk_Utils_EntityLifetime_UE::ForEach_LifetimeDependent(InEntity, [&](FCk_Handle& InDependent)
     {
-        if (ck::Is_NOT_Valid(Dependent))
-        { continue; }
+        if (ck::Is_NOT_Valid(InDependent) || NOT Has(InDependent))
+        { return; }
 
-        if (Has(Dependent))
-        {
-            const auto DependentContextOwner = Get_ContextOwner(Dependent);
-
-            // If the dependent's context owner is the same as what we're changing from,
-            // recursively update it
-            if (DependentContextOwner == CurrentContextOwner)
-            {
-                Request_Override(Dependent, InNewContextOwner, {});
-            }
-        }
-    }
+        // Only dependents that inherited the owner being replaced follow it; an overridden dependent keeps its own.
+        if (Get_ContextOwner(InDependent) == CurrentContextOwner)
+        { Request_Override(InDependent, InNewContextOwner, {}); }
+    });
 
     // Immediate mutation — nothing is enqueued, so completion is synchronous on this stack.
     InDelegate.ExecuteIfBound(InEntity, ECk_Request_OperationResult::Succeeded);
