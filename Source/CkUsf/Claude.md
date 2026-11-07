@@ -332,6 +332,16 @@ follows; a deleted-and-re-added parameter has a new Id and needs the regeneratio
   mesh data channels need TexCoord1/TexCoord2 wired (e.g. CkVat's normal-texture lookup). The WPO entry
   point always receives UV1/UV2; it lives on its own VS-safe Custom node because the pixel node reads
   pixel-only inputs.
+- **A Custom node cannot ask for the per-instance frame — set `_PixelInstanceFrame`.** Inside a look,
+  `GetWorldToInstanceDF(Parameters)` returns `Parameters.InstanceWorldToLocal` only under
+  `HAS_INSTANCE_WORLD_TO_LOCAL_PS`, which needs `NEEDS_INSTANCE_WORLD_TO_LOCAL_PS`; the translator sets that
+  only for a PIXEL-stage graph node that transforms into Instance space (`bUsesInstanceWorldToLocalPS`), and
+  HLSL in a Custom node is not one. Without it an ISM/HISM look aims with the COMPONENT's rotation for every
+  instance, silently. The flag (Surface domains only — an error elsewhere) wires a World->Instance
+  `Transform` of a constant into the pixel node's `CkUsf_InstanceFrameProbe` input (a reserved name), which
+  the call string never reads; the look signature is unchanged and the look then calls
+  `GetWorldToInstanceDF(Parameters)` itself. Non-instanced permutations still read the primitive's transform
+  (that is `HAS_`'s other half). Guarded by `InstanceFrameProbe.ush`, which `#error`s unless the define is set.
 - **UV is TexCoord0** (surface) or screen position (post-process). Other UV channels are not wired;
   raw escape hatch: `Parameters`/`View.*`/`GetPrimitiveData()` inside the .ush work but are
   version-fragile — prefer asking for the input to be wired properly.

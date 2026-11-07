@@ -223,6 +223,15 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     bool _PixelDataChannels = false;
 
+    // Surface-only: make the PIXEL stage carry each instance's world-to-local transform, so the look's
+    // GetWorldToInstanceDF(Parameters) answers per instance (ISM/HISM, Nanite, mesh particles) instead of
+    // falling back to the primitive's. The translator only turns that on for a pixel-stage graph node that
+    // needs it, which code inside a Custom node cannot be — so the generator wires a World->Instance
+    // Transform into the pixel node's CkUsf_InstanceFrameProbe input, which the call ignores. Opt-in because
+    // it adds per-pixel instance data every other master skips.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
+    bool _PixelInstanceFrame = false;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     ECk_Usf_Domain _Domain = ECk_Usf_Domain::SurfaceLit;
 
