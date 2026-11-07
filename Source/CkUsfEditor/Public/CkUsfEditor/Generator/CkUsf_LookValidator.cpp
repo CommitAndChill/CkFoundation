@@ -31,6 +31,7 @@ namespace ck_usf_look_validator
         TEXT("SceneBaseColor"), TEXT("SceneMetallic"), TEXT("SceneRoughness"), TEXT("SceneSpecular"),
         TEXT("ParticleColor"), TEXT("ParticleAlpha"),
         TEXT("DynParam0"), TEXT("DynParam1"), TEXT("DynParam2"), TEXT("DynParam3"),
+        TEXT("CkUsf_InstanceFrameProbe"),
         TEXT("EmissiveColor"), TEXT("Roughness"), TEXT("Metallic"), TEXT("Specular"),
         TEXT("AmbientOcclusion"), TEXT("Normal"), TEXT("Opacity"), TEXT("OpacityMask"),
         TEXT("Refraction"), TEXT("SubsurfaceColor"), TEXT("ClearCoat"), TEXT("ClearCoatRoughness"),
@@ -653,6 +654,14 @@ namespace ck::usf_editor
 
         // Particle inputs are wired on the SURFACE branch of the generator only; asking for them anywhere
         // else silently leaves In.ParticleColor / In.DynamicParameter at their inert defaults.
+        // The probe Transform is wired on the SURFACE branch only, and an instance frame exists only on meshes.
+        if (InDef->_PixelInstanceFrame && NOT IsSurfaceDomain)
+        {
+            Result.Errors.Add(FString::Printf(
+                TEXT("Look [%s]: _PixelInstanceFrame requires a Surface domain — there is no instance frame to carry elsewhere"),
+                *LookName.ToString()));
+        }
+
         if ((InDef->_ParticleColor || InDef->_ParticleDynamicParameter) && NOT IsSurfaceDomain)
         {
             Result.Errors.Add(FString::Printf(
