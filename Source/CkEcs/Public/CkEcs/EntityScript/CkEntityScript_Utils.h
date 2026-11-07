@@ -68,6 +68,15 @@ public:
     Get_ScriptClass(
         const FCk_Handle_EntityScript& InHandle);
 
+    // The live script object behind an entity, or nullptr when the entity carries no EntityScript or its script is gone.
+    // The reverse of UCk_EntityScript_UE::DoGet_ScriptEntity; a typed Cast on the result reaches a script's own members.
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|EntityScript",
+              DisplayName="[Ck][EntityScript] TryGet_EntityScript")
+    static UCk_EntityScript_UE*
+    TryGet_EntityScript(
+        const FCk_Handle& InHandle);
+
 public:
     // Hidden in the editor through the DefaultCkFoundation.ini Config file (see: BlueprintEditor.Menu section)
     // The completion delegate reports that the spawn REQUEST was drained, not that construction finished —
