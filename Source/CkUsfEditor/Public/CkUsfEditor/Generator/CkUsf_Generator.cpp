@@ -6,6 +6,7 @@
 #include "CkUsfEditor/Generator/CkUsf_LookValidator.h"
 #include "CkUsfEditor_Log.h"
 
+#include "CkCore/Ensure/CkEnsure.h"
 #include "CkCore/Validation/CkIsValid.h"
 
 #include "MaterialEditingLibrary.h"
@@ -31,6 +32,8 @@
 #include "Materials/MaterialExpressionPixelDepth.h"
 #include "Materials/MaterialExpressionVertexColor.h"
 #include "Materials/MaterialExpressionPerInstanceCustomData.h"
+#include "Materials/MaterialExpressionCollectionParameter.h"
+#include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialExpressionParticleColor.h"
 #include "Materials/MaterialExpressionDynamicParameter.h"
 #include "Engine/Texture.h"
@@ -349,12 +352,51 @@ namespace ck::usf_editor
         return Code;
     }
 
+    // A collection param reads its value through the collection's uniform buffer. The node resolves the value by
+    // ParameterId (the name is only for display and rename fix-up), so the Id is copied from the collection or the
+    // node reads nothing. A Vector's float4 output is .rgb-swizzled in the Custom code like a VectorParameter's.
+    // The node's Collection pointer is the master's hard reference to the collection.
+    static auto Make_CollectionParamExpression(
+        UMaterial* InMaterial, const FCk_Usf_ParamDesc& P, FName InLookName, int32 InRow)
+        -> UMaterialExpression*
+    {
+        auto* Collection = P._Collection.LoadSynchronous();
+        const auto IsCollectionLoaded = ck::IsValid(Collection);
+        CK_ENSURE_IF_NOT(IsCollectionLoaded,
+            TEXT("Look [{}] param [{}] reads the material parameter collection [{}], which does not load (the validator should have rejected it)"),
+            InLookName, P._Name, P._Collection.ToString())
+        { return nullptr; }
+
+        const auto CollectionParameterName = P.Get_EffectiveCollectionParameterName();
+        const auto* CollectionParameter = P._Type == ECk_Usf_ParamType::Scalar
+            ? static_cast<const FCollectionParameterBase*>(Collection->GetScalarParameterByName(CollectionParameterName))
+            : static_cast<const FCollectionParameterBase*>(Collection->GetVectorParameterByName(CollectionParameterName));
+        const auto HasCollectionParameter = CollectionParameter != nullptr;
+        CK_ENSURE_IF_NOT(HasCollectionParameter,
+            TEXT("Look [{}] param [{}] reads collection parameter [{}], which [{}] does not have as that kind (the validator should have rejected it)"),
+            InLookName, P._Name, CollectionParameterName, Collection->GetPathName())
+        { return nullptr; }
+
+        auto* CollectionExpr = Cast<UMaterialExpressionCollectionParameter>(
+            UMaterialEditingLibrary::CreateMaterialExpression(
+                InMaterial, UMaterialExpressionCollectionParameter::StaticClass(), -800, InRow));
+        CollectionExpr->Collection = Collection;
+        CollectionExpr->ParameterName = CollectionParameterName;
+        CollectionExpr->ParameterId = CollectionParameter->Id;
+        CollectionExpr->Group = P._Group;
+        CollectionExpr->SortPriority = P._SortPriority;
+        return CollectionExpr;
+    }
+
     // ConstDefaultValue is the uniform fallback a PerInstanceCustomData node returns on non-instanced meshes.
     static auto Make_ParamExpression(
         UMaterial* InMaterial, const UCkUsf_LookDefinition* InDef, const FCk_Usf_ParamDesc& P,
         FName InLookName, int32 InRow)
         -> UMaterialExpression*
     {
+        if (P._FromCollection)
+        { return Make_CollectionParamExpression(InMaterial, P, InLookName, InRow); }
+
         if (P._Type == ECk_Usf_ParamType::Scalar && P._PerInstance)
         {
             auto* PerInstanceExpr = Cast<UMaterialExpressionPerInstanceCustomData>(
