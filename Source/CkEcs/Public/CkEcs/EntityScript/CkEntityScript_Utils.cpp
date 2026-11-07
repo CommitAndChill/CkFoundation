@@ -284,6 +284,18 @@ auto
 
 auto
     UCk_Utils_EntityScript_UE::
+    TryGet_EntityScript(
+        const FCk_Handle& InHandle)
+    -> UCk_EntityScript_UE*
+{
+    if (ck::Is_NOT_Valid(InHandle) || NOT InHandle.Has<ck::FFragment_EntityScript>())
+    { return nullptr; }
+
+    return InHandle.Get<ck::FFragment_EntityScript>().Get_Script().Get();
+}
+
+auto
+    UCk_Utils_EntityScript_UE::
     TryGet_Entity_EntityScript_InOwnershipChain(
         const FCk_Handle& InHandle)
     -> FCk_Handle
