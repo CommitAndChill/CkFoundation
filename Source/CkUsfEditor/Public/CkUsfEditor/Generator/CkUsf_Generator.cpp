@@ -33,6 +33,8 @@
 #include "Materials/MaterialExpressionVertexColor.h"
 #include "Materials/MaterialExpressionPerInstanceCustomData.h"
 #include "Materials/MaterialExpressionCollectionParameter.h"
+#include "Materials/MaterialExpressionConstant3Vector.h"
+#include "Materials/MaterialExpressionTransform.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialExpressionParticleColor.h"
 #include "Materials/MaterialExpressionDynamicParameter.h"
@@ -623,6 +625,8 @@ namespace ck::usf_editor
                 Custom->Inputs.Add(D);
             }
         }
+        if (NOT IsPostProcess && InDef->_PixelInstanceFrame)
+        { FCustomInput F; F.InputName = TEXT("CkUsf_InstanceFrameProbe"); Custom->Inputs.Add(F); }
 
         Custom->Code = Build_CustomCode(InDef, IsPostProcess, Contract);
         Apply_LookDefines(Custom, InDef);
@@ -719,6 +723,28 @@ namespace ck::usf_editor
                         Custom, FString::Printf(TEXT("DynParam%d"), Channel));
                 }
             }
+        }
+
+        // ---- Pixel instance frame: a World->Instance Transform compiled in the pixel stage is what sets
+        // bUsesInstanceWorldToLocalPS (HLSLMaterialTranslator), i.e. NEEDS_INSTANCE_WORLD_TO_LOCAL_PS, which
+        // GetWorldToInstanceDF(Parameters) needs to return Parameters.InstanceWorldToLocal. The Custom node
+        // compiles every connected input, so the probe input is enough; the call string never reads it. ----
+        if (NOT IsPostProcess && InDef->_PixelInstanceFrame)
+        {
+            auto* AxisExpr = Cast<UMaterialExpressionConstant3Vector>(
+                UMaterialEditingLibrary::CreateMaterialExpression(
+                    Material, UMaterialExpressionConstant3Vector::StaticClass(), -1400, 10 * 160));
+            AxisExpr->Constant = FLinearColor(1.0f, 0.0f, 0.0f);
+
+            auto* FrameExpr = Cast<UMaterialExpressionTransform>(
+                UMaterialEditingLibrary::CreateMaterialExpression(
+                    Material, UMaterialExpressionTransform::StaticClass(), -1100, 10 * 160));
+            FrameExpr->TransformSourceType = TRANSFORMSOURCE_World;
+            FrameExpr->TransformType = TRANSFORM_Instance;
+
+            UMaterialEditingLibrary::ConnectMaterialExpressions(AxisExpr, FString(), FrameExpr, FString());
+            UMaterialEditingLibrary::ConnectMaterialExpressions(
+                FrameExpr, FString(), Custom, TEXT("CkUsf_InstanceFrameProbe"));
         }
 
         // ---- Parameter nodes wired to Custom inputs by name (per-instance params → PerInstanceCustomData) ----
@@ -983,6 +1009,8 @@ namespace ck::usf_editor
             for (auto Channel = 0; Channel < 4; ++Channel)
             { ExpectedInputs.Add(FName{*FString::Printf(TEXT("DynParam%d"), Channel)}); }
         }
+        if (Definition->_PixelInstanceFrame)
+        { ExpectedInputs.Add(TEXT("CkUsf_InstanceFrameProbe")); }
         auto InputsMatch = ExpectedInputs.Num() == Primary->Inputs.Num()
             && Primary->IncludeFilePaths.Contains(Definition->_UshIncludePath);
         for (auto Index = 0; InputsMatch && Index < ExpectedInputs.Num(); ++Index)

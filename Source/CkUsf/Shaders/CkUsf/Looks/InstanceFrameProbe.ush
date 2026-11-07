@@ -1,0 +1,22 @@
+// /CkUsf/Looks/InstanceFrameProbe.ush
+// Not a shipping look — the HLSL half of the _PixelInstanceFrame regression guard
+// (CkTests: CkUsf.PixelInstanceFrame.SetsTheInstanceFrameDefine). It exists to be generated and
+// force-compiled, never applied.
+//
+// The include refuses to compile unless the material environment asks for the per-instance
+// world-to-local transform in the pixel stage, which is the one thing _PixelInstanceFrame promises.
+// NEEDS_ (not HAS_) is checked because HAS_ also depends on the vertex factory permutation: a
+// non-instanced permutation of the same master legitimately reads the primitive's transform.
+#pragma once
+#include "/CkUsf/Common.ush"
+
+#if !NEEDS_INSTANCE_WORLD_TO_LOCAL_PS
+#error CkUsf InstanceFrameProbe: NEEDS_INSTANCE_WORLD_TO_LOCAL_PS is not set, so _PixelInstanceFrame did not reach the translator
+#endif
+
+FCkUsf_SurfaceOutput CkUsf_Look_InstanceFrameProbe(FCkUsf_SurfaceInput In, float ProbeAmount)
+{
+    FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
+    O.BaseColor = saturate(ProbeAmount).xxx;
+    return O;
+}
