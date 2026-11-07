@@ -5,6 +5,8 @@
 #include "Engine/SubsurfaceProfile.h"
 #include "CkUsf_LookDefinition.generated.h"
 
+class UMaterialParameterCollection;
+
 // --------------------------------------------------------------------------------------------------------------------
 
 UENUM(BlueprintType)
@@ -154,6 +156,25 @@ struct CKUSF_API FCk_Usf_ParamDesc
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     int32 _CustomPrimitiveDataIndex = -1;
 
+    // Scalar/Vector-only: source this param from a MATERIAL PARAMETER COLLECTION instead of a uniform — one
+    // value shared by every material that reads the collection, written through the world's collection
+    // instance (SetScalarParameterValue / SetVectorParameterValue on UKismetMaterialLibrary or the instance),
+    // never through a MID of this look. Mutually exclusive with _PerInstance and _CustomPrimitiveData, legal in
+    // every domain, and never takes a per-instance slot. The generated master holds a hard reference to
+    // _Collection, so the collection loads with the material.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
+    bool _FromCollection = false;
+
+    // Collection params only: the collection the param reads. Must be set and loadable at generation.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
+    TSoftObjectPtr<UMaterialParameterCollection> _Collection;
+
+    // Collection params only: the parameter inside _Collection to read, of the param's own kind (a Scalar reads
+    // one of the collection's ScalarParameters, a Vector one of its VectorParameters). NAME_None reads the
+    // collection parameter named like _Name.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
+    FName _CollectionParameterName = NAME_None;
+
     // Object path for Texture2D / TextureCube params, e.g.
     // "/Engine/MapTemplates/Sky/DaylightAmbientCubemap.DaylightAmbientCubemap".
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
@@ -169,6 +190,10 @@ struct CKUSF_API FCk_Usf_ParamDesc
     // alphabetically alongside anything else that never set it.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     int32 _SortPriority = 32;
+
+    // The collection parameter a _FromCollection param reads: _CollectionParameterName, or _Name when unset.
+    FName Get_EffectiveCollectionParameterName() const
+    { return _CollectionParameterName.IsNone() ? _Name : _CollectionParameterName; }
 };
 
 // --------------------------------------------------------------------------------------------------------------------

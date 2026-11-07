@@ -293,6 +293,21 @@ byte-identically. Shipped pair: `VisualLodCrowdFade` (per-instance) / `VisualLod
 two halves of CkVisualLod's crossfade, sharing `CkUsf_VisualLod_FadeThreshold` from `Common.ush` so
 their masks stay exact complements.
 
+**A material parameter collection is the fourth param source**: `_FromCollection` + `_Collection` (+
+`_CollectionParameterName`, None = the param's own `_Name`) emit a `CollectionParameter` node instead of a
+uniform. It is for a value every material that reads it shares at once (one eye-look direction for every
+eyeball, a world-wide wetness), written through the world's collection instance — never through a MID of
+the look, which has no parameter of that name (`Create_MID_ForLook` skips it). Scalar/Vector-only,
+mutually exclusive with `_PerInstance` and with `_CustomPrimitiveData`, legal in every domain, and it never
+takes a per-instance slot. The validator loads `_Collection` at generation and requires the named
+parameter to exist in it as the param's own kind (a Scalar in `ScalarParameters`, a Vector in
+`VectorParameters`; a Vector reaches the look `.rgb` like a uniform one). The node reads by the collection
+parameter's `Id`, which the generator copies — with the right name and no Id the master fails to compile
+("invalid parameter"). The engine follows a renamed collection parameter by its Id, so the existing master
+keeps reading it, but the look's next regeneration fails validation until `_CollectionParameterName`
+follows; a deleted-and-re-added parameter has a new Id and needs the regeneration. The node's
+`Collection` pointer is a hard reference: the master loads the collection with it.
+
 ## Traps cookbook
 
 - **Never raw `.Sample()` in a lit or WPO'd look** — lit looks compile ray-tracing hit permutations
