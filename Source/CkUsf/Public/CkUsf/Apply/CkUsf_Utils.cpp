@@ -68,6 +68,10 @@ auto
 
     for (const auto& P : InLook->_Parameters)
     {
+        // A collection param has no material parameter on the master to set; its value lives in the collection.
+        if (P._FromCollection)
+        { continue; }
+
         switch (P._Type)
         {
             case ECk_Usf_ParamType::Scalar:

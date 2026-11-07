@@ -6,6 +6,7 @@
 #include "CkCore/Macros/CkMacros.h"
 
 #include "DataDrivenShaderPlatformInfo.h"
+#include "Materials/MaterialParameterCollection.h"
 #include "Engine/EngineTypes.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
@@ -303,6 +304,79 @@ namespace ck_usf_look_validator
         }
     }
 
+    // A collection param reads a value the generated node resolves through the collection's parameter Id; a
+    // missing collection or parameter leaves a node that compiles to nothing the look can rely on.
+    auto Validate_CollectionParam(const FName InLookName, const FCk_Usf_ParamDesc& InParam,
+        ck::usf_editor::FLookValidationResult& InOutResult) -> void
+    {
+        if (NOT InParam._FromCollection)
+        { return; }
+
+        const auto LookName = InLookName.ToString();
+        const auto Name = InParam._Name.ToString();
+        const auto IsScalar = InParam._Type == ECk_Usf_ParamType::Scalar;
+        const auto IsVector = InParam._Type == ECk_Usf_ParamType::Vector;
+
+        if (NOT IsScalar && NOT IsVector)
+        {
+            InOutResult.Errors.Add(FString::Printf(
+                TEXT("Look [%s]: param [%s] is _FromCollection but not Scalar/Vector — a material parameter collection carries only scalars and vectors"),
+                *LookName, *Name));
+            return;
+        }
+
+        if (InParam._PerInstance)
+        {
+            InOutResult.Errors.Add(FString::Printf(
+                TEXT("Look [%s]: param [%s] declares both _FromCollection and _PerInstance — they are two different data sources and the generator emits one node per param"),
+                *LookName, *Name));
+        }
+
+        if (InParam._CustomPrimitiveData)
+        {
+            InOutResult.Errors.Add(FString::Printf(
+                TEXT("Look [%s]: param [%s] declares both _FromCollection and _CustomPrimitiveData — they are two different data sources and the generator emits one node per param"),
+                *LookName, *Name));
+        }
+
+        if (InParam._Collection.IsNull())
+        {
+            InOutResult.Errors.Add(FString::Printf(
+                TEXT("Look [%s]: param [%s] is _FromCollection but its _Collection is not set"),
+                *LookName, *Name));
+            return;
+        }
+
+        const auto* Collection = InParam._Collection.LoadSynchronous();
+        if (Collection == nullptr)
+        {
+            InOutResult.Errors.Add(FString::Printf(
+                TEXT("Look [%s]: param [%s] reads the material parameter collection [%s], which does not load"),
+                *LookName, *Name, *InParam._Collection.ToString()));
+            return;
+        }
+
+        const auto CollectionParameterName = InParam.Get_EffectiveCollectionParameterName();
+        const auto HasMatchingKind = IsScalar
+            ? Collection->GetScalarParameterByName(CollectionParameterName) != nullptr
+            : Collection->GetVectorParameterByName(CollectionParameterName) != nullptr;
+
+        if (NOT HasMatchingKind)
+        {
+            const auto HasOtherKind = IsScalar
+                ? Collection->GetVectorParameterByName(CollectionParameterName) != nullptr
+                : Collection->GetScalarParameterByName(CollectionParameterName) != nullptr;
+
+            InOutResult.Errors.Add(FString::Printf(
+                TEXT("Look [%s]: param [%s] reads collection parameter [%s] as a %s, but the material parameter collection [%s] has no %s parameter of that name%s"),
+                *LookName, *Name, *CollectionParameterName.ToString(),
+                IsScalar ? TEXT("Scalar") : TEXT("Vector"),
+                *Collection->GetPathName(),
+                IsScalar ? TEXT("scalar") : TEXT("vector"),
+                HasOtherKind ? (IsScalar ? TEXT(" (it is a vector parameter)") : TEXT(" (it is a scalar parameter)")) : TEXT("")));
+        }
+    }
+
     auto Validate_GeneratedPackageRoot(const FName InLookName, const UCkUsf_LookDefinition* InDef,
         ck::usf_editor::FLookValidationResult& InOutResult) -> void
     {
@@ -561,6 +635,8 @@ namespace ck::usf_editor
                         *LookName.ToString(), *Name, NumFloatsRead, Param._CustomPrimitiveDataIndex, LastIndexCarried));
                 }
             }
+
+            Validate_CollectionParam(LookName, Param, Result);
         }
 
         Validate_GeneratedPackageRoot(LookName, InDef, Result);
