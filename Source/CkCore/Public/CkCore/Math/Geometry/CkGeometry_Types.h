@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CkCore/Format/CkFormat.h"
 #include "CoreMinimal.h"
 #include "GeometryTypes.h"
 #include "OrientedBoxTypes.h"

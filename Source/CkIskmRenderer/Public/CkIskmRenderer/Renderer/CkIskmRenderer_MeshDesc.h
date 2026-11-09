@@ -5,6 +5,7 @@
 #include "Materials/MaterialInterface.h"
 
 #include "CkCore/Macros/CkMacros.h"
+#include "CkCore/Format/CkFormat.h"
 
 #include "CkIskmRenderer_MeshDesc.generated.h"
 

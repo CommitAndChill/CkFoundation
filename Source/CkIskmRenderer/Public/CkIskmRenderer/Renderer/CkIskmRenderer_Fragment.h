@@ -4,6 +4,7 @@
 #include "UObject/WeakObjectPtr.h"
 
 #include "CkCore/Macros/CkMacros.h"
+#include "CkCore/Format/CkFormat.h"
 #include "CkEcs/Tag/CkTag.h"
 
 class UCk_IskmAnimCollection_Data;

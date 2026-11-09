@@ -5,6 +5,7 @@
 #include "CkInput/Settings/CkInput_Settings.h"
 
 #include <AssetRegistry/IAssetRegistry.h>
+#include <Engine/LocalPlayer.h>
 #include <EnhancedInputSubsystems.h>
 #include <InputMappingContext.h>
 

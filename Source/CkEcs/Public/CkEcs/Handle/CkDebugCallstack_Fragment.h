@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CkCore/Debug/CkDebug_Utils.h"
+#include "CkCore/Format/CkFormat.h"
 
 namespace ck
 {
