@@ -1,4 +1,5 @@
 #include "CkUsf/Outline/CkUsf_Outline_ProjectSettings.h"
+#include "CkCore/Ensure/CkEnsure.h"
 
 #include "CkUsf/Outline/CkUsf_OutlinePreset.h"
 #include "CkCore/Validation/CkIsValid.h"

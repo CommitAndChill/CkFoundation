@@ -1,4 +1,5 @@
 #include "CkDynamic_HandleDefinition.h"
+#include "CkCore/Validation/CkIsValid.h"
 
 #include "CkCore/Ensure/CkEnsure.h"
 

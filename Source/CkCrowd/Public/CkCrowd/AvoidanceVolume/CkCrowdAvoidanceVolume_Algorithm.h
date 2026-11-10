@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "CkCore/Macros/CkMacros.h"
 
 namespace ck::crowd_avoidance_volume
 {

@@ -1,4 +1,5 @@
 #include "CkAngelscriptGenerator/Tests/Test_AngelscriptWrapperGenerator_Fixtures.h"
+#include "CkCore/Macros/CkMacros.h"
 
 #include "CkAngelscriptGenerator/CkAngelscriptWrapperGenerator.h"
 

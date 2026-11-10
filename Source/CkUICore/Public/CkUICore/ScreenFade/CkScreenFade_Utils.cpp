@@ -1,8 +1,11 @@
 // Inspired by https://github.com/suramaru517/ScreenFade
 
 #include "CkScreenFade_Utils.h"
+#include "CkCore/Ensure/CkEnsure.h"
 
 #include "CkUICore/ScreenFade/CkScreenFade_Subsystem.h"
+#include <GameFramework/PlayerController.h>
+#include <Engine/LocalPlayer.h>
 
 // --------------------------------------------------------------------------------------------------------------------
 

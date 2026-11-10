@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/WeakObjectPtr.h"
 
 // ====================================================================================================================
 //  ck::anim_bake — shared CPU animation-sampling core for frame-baked renderers (CkIskmRenderer, CkVat).

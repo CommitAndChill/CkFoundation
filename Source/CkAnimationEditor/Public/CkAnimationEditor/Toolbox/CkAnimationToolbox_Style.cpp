@@ -1,4 +1,5 @@
 #include "CkAnimationToolbox_Style.h"
+#include "CkCore/Macros/CkMacros.h"
 
 #include <Styling/SlateStyleRegistry.h>
 #include <Styling/CoreStyle.h>

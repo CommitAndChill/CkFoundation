@@ -1,4 +1,5 @@
 #include "CkInsightsAnalyzer/Core/CkFrameAnalyzer.h"
+#include "CkCore/Macros/CkMacros.h"
 #include "CkInsightsAnalyzer/Core/CkTraceSession.h"
 #include "CkInsightsAnalyzer/Report/CkFrameReport.h"
 

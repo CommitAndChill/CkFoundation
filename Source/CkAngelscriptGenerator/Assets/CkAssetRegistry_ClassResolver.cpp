@@ -1,4 +1,5 @@
 #include "CkAssetRegistry_ClassResolver.h"
+#include "CkCore/Macros/CkMacros.h"
 
 #include "CkAngelscriptGenerator/Assets/CkAssetRegistrySubsystem.h"
 #include "CkAngelscriptGenerator/CkAngelscriptGenerator_Log.h"

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Containers/UnrealString.h>
+#include "CkCore/Macros/CkMacros.h"
 
 #if WITH_ANGELSCRIPT_CK
 

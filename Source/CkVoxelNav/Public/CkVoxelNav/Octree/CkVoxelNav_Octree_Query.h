@@ -3,6 +3,7 @@
 #include "CkVoxelNav/Octree/CkVoxelNav_Octree_Types.h"
 
 #include <CoreMinimal.h>
+#include <Math/RandomStream.h>
 
 // --------------------------------------------------------------------------------------------------------------------
 // Read-only queries over a built octree: position <-> address, cell extents, neighbour enumeration, and

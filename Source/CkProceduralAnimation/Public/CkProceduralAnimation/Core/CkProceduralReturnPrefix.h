@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "CkCore/Macros/CkMacros.h"
 
 namespace ck::procedural_action
 {

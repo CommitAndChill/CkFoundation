@@ -1,4 +1,5 @@
 #include "CkAssetRegistry_Utils.h"
+#include "CkCore/Validation/CkIsValid.h"
 #include "CkCore/Ensure/CkEnsure.h"
 
 #include "CkAssetRegistrySubsystem.h"

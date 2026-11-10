@@ -1,4 +1,5 @@
 #include "CkAngelscriptGenerator_DriftCommandlet.h"
+#include "CkCore/Macros/CkMacros.h"
 
 #include "CkAngelscriptGenerator/AutoTests/CkAutoTestWrapperGenerator.h"
 #include "CkAngelscriptGenerator/CkAngelscriptEntityScriptParamsGenerator.h"

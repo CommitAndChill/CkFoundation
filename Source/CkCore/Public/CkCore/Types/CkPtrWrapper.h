@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CkCore/Macros/CkMacros.h"
+#include "CkCore/Validation/CkIsValid.h"
 #include "CkCore/TypeTraits/CkTypeTraits.h"
 
 namespace ck

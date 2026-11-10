@@ -1,4 +1,5 @@
 #include "CkGroundNav_Query_DynamicObstacles.h"
+#include "CkCore/Macros/CkMacros.h"
 
 #include <Algo/Sort.h>
 #include <cmath>
