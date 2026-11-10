@@ -410,7 +410,7 @@ namespace ck
         CK_ENSURE_IF_NOT(ck::IsValid(EntityScript),
             TEXT("EntityScript is INVALID for [{}] when attempting to invoke ContinueConstruction on it"), InHandle)
         {
-            InHandle.Remove<MarkedDirtyBy>();
+            InHandle.Remove<FRequest_EntityScript_Replicate>();
             return;
         }
 
@@ -436,7 +436,7 @@ namespace ck
         UCk_Utils_EntityScript_UE::Request_ReplicateEntityScript(InHandle, ReplicatedOwner, EntityScript.Get(), SpawnParamsCopy,
             InRequest.Get_ContextOwnerOverride());
 
-        InHandle.Remove<MarkedDirtyBy>();
+        InHandle.Remove<FRequest_EntityScript_Replicate>();
     }
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -449,6 +449,25 @@ namespace ck
             const FFragment_EntityScript& InEntityScript)
         -> void
     {
+        // The tag removed below is one the replicate processor's view requires, so a request still pending here would
+        // never be served. The request exists only for a Replicates script on a host; a driverless entity is the
+        // WithActor deferral (its driver arrives later); an editor-world entity never replicates.
+        CK_ENSURE_IF_NOT(NOT (InHandle.Has<FRequest_EntityScript_Replicate>()
+                and InHandle.Has<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>()
+                and NOT InHandle.Has<FTag_EditorOnlyEntity>()),
+            TEXT("EntityScript [{}] is finishing construction with its replicate request unserved; replicating it now. "
+                 "FProcessor_EntityScript_Replicate did not run between the request and the finish."), InHandle)
+        {
+            const auto Request = InHandle.Get<FRequest_EntityScript_Replicate>();
+            InHandle.Remove<FRequest_EntityScript_Replicate>();
+
+            if (ck::IsValid(Request.Get_Script()))
+            {
+                UCk_Utils_EntityScript_UE::Request_ReplicateEntityScript(InHandle, Request.Get_Owner(), Request.Get_Script().Get(),
+                    Request.Get_SpawnParams(), Request.Get_ContextOwnerOverride());
+            }
+        }
+
         InHandle.Remove<MarkedDirtyBy>();
 
         CK_CALLSTACK_RECORD_MSG(ck::FFragment_EntityScript, InHandle,

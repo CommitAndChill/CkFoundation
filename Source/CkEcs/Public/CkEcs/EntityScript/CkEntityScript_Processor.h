@@ -115,9 +115,14 @@ namespace ck
         using RunAfter = TDepList<FProcessor_EntityScript_ContinueConstruction>;
         static constexpr auto NetModeRequirement = ECk_ProcessorNetModeRequirement::AuthorityOnly;
         static constexpr auto WorldTypeRequirement = ECk_ProcessorWorldTypeRequirement::RuntimeOnly;
-        using MarkedDirtyBy = FRequest_EntityScript_Replicate;
+        // Either half of the view wakes it: a Continue-flow script finishes after a pass already saw its request with
+        // no finish tag, and only the tag then moves.
+        using MarkedDirtyByAnyOf = TDepList<FRequest_EntityScript_Replicate, FTag_EntityScript_FinishConstruction>;
         static constexpr auto LoadPolicy = ECk_ProcessorLoadPolicy::RunsDuringLoad; // load-gate kernel
         static constexpr auto HydrationQuarantinePolicy = ECk_ProcessorHydrationQuarantine::Exempt; // load-gate kernel
+        // Replayed by the settle barrier (not a trigger): a spawn the barrier executes is replicated in the same pass,
+        // before FinishConstruction consumes the tag this view requires.
+        using LocalSettleAfter = FGroup_Gameplay_Script;
 
     public:
         using TProcessor::TProcessor;

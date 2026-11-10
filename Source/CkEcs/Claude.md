@@ -320,7 +320,13 @@ Declared barriers: `Transform_HandleRequests` (trigger) + the `SceneNode_Update`
 after `FGroup_Transform_Derived`; and since 2026-08-24 the **SM cascade barrier** after
 `FGroup_Gameplay_Script` — 16 triggers (the CkStateMachine decision/exit chain in
 `FGroup_Gameplay_AI`, `SmScript_CommitPendingAttach`, and the four EntityScript pipeline
-processors), zero replay-only participants. It converges the event-driven SM transition cascade
+processors) and one replay-only participant, `FProcessor_EntityScript_Replicate`: a
+`Replicates` spawn the barrier executes must be replicated in the same pass, before
+`FinishConstruction` (a trigger) consumes the finish tag the replicate view requires; without
+it such a spawn is built on the host and never replicated. Its markers are the replicate
+request and that finish tag (`MarkedDirtyByAnyOf`), so a `Continue`-flow script whose finish
+lands after a pass already saw its request still wakes it; `FinishConstruction` ensures (and
+replicates) if a request is still unserved when it runs. It converges the event-driven SM transition cascade
 (task result → condition → transition → commit → exit → new state/task spawn →
 BeginPlay/EnterTask) before physics and the transform phases; polled and vacuous transitions
 still arm in the next main pass via `SmState_Update` (excluded on purpose — see
