@@ -2,6 +2,7 @@
 
 #include "CkCore/Build/CkBuild_Macros.h"
 #include "CkCore/Macros/CkMacros.h"
+#include "CkCore/Format/CkFormat.h"
 
 #include <HAL/PlatformMisc.h> // for PLATFORM_BREAK() + FPlatformMisc::IsDebuggerPresent()
 
