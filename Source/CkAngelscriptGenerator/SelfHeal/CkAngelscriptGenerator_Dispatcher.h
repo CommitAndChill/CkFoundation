@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 
 #include "CkAngelscriptGenerator/SelfHeal/CkAngelscriptGenerator_AsErrorParser.h"
+#include "CkAngelscriptGenerator/SelfHeal/CkAngelscriptGenerator_AsSourceScanner.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -22,6 +23,10 @@ namespace ck::angelscriptgenerator::self_heal
     {
         ECk_RecoveryStrategy Strategy = ECk_RecoveryStrategy::Unrecognized;
         FCk_AsParsedError    Error;
+
+        // For Quarantine_StaleEspCanonical, this is the canonical Classify resolved. For an
+        // added field the error is at the caller, so Error.FilePath is not this path.
+        FString              QuarantineCanonicalPath;
     };
 
     class CKANGELSCRIPTGENERATOR_API FCkAsRecoveryDispatcher
@@ -32,8 +37,29 @@ namespace ck::angelscriptgenerator::self_heal
 
         static constexpr int32 MaxPerSignatureRepeats = 3;
 
+        // The single-argument form probes the live ESP canonicals and Script/ trees,
+        // and only for a caller-side `'<Member>' is not a member of 'F<X>_SpawnParams'`.
+        // Every other error kind classifies without IO.
         static auto Classify       (const FCk_AsParsedError& InError) -> ECk_RecoveryStrategy;
+        static auto Classify(
+            const FCk_AsParsedError& InError,
+            const TArray<FString>&   InCanonicalCandidates,
+            const TArray<FString>&   InScanRoots,
+            FCk_AsSourceScanCache*   InScanCache,
+            FString*                 OutQuarantineCanonical = nullptr) -> ECk_RecoveryStrategy;
         static auto BuildActionPlan(const TArray<FCk_AsParsedError>& InDedupedRoots) -> TArray<FCk_RecoveryAction>;
+
+        // Added-field twin of the deleted-field quarantine: a caller sets a field
+        // that `U<X>`'s source declares ExposeOnSpawn, but the one present
+        // `*_EntitySpawnParams.as` canonical defining `F<X>_SpawnParams` predates it.
+        // Returns that canonical, or empty when any link of the evidence is missing.
+        // An empty result means a genuine authoring error, which must stay Unrecognized.
+        // Read-only, so it is safe inside OnReloadHadErrors.
+        static auto Find_StaleCanonical_ForAddedField(
+            const FCk_AsParsedError& InError,
+            const TArray<FString>&   InCanonicalCandidates,
+            const TArray<FString>&   InScanRoots,
+            FCk_AsSourceScanCache*   InScanCache = nullptr) -> FString;
 
         // Hook handler for FAngelscriptCodeModule::GetReloadHadErrors. Queues only —
         // applying strategies here is invisible to the hot-reload checker thread
