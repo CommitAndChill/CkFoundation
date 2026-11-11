@@ -219,6 +219,7 @@ the fix.
 
 | Mistake | Correction |
 |---|---|
+| Current-state block updated, status header left as it was | They are one edit: the header (`references/campaign-doc-templates.md` §3.3) is what the campaign board shows. Rewrite it at every gate and session end, then run the board's `validate` on the file |
 | Gate marked done in the index but not the gate file (or vice versa) | Both in ONE commit — or keep status in one place only (Exhibit A secondary drift) |
 | "Next session should…" written into an undated doc | Volatile state lives only in PROGRESS.md's current-state block; every campaign doc carries a freshness header + death condition |
 | Completion claimed while an open-items section is unresolved | DEBUG_CALLSTACK's "100% coverage" beside 19 unchecked modules — resolve or tombstone the open section first |

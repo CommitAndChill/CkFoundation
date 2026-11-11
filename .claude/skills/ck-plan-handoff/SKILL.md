@@ -87,7 +87,9 @@ spec, say so in PROMPT.md in one line and name what stands in its place.
   - Explicit fences: the wrong paths from Phase A, each with its reason.
 - **PROGRESS.md** — from the ck-methodology template, pre-filled with all
   phases, plus a **Blockers** section the executor must use instead of
-  improvising.
+  improvising. Its status header (template §3.3) lists every phase, the
+  first one `next`; rewriting that header is part of each phase's exit
+  steps.
 - **VALIDATION.md** (final phase) — the full acceptance protocol: headless
   test commands with expected results, three-environment checks,
   `[EDITOR-VERIFY]` steps for the human, and the definition of done routed

@@ -122,9 +122,25 @@ lists 19 unchecked modules (a self-contradiction a reader cannot resolve); and i
 that no longer exist (CkEcsTemplate/CkTemplate — removed in `ad045415b`).
 
 ```markdown
+---
+{
+  "campaign": "<Campaign>",
+  "status": "active",
+  "updated": "YYYY-MM-DD",
+  "phases": [
+    {"id": "G0", "title": "<a few words>", "state": "done", "commit": "<hash>"},
+    {"id": "G1", "title": "<a few words>", "state": "next"},
+    {"id": "G2", "title": "<a few words>", "state": "pending"}
+  ],
+  "next": "<one line, the same as Next action below>",
+  "blocked_on": null,
+  "owed_by_maintainer": []
+}
+---
+
 # <Campaign> — PROGRESS.md (living log)
 
-## Current state  <!-- supersedes everything below; update at EVERY gate and session end -->
+## Current state  <!-- supersedes everything below; update at EVERY gate and session end, together with the status header above -->
 **As of YYYY-MM-DD (commit <hash>):** Gate N done; Gate N+1 in progress at <work item>.
 **Baseline being diffed against:** <test pass/fail counts + failing names, captured YYYY-MM-DD>.
 **Next action:** <one line>.
@@ -147,3 +163,19 @@ promoted from these rows.)
 **Rule: no completion claim may be written anywhere in this file while any row here is unresolved.**
 ```
 
+**The status header** (the JSON object between the two `---` lines) is the machine-readable twin of
+the current-state block. The campaign board (`CkAuto/CampaignBoard/`; the full contract is its
+`README.md`) reads that header and nothing else, so one page can show every campaign's gates, its
+next action and what is waiting on the maintainer, without anyone parsing prose.
+
+- It is rewritten **in the same edit** as the current-state block, at every gate and at session end,
+  with `updated` set to that day. A header that disagrees with the block under it is Exhibit A's
+  drift in a new place.
+- `status` is `active`, `awaiting-review` (every gate ran; the maintainer owes a review, an
+  `[EDITOR-VERIFY]` pass, a commit or a ruling), `parked`, `done` (nothing owed) or `superseded`.
+  A phase `state` is `done`, `active`, `next`, `pending`, `blocked` or `skipped`.
+- `owed_by_maintainer` lists only what the maintainer alone can do, one line each. Commit hashes go
+  in a phase's `commit` (or a top-level `commits` list); the board works out which are unpushed, so
+  "push" is never an owed item.
+- Check it before ending the session:
+  `python CkAuto/CampaignBoard/campaign_board.py validate <path to PROGRESS.md>`.
