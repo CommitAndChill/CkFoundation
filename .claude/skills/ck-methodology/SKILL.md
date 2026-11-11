@@ -215,6 +215,21 @@ the fix.
 
   Code moved and the doc didn't → distrust the doc; update or tombstone it FIRST, then work.
 
+## 8. Executors — where the time and the tokens go
+
+An executor re-reads its whole context on every request, and a fresh-boot test run costs minutes of editor boot
+whatever it selects. Measured on one executor phase (2026-11-11): 127 requests over a context that reached 330k
+tokens; 18 of them were one-line "run green, waiting" wake-ups during a 39-run sweep, which cost 5.9M cached-input
+tokens for 2.9k tokens of output; and the accepting session was about to run the same sweep a second time.
+
+| Rule | Why |
+|---|---|
+| The executor runs the build, the phase's own tests and one run per feature it edited. The wide regression list runs **once**, on the executor's final tree, by the session that accepts the phase | Two sessions running one list doubles the slowest step of every phase |
+| A sweep of several runs is ONE background command that prints one table at the end (`CkAuto/.claude/skills/build-test/lane-sweep.sh` for focused patterns). The agent waits for it to exit: no per-run watch, no "waiting" turns | Every wake is a full context read; the sweep itself needs no model |
+| A phase doc is self-sufficient and cites `file:line-range`. The executor opens no research notes, no earlier phase doc and no whole log (`grep`, then `cut -c1-300 \| head`) | Whatever an executor reads, it re-reads on every later request |
+| While a sweep runs, the accepting session reads the diff and writes the next phase's doc. Nobody edits a script or source file until the sweep ends | The sweep is the wall-clock floor of a phase; idle waiting adds to it |
+| A run's own artifact (its exit code and summary block) is evidence when no source file is newer than the run. Read it instead of repeating the run; after an audit edit, re-run what the edit touches | An identical run on an identical tree is not more evidence. A report *about* the run is still only a claim (§6) |
+| Stop a sweep with its stop file | Killing the wrapper of a chained background command lets the next command start, and two toolbox runs then overlap and void each other |
 ## Common mistakes
 
 | Mistake | Correction |
@@ -229,6 +244,8 @@ the fix.
 | "No regressions" without a recorded baseline | Capture counts + failing names at gate entry; diff at exit |
 | Green suite treated as gate exit | Run the gate's own expected observations; a suite says nothing about paths it doesn't exercise |
 | CTO brief's locked-decisions written from memory | Regenerate from the plan text at send time (CkEqs drift, flagged twice) |
+| Executor and accepting session both run the wide regression list | One of them, once, on the final tree (§8) |
+| An agent woken after every run of a sweep to say "green, waiting" | One background command, one table, one wake (§8) |
 | Treating a review blocker list as advisory | Sign-off conditions are gates; re-review maps each to its resolution before work starts |
 
 ## Provenance and maintenance

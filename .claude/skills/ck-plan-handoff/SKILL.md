@@ -85,6 +85,24 @@ spec, say so in PROMPT.md in one line and name what stands in its place.
     failing test from the executable spec, the exit criterion IS that test
     going green under the toolbox.
   - Explicit fences: the wrong paths from Phase A, each with its reason.
+  - **A verification budget**: which runs are the executor's (the build,
+    the phase's own tests, one run per feature it edits) and which belong
+    to the session that accepts the phase (the wide regression list, run
+    once, on the executor's final tree). A list both sessions run is the
+    slowest step of the phase paid for twice.
+
+  **Write every phase for the executor's context, which it re-reads on
+  every request** (a request that only says "still waiting" included):
+  - The phase doc is self-sufficient. What the executor must read is cited
+    as `file:line-range`; it is never sent to research notes, an earlier
+    phase doc or a whole log.
+  - Any step that runs more than one test run is ONE background command
+    that prints one table at the end (for focused test patterns:
+    `CkAuto/.claude/skills/build-test/lane-sweep.sh`). The step says so,
+    and says to wait for the command to exit: no per-run watch, no
+    narrated waiting.
+  - A step that can fail to compile says to fix every reported error
+    before the next boot, not one error per boot.
 - **PROGRESS.md** — from the ck-methodology template, pre-filled with all
   phases, plus a **Blockers** section the executor must use instead of
   improvising. Its status header (template §3.3) lists every phase, the
@@ -103,6 +121,10 @@ Re-read the package as a Sonnet-class executor with no context:
 - Does any gate lack an "anything else → STOP" branch? Add it.
 - Does any phase require a design decision? Pull it back into PROMPT.md.
 - Is every command/path/signature verified against the repo this session?
+- Does any phase have the executor run a regression list that the
+  accepting session will run again? Give it to one of them.
+- Can the executor finish a phase from the phase doc and the line ranges
+  it cites, without opening research notes or another phase doc?
 Then hand the user: the package file list, the one paragraph they'd paste to
 start executor session 1, and your confidence (high/medium) per phase with
 the reason for anything medium.
