@@ -58,7 +58,8 @@ namespace ck::angelscriptgenerator::self_heal
         TMap<FString, FConvergenceTracker> sPerSignatureRecoveryCount;
         TSet<FString>                      sBlacklistedSignatures;
 
-        // Canonicals quarantined this session (absolute path) — one shot each.
+        // Quarantine attempts this session, one shot each: the canonical's absolute path,
+        // or `<path>|<Struct>.<Member>` for an added field (see Apply_QuarantineStaleEspCanonical).
         // The guard is added on the ATTEMPT, not on success, so a FAILED
         // quarantine cannot loop either (mid-session has no MaxCycles cap).
         TSet<FString> sQuarantinedEspCanonicals;
@@ -130,8 +131,9 @@ namespace ck::angelscriptgenerator::self_heal
 
         // These are the ONLY generated files the dispatcher may delete — the one
         // sanctioned canonical mutation. TRACKED generated files never carry this
-        // suffix, so they can never be quarantined. Deliberately IO-free, so
-        // classification stays deterministic and unit-testable.
+        // suffix, so they can never be quarantined. Deliberately IO-free: the
+        // location rules stay deterministic, and only the caller-side
+        // added-field probe (Find_StaleCanonical_ForAddedField) reads files.
         auto Is_EntitySpawnParamsCanonicalPath(
             const FString& InFilePath) -> bool
         {
@@ -316,16 +318,28 @@ namespace ck::angelscriptgenerator::self_heal
             return IsStructShapedError ? InError.MissingIdentifier : FString{};
         }
 
-        // For a stale canonical referencing a deleted type, the error's FilePath
-        // IS the canonical. Passing NO seed classes makes the rebuild enumerate
-        // the union from the canonical's own blocks, so every shape it covered is
-        // rebuilt in ONE pass rather than one cycle per orphaned class.
+        // For a stale canonical referencing a deleted type or field, the error's
+        // FilePath IS the canonical. For an added field the error is at the
+        // CALLER, and Classify resolved the canonical once and carried it on the
+        // action (InQuarantineCanonical). Passing NO seed classes makes the
+        // rebuild enumerate the union from the canonical's own blocks, so every
+        // shape it covered is rebuilt in ONE pass rather than one cycle per
+        // orphaned class.
+        //
+        // One-shot keys: the located-in-canonical heals key on the canonical
+        // alone. An added field keys on `<canonical>|<Struct>.<Member>`, so each
+        // distinct added field gets one attempt and never spends the
+        // deleted-field budget. The loop is still bounded at one lap when the
+        // scanner and the real generator disagree on a member (quarantine, then
+        // the regenerated canonical still lacks it, then the caller fails again).
         auto Apply_QuarantineStaleEspCanonical(
             const FCk_AsParsedError& InError,
+            const FString&           InQuarantineCanonical,
             const TArray<FString>&   InScanRoots,
             FCk_AsSourceScanCache*   InScanCache) -> bool
         {
-            const auto& CanonicalPath = InError.FilePath;
+            const auto ErrorIsInCanonical = Is_EntitySpawnParamsCanonicalPath(InError.FilePath);
+            const auto& CanonicalPath = ErrorIsInCanonical ? InError.FilePath : InQuarantineCanonical;
 
             // Defense in depth — Classify already gated on this; re-checked so a
             // future caller can't route a TRACKED generated file into a delete.
@@ -336,17 +350,40 @@ namespace ck::angelscriptgenerator::self_heal
                 return false;
             }
 
-            if (sQuarantinedEspCanonicals.Contains(CanonicalPath))
+            // Several roots in one drain can share a canonical, for example callers of one added
+            // field in N files. The first root deletes it, and the rest have nothing left to do.
+            if (NOT IFileManager::Get().FileExists(*CanonicalPath))
             {
-                Log(TEXT("[SelfHeal] Canonical '{}' already quarantined this session - not retrying."),
-                    CanonicalPath);
+                Log(TEXT("[SelfHeal] Canonical '{}' is already gone (quarantined by an earlier root) - nothing to do for '{}.{}' at {}:{}:{}."),
+                    CanonicalPath, InError.LookupScope, InError.MissingIdentifier, InError.FilePath, InError.Line, InError.Column);
                 return false;
             }
-            sQuarantinedEspCanonicals.Add(CanonicalPath);
 
-            Log(TEXT("[SelfHeal] Stale canonical '{}' references a deleted symbol ('{}' @ {}:{}) - ")
-                TEXT("quarantining + rebuilding full shapes from source."),
-                CanonicalPath, InError.MissingIdentifier, InError.Line, InError.Column);
+            const auto AttemptKey = ErrorIsInCanonical
+                ? CanonicalPath
+                : FString::Printf(TEXT("%s|%s.%s"), *CanonicalPath, *InError.LookupScope, *InError.MissingIdentifier);
+
+            if (sQuarantinedEspCanonicals.Contains(AttemptKey))
+            {
+                Log(TEXT("[SelfHeal] Quarantine '{}' already attempted this session - not retrying."),
+                    AttemptKey);
+                return false;
+            }
+            sQuarantinedEspCanonicals.Add(AttemptKey);
+
+            if (ErrorIsInCanonical)
+            {
+                Log(TEXT("[SelfHeal] Stale canonical '{}' references a deleted symbol ('{}' @ {}:{}) - ")
+                    TEXT("quarantining + rebuilding full shapes from source."),
+                    CanonicalPath, InError.MissingIdentifier, InError.Line, InError.Column);
+            }
+            else
+            {
+                Log(TEXT("[SelfHeal] Stale canonical '{}' predates field '{}.{}', which the source declares ")
+                    TEXT("(caller {}:{}:{}) - quarantining + rebuilding full shapes from source."),
+                    CanonicalPath, InError.LookupScope, InError.MissingIdentifier,
+                    InError.FilePath, InError.Line, InError.Column);
+            }
 
             const auto Quarantined = FCkAsStubSynthesizer::Quarantine_And_ResynthesizeFullShapes(
                 CanonicalPath, /*InSeedClassNames=*/{}, InError, InScanRoots, InScanCache);
@@ -369,6 +406,7 @@ namespace ck::angelscriptgenerator::self_heal
         auto Apply_Strategy(
             ECk_RecoveryStrategy     InStrategy,
             const FCk_AsParsedError& InError,
+            const FString&           InQuarantineCanonical,
             const TArray<FString>&   InCandidates,
             const TArray<FString>&   InScanRoots,
             FCk_AsSourceScanCache*   InScanCache) -> bool
@@ -516,7 +554,7 @@ namespace ck::angelscriptgenerator::self_heal
 
                 case ECk_RecoveryStrategy::Quarantine_StaleEspCanonical:
                 {
-                    return Apply_QuarantineStaleEspCanonical(InError, InScanRoots, InScanCache);
+                    return Apply_QuarantineStaleEspCanonical(InError, InQuarantineCanonical, InScanRoots, InScanCache);
                 }
 
                 case ECk_RecoveryStrategy::Author_FixupRequired_AdjacentStringLiteral:
@@ -649,6 +687,13 @@ namespace ck::angelscriptgenerator::self_heal
                 }
                 case ECk_RecoveryStrategy::Quarantine_StaleEspCanonical:
                 {
+                    // Added field: the error sits at the caller, so FilePath is not the canonical.
+                    if (NOT Is_EntitySpawnParamsCanonicalPath(InAction.Error.FilePath))
+                    {
+                        return FString::Printf(TEXT("quarantine stale canonical %s (field '%s.%s' added in source)"),
+                            *InAction.QuarantineCanonicalPath, *InAction.Error.LookupScope, *InAction.Error.MissingIdentifier);
+                    }
+
                     const auto DeadSymbol = InAction.Error.Kind == ECk_AsParsedError_Kind::NotAMemberOfStruct
                         ? FString::Printf(TEXT("dead field '%s.%s'"),
                             *InAction.Error.LookupScope, *InAction.Error.MissingIdentifier)
@@ -1081,7 +1126,7 @@ namespace ck::angelscriptgenerator::self_heal
             {
                 if (NOT Try_ReserveSynthesis(Action))
                 { continue; }
-                if (Apply_Strategy(Action.Strategy, Action.Error, DrainCandidates, DrainScanRoots, &DrainScanCache))
+                if (Apply_Strategy(Action.Strategy, Action.Error, Action.QuarantineCanonicalPath, DrainCandidates, DrainScanRoots, &DrainScanCache))
                 { AppliedActions.Add(Action); }
             }
             const auto QueuedCount = sPendingActions.Num();
@@ -1139,7 +1184,7 @@ namespace ck::angelscriptgenerator::self_heal
             {
                 if (NOT Try_ReserveSynthesis(Action))
                 { continue; }
-                if (Apply_Strategy(Action.Strategy, Action.Error, DrainCandidates, DrainScanRoots, &DrainScanCache))
+                if (Apply_Strategy(Action.Strategy, Action.Error, Action.QuarantineCanonicalPath, DrainCandidates, DrainScanRoots, &DrainScanCache))
                 { AppliedActions.Add(Action); }
             }
             const auto QueuedCount = sPendingActions.Num();
@@ -1207,7 +1252,7 @@ namespace ck::angelscriptgenerator::self_heal
             {
                 if (NOT Try_ReserveSynthesis(Action))
                 { continue; }
-                if (Apply_Strategy(Action.Strategy, Action.Error, DrainCandidates, DrainScanRoots, &DrainScanCache))
+                if (Apply_Strategy(Action.Strategy, Action.Error, Action.QuarantineCanonicalPath, DrainCandidates, DrainScanRoots, &DrainScanCache))
                 { AppliedActions.Add(Action); }
             }
             const auto QueuedCount = sPendingActions.Num();
@@ -1250,10 +1295,107 @@ namespace ck::angelscriptgenerator::self_heal
 
     auto
         FCkAsRecoveryDispatcher::
+        Find_StaleCanonical_ForAddedField(
+            const FCk_AsParsedError& InError,
+            const TArray<FString>&   InCanonicalCandidates,
+            const TArray<FString>&   InScanRoots,
+            FCk_AsSourceScanCache*   InScanCache)
+        -> FString
+    {
+        if (InError.Kind != ECk_AsParsedError_Kind::NotAMemberOfStruct)
+        { return FString{}; }
+
+        const auto ClassName = FCkAsStubSynthesizer::Derive_ClassNameFromStructName(InError.LookupScope);
+        if (ClassName.IsEmpty() || InError.MissingIdentifier.IsEmpty())
+        { return FString{}; }
+
+        // The few candidate canonicals are cheaper than a source scan, so check them first.
+        // With no canonical (a fresh clone running on recovery stubs), nothing is stale.
+        // A struct defined in two canonicals is ambiguous, and an ambiguous match is never deleted.
+        auto StaleCanonical = FString{};
+        for (const auto& Candidate : InCanonicalCandidates)
+        {
+            if (NOT ck_angelscript_generator_dispatcher::Is_EntitySpawnParamsCanonicalPath(Candidate))
+            { continue; }
+
+            // Candidate canonicals are cached next to source contents (keyed by
+            // path, so no collision: the scanner never enumerates Generated/). A
+            // plan with callers in N files then reads each canonical once.
+            auto LocalContents = FString{};
+            const FString* Contents = nullptr;
+            if (InScanCache != nullptr)
+            { Contents = InScanCache->ContentsByPath.Find(Candidate); }
+            if (Contents == nullptr)
+            {
+                FFileHelper::LoadFileToString(LocalContents, *Candidate);
+                Contents = InScanCache != nullptr
+                    ? &InScanCache->ContentsByPath.Add(Candidate, MoveTemp(LocalContents))
+                    : &LocalContents;
+            }
+
+            if (NOT FCkAsStubSynthesizer::Has_SpawnParamsStruct(*Contents, InError.LookupScope))
+            { continue; }
+
+            if (NOT StaleCanonical.IsEmpty())
+            { return FString{}; }
+            StaleCanonical = Candidate;
+        }
+
+        if (StaleCanonical.IsEmpty())
+        { return FString{}; }
+
+        // The source must declare the member as ExposeOnSpawn, or the generator would never emit it.
+        // A misspelled or unexposed field fails here and stays an authoring error.
+        const auto Shape = FCkAsSourceScanner::Scan_ClassShape(ClassName, InScanRoots, InScanCache);
+        if (NOT Shape.Found)
+        { return FString{}; }
+
+        const auto SourceDeclaresMember = Shape.FlattenedProperties.ContainsByPredicate(
+            [&](const FCk_AsExposedProperty& InProperty)
+            { return InProperty.Name.Equals(InError.MissingIdentifier, ESearchCase::CaseSensitive); });
+
+        return SourceDeclaresMember ? StaleCanonical : FString{};
+    }
+
+    // ----------------------------------------------------------------------------------------------------------------
+
+    auto
+        FCkAsRecoveryDispatcher::
         Classify(
             const FCk_AsParsedError& InError)
         -> ECk_RecoveryStrategy
     {
+        // Only this shape needs the live file system; everything else classifies on its text alone.
+        const auto NeedsAddedFieldProbe =
+               InError.Kind == ECk_AsParsedError_Kind::NotAMemberOfStruct
+            && NOT ck_angelscript_generator_dispatcher::Is_EntitySpawnParamsCanonicalPath(InError.FilePath)
+            && NOT FCkAsStubSynthesizer::Derive_ClassNameFromStructName(InError.LookupScope).IsEmpty();
+
+        if (NOT NeedsAddedFieldProbe)
+        { return Classify(InError, {}, {}, nullptr); }
+
+        auto ScanCache = FCk_AsSourceScanCache{};
+        return Classify(InError,
+            ck_angelscript_generator_dispatcher::Collect_EntitySpawnParamsCandidates(),
+            FCkAsSourceScanner::Get_DefaultScanRoots(),
+            &ScanCache);
+    }
+
+    // ----------------------------------------------------------------------------------------------------------------
+
+    auto
+        FCkAsRecoveryDispatcher::
+        Classify(
+            const FCk_AsParsedError& InError,
+            const TArray<FString>&   InCanonicalCandidates,
+            const TArray<FString>&   InScanRoots,
+            FCk_AsSourceScanCache*   InScanCache,
+            FString*                 OutQuarantineCanonical)
+        -> ECk_RecoveryStrategy
+    {
+        if (OutQuarantineCanonical != nullptr)
+        { OutQuarantineCanonical->Reset(); }
+
         switch (InError.Kind)
         {
             case ECk_AsParsedError_Kind::NoMatchingSignatures:
@@ -1308,7 +1450,22 @@ namespace ck::angelscriptgenerator::self_heal
                 // it; the identical error in author source stays Unrecognized,
                 // because a real authoring bug must not be papered over.
                 if (ck_angelscript_generator_dispatcher::Is_EntitySpawnParamsCanonicalPath(InError.FilePath))
-                { return ECk_RecoveryStrategy::Quarantine_StaleEspCanonical; }
+                {
+                    if (OutQuarantineCanonical != nullptr)
+                    { *OutQuarantineCanonical = InError.FilePath; }
+                    return ECk_RecoveryStrategy::Quarantine_StaleEspCanonical;
+                }
+
+                // The ADDED-field twin, reported at the CALLER: the source declares the field,
+                // but the machine-local canonical predates it. This needs evidence from both
+                // the source and the canonical, so a genuine typo still stays Unrecognized.
+                if (auto StaleCanonical = Find_StaleCanonical_ForAddedField(InError, InCanonicalCandidates, InScanRoots, InScanCache);
+                    NOT StaleCanonical.IsEmpty())
+                {
+                    if (OutQuarantineCanonical != nullptr)
+                    { *OutQuarantineCanonical = MoveTemp(StaleCanonical); }
+                    return ECk_RecoveryStrategy::Quarantine_StaleEspCanonical;
+                }
 
                 return ECk_RecoveryStrategy::Unrecognized;
             }
@@ -1332,10 +1489,28 @@ namespace ck::angelscriptgenerator::self_heal
         auto Plan = TArray<FCk_RecoveryAction>{};
         Plan.Reserve(InDedupedRoots.Num());
 
+        // The live probe inputs are built once per plan, not once per root. A plan
+        // with several caller-side SpawnParams member errors then walks the
+        // Script/ tree once. The cache lives only for this plan, well inside its
+        // contract of a single drain.
+        auto ProbeCandidates = TArray<FString>{};
+        auto ProbeScanRoots  = TArray<FString>{};
+        auto ProbeScanCache  = FCk_AsSourceScanCache{};
+        auto ProbeInputsBuilt = false;
+
         for (const auto& Root : InDedupedRoots)
         {
+            if (NOT ProbeInputsBuilt
+                && Root.Kind == ECk_AsParsedError_Kind::NotAMemberOfStruct
+                && NOT FCkAsStubSynthesizer::Derive_ClassNameFromStructName(Root.LookupScope).IsEmpty())
+            {
+                ProbeCandidates  = ck_angelscript_generator_dispatcher::Collect_EntitySpawnParamsCandidates();
+                ProbeScanRoots   = FCkAsSourceScanner::Get_DefaultScanRoots();
+                ProbeInputsBuilt = true;
+            }
+
             auto Action     = FCk_RecoveryAction{};
-            Action.Strategy = Classify(Root);
+            Action.Strategy = Classify(Root, ProbeCandidates, ProbeScanRoots, &ProbeScanCache, &Action.QuarantineCanonicalPath);
             Action.Error    = Root;
             Plan.Add(MoveTemp(Action));
         }
