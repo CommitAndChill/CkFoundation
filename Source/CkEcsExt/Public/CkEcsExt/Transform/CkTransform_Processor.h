@@ -149,6 +149,38 @@ namespace ck
             const FCk_Request_Transform_SetScale& InRequest) -> void;
     };
 
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // Releases the replicated pose held for an entity declared YieldsToSceneNodeParent. Placed directly before the
+    // request drain so no attach can fall between the parent-driven check here and the drain's own: a parent-driven
+    // node discards the mark, any other applies the driver's latest received entries. The mark is always consumed.
+    class CKECSEXT_API FProcessor_Transform_ApplyReplicatedPose : public ck_exp::TProcessor<
+            FProcessor_Transform_ApplyReplicatedPose,
+            FCk_Handle_Transform,
+            ck::TReadOnly<FFragment_Transform_PendingReplicatedPose>,
+            TExclude<FTag_DestroyEntity_Initiate>,
+            CK_IGNORE_PENDING_KILL>
+    {
+    public:
+        using Group = FGroup_Transform;
+        using RunBefore = TDepList<FProcessor_Transform_HandleRequests>;
+        static constexpr auto NetModeRequirement = ECk_ProcessorNetModeRequirement::ClientOnly;
+        static constexpr auto WorldTypeRequirement = ECk_ProcessorWorldTypeRequirement::RuntimeOnly;
+        using MarkedDirtyBy = FFragment_Transform_PendingReplicatedPose;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        static auto
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_Transform_PendingReplicatedPose& InPending) -> void;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
     class CKECSEXT_API FProcessor_Transform_SyncToActor : public ck_exp::TProcessor<
             FProcessor_Transform_SyncToActor,
             FCk_Handle_Transform,

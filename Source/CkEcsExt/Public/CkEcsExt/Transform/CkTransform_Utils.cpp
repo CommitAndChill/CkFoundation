@@ -3,6 +3,7 @@
 #include "CkEcsExt/CkEcsExt_Log.h"
 
 #include "CkEcs/Net/CkNet_Utils.h"
+#include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_Fragment.h"
 
 #include <Components/MeshComponent.h>
 #include <Components/PrimitiveComponent.h>
@@ -363,6 +364,159 @@ auto
     { RequestsFragment._ScaleRequests->TryFireCompletion(InHandle, ECk_Request_OperationResult::Failed); }
 
     RequestsFragment._ScaleRequests = ScaleRequest;
+}
+
+auto
+    UCk_Utils_Transform_UE::
+    Request_SetReplicatedPosePolicy(
+        FCk_Handle_Transform& InHandle,
+        ECk_Transform_ReplicatedPosePolicy InPolicy,
+        const FCk_Delegate_Request_OnCompleted& InDelegate)
+    -> FCk_Handle_Transform
+{
+    switch (InPolicy)
+    {
+        case ECk_Transform_ReplicatedPosePolicy::AlwaysApplied:
+        {
+            InHandle.Try_Remove<ck::FTag_Transform_ReplicatedPoseYieldsToParent>();
+            InHandle.Try_Remove<ck::FFragment_Transform_PendingReplicatedPose>();
+            break;
+        }
+        case ECk_Transform_ReplicatedPosePolicy::YieldsToSceneNodeParent:
+        {
+            InHandle.AddOrGet<ck::FTag_Transform_ReplicatedPoseYieldsToParent>();
+            break;
+        }
+    }
+
+    // Immediate mutation — nothing is enqueued, so completion is synchronous on this stack.
+    InDelegate.ExecuteIfBound(InHandle, ECk_Request_OperationResult::Succeeded);
+
+    return InHandle;
+}
+
+auto
+    UCk_Utils_Transform_UE::
+    Get_ReplicatedPosePolicy(
+        const FCk_Handle_Transform& InHandle)
+    -> ECk_Transform_ReplicatedPosePolicy
+{
+    return Get_IsReplicatedPoseYieldingToParent(InHandle)
+        ? ECk_Transform_ReplicatedPosePolicy::YieldsToSceneNodeParent
+        : ECk_Transform_ReplicatedPosePolicy::AlwaysApplied;
+}
+
+auto
+    UCk_Utils_Transform_UE::
+    Apply_ReplicatedLocation(
+        FCk_Handle_Transform& InHandle,
+        const FVector& InLocation,
+        bool InSnap)
+    -> void
+{
+    if (NOT InSnap && UCk_Utils_TransformInterpolation_UE::Has(InHandle))
+    {
+        auto HandleTransformInterpolation = UCk_Utils_TransformInterpolation_UE::CastChecked(InHandle);
+        const auto CurrentLoc = Get_EntityCurrentLocation(InHandle);
+        UCk_Utils_TransformInterpolation_UE::Request_SetInterpolationGoal_LocationOffset(
+            HandleTransformInterpolation, InLocation - CurrentLoc);
+        return;
+    }
+
+    Request_SetLocation(InHandle, FCk_Request_Transform_SetLocation{InLocation}, {});
+}
+
+auto
+    UCk_Utils_Transform_UE::
+    Apply_ReplicatedRotation(
+        FCk_Handle_Transform& InHandle,
+        const FQuat& InRotation,
+        bool InSnap)
+    -> void
+{
+    if (NOT InSnap && UCk_Utils_TransformInterpolation_UE::Has(InHandle))
+    {
+        auto HandleTransformInterpolation = UCk_Utils_TransformInterpolation_UE::CastChecked(InHandle);
+        const auto CurrentRot = Get_EntityCurrentRotation(InHandle);
+        UCk_Utils_TransformInterpolation_UE::Request_SetInterpolationGoal_RotationOffset(
+            HandleTransformInterpolation, InRotation.Rotator() - CurrentRot);
+        return;
+    }
+
+    Request_SetRotation(InHandle, FCk_Request_Transform_SetRotation{InRotation.Rotator()}, {});
+}
+
+auto
+    UCk_Utils_Transform_UE::
+    Apply_ReplicatedScale(
+        FCk_Handle_Transform& InHandle,
+        const FVector& InScale)
+    -> void
+{
+    Request_SetScale(InHandle,
+        FCk_Request_Transform_SetScale{InScale}
+            .Set_LocalWorld(ECk_LocalWorld::World), {});
+}
+
+auto
+    UCk_Utils_Transform_UE::
+    Get_IsReplicatedPoseYieldingToParent(
+        const FCk_Handle_Transform& InHandle)
+    -> bool
+{
+    return InHandle.Has<ck::FTag_Transform_ReplicatedPoseYieldsToParent>();
+}
+
+auto
+    UCk_Utils_Transform_UE::
+    Request_MarkReplicatedPosePending(
+        FCk_Handle_Transform& InHandle,
+        ECk_TransformComponents InComponents,
+        ECk_TransformComponents InSnapComponents)
+    -> void
+{
+    auto& Pending = InHandle.AddOrGet<ck::FFragment_Transform_PendingReplicatedPose>();
+    Pending._Components |= InComponents;
+    Pending._SnapComponents |= InSnapComponents;
+}
+
+auto
+    UCk_Utils_Transform_UE::
+    OnSceneNode_AttachedToParent(
+        FCk_Handle_Transform& InHandle)
+    -> void
+{
+    if (NOT Get_IsReplicatedPoseYieldingToParent(InHandle))
+    { return; }
+
+    // A goal or a pose still in flight would issue a world write on what is now a derived pose.
+    InHandle.Try_Remove<ck::FFragment_TransformInterpolation_NewGoal_Location>();
+    InHandle.Try_Remove<ck::FFragment_TransformInterpolation_NewGoal_Rotation>();
+    InHandle.Try_Remove<ck::FFragment_Transform_PendingReplicatedPose>();
+}
+
+auto
+    UCk_Utils_Transform_UE::
+    OnSceneNode_Detached(
+        FCk_Handle_Transform& InHandle)
+    -> void
+{
+    if (NOT Get_IsReplicatedPoseYieldingToParent(InHandle))
+    { return; }
+
+    if (UCk_Utils_Net_UE::Get_IsEntityNetMode_Host(InHandle))
+    { return; }
+
+    if (NOT InHandle.Has<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>())
+    { return; }
+
+    InHandle.Try_Remove<ck::FFragment_TransformInterpolation_NewGoal_Location>();
+    InHandle.Try_Remove<ck::FFragment_TransformInterpolation_NewGoal_Rotation>();
+
+    // Marked, never queued: a re-attach later on this stack discards the mark, so it leaves nothing to reject.
+    Request_MarkReplicatedPosePending(InHandle,
+        ECk_TransformComponents::Location | ECk_TransformComponents::Rotation | ECk_TransformComponents::Scale,
+        ECk_TransformComponents::None);
 }
 
 auto

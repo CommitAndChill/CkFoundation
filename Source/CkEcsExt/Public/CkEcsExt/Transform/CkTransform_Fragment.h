@@ -31,7 +31,35 @@ namespace ck
     // semantics): SyncFrom* back off, SyncToActor still pushes. See CkEcsExt/CLAUDE.md § "SceneNode Unreal anchors".
     CK_DEFINE_ECS_TAG(FTag_Transform_ExternallyDriven);
 
+    // ECk_Transform_ReplicatedPosePolicy::YieldsToSceneNodeParent: a replicated pose never writes this entity's world
+    // transform while it is parent-driven, and re-applies on detach. Acts only on a machine without authority.
+    CK_DEFINE_ECS_TAG(FTag_Transform_ReplicatedPoseYieldsToParent);
+
     // --------------------------------------------------------------------------------------------------------------------
+
+    // Replicated pose components that arrived (or were re-marked by a detach) for a declared entity and are not
+    // applied yet. Local to the machine that received them; FProcessor_Transform_ApplyReplicatedPose consumes it.
+    struct FFragment_Transform_PendingReplicatedPose
+    {
+    public:
+        CK_GENERATED_BODY(FFragment_Transform_PendingReplicatedPose);
+
+    public:
+        friend class FProcessor_Transform_ApplyReplicatedPose;
+        friend UCk_Utils_Transform_UE;
+
+    private:
+        ECk_TransformComponents _Components = ECk_TransformComponents::None;
+        // The subset of _Components whose latest arrival is the entry's first application.
+        ECk_TransformComponents _SnapComponents = ECk_TransformComponents::None;
+
+    public:
+        CK_PROPERTY_GET(_Components);
+        CK_PROPERTY_GET(_SnapComponents);
+
+    public:
+        CK_DEFINE_CONSTRUCTORS(FFragment_Transform_PendingReplicatedPose, _Components, _SnapComponents);
+    };
 
 
     // --------------------------------------------------------------------------------------------------------------------

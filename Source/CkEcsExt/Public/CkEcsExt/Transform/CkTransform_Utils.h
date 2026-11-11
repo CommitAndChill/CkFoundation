@@ -212,7 +212,27 @@ public:
         const FCk_Request_Transform_SetTransform& InRequest,
         const FCk_Delegate_Request_OnCompleted& InDelegate);
 
+    /** Declare at composition, on every machine. Inert where the entity has authority. With YieldsToSceneNodeParent,
+     *  a machine without authority holds replicated poses while the entity has a scene-node parent and applies the
+     *  latest received location, rotation and scale once the parent is removed. Immediate. */
+    UFUNCTION(BlueprintCallable,
+              Category = "Ck|Utils|Transform",
+              DisplayName = "[Ck][Transform] Request Set Replicated Pose Policy",
+              meta = (AutoCreateRefTerm = "InDelegate"))
+    static FCk_Handle_Transform
+    Request_SetReplicatedPosePolicy(
+        UPARAM(ref) FCk_Handle_Transform& InHandle,
+        ECk_Transform_ReplicatedPosePolicy InPolicy,
+        const FCk_Delegate_Request_OnCompleted& InDelegate);
+
 public:
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|Transform",
+              DisplayName = "[Ck][Transform] Get Replicated Pose Policy")
+    static ECk_Transform_ReplicatedPosePolicy
+    Get_ReplicatedPosePolicy(
+        const FCk_Handle_Transform& InHandle);
+
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|Transform",
               DisplayName = "[Ck][Transform] Get Transform")
@@ -286,6 +306,48 @@ public:
         ck::FFragment_Transform& InTransformFragment,
         ck::FFragment_Transform_Previous& InPrevTransformFragment,
         const FTransform& InNewTransform) -> ECk_TransformComponents;
+
+public:
+    // The one apply path of a replicated pose: an interpolation goal when the entity interpolates and this is not a
+    // first application (InSnap false), otherwise the plain world request. Used by the net-apply handlers and by
+    // FProcessor_Transform_ApplyReplicatedPose.
+    static auto
+    Apply_ReplicatedLocation(
+        FCk_Handle_Transform& InHandle,
+        const FVector& InLocation,
+        bool InSnap) -> void;
+
+    static auto
+    Apply_ReplicatedRotation(
+        FCk_Handle_Transform& InHandle,
+        const FQuat& InRotation,
+        bool InSnap) -> void;
+
+    // Scale has no interpolation branch: every arrival is the plain world request.
+    static auto
+    Apply_ReplicatedScale(
+        FCk_Handle_Transform& InHandle,
+        const FVector& InScale) -> void;
+
+    static auto
+    Get_IsReplicatedPoseYieldingToParent(
+        const FCk_Handle_Transform& InHandle) -> bool;
+
+    // Records an arrival for a declared entity instead of applying it.
+    static auto
+    Request_MarkReplicatedPosePending(
+        FCk_Handle_Transform& InHandle,
+        ECk_TransformComponents InComponents,
+        ECk_TransformComponents InSnapComponents) -> void;
+
+    // Scene-node hooks; each returns at once for an undeclared entity.
+    static auto
+    OnSceneNode_AttachedToParent(
+        FCk_Handle_Transform& InHandle) -> void;
+
+    static auto
+    OnSceneNode_Detached(
+        FCk_Handle_Transform& InHandle) -> void;
 
 private:
     static auto

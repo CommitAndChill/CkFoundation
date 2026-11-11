@@ -33,6 +33,7 @@ CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_SyncFromActor);
 CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_SyncFromMeshSocket);
 CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_InterpolateToGoal_Location);
 CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_InterpolateToGoal_Rotation);
+CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_ApplyReplicatedPose);
 CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_HandleRequests);
 CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_SyncToActor);
 CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_FireSignals);
@@ -42,6 +43,25 @@ CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_RestoreRebaseCleanup);
 
 namespace ck_transform
 {
+    // A parent-driven SceneNode's Transform is derived from its local SceneNode offset and its parent's world
+    // transform; neither the request drain nor the replicated-pose release may write it.
+    template <typename THandle>
+    auto
+        Get_IsParentDrivenSceneNode(
+            const THandle& InHandle)
+        -> bool
+    {
+        const auto HasTransformAnchor =
+            InHandle.template Has_Any<ck::FFragment_Transform_MeshSocket, ck::FFragment_Transform_RootComponent>();
+        const auto IsParentDrivenSceneNode =
+            InHandle.template Has<ck::FFragment_SceneNode>()
+            && InHandle.template Has<ck::SceneNodeParent>()
+            && NOT InHandle.template Has<ck::FFragment_SceneNode_UnrealAnchor>()
+            && (NOT HasTransformAnchor || InHandle.template Has<ck::FTag_Transform_ExternallyDriven>());
+
+        return IsParentDrivenSceneNode;
+    }
+
     template <typename THandle>
     auto
         ResolveRestoreRebase(
@@ -234,6 +254,55 @@ namespace ck
     // --------------------------------------------------------------------------------------------------------------------
 
     auto
+        FProcessor_Transform_ApplyReplicatedPose::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_Transform_PendingReplicatedPose& InPending)
+        -> void
+    {
+        const auto Components = InPending.Get_Components();
+        const auto SnapComponents = InPending.Get_SnapComponents();
+
+        InHandle.Remove<MarkedDirtyBy>();
+
+        if (ck_transform::Get_IsParentDrivenSceneNode(InHandle))
+        { return; }
+
+        // A null entry means the authority never sent that component: there is nothing to apply for it.
+        if (EnumHasAnyFlags(Components, ECk_TransformComponents::Location))
+        {
+            if (const auto* Location = UCk_Utils_Net_UE::TryGetContainerFragmentData<FCk_RepData_Location>(InHandle);
+                Location != nullptr)
+            {
+                const auto Snap = EnumHasAnyFlags(SnapComponents, ECk_TransformComponents::Location);
+                UCk_Utils_Transform_UE::Apply_ReplicatedLocation(InHandle, Location->Value, Snap);
+            }
+        }
+
+        if (EnumHasAnyFlags(Components, ECk_TransformComponents::Rotation))
+        {
+            if (const auto* Rotation = UCk_Utils_Net_UE::TryGetContainerFragmentData<FCk_RepData_Rotation>(InHandle);
+                Rotation != nullptr)
+            {
+                const auto Snap = EnumHasAnyFlags(SnapComponents, ECk_TransformComponents::Rotation);
+                UCk_Utils_Transform_UE::Apply_ReplicatedRotation(InHandle, Rotation->Value, Snap);
+            }
+        }
+
+        if (EnumHasAnyFlags(Components, ECk_TransformComponents::Scale))
+        {
+            if (const auto* Scale = UCk_Utils_Net_UE::TryGetContainerFragmentData<FCk_RepData_Scale>(InHandle);
+                Scale != nullptr)
+            {
+                UCk_Utils_Transform_UE::Apply_ReplicatedScale(InHandle, Scale->Value);
+            }
+        }
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
         FProcessor_Transform_HandleRequests::
         DoTick(
             TimeType InDeltaT) -> void
@@ -347,13 +416,7 @@ namespace ck
         // below mirror TProcessor_SceneNode_Update's complete contract. Unreal-anchor followers
         // use a separate processor. Root/socket anchored nodes remain anchor-authoritative unless
         // they explicitly opt into parent-driven transforms.
-        const auto HasTransformAnchor =
-            InHandle.Has_Any<FFragment_Transform_MeshSocket, FFragment_Transform_RootComponent>();
-        const auto IsParentDrivenSceneNode =
-            InHandle.Has<FFragment_SceneNode>()
-            && InHandle.Has<SceneNodeParent>()
-            && NOT InHandle.Has<FFragment_SceneNode_UnrealAnchor>()
-            && (NOT HasTransformAnchor || InHandle.Has<FTag_Transform_ExternallyDriven>());
+        const auto IsParentDrivenSceneNode = ck_transform::Get_IsParentDrivenSceneNode(InHandle);
 
         const auto HasMutationRequests =
             NOT InRequestsComp._LocationRequests.IsEmpty()

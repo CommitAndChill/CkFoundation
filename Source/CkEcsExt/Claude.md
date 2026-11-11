@@ -98,6 +98,19 @@ should instead follow its scene-node parent (Unreal `AttachToComponent` semantic
 `SyncFromActor`/`SyncFromMeshSocket` back off while `SyncToActor` keeps pushing the parent-driven pose onto
 the anchor.
 
+`ECk_Transform_ReplicatedPosePolicy` (`UCk_Utils_Transform_UE::Request_SetReplicatedPosePolicy`, tag
+`FTag_Transform_ReplicatedPoseYieldsToParent`) decides what a replicated pose does to a Transform that a machine
+without authority parents locally. `AlwaysApplied` (the default) writes every arrival as a world request, so a
+parent-driven node rejects it with the drain's ensure: an undeclared replicated entity parented on a client keeps
+that signal. `YieldsToSceneNodeParent` makes the net-apply handlers only mark the arrival
+(`FFragment_Transform_PendingReplicatedPose`); `FProcessor_Transform_ApplyReplicatedPose`, client-only and directly
+before the request drain, discards the mark while the node is parent-driven and otherwise applies the latest
+received location, rotation and scale from the replication driver through the normal request path. Attaching drops
+any pending mark and interpolation goal; `Request_Detach` re-marks all three components, so the latest received
+pose applies again on detach (it never queues a request, so a detach and re-attach in one call leaves nothing to
+reject). The authority's send is unchanged and the policy is inert on a host. The one rule for callers: declare it
+at composition, on every machine.
+
 ### Physics ownership
 
 An entity is EITHER Chaos-simulated (CkOverlapBody's `UShapeComponent` path, CkRaySense's engine-trace

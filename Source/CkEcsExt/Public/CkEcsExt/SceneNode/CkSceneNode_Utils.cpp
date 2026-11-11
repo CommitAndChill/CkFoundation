@@ -428,6 +428,8 @@ auto
         { }
 
         InHandle.AddOrGet<ck::FTag_Transform_ExternallyDriven>();
+
+        UCk_Utils_Transform_UE::OnSceneNode_AttachedToParent(InHandle);
     }
 
     auto SceneNodeHandle = Cast(InHandle);
@@ -536,6 +538,8 @@ auto
 
     RemoveExistingLayerTag(NodeAsTransform);
     NodeAsTransform.Try_Remove<ck::FTag_Transform_ExternallyDriven>();
+
+    UCk_Utils_Transform_UE::OnSceneNode_Detached(NodeAsTransform);
 
     // Immediate mutation — nothing is enqueued, so completion is synchronous on this stack.
     InDelegate.ExecuteIfBound(InSceneNode, ECk_Request_OperationResult::Succeeded);

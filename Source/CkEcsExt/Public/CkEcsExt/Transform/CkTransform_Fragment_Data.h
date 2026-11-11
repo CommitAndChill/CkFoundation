@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CkCore/Enums/CkEnums.h"
+#include "CkCore/Format/CkFormat.h"
 #include "CkCore/Time/CkTime.h"
 
 #include "CkEcs/Handle/CkHandle.h"
@@ -24,6 +25,20 @@ CK_DEFINE_CUSTOM_ISVALID_AND_FORMATTER_HANDLE_TYPESAFE(FCk_Handle_Transform);
 USTRUCT(BlueprintType, meta=(HasNativeMake, HasNativeBreak))
 struct CKECSEXT_API FCk_Handle_TransformInterpolation : public FCk_Handle_TypeSafe { GENERATED_BODY() CK_GENERATED_BODY_HANDLE_TYPESAFE(FCk_Handle_TransformInterpolation); };
 CK_DEFINE_CUSTOM_ISVALID_AND_FORMATTER_HANDLE_TYPESAFE(FCk_Handle_TransformInterpolation);
+
+// --------------------------------------------------------------------------------------------------------------------
+
+// What a machine without authority does with a replicated pose while the Transform has a scene-node parent.
+// AlwaysApplied: every arrival is written as a world transform request. YieldsToSceneNodeParent: arrivals are held
+// while parent-driven, and the latest received pose applies again once the parent is removed.
+UENUM(BlueprintType)
+enum class ECk_Transform_ReplicatedPosePolicy : uint8
+{
+    AlwaysApplied,
+    YieldsToSceneNodeParent
+};
+
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_Transform_ReplicatedPosePolicy);
 
 // --------------------------------------------------------------------------------------------------------------------
 

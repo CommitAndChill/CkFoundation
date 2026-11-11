@@ -37,17 +37,16 @@ static struct FTransformRepHandlerRegistrar
                     { return ECk_Persistence_ApplyResult::NotReady; }
 
                     const auto& Location = New.Get<FCk_RepData_Location>().Value;
+                    const auto Snap = NOT Old.IsSet();
 
-                    if (Old.IsSet() && UCk_Utils_TransformInterpolation_UE::Has(HandleTransform))
+                    if (UCk_Utils_Transform_UE::Get_IsReplicatedPoseYieldingToParent(HandleTransform))
                     {
-                        auto HandleTransformInterpolation = UCk_Utils_TransformInterpolation_UE::CastChecked(Entity);
-                        const auto CurrentLoc = UCk_Utils_Transform_UE::Get_EntityCurrentLocation(HandleTransform);
-                        UCk_Utils_TransformInterpolation_UE::Request_SetInterpolationGoal_LocationOffset(
-                            HandleTransformInterpolation, Location - CurrentLoc);
+                        UCk_Utils_Transform_UE::Request_MarkReplicatedPosePending(HandleTransform, ECk_TransformComponents::Location,
+                            Snap ? ECk_TransformComponents::Location : ECk_TransformComponents::None);
                         return ECk_Persistence_ApplyResult::Applied;
                     }
 
-                    UCk_Utils_Transform_UE::Request_SetLocation(HandleTransform, FCk_Request_Transform_SetLocation{Location}, {});
+                    UCk_Utils_Transform_UE::Apply_ReplicatedLocation(HandleTransform, Location, Snap);
                     return ECk_Persistence_ApplyResult::Applied;
                 } });
 
@@ -59,30 +58,34 @@ static struct FTransformRepHandlerRegistrar
                     { return ECk_Persistence_ApplyResult::NotReady; }
 
                     const auto& Rotation = New.Get<FCk_RepData_Rotation>().Value;
+                    const auto Snap = NOT Old.IsSet();
 
-                    if (Old.IsSet() && UCk_Utils_TransformInterpolation_UE::Has(HandleTransform))
+                    if (UCk_Utils_Transform_UE::Get_IsReplicatedPoseYieldingToParent(HandleTransform))
                     {
-                        auto HandleTransformInterpolation = UCk_Utils_TransformInterpolation_UE::CastChecked(Entity);
-                        const auto CurrentRot = UCk_Utils_Transform_UE::Get_EntityCurrentRotation(HandleTransform);
-                        UCk_Utils_TransformInterpolation_UE::Request_SetInterpolationGoal_RotationOffset(
-                            HandleTransformInterpolation, Rotation.Rotator() - CurrentRot);
+                        UCk_Utils_Transform_UE::Request_MarkReplicatedPosePending(HandleTransform, ECk_TransformComponents::Rotation,
+                            Snap ? ECk_TransformComponents::Rotation : ECk_TransformComponents::None);
                         return ECk_Persistence_ApplyResult::Applied;
                     }
 
-                    UCk_Utils_Transform_UE::Request_SetRotation(HandleTransform, FCk_Request_Transform_SetRotation{Rotation.Rotator()}, {});
+                    UCk_Utils_Transform_UE::Apply_ReplicatedRotation(HandleTransform, Rotation, Snap);
                     return ECk_Persistence_ApplyResult::Applied;
                 } });
 
         FCk_PersistenceHandlerRegistry::Register_NetOnly<FCk_RepData_Scale>({ .Posture = ECk_Snapshot_Posture::Session, .NetApply =
-                [](FCk_Handle& Entity, const FInstancedStruct& New, const TOptional<FInstancedStruct>& /*Old*/) -> ECk_Persistence_ApplyResult
+                [](FCk_Handle& Entity, const FInstancedStruct& New, const TOptional<FInstancedStruct>& Old) -> ECk_Persistence_ApplyResult
                 {
                     auto HandleTransform = UCk_Utils_Transform_UE::Cast(Entity);
                     if (ck::Is_NOT_Valid(HandleTransform))
                     { return ECk_Persistence_ApplyResult::NotReady; }
 
-                    UCk_Utils_Transform_UE::Request_SetScale(HandleTransform,
-                        FCk_Request_Transform_SetScale{New.Get<FCk_RepData_Scale>().Value}
-                            .Set_LocalWorld(ECk_LocalWorld::World), {});
+                    if (UCk_Utils_Transform_UE::Get_IsReplicatedPoseYieldingToParent(HandleTransform))
+                    {
+                        UCk_Utils_Transform_UE::Request_MarkReplicatedPosePending(HandleTransform, ECk_TransformComponents::Scale,
+                            Old.IsSet() ? ECk_TransformComponents::None : ECk_TransformComponents::Scale);
+                        return ECk_Persistence_ApplyResult::Applied;
+                    }
+
+                    UCk_Utils_Transform_UE::Apply_ReplicatedScale(HandleTransform, New.Get<FCk_RepData_Scale>().Value);
                     return ECk_Persistence_ApplyResult::Applied;
                 } });
     }
