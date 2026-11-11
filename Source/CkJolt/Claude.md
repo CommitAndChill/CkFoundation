@@ -209,6 +209,17 @@ resolve their soft mesh through a rooted batch, consumer id `JoltBody.Setup`), `
   WorldContextObject and an `FCk_Jolt_QueryFilter` (UE channel + minimum response), resolves the subsystem
   and rebuilds its shape per call, collects EVERY hit, and attributes each hit to a live entity. Pure reads
   — no probe-overlap side effects.
+- `UCk_Utils_JoltQuery_UE::Get_BallisticCast(WorldContext, FCk_Jolt_BallisticCast_Params)` — predicts where a
+  launched body first hits by REPLAYING the integrator's free flight (`ck::jolt::ballistic::Advance_OneStep`,
+  Query/CkJoltBallistic_Math.h: gravity × gravity factor, then `max(0, 1 - damping·dt)`, then the speed clamp, then
+  the move — `MotionProperties::ApplyForceTorqueAndDragInternal`'s order) at the simulation's own step,
+  `1 / FixedTimestepHz / CollisionSteps` with the physics system's gravity, and sweeping the shape along the path
+  through the narrow phase: ONE sweep per segment of `_StepsPerSegment` steps, shape and filters built once per call.
+  Sensors and the bodies of `_IgnoredEntities` (matched on body user data) never stop it. The result is the path as
+  location / velocity / time points (the last one interpolated at the hit) plus a `FCk_Jolt_HitResult` filled like
+  `Get_ShapeCast`'s. Gravity only between contacts: no bounce, no forces, no angular motion. Pure read, game thread
+  only; it never steps the world or creates a body. The flight to replay comes from
+  `UCk_Utils_JoltBody_UE::Get_BallisticFlight`.
 - **Occupancy surface** — the opposite trade, for callers issuing thousands of boolean tests (coverage
   grids, volumetric navigation bakes): any-hit early-out, NO entity attribution, no per-call subsystem
   resolution, caller-owned shape and filters. Two layers:
@@ -255,7 +266,9 @@ resolve their soft mesh through a rooted batch, consumer id `JoltBody.Setup`), `
   `FTag_JoltBody_PersistContacts`) / `OnJoltBodyContactRemoved` (payload OtherEntity +
   points/normal + RelativeNormalSpeed POSITIVE-WHEN-CLOSING + OtherIsSensor + OtherPhysicalMaterial,
   resolved through `ck::jolt::TryGet_BodyPhysicalMaterial` with the OTHER side's body id) and
-  `OnJoltBodySleepStateChanged`. Contact routing: `"JoltBody.Signals"` router registered on
+  `OnJoltBodySleepStateChanged`. `Get_BallisticFlight` returns the spec's linear damping, gravity factor and max
+  linear velocity as an `FCk_Jolt_BallisticFlight` (readable before the body is added) — the input
+  `Get_BallisticCast` replays. Contact routing: `"JoltBody.Signals"` router registered on
   the subsystem; UserData==0 = NO entity — never resolve raw id 0 (it is the registry's transient
   root). Baked statics now carry their source actor's JoltStaticActor entity id (not 0), so a
   dynamic-vs-baked-floor contact resolves `_OtherEntity` to that attribution entity. A baked

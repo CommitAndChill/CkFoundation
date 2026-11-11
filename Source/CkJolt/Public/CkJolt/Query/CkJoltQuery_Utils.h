@@ -102,6 +102,18 @@ public:
         FRotator InRotation,
         FCk_Jolt_ShapeDimensions InShape,
         FCk_Jolt_QueryFilter InFilter);
+
+    /// Flies a body's centre through the world by replaying the simulation's own free-flight integration at its own
+    /// fixed step, sweeping the shape along each segment, to the first blocking hit. Sensors and the ignored
+    /// entities never stop it. One narrow-phase sweep per segment.
+    UFUNCTION(BlueprintCallable,
+              Category = "Ck|Jolt",
+              meta = (WorldContext = "InWorldContextObject"),
+              DisplayName="[Ck][Jolt] Ballistic Cast (Closest, By Channel)")
+    static FCk_Jolt_BallisticCast_Result
+    Get_BallisticCast(
+        const UObject* InWorldContextObject,
+        const FCk_Jolt_BallisticCast_Params& InParams);
 };
 
 // --------------------------------------------------------------------------------------------------------------------

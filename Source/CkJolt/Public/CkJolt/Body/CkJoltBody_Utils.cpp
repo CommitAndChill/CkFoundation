@@ -259,6 +259,26 @@ auto
 
 auto
     UCk_Utils_JoltBody_UE::
+    Get_BallisticFlight(
+        const FCk_Handle_JoltBody& InBody)
+    -> FCk_Jolt_BallisticFlight
+{
+    CK_ENSURE_IF_NOT(ck::IsValid(InBody),
+        TEXT("Invalid JoltBody Handle passed to Get_BallisticFlight"))
+    { return {}; }
+
+    const auto& Params = InBody.Get<ck::FFragment_JoltBody_Params>();
+
+    auto Flight = FCk_Jolt_BallisticFlight{};
+    Flight.Set_LinearDamping(Params.Get_LinearDamping());
+    Flight.Set_GravityFactor(Params.Get_GravityFactor());
+    Flight.Set_MaxLinearVelocity(Params.Get_MaxLinearVelocity());
+
+    return Flight;
+}
+
+auto
+    UCk_Utils_JoltBody_UE::
     Get_SleepState(
         const FCk_Handle_JoltBody& InJoltBody)
     -> ECk_Jolt_SleepState

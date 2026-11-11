@@ -8,6 +8,7 @@
 
 #include "CkJolt/Body/CkJoltBody_Fragment.h"
 #include "CkJolt/Body/CkJoltBody_Fragment_Data.h"
+#include "CkJolt/Query/CkJoltQuery_Data.h"
 
 #include "CkJoltBody_Utils.generated.h"
 
@@ -80,6 +81,14 @@ public:
     static UPhysicalMaterial*
     Get_PhysicalMaterial(
         const FCk_Handle_JoltBody& InJoltBody);
+
+    /// The flight settings this body was built with. Readable before the body is added to the simulation.
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|JoltBody",
+              DisplayName="[Ck][JoltBody] Get Ballistic Flight")
+    static FCk_Jolt_BallisticFlight
+    Get_BallisticFlight(
+        const FCk_Handle_JoltBody& InBody);
 
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|JoltBody",
