@@ -123,6 +123,7 @@ Before writing any code, navigate the documentation in this order:
 | async asset loading → fragments | `CkResourceLoader` — `RequestLoad_RootedBatch` is the ONLY sanctioned way a feature loads an asset it will hold (the batch roots it); params/requests stay `TSoftObjectPtr` |
 | relay entity events to an actor (channels) | `CkActorRelay` |
 | debug shapes / procedural mesh text | `CkPmg` |
+| draw a curve / path / beam that changes every frame | `CkPmg` Polyline — `UCk_Utils_Pmg_Polyline_UE` |
 | physics-substep ticking | `CkSubstep` |
 | project settings exposed to editor | `CkSettings` |
 | console variables / runtime tuning | `CkCVar` |

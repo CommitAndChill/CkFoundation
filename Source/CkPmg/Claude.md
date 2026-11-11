@@ -1,11 +1,43 @@
 # CkPmg
 
-**Purpose:** Procedural mesh generation — runtime-built debug shapes (capsule, sphere, box, cone, cylinder, torus, hemisphere, pyramid + angular/directional/icon/symbol variants) with optional matching wireframe overlay. Attached to entities as `UProceduralMeshComponent` instances.
+**Purpose:** Procedural mesh generation — runtime-built debug shapes (capsule, sphere, box, cone, cylinder, torus, hemisphere, pyramid + angular/directional/icon/symbol variants) with optional matching wireframe overlay. Attached to entities as `UProceduralMeshComponent` instances. Also two material-carrying shapes with their own typed handles: the Donut (a flat ring) and the Polyline (a tube swept along world-space points that may change every frame).
 
 **Depends on:** `CkCore`, `CkEcs`, `CkEcsExt`, `CkLabel`, `CkLog`, `CkProvider`, `CkRecord`,
-`CkResourceLoader` (the donut material is a soft ref resolved through a rooted batch, consumer id
-`PmgDonut.Material`), `CkSettings`.
+`CkResourceLoader` (the donut and polyline materials are soft refs resolved through a rooted batch,
+consumer ids `PmgDonut.Material` and `PmgPolyline.Material`), `CkSettings`.
 **Used by:** Ability VFX, AoE indicators, in-world debugger overlays, procedural geometry.
+
+---
+
+## Polyline (a tube along a path that changes every frame)
+
+`UCk_Utils_Pmg_Polyline_UE` (`CkPmg_Utils_Polyline.h`): `Add` / `Create` with an `FCk_Pmg_Polyline_Spec`
+(material, radius, sides 3..16, max points 2..512), then `Request_SetPoints` with world-space points,
+`Request_SetRadius`, `Request_SetMaterial`. Read back with `Get_NumDrawnPoints`, `Get_DrawnLength`, `Get_Radius`.
+
+- **Not a debug shape.** It is the Donut's sibling: a material-carrying shape with its own typed handle
+  (`FCk_Handle_Pmg_Polyline`). It does not use `FFragment_Pmg_DebugShape_Common`, takes no `Duration`, and lives
+  until its entity is destroyed (EndPlay destroys the component).
+- **World-space.** The points are world positions. The polyline has no `UpdateTransform` processor and does not follow
+  its entity's transform; each drain puts the component at the first point (rotation identity, scale one) and writes
+  the vertices relative to it.
+- **Fixed topology, vertex rewrite.** Setup calls `CreateMeshSection_LinearColor` once, for `MaxPoints` rings of
+  `Sides + 1` vertices (`(MaxPoints - 1) * Sides` quads, all degenerate, section hidden). Every later change is
+  `UpdateMeshSection_LinearColor` on that section, never a new section. Rings past the last drawn point collapse
+  onto it, so the unused part of the fixed topology draws nothing. Fewer than two points (after merging points closer
+  than 0.01 cm) hides the section. More than `MaxPoints` points are resampled evenly by arc length, keeping the first
+  and last. Ring frames are parallel transported, so a planar curve's tube does not twist. The pure core is
+  `ck::pmg::polyline::Build_Tube` (`CkPmg_Polyline_Geometry.h`).
+- **UV0 / vertex-colour contract.** UV0.X = distance along the path in cm, UV0.Y = 0..1 around the tube (the seam
+  vertex is duplicated). Vertex colour R = distance along the path / total length, G = B = 0, A = 1, written without
+  sRGB conversion so R stays linear. A material can dash or fade the tube from these alone.
+- **Why the drain is in `FGroup_PostTransform`.** A consumer that computes its points from final poses does so in
+  `FGroup_Gameplay_Camera`; draining after that group puts the new vertices on screen the same frame. Do not move it to
+  `FGroup_Gameplay_Rendering` to match the Donut: that group runs before the camera settles, one frame late. Setup
+  stays in `FGroup_Gameplay_Rendering`. A request that arrives before Setup has run stays queued until it has.
+- **Requests.** The last SetPoints of a drain wins (earlier ones in the same drain complete as superseded); radius
+  changes re-tube the last points; a material still loading holds itself (and later materials) to the next tick
+  without holding the points back.
 
 ---
 
