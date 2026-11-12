@@ -523,9 +523,9 @@ auto Health = utils_float_attribute::Add(SelfEntity, Attr);
 // it, so no entity-to-object lookup is needed. Do NOT tag-scan and
 // TryGet_EntityScript in gameplay code (§5).
 // In UMyStation_EntityScript::DoConstruct (Director is an ExposeOnSpawn param):
-Director.Request_RegisterStation(this);
+Director.Register_Station(this);
 // In UMyDirector_EntityScript (_Stations is a TArray<UMyStation_EntityScript>):
-void Request_RegisterStation(UMyStation_EntityScript InStation) { _Stations.Add(InStation); }
+void Register_Station(UMyStation_EntityScript InStation) { _Stations.Add(InStation); }
 // The station unregisters itself in DoEndPlay. Spawn stations with the director
 // as their lifetime owner so the director never ends play (and is re-issued) first.
 
