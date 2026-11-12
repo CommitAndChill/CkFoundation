@@ -7,6 +7,7 @@
 
 #include "DataDrivenShaderPlatformInfo.h"
 #include "Materials/MaterialParameterCollection.h"
+#include "ParameterCollection.h"
 #include "Engine/EngineTypes.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
@@ -378,6 +379,28 @@ namespace ck_usf_look_validator
         }
     }
 
+    // The material translator refuses a material that reads more distinct collections than
+    // MaxNumParameterCollectionsPerMaterial, and a headless generation never compiles the master to find out,
+    // so the look is rejected here instead of producing a master that fails translation.
+    auto Validate_CollectionCount(const FName InLookName, const UCkUsf_LookDefinition* InDef,
+        ck::usf_editor::FLookValidationResult& InOutResult) -> void
+    {
+        auto ReadCollections = TSet<FSoftObjectPath>{};
+        for (const auto& Param : InDef->_Parameters)
+        {
+            if (Param._FromCollection && NOT Param._Collection.IsNull())
+            { ReadCollections.Add(Param._Collection.ToSoftObjectPath()); }
+        }
+
+        const auto MaxCollections = static_cast<int32>(MaxNumParameterCollectionsPerMaterial);
+        if (ReadCollections.Num() > MaxCollections)
+        {
+            InOutResult.Errors.Add(FString::Printf(
+                TEXT("Look [%s]: its params read [%d] distinct material parameter collections, but a material can read at most [%d]"),
+                *InLookName.ToString(), ReadCollections.Num(), MaxCollections));
+        }
+    }
+
     auto Validate_GeneratedPackageRoot(const FName InLookName, const UCkUsf_LookDefinition* InDef,
         ck::usf_editor::FLookValidationResult& InOutResult) -> void
     {
@@ -640,6 +663,7 @@ namespace ck::usf_editor
             Validate_CollectionParam(LookName, Param, Result);
         }
 
+        Validate_CollectionCount(LookName, InDef, Result);
         Validate_GeneratedPackageRoot(LookName, InDef, Result);
 
         const auto IsSurfaceDomain = InDef->_Domain == ECk_Usf_Domain::SurfaceLit
