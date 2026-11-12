@@ -29,6 +29,13 @@ evidence lives in `docs/campaigns/runtime-mesh/PROGRESS.md`.
   none), latched, then the typed receiver fires followed by the generic completion. Between entries the drain
   resolves the queue again through the transient entity, because a callback may have appended (that request waits
   for a later drain) or closed it.
+- `Add_SharedGeometry(Handle, Source)` composes `FFragment_RuntimeMesh` on a caller-chosen entity as `Ready`,
+  `None`, with a Ready source's `FValidatedGeometryPtr`: Ready on return, no pending import, no queue entry, no
+  signal. The target goes through the same precheck `Add` uses (`DoGet_CanComposeOn`, one helper, not a copy);
+  an invalid source or one that is not Ready is rejected too, each with an ensure, an invalid handle and nothing
+  composed. Sharing the pointer is safe because the geometry is immutable; the result keeps no reference to the
+  source entity, so either may be destroyed first, and the two need not share an owner. `Adopt_Validated` stays
+  the drain's only publisher and still creates its results as new entities.
 - Slice result shape: `FCk_RuntimeMesh_SliceResult` keeps `_Positive`/`_Negative`, their metrics and cap counts,
   and adds `_PositivePieces`/`_NegativePieces` (`FCk_RuntimeMesh_SlicePiece`: handle, metrics, cap triangles),
   every island of each side, largest volume first; the scalar fields always describe piece 0 of each side.

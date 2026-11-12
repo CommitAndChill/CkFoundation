@@ -34,6 +34,19 @@ public:
         UPARAM(ref) FCk_Handle& InHandle,
         const FCk_RuntimeMesh_Spec& InSpec);
 
+    /** Composes the geometry feature on InHandle sharing InSource's immutable geometry: Ready on return, with no
+     *  load, no copy, no queued work and no signal. The result keeps no reference to the source entity, so
+     *  destroying either leaves the other Ready, and the two need not share an owner. Rejects, with an ensure and
+     *  an invalid handle and nothing composed, a target Add would reject, an invalid source, and a source that is
+     *  not Ready. */
+    UFUNCTION(BlueprintCallable,
+              Category = "Ck|Utils|RuntimeMesh",
+              DisplayName = "[Ck][RuntimeMesh] Add Shared Geometry")
+    static FCk_Handle_RuntimeMesh
+    Add_SharedGeometry(
+        UPARAM(ref) FCk_Handle& InHandle,
+        const FCk_Handle_RuntimeMesh& InSource);
+
     // Not providing a Remove by design: derived results are standalone entities, so their lifetime is the
     // entity's - use UCk_Utils_EntityLifetime_UE::Request_DestroyEntity.
 
@@ -116,6 +129,12 @@ public:
         const FCk_Delegate_Request_OnCompleted& InDelegate);
 
 private:
+    // The target checks every composition makes; InOperation names the caller in the ensure.
+    static auto
+    DoGet_CanComposeOn(
+        const FCk_Handle& InHandle,
+        const TCHAR* InOperation) -> bool;
+
     // The drain's only way to publish geometry it has already validated; not a consumer API.
     static auto
     Adopt_Validated(

@@ -164,25 +164,7 @@ auto
         const FCk_RuntimeMesh_Spec& InSpec)
     -> FCk_Handle_RuntimeMesh
 {
-    const auto IsTargetValid = ck::IsValid(InHandle);
-    CK_ENSURE_IF_NOT(IsTargetValid, TEXT("RuntimeMesh Add rejected invalid target [{}]"), InHandle)
-    { return {}; }
-
-    // World teardown is a contract violation for Add, not a deferred outcome: a mesh composed now would start an
-    // asset load into a world that is going away.
-    const auto* World = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InHandle);
-    const auto WorldEntity = UCk_Utils_EntityLifetime_UE::Get_TransientEntity(InHandle);
-    const auto IsWorldClosing = WorldEntity.Has<ck::FFragment_RuntimeMesh_Queue>()
-        && WorldEntity.Get<ck::FFragment_RuntimeMesh_Queue>().Get_Closing();
-    const auto CanCompose = ck::IsValid(World)
-        && NOT World->IsBeingCleanedUp()
-        && NOT IsWorldClosing
-        && UCk_Utils_EntityLifetime_UE::Get_CanCreateEntity(InHandle)
-        && NOT UCk_Utils_EntityLifetime_UE::Get_IsPendingDestroy(InHandle, ECk_EntityLifetime_DestructionPhase::BeginDestroy)
-        && NOT Has(InHandle);
-    CK_ENSURE_IF_NOT(CanCompose,
-        TEXT("RuntimeMesh Add rejected target [{}]: its world is tearing down, it is being destroyed, or it already has a RuntimeMesh"),
-        InHandle)
+    if (NOT DoGet_CanComposeOn(InHandle, TEXT("Add")))
     { return {}; }
 
     const auto SourcePath = InSpec.Get_SourceMesh().ToSoftObjectPath();
@@ -196,6 +178,70 @@ auto
     InHandle.Add<ck::FFragment_RuntimeMesh_PendingImport>(SourcePath, ck::runtimemesh::MakeImportOptions(InSpec.Get_Import()));
 
     return CastChecked(InHandle);
+}
+
+auto
+    UCk_Utils_RuntimeMesh_UE::
+    Add_SharedGeometry(
+        FCk_Handle& InHandle,
+        const FCk_Handle_RuntimeMesh& InSource)
+    -> FCk_Handle_RuntimeMesh
+{
+    if (NOT DoGet_CanComposeOn(InHandle, TEXT("Add Shared Geometry")))
+    { return {}; }
+
+    const auto IsSourceValid = ck::IsValid(InSource) && Has(InSource);
+    CK_ENSURE_IF_NOT(IsSourceValid,
+        TEXT("RuntimeMesh Add Shared Geometry rejected target [{}]: source [{}] is invalid"), InHandle, InSource)
+    { return {}; }
+
+    const auto& Source = InSource.Get<ck::FFragment_RuntimeMesh>();
+    const auto IsSourceReady = Source.Get_SetupState() == ECk_RuntimeMesh_SetupState::Ready && Source.Get_Geometry().IsValid();
+    CK_ENSURE_IF_NOT(IsSourceReady,
+        TEXT("RuntimeMesh Add Shared Geometry rejected target [{}]: source [{}] is not Ready (setup state [{}])"),
+        InHandle, InSource, Source.Get_SetupState())
+    { return {}; }
+
+    // The geometry is immutable, so the pointer is shared rather than copied; it is taken before the target's
+    // fragment is added, and the result keeps no reference to the source entity.
+    auto Geometry = Source.Get_Geometry();
+    InHandle.Add<ck::FFragment_RuntimeMesh>(
+        ECk_RuntimeMesh_SetupState::Ready, ECk_RuntimeMesh_SetupFailure::None, MoveTemp(Geometry));
+
+    return CastChecked(InHandle);
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    UCk_Utils_RuntimeMesh_UE::
+    DoGet_CanComposeOn(
+        const FCk_Handle& InHandle,
+        const TCHAR* InOperation)
+    -> bool
+{
+    const auto IsTargetValid = ck::IsValid(InHandle);
+    CK_ENSURE_IF_NOT(IsTargetValid, TEXT("RuntimeMesh {} rejected invalid target [{}]"), InOperation, InHandle)
+    { return false; }
+
+    // World teardown is a contract violation, not a deferred outcome: a mesh composed now would start an asset load
+    // into, or publish geometry on, a world that is going away.
+    const auto* World = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InHandle);
+    const auto WorldEntity = UCk_Utils_EntityLifetime_UE::Get_TransientEntity(InHandle);
+    const auto IsWorldClosing = WorldEntity.Has<ck::FFragment_RuntimeMesh_Queue>()
+        && WorldEntity.Get<ck::FFragment_RuntimeMesh_Queue>().Get_Closing();
+    const auto CanCompose = ck::IsValid(World)
+        && NOT World->IsBeingCleanedUp()
+        && NOT IsWorldClosing
+        && UCk_Utils_EntityLifetime_UE::Get_CanCreateEntity(InHandle)
+        && NOT UCk_Utils_EntityLifetime_UE::Get_IsPendingDestroy(InHandle, ECk_EntityLifetime_DestructionPhase::BeginDestroy)
+        && NOT Has(InHandle);
+    CK_ENSURE_IF_NOT(CanCompose,
+        TEXT("RuntimeMesh {} rejected target [{}]: its world is tearing down, it is being destroyed, or it already has a RuntimeMesh"),
+        InOperation, InHandle)
+    { return false; }
+
+    return true;
 }
 
 // --------------------------------------------------------------------------------------------------------------------
