@@ -24,8 +24,7 @@ namespace ck::angelscriptgenerator::self_heal
         ECk_RecoveryStrategy Strategy = ECk_RecoveryStrategy::Unrecognized;
         FCk_AsParsedError    Error;
 
-        // For Quarantine_StaleEspCanonical, this is the canonical Classify resolved. For an
-        // added field the error is at the caller, so Error.FilePath is not this path.
+        // The canonical Classify resolved; for an added field, Error.FilePath is the caller instead.
         FString              QuarantineCanonicalPath;
     };
 
@@ -37,9 +36,8 @@ namespace ck::angelscriptgenerator::self_heal
 
         static constexpr int32 MaxPerSignatureRepeats = 3;
 
-        // The single-argument form probes the live ESP canonicals and Script/ trees,
-        // and only for a caller-side `'<Member>' is not a member of 'F<X>_SpawnParams'`.
-        // Every other error kind classifies without IO.
+        // The single-argument form reads the live canonicals and Script/ trees, only for a caller-side
+        // `F<X>_SpawnParams` member error; every other kind classifies without IO.
         static auto Classify       (const FCk_AsParsedError& InError) -> ECk_RecoveryStrategy;
         static auto Classify(
             const FCk_AsParsedError& InError,
@@ -49,12 +47,8 @@ namespace ck::angelscriptgenerator::self_heal
             FString*                 OutQuarantineCanonical = nullptr) -> ECk_RecoveryStrategy;
         static auto BuildActionPlan(const TArray<FCk_AsParsedError>& InDedupedRoots) -> TArray<FCk_RecoveryAction>;
 
-        // Added-field twin of the deleted-field quarantine: a caller sets a field
-        // that `U<X>`'s source declares ExposeOnSpawn, but the one present
-        // `*_EntitySpawnParams.as` canonical defining `F<X>_SpawnParams` predates it.
-        // Returns that canonical, or empty when any link of the evidence is missing.
-        // An empty result means a genuine authoring error, which must stay Unrecognized.
-        // Read-only, so it is safe inside OnReloadHadErrors.
+        // The one canonical defining `F<X>_SpawnParams` that predates a member `U<X>`'s source declares
+        // ExposeOnSpawn, or empty (a genuine authoring error). Read-only, so safe inside OnReloadHadErrors.
         static auto Find_StaleCanonical_ForAddedField(
             const FCk_AsParsedError& InError,
             const TArray<FString>&   InCanonicalCandidates,
