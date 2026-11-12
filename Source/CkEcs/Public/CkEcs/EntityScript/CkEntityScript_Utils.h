@@ -69,6 +69,7 @@ public:
         const FCk_Handle_EntityScript& InHandle);
 
     // The reverse of UCk_EntityScript_UE::DoGet_ScriptEntity, or nullptr when the entity has no live script.
+    // Re-fetch rather than cache: after the entity ends play a pooled script may be re-issued to another entity.
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|EntityScript",
               DisplayName="[Ck][EntityScript] TryGet_EntityScript")
