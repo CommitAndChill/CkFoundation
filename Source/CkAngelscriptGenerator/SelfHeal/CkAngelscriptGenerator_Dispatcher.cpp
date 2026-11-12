@@ -58,10 +58,9 @@ namespace ck::angelscriptgenerator::self_heal
         TMap<FString, FConvergenceTracker> sPerSignatureRecoveryCount;
         TSet<FString>                      sBlacklistedSignatures;
 
-        // Quarantine attempts this session, one shot each: the canonical's absolute path,
-        // or `<path>|<Struct>.<Member>` for an added field (see Apply_QuarantineStaleEspCanonical).
-        // The guard is added on the ATTEMPT, not on success, so a FAILED
-        // quarantine cannot loop either (mid-session has no MaxCycles cap).
+        // One quarantine attempt per key per session: the canonical's path, or `<path>|<Struct>.<Member>`
+        // for an added field. Added on the ATTEMPT, so a failed quarantine cannot loop either
+        // (mid-session has no MaxCycles cap).
         TSet<FString> sQuarantinedEspCanonicals;
 
         // Cold-start deferral: mutations applied inside OnReloadHadErrors land
@@ -318,20 +317,10 @@ namespace ck::angelscriptgenerator::self_heal
             return IsStructShapedError ? InError.MissingIdentifier : FString{};
         }
 
-        // For a stale canonical referencing a deleted type or field, the error's
-        // FilePath IS the canonical. For an added field the error is at the
-        // CALLER, and Classify resolved the canonical once and carried it on the
-        // action (InQuarantineCanonical). Passing NO seed classes makes the
-        // rebuild enumerate the union from the canonical's own blocks, so every
-        // shape it covered is rebuilt in ONE pass rather than one cycle per
-        // orphaned class.
-        //
-        // One-shot keys: the located-in-canonical heals key on the canonical
-        // alone. An added field keys on `<canonical>|<Struct>.<Member>`, so each
-        // distinct added field gets one attempt and never spends the
-        // deleted-field budget. The loop is still bounded at one lap when the
-        // scanner and the real generator disagree on a member (quarantine, then
-        // the regenerated canonical still lacks it, then the caller fails again).
+        // The canonical is the error's FilePath, or, for an added field reported at the caller, the one
+        // Classify resolved. No seed classes: the rebuild enumerates the canonical's own blocks, so every
+        // shape it covered is rebuilt in one pass. The one-shot key is the only bound on a loop when the
+        // scanner and the real generator disagree on a member, so it is never cleared on success.
         auto Apply_QuarantineStaleEspCanonical(
             const FCk_AsParsedError& InError,
             const FString&           InQuarantineCanonical,
@@ -350,8 +339,7 @@ namespace ck::angelscriptgenerator::self_heal
                 return false;
             }
 
-            // Several roots in one drain can share a canonical, for example callers of one added
-            // field in N files. The first root deletes it, and the rest have nothing left to do.
+            // Callers of one added field in several files share a canonical; the first root already deleted it.
             if (NOT IFileManager::Get().FileExists(*CanonicalPath))
             {
                 Log(TEXT("[SelfHeal] Canonical '{}' is already gone (quarantined by an earlier root) - nothing to do for '{}.{}' at {}:{}:{}."),
@@ -687,7 +675,6 @@ namespace ck::angelscriptgenerator::self_heal
                 }
                 case ECk_RecoveryStrategy::Quarantine_StaleEspCanonical:
                 {
-                    // Added field: the error sits at the caller, so FilePath is not the canonical.
                     if (NOT Is_EntitySpawnParamsCanonicalPath(InAction.Error.FilePath))
                     {
                         return FString::Printf(TEXT("quarantine stale canonical %s (field '%s.%s' added in source)"),
@@ -1309,8 +1296,6 @@ namespace ck::angelscriptgenerator::self_heal
         if (ClassName.IsEmpty() || InError.MissingIdentifier.IsEmpty())
         { return FString{}; }
 
-        // The few candidate canonicals are cheaper than a source scan, so check them first.
-        // With no canonical (a fresh clone running on recovery stubs), nothing is stale.
         // A struct defined in two canonicals is ambiguous, and an ambiguous match is never deleted.
         auto StaleCanonical = FString{};
         for (const auto& Candidate : InCanonicalCandidates)
@@ -1318,9 +1303,7 @@ namespace ck::angelscriptgenerator::self_heal
             if (NOT ck_angelscript_generator_dispatcher::Is_EntitySpawnParamsCanonicalPath(Candidate))
             { continue; }
 
-            // Candidate canonicals are cached next to source contents (keyed by
-            // path, so no collision: the scanner never enumerates Generated/). A
-            // plan with callers in N files then reads each canonical once.
+            // Shares the source scan cache; no collision, since the scanner never enumerates Generated/.
             auto LocalContents = FString{};
             const FString* Contents = nullptr;
             if (InScanCache != nullptr)
@@ -1344,8 +1327,7 @@ namespace ck::angelscriptgenerator::self_heal
         if (StaleCanonical.IsEmpty())
         { return FString{}; }
 
-        // The source must declare the member as ExposeOnSpawn, or the generator would never emit it.
-        // A misspelled or unexposed field fails here and stays an authoring error.
+        // A misspelled or non-ExposeOnSpawn member fails here and stays an authoring error.
         const auto Shape = FCkAsSourceScanner::Scan_ClassShape(ClassName, InScanRoots, InScanCache);
         if (NOT Shape.Found)
         { return FString{}; }
@@ -1365,7 +1347,6 @@ namespace ck::angelscriptgenerator::self_heal
             const FCk_AsParsedError& InError)
         -> ECk_RecoveryStrategy
     {
-        // Only this shape needs the live file system; everything else classifies on its text alone.
         const auto NeedsAddedFieldProbe =
                InError.Kind == ECk_AsParsedError_Kind::NotAMemberOfStruct
             && NOT ck_angelscript_generator_dispatcher::Is_EntitySpawnParamsCanonicalPath(InError.FilePath)
@@ -1456,9 +1437,8 @@ namespace ck::angelscriptgenerator::self_heal
                     return ECk_RecoveryStrategy::Quarantine_StaleEspCanonical;
                 }
 
-                // The ADDED-field twin, reported at the CALLER: the source declares the field,
-                // but the machine-local canonical predates it. This needs evidence from both
-                // the source and the canonical, so a genuine typo still stays Unrecognized.
+                // Added-field twin, reported at the caller. It needs evidence from both the source and
+                // the canonical, so a genuine typo stays Unrecognized.
                 if (auto StaleCanonical = Find_StaleCanonical_ForAddedField(InError, InCanonicalCandidates, InScanRoots, InScanCache);
                     NOT StaleCanonical.IsEmpty())
                 {
@@ -1489,10 +1469,7 @@ namespace ck::angelscriptgenerator::self_heal
         auto Plan = TArray<FCk_RecoveryAction>{};
         Plan.Reserve(InDedupedRoots.Num());
 
-        // The live probe inputs are built once per plan, not once per root. A plan
-        // with several caller-side SpawnParams member errors then walks the
-        // Script/ tree once. The cache lives only for this plan, well inside its
-        // contract of a single drain.
+        // Built once per plan, so several caller-side SpawnParams member errors walk Script/ once.
         auto ProbeCandidates = TArray<FString>{};
         auto ProbeScanRoots  = TArray<FString>{};
         auto ProbeScanCache  = FCk_AsSourceScanCache{};

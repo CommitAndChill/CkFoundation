@@ -20,8 +20,7 @@ namespace ck::angelscriptgenerator::self_heal
         AdjacentStringLiteral,         // "Instead found '<string constant>'" — `"foo " "bar"` C-style splice.
         BareCtorNoMatchingSignatures,  // `No matching signatures to '<Ident>(<args>)'` — no `::`.
         NotAMemberOfStruct,            // `'<Member>' is not a member of '<Struct>'` — a field deleted out
-                                       // from under a stale ESP canonical (2026-08 OpenSign wedge), or one
-                                       // added after it, reported at the caller (2026-11 Mars wedge).
+                                       // from under a stale ESP canonical, or added after it (at the caller).
     };
 
     struct CKANGELSCRIPTGENERATOR_API FCk_AsParsedError
