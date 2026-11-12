@@ -156,12 +156,9 @@ struct CKUSF_API FCk_Usf_ParamDesc
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     int32 _CustomPrimitiveDataIndex = -1;
 
-    // Scalar/Vector-only: source this param from a MATERIAL PARAMETER COLLECTION instead of a uniform — one
-    // value shared by every material that reads the collection, written through the world's collection
-    // instance (SetScalarParameterValue / SetVectorParameterValue on UKismetMaterialLibrary or the instance),
-    // never through a MID of this look. Mutually exclusive with _PerInstance and _CustomPrimitiveData, legal in
-    // every domain, and never takes a per-instance slot. The generated master holds a hard reference to
-    // _Collection, so the collection loads with the material.
+    // Scalar/Vector-only: read this param from a material parameter collection instead of a uniform. Write it
+    // through the world's collection instance, never through a MID of this look. Mutually exclusive with
+    // _PerInstance and _CustomPrimitiveData.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     bool _FromCollection = false;
 
@@ -169,9 +166,8 @@ struct CKUSF_API FCk_Usf_ParamDesc
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     TSoftObjectPtr<UMaterialParameterCollection> _Collection;
 
-    // Collection params only: the parameter inside _Collection to read, of the param's own kind (a Scalar reads
-    // one of the collection's ScalarParameters, a Vector one of its VectorParameters). NAME_None reads the
-    // collection parameter named like _Name.
+    // Collection params only: the parameter inside _Collection to read, of the param's own kind. None reads
+    // the one named like _Name.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     FName _CollectionParameterName = NAME_None;
 
@@ -191,7 +187,6 @@ struct CKUSF_API FCk_Usf_ParamDesc
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     int32 _SortPriority = 32;
 
-    // The collection parameter a _FromCollection param reads: _CollectionParameterName, or _Name when unset.
     FName Get_EffectiveCollectionParameterName() const
     { return _CollectionParameterName.IsNone() ? _Name : _CollectionParameterName; }
 };
@@ -225,10 +220,7 @@ public:
 
     // Surface-only: make the PIXEL stage carry each instance's world-to-local transform, so the look's
     // GetWorldToInstanceDF(Parameters) answers per instance (ISM/HISM, Nanite, mesh particles) instead of
-    // falling back to the primitive's. The translator only turns that on for a pixel-stage graph node that
-    // needs it, which code inside a Custom node cannot be — so the generator wires a World->Instance
-    // Transform into the pixel node's CkUsf_InstanceFrameProbe input, which the call ignores. Opt-in because
-    // it adds per-pixel instance data every other master skips.
+    // falling back to the primitive's. Opt-in because it adds per-pixel instance data.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     bool _PixelInstanceFrame = false;
 

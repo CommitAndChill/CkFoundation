@@ -354,10 +354,7 @@ namespace ck::usf_editor
         return Code;
     }
 
-    // A collection param reads its value through the collection's uniform buffer. The node resolves the value by
-    // ParameterId (the name is only for display and rename fix-up), so the Id is copied from the collection or the
-    // node reads nothing. A Vector's float4 output is .rgb-swizzled in the Custom code like a VectorParameter's.
-    // The node's Collection pointer is the master's hard reference to the collection.
+    // The node resolves by ParameterId (the name is display-only), so the Id is copied or the node reads nothing.
     static auto Make_CollectionParamExpression(
         UMaterial* InMaterial, const FCk_Usf_ParamDesc& P, FName InLookName, int32 InRow)
         -> UMaterialExpression*
@@ -725,10 +722,9 @@ namespace ck::usf_editor
             }
         }
 
-        // ---- Pixel instance frame: a World->Instance Transform compiled in the pixel stage is what sets
-        // bUsesInstanceWorldToLocalPS (HLSLMaterialTranslator), i.e. NEEDS_INSTANCE_WORLD_TO_LOCAL_PS, which
-        // GetWorldToInstanceDF(Parameters) needs to return Parameters.InstanceWorldToLocal. The Custom node
-        // compiles every connected input, so the probe input is enough; the call string never reads it. ----
+        // ---- Pixel instance frame: only a pixel-stage World->Instance Transform makes the translator set
+        // NEEDS_INSTANCE_WORLD_TO_LOCAL_PS. The Custom node compiles every connected input, so the unread probe
+        // input is enough. ----
         if (NOT IsPostProcess && InDef->_PixelInstanceFrame)
         {
             auto* AxisExpr = Cast<UMaterialExpressionConstant3Vector>(
