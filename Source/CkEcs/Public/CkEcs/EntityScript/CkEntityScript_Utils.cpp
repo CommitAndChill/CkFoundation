@@ -291,7 +291,21 @@ auto
     if (ck::Is_NOT_Valid(InHandle) || NOT InHandle.Has<ck::FFragment_EntityScript>())
     { return nullptr; }
 
-    return InHandle.Get<ck::FFragment_EntityScript>().Get_Script().Get();
+    if (InHandle.Has<ck::FTag_EntityScript_HasEndedPlay>())
+    { return nullptr; }
+
+    auto* Script = InHandle.Get<ck::FFragment_EntityScript>().Get_Script().Get();
+
+    CK_ENSURE_IF_NOT(ck::IsValid(Script),
+        TEXT("The EntityScript of Handle [{}] is gone although the entity has not ended play"), InHandle)
+    { return nullptr; }
+
+    CK_ENSURE_IF_NOT(Script->Get_InstancingPolicy() != ECk_EntityScript_InstancingPolicy::NotInstanced,
+        TEXT("TryGet_EntityScript refuses [{}] for Handle [{}]: a NotInstanced script is the archetype shared by "
+            "every entity of its class"), Script, InHandle)
+    { return nullptr; }
+
+    return Script;
 }
 
 auto
