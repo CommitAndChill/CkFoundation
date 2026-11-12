@@ -263,6 +263,11 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     bool _TwoSided = false;
 
+    // Translucent surface looks only: draw over every opaque pixel, even one in front of it (the material's
+    // Disable Depth Test). For a marker that must stay visible through what stands between it and the camera.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
+    bool _DisableDepthTest = false;
+
     // Preprocessor defines injected into the look's Custom nodes (pixel AND WPO), each "NAME" or
     // "NAME=VALUE". A define change requires regenerating the master.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")

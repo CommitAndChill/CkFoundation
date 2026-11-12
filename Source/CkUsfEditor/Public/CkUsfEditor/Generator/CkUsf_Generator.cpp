@@ -527,6 +527,9 @@ namespace ck::usf_editor
         if (IsSurface)
         { Material->TwoSided = InDef->_TwoSided; }
 
+        // The engine honours it on translucency only; the validator warns when it is asked for elsewhere.
+        Material->bDisableDepthTest = IsSurface && IsTranslucent && InDef->_DisableDepthTest;
+
         Material->bUsedWithInstancedStaticMeshes = InDef->_UsedWithInstancedStaticMeshes;
         Material->bUsedWithSkeletalMesh = InDef->_UsedWithSkeletalMesh;
         Material->bUsedWithMorphTargets = InDef->_UsedWithMorphTargets;

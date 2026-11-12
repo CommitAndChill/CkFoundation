@@ -349,6 +349,9 @@ name a third. The param's `_DefaultScalar`/`_DefaultVector` are not used: the co
   A define change needs regeneration (it changes the material, not just the include).
 - **Lit translucency reads flat by default** — set `_TranslucencyLighting = SurfacePerPixel` on
   glass-like looks (engine default is volumetric non-directional).
+- **`_DisableDepthTest` draws a look over everything** — the master's Disable Depth Test, so the surface shows
+  through every opaque pixel in front of it (an aim marker, a highlight seen through walls). The engine honours it on
+  translucency only: the generator sets it for a `Translucent` surface look and the validator warns elsewhere.
 - **`_PixelDataChannels` is opt-in because interpolators cost** — only looks whose PIXEL stage decodes
   mesh data channels need TexCoord1/TexCoord2 wired (e.g. CkVat's normal-texture lookup). The WPO entry
   point always receives UV1/UV2; it lives on its own VS-safe Custom node because the pixel node reads

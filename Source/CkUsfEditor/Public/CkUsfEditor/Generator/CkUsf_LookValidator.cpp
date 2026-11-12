@@ -665,6 +665,14 @@ namespace ck::usf_editor
         const auto IsSurfaceDomain = InDef->_Domain == ECk_Usf_Domain::SurfaceLit
                                   || InDef->_Domain == ECk_Usf_Domain::SurfaceUnlit;
 
+        if (InDef->_DisableDepthTest &&
+            (NOT IsSurfaceDomain || InDef->_BlendMode != ECk_Usf_BlendMode::Translucent))
+        {
+            Result.Warnings.Add(FString::Printf(
+                TEXT("Look [%s]: _DisableDepthTest applies to a Translucent surface look only — this look is depth tested as usual"),
+                *LookName.ToString()));
+        }
+
         if (InDef->Get_NumPerInstanceFloats() > 0 && NOT IsSurfaceDomain)
         {
             Result.Warnings.Add(FString::Printf(
