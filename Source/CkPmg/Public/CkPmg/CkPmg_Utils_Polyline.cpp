@@ -59,6 +59,20 @@ auto
         InSpec.Get_MaxPoints(), ck_pmg_utils_polyline::MinPoints, ck_pmg_utils_polyline::MaxPoints, InHandle)
     { return {}; }
 
+    const auto ArrowLengthIsValid = FMath::IsFinite(InSpec.Get_ArrowLength()) && InSpec.Get_ArrowLength() >= 0.0f;
+    CK_ENSURE_IF_NOT(ArrowLengthIsValid,
+        TEXT("Pmg Polyline arrow length [{}] must be 0 (no arrowhead) or positive for Entity [{}]"),
+        InSpec.Get_ArrowLength(), InHandle)
+    { return {}; }
+
+    const auto ArrowRadiusIsValid = InSpec.Get_ArrowLength() <= 0.0f ||
+                                    (FMath::IsFinite(InSpec.Get_ArrowRadius()) &&
+                                     InSpec.Get_ArrowRadius() >= ck_pmg_utils_polyline::MinRadius);
+    CK_ENSURE_IF_NOT(ArrowRadiusIsValid,
+        TEXT("Pmg Polyline arrow radius [{}] must be at least [{}] cm when it draws an arrowhead, for Entity [{}]"),
+        InSpec.Get_ArrowRadius(), ck_pmg_utils_polyline::MinRadius, InHandle)
+    { return {}; }
+
     InHandle.Add<ck::FFragment_Pmg_Polyline_Params>(InSpec);
 
     auto& Polyline = InHandle.Add<ck::FFragment_Pmg_Polyline>();

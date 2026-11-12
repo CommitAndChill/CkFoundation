@@ -12,8 +12,22 @@ consumer ids `PmgDonut.Material` and `PmgPolyline.Material`), `CkSettings`.
 ## Polyline (a tube along a path that changes every frame)
 
 `UCk_Utils_Pmg_Polyline_UE` (`CkPmg_Utils_Polyline.h`): `Add` / `Create` with an `FCk_Pmg_Polyline_Spec`
-(material, radius, sides 3..16, max points 2..512), then `Request_SetPoints` with world-space points,
-`Request_SetRadius`, `Request_SetMaterial`. Read back with `Get_NumDrawnPoints`, `Get_DrawnLength`, `Get_Radius`.
+(material, profile, radius, sides 3..16, max points 2..512, arrowhead length and radius), then `Request_SetPoints`
+with world-space points, `Request_SetRadius`, `Request_SetMaterial`. Read back with `Get_NumDrawnPoints`,
+`Get_DrawnLength`, `Get_Radius`.
+
+- **Profile.** `Tube` is a round tube of `Sides` faces. `Ribbon` is a flat strip twice `Radius` wide, laid across the
+  frame's side vector (`Tangent x WorldUp`, parallel transported): level across when the path runs level, so a path
+  in a vertical plane (a ballistic arc) reads as a band seen from above. Its front faces `Side x Tangent`, up for a level
+  path; give it a two-sided material if it must also read from below. A ribbon ignores `Sides`.
+- **Arrowhead.** `_ArrowLength > 0` ends the path in a head over its last `_ArrowLength` centimetres (all of a
+  shorter path), `_ArrowRadius` wide at its base: a cone on a tube, a triangle on a ribbon, straight from the base to
+  the last point. The shaft stops at the base. It adds two rings to the fixed topology and no drawn point:
+  `Get_NumDrawnPoints` and `Get_DrawnLength` still describe the path.
+- **Winding.** Unreal's front face is clockwise seen from the front, so a triangle's visible side is
+  `(C - A) x (B - A)`, the opposite of the plain cross product (`KismetProceduralMeshLibrary::GenerateBoxMesh` winds
+  its +Z face that way). The geometry spec checks every face against that convention; a test that uses the plain
+  cross product passes on an inside-out mesh.
 
 - **Not a debug shape.** It is the Donut's sibling: a material-carrying shape with its own typed handle
   (`FCk_Handle_Pmg_Polyline`). It does not use `FFragment_Pmg_DebugShape_Common`, takes no `Duration`, and lives
@@ -21,15 +35,17 @@ consumer ids `PmgDonut.Material` and `PmgPolyline.Material`), `CkSettings`.
 - **World-space.** The points are world positions. The polyline has no `UpdateTransform` processor and does not follow
   its entity's transform; each drain puts the component at the first point (rotation identity, scale one) and writes
   the vertices relative to it.
-- **Fixed topology, vertex rewrite.** Setup calls `CreateMeshSection_LinearColor` once, for `MaxPoints` rings of
-  `Sides + 1` vertices (`(MaxPoints - 1) * Sides` quads, all degenerate, section hidden). Every later change is
+- **Fixed topology, vertex rewrite.** Setup calls `CreateMeshSection_LinearColor` once, for `MaxPoints` rings (two
+  more with an arrowhead) of `Sides + 1` vertices on a tube or 2 on a ribbon, one quad per face between consecutive
+  rings, all degenerate, section hidden. Every later change is
   `UpdateMeshSection_LinearColor` on that section, never a new section. Rings past the last drawn point collapse
   onto it, so the unused part of the fixed topology draws nothing. Fewer than two points (after merging points closer
   than 0.01 cm) hides the section. More than `MaxPoints` points are resampled evenly by arc length, keeping the first
-  and last. Ring frames are parallel transported, so a planar curve's tube does not twist. The pure core is
-  `ck::pmg::polyline::Build_Tube` (`CkPmg_Polyline_Geometry.h`).
+  and last. Ring frames are parallel transported, so a planar curve does not twist. The pure core is
+  `ck::pmg::polyline::Build(Points, FShape)` (`CkPmg_Polyline_Geometry.h`; `Build_Tube` is the tube-without-head
+  shorthand).
 - **UV0 / vertex-colour contract.** UV0.X = distance along the path in cm, UV0.Y = 0..1 around the tube (the seam
-  vertex is duplicated). Vertex colour R = distance along the path / total length, G = B = 0, A = 1, written without
+  vertex is duplicated) or across the ribbon. Vertex colour R = distance along the path / total length, G = B = 0, A = 1, written without
   sRGB conversion so R stays linear. A material can dash or fade the tube from these alone.
 - **Why the drain is in `FGroup_PostTransform`.** A consumer that computes its points from final poses does so in
   `FGroup_Gameplay_Camera`; draining after that group puts the new vertices on screen the same frame. Do not move it to

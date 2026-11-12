@@ -49,6 +49,23 @@ namespace ck_pmg_processor_polyline
         { InMeshComponent->SetMaterial(MeshSectionIndex, DefaultMaterial); }
     }
 
+    // The shape the spec describes, at the polyline's current radius (a SetRadius changes only that).
+    auto
+        Make_Shape(
+            const ck::FFragment_Pmg_Polyline_Params& InParams,
+            float InRadius)
+        -> ck::pmg::polyline::FShape
+    {
+        auto Shape = ck::pmg::polyline::FShape{};
+        Shape._Profile = InParams.Get_Profile();
+        Shape._Radius = InRadius;
+        Shape._Sides = InParams.Get_Sides();
+        Shape._MaxPoints = InParams.Get_MaxPoints();
+        Shape._ArrowLength = InParams.Get_ArrowLength();
+        Shape._ArrowRadius = InParams.Get_ArrowRadius();
+        return Shape;
+    }
+
     // Rewrites the fixed-topology section in place; the polyline never calls CreateMeshSection after Setup.
     auto
         DoUpdateTube(
@@ -59,7 +76,7 @@ namespace ck_pmg_processor_polyline
             float InRadius)
         -> ck::pmg::polyline::FTubeBuffers
     {
-        auto Buffers = ck::pmg::polyline::Build_Tube(InWorldPoints, InRadius, InParams.Get_Sides(), InParams.Get_MaxPoints());
+        auto Buffers = ck::pmg::polyline::Build(InWorldPoints, Make_Shape(InParams, InRadius));
 
         if (InWorldPoints.Num() > 0)
         {
@@ -153,13 +170,14 @@ namespace ck
 
         InPolyline._Material = ResolvedMaterial;
 
-        // The one CreateMeshSection of the shape's life: MaxPoints rings, every vertex at the origin, so
-        // every triangle is degenerate until the first SetPoints rewrites the vertex buffer.
-        const auto EmptyTube = pmg::polyline::Build_Tube({}, InPolyline._Radius, InParams.Get_Sides(), InParams.Get_MaxPoints());
+        // The one CreateMeshSection of the shape's life: every ring of the fixed topology, every vertex at the
+        // origin, so every triangle is degenerate until the first SetPoints rewrites the vertex buffer.
+        const auto Shape = ck_pmg_processor_polyline::Make_Shape(InParams, InPolyline._Radius);
+        const auto EmptyTube = pmg::polyline::Build({}, Shape);
         MeshComponent->CreateMeshSection_LinearColor(
             ck_pmg_processor_polyline::MeshSectionIndex,
             EmptyTube._Positions,
-            pmg::polyline::Build_Triangles(InParams.Get_MaxPoints(), InParams.Get_Sides()),
+            pmg::polyline::Build_Triangles(Shape),
             EmptyTube._Normals,
             EmptyTube._UV0,
             EmptyTube._Colors,

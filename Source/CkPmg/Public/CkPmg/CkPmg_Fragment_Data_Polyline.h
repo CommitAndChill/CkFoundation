@@ -19,6 +19,19 @@ CK_DEFINE_CUSTOM_ISVALID_AND_FORMATTER_HANDLE_TYPESAFE(FCk_Handle_Pmg_Polyline);
 
 // --------------------------------------------------------------------------------------------------------------------
 
+UENUM(BlueprintType)
+enum class ECk_Pmg_Polyline_Profile : uint8
+{
+    // A round tube of _Sides faces around the path
+    Tube,
+    // A flat strip twice _Radius wide, lying across the path's side vector (level when the path runs level) and
+    // facing up when the path runs level
+    Ribbon
+};
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_Pmg_Polyline_Profile);
+
+// --------------------------------------------------------------------------------------------------------------------
+
 USTRUCT(BlueprintType)
 struct CKPMG_API FCk_Pmg_Polyline_Spec
 {
@@ -33,11 +46,14 @@ private:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
     TSoftObjectPtr<UMaterialInterface> _Material;
 
-    // Tube radius in cm
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
+    ECk_Pmg_Polyline_Profile _Profile = ECk_Pmg_Polyline_Profile::Tube;
+
+    // Tube radius, or a ribbon's half width, in cm
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true, ClampMin = "0.01"))
     float _Radius = 1.0f;
 
-    // Faces around the tube
+    // Faces around the tube; a ribbon ignores it
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true, ClampMin = "3", ClampMax = "16"))
     int32 _Sides = 6;
 
@@ -45,11 +61,23 @@ private:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true, ClampMin = "2", ClampMax = "512"))
     int32 _MaxPoints = 64;
 
+    // Length in cm of an arrowhead ending the path at its last point: a cone on a tube, a triangle on a ribbon.
+    // 0 draws no head.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true, ClampMin = "0.0"))
+    float _ArrowLength = 0.0f;
+
+    // The arrowhead's radius (a ribbon's half width) at its base, in cm
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true, ClampMin = "0.0"))
+    float _ArrowRadius = 0.0f;
+
 public:
     CK_PROPERTY(_Material);
+    CK_PROPERTY(_Profile);
     CK_PROPERTY(_Radius);
     CK_PROPERTY(_Sides);
     CK_PROPERTY(_MaxPoints);
+    CK_PROPERTY(_ArrowLength);
+    CK_PROPERTY(_ArrowRadius);
 };
 
 // --------------------------------------------------------------------------------------------------------------------
