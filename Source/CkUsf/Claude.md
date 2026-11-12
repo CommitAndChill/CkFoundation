@@ -306,7 +306,10 @@ parameter's `Id`, which the generator copies — with the right name and no Id t
 ("invalid parameter"). The engine follows a renamed collection parameter by its Id, so the existing master
 keeps reading it, but the look's next regeneration fails validation until `_CollectionParameterName`
 follows; a deleted-and-re-added parameter has a new Id and needs the regeneration. The node's
-`Collection` pointer is a hard reference: the master loads the collection with it.
+`Collection` pointer is a hard reference: the master loads the collection with it. A material can read at
+most `MaxNumParameterCollectionsPerMaterial` (2) distinct collections; the translator refuses more, and a
+headless generation never compiles the master to find out, so the validator rejects a look whose params
+name a third. The param's `_DefaultScalar`/`_DefaultVector` are not used: the collection holds the default.
 
 ## Traps cookbook
 
