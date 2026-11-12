@@ -149,7 +149,9 @@ auto Entities = utils_entity_tag::ForEach_Entity(SelfEntity, n"TAG_MyEntity");
 // Debug draw — NO World param in AS
 utils_debug_draw::DrawDebugString(Pos, Text, nullptr, FLinearColor::White, 0.0f);
 
-// Entity script retrieval + typed cast
+// Entity script retrieval + typed cast — tests and debug only. Re-fetch, never
+// cache: a pooled script may be re-issued to another entity once this one ends play.
+// Gameplay reaches another script by registration (§12).
 auto Script = utils_entity_script::TryGet_EntityScript(EntityHandle);
 auto Typed  = Cast<UMyEntityScript>(Script);
 
@@ -517,13 +519,15 @@ auto Attr = FCk_FloatAttribute_Spec(
 Attr.Set_MinMax(ECk_MinMax::MinMax).Set_MinValue(0.0f).Set_MaxValue(100.0f);
 auto Health = utils_float_attribute::Add(SelfEntity, Attr);
 
-// Find tagged entities + typed script access
-for (auto E : utils_entity_tag::ForEach_Entity(SelfEntity, n"TAG_MyEntity"))
-{
-    auto S = utils_entity_script::TryGet_EntityScript(E);
-    auto Typed = Cast<UMyEntityScript>(S);
-    if (ck::IsValid(Typed)) { Typed.SomeFunction(); }
-}
+// Calling into another script: the registrant passes `this` to whoever calls
+// it, so no entity-to-object lookup is needed. Do NOT tag-scan and
+// TryGet_EntityScript in gameplay code (§5).
+// In UMyStation_EntityScript::DoConstruct (Director is an ExposeOnSpawn param):
+Director.Request_RegisterStation(this);
+// In UMyDirector_EntityScript (_Stations is a TArray<UMyStation_EntityScript>):
+void Request_RegisterStation(UMyStation_EntityScript InStation) { _Stations.Add(InStation); }
+// The station unregisters itself in DoEndPlay. Spawn stations with the director
+// as their lifetime owner so the director never ends play (and is re-issued) first.
 
 // Request structs — use fluent setter chains for optional params
 auto Req = FCk_Request_AudioDirector_StartTrack(TrackName);
