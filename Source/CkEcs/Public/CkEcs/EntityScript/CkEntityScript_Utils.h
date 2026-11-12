@@ -68,8 +68,7 @@ public:
     Get_ScriptClass(
         const FCk_Handle_EntityScript& InHandle);
 
-    // The live script object behind an entity, or nullptr when the entity carries no EntityScript or its script is gone.
-    // The reverse of UCk_EntityScript_UE::DoGet_ScriptEntity; a typed Cast on the result reaches a script's own members.
+    // The reverse of UCk_EntityScript_UE::DoGet_ScriptEntity, or nullptr when the entity has no live script.
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|EntityScript",
               DisplayName="[Ck][EntityScript] TryGet_EntityScript")

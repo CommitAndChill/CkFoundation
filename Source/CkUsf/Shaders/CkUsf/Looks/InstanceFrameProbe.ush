@@ -3,10 +3,8 @@
 // (CkTests: CkUsf.PixelInstanceFrame.SetsTheInstanceFrameDefine). It exists to be generated and
 // force-compiled, never applied.
 //
-// The include refuses to compile unless the material environment asks for the per-instance
-// world-to-local transform in the pixel stage, which is the one thing _PixelInstanceFrame promises.
-// NEEDS_ (not HAS_) is checked because HAS_ also depends on the vertex factory permutation: a
-// non-instanced permutation of the same master legitimately reads the primitive's transform.
+// Checks NEEDS_, not HAS_: HAS_ also depends on the vertex factory, and a non-instanced permutation of
+// the same master legitimately reads the primitive's transform.
 #pragma once
 #include "/CkUsf/Common.ush"
 

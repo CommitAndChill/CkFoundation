@@ -306,8 +306,6 @@ namespace ck_usf_look_validator
         }
     }
 
-    // A collection param reads a value the generated node resolves through the collection's parameter Id; a
-    // missing collection or parameter leaves a node that compiles to nothing the look can rely on.
     auto Validate_CollectionParam(const FName InLookName, const FCk_Usf_ParamDesc& InParam,
         ck::usf_editor::FLookValidationResult& InOutResult) -> void
     {
@@ -379,9 +377,7 @@ namespace ck_usf_look_validator
         }
     }
 
-    // The material translator refuses a material that reads more distinct collections than
-    // MaxNumParameterCollectionsPerMaterial, and a headless generation never compiles the master to find out,
-    // so the look is rejected here instead of producing a master that fails translation.
+    // The translator refuses more collections than this, and a headless generation never compiles the master.
     auto Validate_CollectionCount(const FName InLookName, const UCkUsf_LookDefinition* InDef,
         ck::usf_editor::FLookValidationResult& InOutResult) -> void
     {
