@@ -31,6 +31,15 @@ the icon registry; added 2026-08-17).
   `GetToneColor(ECk_Tone)`.
 - `ECk_Tone` — Neutral/Info/Ok/Warn/Err/Accent semantic tones.
 - `UCk_Style_UserSettings_UE` — the tunables; read live via `GetDefault<>`, never cached.
+- **Two palettes, one getter.** The flat colour properties are the Dark palette; `Light`
+  (`FCk_Style_PaletteColors`) holds the same slots. Every colour getter returns `Light.X` when
+  `CkStyle::IsLight()`: Palette Mode (Follow Editor Theme / Always Dark / Always Light), where Follow
+  reads `USlateThemeManager`'s Background luminance (> 0.5 = Light). Unattended runs always resolve
+  Dark, so gates and rendered references never change. `CkStyle::FScopedPalette` overrides the
+  resolution on the game thread (tests; the overlay opt-out `OverlaysFollowEditorTheme`).
+  A colour baked at widget construction does not follow a live switch; the debugger windows rebuild
+  on a flip (`SCkDebugger_WindowBase::Poll_StyleRevision`). `Ck.CkEditorTools.Style.Palette.*` pins it.
+  Text or icon ink in a hue tuned for dark surfaces goes through `CkStyle::InkOf`.
 - `FCkIconStyle::Get_Brush(ECk_Icon, ECk_Icon_BrushSize)` — the ONLY way to resolve a typed icon
   brush (16 and 24 are separately registered brushes — UE caches rasterization per brush, so one
   brush at two sizes would blur). Glyphs are monochrome white; tint via `SImage.ColorAndOpacity`.
