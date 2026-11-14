@@ -62,10 +62,12 @@ bool
         const FString& Parameters)
 {
     const auto* Settings = GetDefault<UCk_Style_UserSettings_UE>();
+    const auto ThemeLight = CkStyle::IsThemeLight();
 
     {
         const auto Scope = CkStyle::FScopedPalette{ECk_Style_Palette::Light};
         TestTrue(TEXT("A Light scope resolves Light"), CkStyle::IsLight());
+        TestEqual(TEXT("The unscoped theme resolution ignores the scope"), CkStyle::IsThemeLight(), ThemeLight);
         TestEqual(TEXT("Bg1 reads the Light field"), CkStyle::Bg1(), Settings->Light.Bg1);
         TestEqual(TEXT("Text reads the Light field"), CkStyle::Text(), Settings->Light.Text);
         TestEqual(TEXT("Accent reads the Light field"), CkStyle::Accent(), Settings->Light.Accent);

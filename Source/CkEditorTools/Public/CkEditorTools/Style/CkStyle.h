@@ -59,7 +59,9 @@ namespace CkStyle
 		bool InIsUnattended,
 		const FLinearColor& InThemeBackground) -> ECk_Style_Palette;
 
+	// IsLight honours an active FScopedPalette; IsThemeLight is the unscoped resolution that flip detectors watch.
 	CKEDITORTOOLS_API auto IsLight() -> bool;
+	CKEDITORTOOLS_API auto IsThemeLight() -> bool;
 
 	// Dark when the overlays opted out of following the editor theme, unset otherwise.
 	CKEDITORTOOLS_API auto GetOverlayPalette() -> TOptional<ECk_Style_Palette>;
