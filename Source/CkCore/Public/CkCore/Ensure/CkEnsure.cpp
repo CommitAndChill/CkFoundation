@@ -10,6 +10,7 @@
 #include "CkCore/Ensure/CkEnsure_Utils.h"
 
 #include <CoreMinimal.h>
+#include <Styling/StyleColors.h>
 #include <Windows/WindowsPlatformApplicationMisc.h> // required for clipboard copy
 
 #if WITH_ANGELSCRIPT_CK
@@ -25,6 +26,19 @@ namespace ck::ensure
     {
         static const auto File = FName{TEXT("CkEnsure.SuppressOutsidePieDialogs")};
         return File;
+    }
+
+    // Dark keeps the authored tints; a light editor theme gets FStyleColors-derived fills that its dark ink reads on.
+    auto Get_DialogButtonColor(
+        const FLinearColor& InDark,
+        EStyleColor InLightTone,
+        float InLightToneAmount) -> FLinearColor
+    {
+        const auto& Theme = USlateThemeManager::Get();
+        if (Theme.GetColor(EStyleColor::Background).GetLuminance() <= 0.5f)
+        { return InDark; }
+
+        return FMath::Lerp(Theme.GetColor(EStyleColor::Secondary), Theme.GetColor(InLightTone), InLightToneAmount);
     }
 
     auto Get_IsOutsidePieDialogSuppressed() -> bool
@@ -567,7 +581,7 @@ namespace ck::ensure
         auto Buttons = TArray<DialogButton>{};
 
         Buttons.Add(DialogButton{FText::FromString(TEXT("Ignore Once")), FSimpleDelegate::CreateLambda([&]()
-        {})}.Set_Color(FLinearColor{0.22f, 0.22f, 0.22f, 1.0f}));
+        {})}.Set_Color(Get_DialogButtonColor(FLinearColor{0.22f, 0.22f, 0.22f, 1.0f}, EStyleColor::Secondary, 0.0f)));
 
         Buttons.Add(DialogButton{FText::FromString(TEXT("Ignore All")), FSimpleDelegate::CreateLambda([&]()
         {
@@ -575,7 +589,7 @@ namespace ck::ensure
             { UCk_Utils_Ensure_UE::Request_IgnoreEnsureAtFileAndLine(InFile, InLine); }
             else
             { UCk_Utils_Ensure_UE::Request_IgnoreEnsure_WithCallstack(BpStackTrace + AsStackTrace); }
-        })}.Set_Color(FLinearColor{1.0f, 0.62f, 0.27f, 1.0f}).Set_IsPrimary(true).Set_ShouldFocus(true));
+        })}.Set_Color(Get_DialogButtonColor(FLinearColor{1.0f, 0.62f, 0.27f, 1.0f}, EStyleColor::Warning, 0.35f)).Set_IsPrimary(true).Set_ShouldFocus(true));
 
         Buttons.Add(DialogButton{FText::FromString(TEXT("  ")), {}}
         .Set_Color(FLinearColor{0.0f, 0.0f, 0.0f, 0.0f})
@@ -587,11 +601,11 @@ namespace ck::ensure
             { UCk_Utils_Ensure_UE::Request_IgnoreEnsurePermanently_AtFileAndLine(InFile, InLine); }
             else
             { UCk_Utils_Ensure_UE::Request_IgnoreEnsurePermanently_WithCallstack(BpStackTrace + AsStackTrace); }
-        })}.Set_Color(FLinearColor{0.45f, 0.25f, 0.55f, 1.0f})
+        })}.Set_Color(Get_DialogButtonColor(FLinearColor{0.45f, 0.25f, 0.55f, 1.0f}, EStyleColor::AccentPurple, 0.35f))
           .Set_Tooltip(FText::FromString(TEXT("Ignore this ensure until the Editor is restarted"))));
 
         Buttons.Add(DialogButton{FText::FromString(TEXT("Break")), {}}
-        .Set_Color(FLinearColor{0.22f, 0.22f, 0.22f, 1.0f})
+        .Set_Color(Get_DialogButtonColor(FLinearColor{0.22f, 0.22f, 0.22f, 1.0f}, EStyleColor::Secondary, 0.0f))
         .Set_EnableDisable(StackTraceFromEnsureCaller.IsEmpty() ? ECk_EnableDisable::Disable : ECk_EnableDisable::Enable));
 
         if (GIsEditor)
@@ -599,13 +613,13 @@ namespace ck::ensure
             Buttons.Add(DialogButton{FText::FromString(TEXT("Break in BP")), FSimpleDelegate::CreateLambda([&]()
             {
                 UCk_Utils_Debug_StackTrace_UE::Try_BreakInScript(nullptr);
-            })}.Set_Color(FLinearColor{0.34f, 0.34f, 0.59f, 1.0f})
+            })}.Set_Color(Get_DialogButtonColor(FLinearColor{0.34f, 0.34f, 0.59f, 1.0f}, EStyleColor::AccentBlue, 0.35f))
             .Set_EnableDisable(HasBpStack ? ECk_EnableDisable::Enable : ECk_EnableDisable::Disable));
 
             Buttons.Add(DialogButton{FText::FromString(TEXT("Break in AS")), FSimpleDelegate::CreateLambda([&]()
             {
                 UCk_Utils_Debug_StackTrace_UE::Try_BreakInAngelscript(nullptr);
-            })}.Set_Color(FLinearColor{0.59f, 0.34f, 0.34f, 1.0f})
+            })}.Set_Color(Get_DialogButtonColor(FLinearColor{0.59f, 0.34f, 0.34f, 1.0f}, EStyleColor::AccentRed, 0.35f))
             .Set_EnableDisable(HasAsStack ? ECk_EnableDisable::Enable : ECk_EnableDisable::Disable));
         }
 
@@ -616,7 +630,7 @@ namespace ck::ensure
             {
                 UCk_Utils_Ensure_UE::Request_IgnoreAllEnsures();
                 UCk_Utils_EditorOnly_UE::Request_AbortPIE();
-            })}.Set_Color(FLinearColor{1.0f, 0.1f, 0.1f, 1.0f}));
+            })}.Set_Color(Get_DialogButtonColor(FLinearColor{1.0f, 0.1f, 0.1f, 1.0f}, EStyleColor::Error, 0.5f)));
         }
 
         if (IsOutsidePieInEditor)
@@ -627,7 +641,7 @@ namespace ck::ensure
                 {
                     Request_SuppressOutsidePieDialogs();
                 })}
-                .Set_Color(FLinearColor{0.45f, 0.25f, 0.55f, 1.0f})
+                .Set_Color(Get_DialogButtonColor(FLinearColor{0.45f, 0.25f, 0.55f, 1.0f}, EStyleColor::AccentPurple, 0.35f))
                 .Set_Tooltip(FText::FromString(TEXT(
                     "Suppress outside-PIE ensure dialogs until Clear All Ignored Ensures or the next game-world "
                     "teardown. Ensures continue to log."))));
