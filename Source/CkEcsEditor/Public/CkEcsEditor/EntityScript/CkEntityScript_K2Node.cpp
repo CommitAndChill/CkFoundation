@@ -20,6 +20,7 @@
 #include <DetailLayoutBuilder.h>
 #include <DetailWidgetRow.h>
 #include <EditorStyleSet.h>
+#include <Styling/StyleColors.h>
 #include <GraphEditorSettings.h>
 #include <K2Node_CallFunction.h>
 #include <K2Node_MakeStruct.h>
@@ -1641,7 +1642,7 @@ auto
                                 return FText::GetEmpty();
                             })
                             .Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-                            .ColorAndOpacity(FLinearColor(0.8f, 0.8f, 0.8f))
+                            .ColorAndOpacity(FStyleColors::Foreground)
                         ]
                     ]
 
@@ -1673,7 +1674,7 @@ auto
                             SNew(STextBlock)
                             .Text(FText::FromString(TEXT("CDO")))
                             .Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-                            .ColorAndOpacity(FLinearColor(0.8f, 0.8f, 0.8f))
+                            .ColorAndOpacity(FStyleColors::Foreground)
                         ]
                     ]
                 ]
