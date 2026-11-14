@@ -50,9 +50,17 @@ auto
 	IsLight()
 	-> bool
 {
-	if (ck_style::ScopedPalette.IsSet() && IsInGameThread())
+	if (IsInGameThread() && ck_style::ScopedPalette.IsSet())
 	{ return *ck_style::ScopedPalette == ECk_Style_Palette::Light; }
 
+	return IsThemeLight();
+}
+
+auto
+	CkStyle::
+	IsThemeLight()
+	-> bool
+{
 	return ResolvePalette(
 		ck_style::DoSettings()->PaletteMode,
 		FApp::IsUnattended(),
