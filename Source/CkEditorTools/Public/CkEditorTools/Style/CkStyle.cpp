@@ -5,6 +5,11 @@
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
+#include "Styling/StyleColors.h"
+
+#include "CkCore/Macros/CkMacros.h"
+
+#include "Misc/App.h"
 
 // ====================================================================================================================
 
@@ -14,6 +19,74 @@ namespace ck_style
 	{
 		return GetDefault<UCk_Style_UserSettings_UE>();
 	}
+
+	TOptional<ECk_Style_Palette> ScopedPalette;
+}
+
+// ====================================================================================================================
+
+auto
+	CkStyle::
+	ResolvePalette(
+		ECk_Style_PaletteMode InMode,
+		bool InIsUnattended,
+		const FLinearColor& InThemeBackground)
+	-> ECk_Style_Palette
+{
+	if (InIsUnattended)
+	{ return ECk_Style_Palette::Dark; }
+
+	switch (InMode)
+	{
+		case ECk_Style_PaletteMode::AlwaysDark:  return ECk_Style_Palette::Dark;
+		case ECk_Style_PaletteMode::AlwaysLight: return ECk_Style_Palette::Light;
+		default:
+			return InThemeBackground.GetLuminance() > 0.5f ? ECk_Style_Palette::Light : ECk_Style_Palette::Dark;
+	}
+}
+
+auto
+	CkStyle::
+	IsLight()
+	-> bool
+{
+	if (ck_style::ScopedPalette.IsSet() && IsInGameThread())
+	{ return *ck_style::ScopedPalette == ECk_Style_Palette::Light; }
+
+	return ResolvePalette(
+		ck_style::DoSettings()->PaletteMode,
+		FApp::IsUnattended(),
+		USlateThemeManager::Get().GetColor(EStyleColor::Background)) == ECk_Style_Palette::Light;
+}
+
+auto
+	CkStyle::
+	GetOverlayPalette()
+	-> TOptional<ECk_Style_Palette>
+{
+	if (ck_style::DoSettings()->bOverlaysFollowEditorTheme)
+	{ return {}; }
+
+	return ECk_Style_Palette::Dark;
+}
+
+CkStyle::FScopedPalette::
+	FScopedPalette(
+		TOptional<ECk_Style_Palette> InPalette)
+{
+	if (NOT InPalette.IsSet() || NOT IsInGameThread())
+	{ return; }
+
+	_Applied = true;
+	_Previous = ck_style::ScopedPalette;
+	ck_style::ScopedPalette = InPalette;
+}
+
+CkStyle::FScopedPalette::
+	~FScopedPalette()
+{
+	if (_Applied)
+	{ ck_style::ScopedPalette = _Previous; }
 }
 
 #define CK_STYLE_GETTER(Name) \
@@ -22,80 +95,87 @@ namespace ck_style
 		return ck_style::DoSettings()->Name; \
 	}
 
+#define CK_STYLE_PALETTE_GETTER(Name) \
+	auto CkStyle::Name() -> FLinearColor \
+	{ \
+		const auto* Settings = ck_style::DoSettings(); \
+		return IsLight() ? Settings->Light.Name : Settings->Name; \
+	}
+
 // ====================================================================================================================
 
-CK_STYLE_GETTER(BgRoot)
-CK_STYLE_GETTER(Bg1)
-CK_STYLE_GETTER(Bg2)
-CK_STYLE_GETTER(Bg3)
-CK_STYLE_GETTER(Border)
-CK_STYLE_GETTER(BorderStrong)
-CK_STYLE_GETTER(Text)
-CK_STYLE_GETTER(TextDim)
-CK_STYLE_GETTER(TextMute)
-CK_STYLE_GETTER(TextStrong)
-CK_STYLE_GETTER(Accent)
-CK_STYLE_GETTER(Ok)
-CK_STYLE_GETTER(Err)
-CK_STYLE_GETTER(Warn)
-CK_STYLE_GETTER(Info)
-CK_STYLE_GETTER(AccentDim)
-CK_STYLE_GETTER(OkDim)
-CK_STYLE_GETTER(ErrDim)
-CK_STYLE_GETTER(WarnDim)
-CK_STYLE_GETTER(InfoDim)
-CK_STYLE_GETTER(NeutralDim)
+CK_STYLE_PALETTE_GETTER(BgRoot)
+CK_STYLE_PALETTE_GETTER(Bg1)
+CK_STYLE_PALETTE_GETTER(Bg2)
+CK_STYLE_PALETTE_GETTER(Bg3)
+CK_STYLE_PALETTE_GETTER(Border)
+CK_STYLE_PALETTE_GETTER(BorderStrong)
+CK_STYLE_PALETTE_GETTER(Text)
+CK_STYLE_PALETTE_GETTER(TextDim)
+CK_STYLE_PALETTE_GETTER(TextMute)
+CK_STYLE_PALETTE_GETTER(TextStrong)
+CK_STYLE_PALETTE_GETTER(Accent)
+CK_STYLE_PALETTE_GETTER(Ok)
+CK_STYLE_PALETTE_GETTER(Err)
+CK_STYLE_PALETTE_GETTER(Warn)
+CK_STYLE_PALETTE_GETTER(Info)
+CK_STYLE_PALETTE_GETTER(AccentDim)
+CK_STYLE_PALETTE_GETTER(OkDim)
+CK_STYLE_PALETTE_GETTER(ErrDim)
+CK_STYLE_PALETTE_GETTER(WarnDim)
+CK_STYLE_PALETTE_GETTER(InfoDim)
+CK_STYLE_PALETTE_GETTER(NeutralDim)
 
-CK_STYLE_GETTER(Selection)
-CK_STYLE_GETTER(SelectionInactive)
-CK_STYLE_GETTER(Hover)
+CK_STYLE_PALETTE_GETTER(Selection)
+CK_STYLE_PALETTE_GETTER(SelectionInactive)
+CK_STYLE_PALETTE_GETTER(Hover)
 
-CK_STYLE_GETTER(None)
-CK_STYLE_GETTER(EntityId)
-CK_STYLE_GETTER(Transform)
-CK_STYLE_GETTER(Network)
-CK_STYLE_GETTER(Relationship)
-CK_STYLE_GETTER(Attribute)
-CK_STYLE_GETTER(Reference)
-CK_STYLE_GETTER(PickMarker_Default)
-CK_STYLE_GETTER(PickMarker_Hover)
-CK_STYLE_GETTER(AxisX)
-CK_STYLE_GETTER(AxisY)
-CK_STYLE_GETTER(AxisZ)
+CK_STYLE_PALETTE_GETTER(None)
+CK_STYLE_PALETTE_GETTER(EntityId)
+CK_STYLE_PALETTE_GETTER(Transform)
+CK_STYLE_PALETTE_GETTER(Network)
+CK_STYLE_PALETTE_GETTER(Relationship)
+CK_STYLE_PALETTE_GETTER(Attribute)
+CK_STYLE_PALETTE_GETTER(Reference)
+CK_STYLE_PALETTE_GETTER(PickMarker_Default)
+CK_STYLE_PALETTE_GETTER(PickMarker_Hover)
+CK_STYLE_PALETTE_GETTER(AxisX)
+CK_STYLE_PALETTE_GETTER(AxisY)
+CK_STYLE_PALETTE_GETTER(AxisZ)
 
-CK_STYLE_GETTER(Value_Bool_True)
-CK_STYLE_GETTER(Value_Bool_False)
-CK_STYLE_GETTER(Value_Numeric)
-CK_STYLE_GETTER(Value_String)
-CK_STYLE_GETTER(Value_Math)
-CK_STYLE_GETTER(Value_Tag)
-CK_STYLE_GETTER(Value_Enum)
-CK_STYLE_GETTER(Value_Object)
-CK_STYLE_GETTER(Value_Handle)
+CK_STYLE_PALETTE_GETTER(Value_Bool_True)
+CK_STYLE_PALETTE_GETTER(Value_Bool_False)
+CK_STYLE_PALETTE_GETTER(Value_Numeric)
+CK_STYLE_PALETTE_GETTER(Value_String)
+CK_STYLE_PALETTE_GETTER(Value_Math)
+CK_STYLE_PALETTE_GETTER(Value_Tag)
+CK_STYLE_PALETTE_GETTER(Value_Enum)
+CK_STYLE_PALETTE_GETTER(Value_Object)
+CK_STYLE_PALETTE_GETTER(Value_Handle)
 
-CK_STYLE_GETTER(State_Enabled)
-CK_STYLE_GETTER(State_Disabled)
-CK_STYLE_GETTER(State_Overlapping)
-CK_STYLE_GETTER(State_Config)
+CK_STYLE_PALETTE_GETTER(State_Enabled)
+CK_STYLE_PALETTE_GETTER(State_Disabled)
+CK_STYLE_PALETTE_GETTER(State_Overlapping)
+CK_STYLE_PALETTE_GETTER(State_Config)
 
-CK_STYLE_GETTER(Status_NotStarted)
-CK_STYLE_GETTER(Status_Active)
-CK_STYLE_GETTER(Status_Completed)
-CK_STYLE_GETTER(Status_Failed)
+CK_STYLE_PALETTE_GETTER(Status_NotStarted)
+CK_STYLE_PALETTE_GETTER(Status_Active)
+CK_STYLE_PALETTE_GETTER(Status_Completed)
+CK_STYLE_PALETTE_GETTER(Status_Failed)
 
-CK_STYLE_GETTER(Graph_Background)
-CK_STYLE_GETTER(Graph_Edge)
-CK_STYLE_GETTER(Graph_Node_Center)
-CK_STYLE_GETTER(Graph_Node_Default)
-CK_STYLE_GETTER(Graph_Node_Border_Default)
-CK_STYLE_GETTER(Graph_Node_Border_Center)
+CK_STYLE_PALETTE_GETTER(Graph_Background)
+CK_STYLE_PALETTE_GETTER(Graph_Edge)
+CK_STYLE_PALETTE_GETTER(Graph_Node_Center)
+CK_STYLE_PALETTE_GETTER(Graph_Node_Default)
+CK_STYLE_PALETTE_GETTER(Graph_Node_Border_Default)
+CK_STYLE_PALETTE_GETTER(Graph_Node_Border_Center)
 
-CK_STYLE_GETTER(CategoryGather)
-CK_STYLE_GETTER(CategoryBuild)
-CK_STYLE_GETTER(CategoryResearch)
-CK_STYLE_GETTER(CategoryTrain)
-CK_STYLE_GETTER(CategoryAge)
-CK_STYLE_GETTER(CategoryTrade)
+CK_STYLE_PALETTE_GETTER(CategoryGather)
+CK_STYLE_PALETTE_GETTER(CategoryBuild)
+CK_STYLE_PALETTE_GETTER(CategoryResearch)
+CK_STYLE_PALETTE_GETTER(CategoryTrain)
+CK_STYLE_PALETTE_GETTER(CategoryAge)
+CK_STYLE_PALETTE_GETTER(CategoryTrade)
 
 CK_STYLE_GETTER(FontSizeH2)
 CK_STYLE_GETTER(FontSizeH3)
@@ -105,7 +185,7 @@ CK_STYLE_GETTER(FontSizeSmall)
 CK_STYLE_GETTER(FontSizeMicro)
 
 CK_STYLE_GETTER(PaneHeadingFontSize)
-CK_STYLE_GETTER(PaneHeadingColor)
+CK_STYLE_PALETTE_GETTER(PaneHeadingColor)
 
 CK_STYLE_GETTER(PlanStrip_TitleFontSize)
 CK_STYLE_GETTER(PlanStrip_MetaFontSize)
@@ -115,25 +195,25 @@ CK_STYLE_GETTER(PlanStrip_StepNameFontSize)
 CK_STYLE_GETTER(PlanStrip_StepCostFontSize)
 CK_STYLE_GETTER(PlanStrip_StepStateFontSize)
 
-CK_STYLE_GETTER(PlanStep_Fill_Pending)
-CK_STYLE_GETTER(PlanStep_Border_Pending)
-CK_STYLE_GETTER(PlanStep_Badge_Pending)
-CK_STYLE_GETTER(PlanStep_Fill_Active)
-CK_STYLE_GETTER(PlanStep_Border_Active)
-CK_STYLE_GETTER(PlanStep_Badge_Active)
-CK_STYLE_GETTER(PlanStep_Fill_Done)
-CK_STYLE_GETTER(PlanStep_Border_Done)
-CK_STYLE_GETTER(PlanStep_Badge_Done)
-CK_STYLE_GETTER(PlanStrip_GoalFill)
-CK_STYLE_GETTER(PlanStrip_GoalBorder)
+CK_STYLE_PALETTE_GETTER(PlanStep_Fill_Pending)
+CK_STYLE_PALETTE_GETTER(PlanStep_Border_Pending)
+CK_STYLE_PALETTE_GETTER(PlanStep_Badge_Pending)
+CK_STYLE_PALETTE_GETTER(PlanStep_Fill_Active)
+CK_STYLE_PALETTE_GETTER(PlanStep_Border_Active)
+CK_STYLE_PALETTE_GETTER(PlanStep_Badge_Active)
+CK_STYLE_PALETTE_GETTER(PlanStep_Fill_Done)
+CK_STYLE_PALETTE_GETTER(PlanStep_Border_Done)
+CK_STYLE_PALETTE_GETTER(PlanStep_Badge_Done)
+CK_STYLE_PALETTE_GETTER(PlanStrip_GoalFill)
+CK_STYLE_PALETTE_GETTER(PlanStrip_GoalBorder)
 
-CK_STYLE_GETTER(NodeFill_Inactive)
-CK_STYLE_GETTER(NodeBorder_Inactive)
-CK_STYLE_GETTER(NodeFill_InPlan)
-CK_STYLE_GETTER(NodeBorder_InPlan)
-CK_STYLE_GETTER(NodeFill_Goal)
-CK_STYLE_GETTER(NodeBorder_Goal)
-CK_STYLE_GETTER(NodeFill_GoalInactive)
+CK_STYLE_PALETTE_GETTER(NodeFill_Inactive)
+CK_STYLE_PALETTE_GETTER(NodeBorder_Inactive)
+CK_STYLE_PALETTE_GETTER(NodeFill_InPlan)
+CK_STYLE_PALETTE_GETTER(NodeBorder_InPlan)
+CK_STYLE_PALETTE_GETTER(NodeFill_Goal)
+CK_STYLE_PALETTE_GETTER(NodeBorder_Goal)
+CK_STYLE_PALETTE_GETTER(NodeFill_GoalInactive)
 CK_STYLE_GETTER(NodeTitleFontSize)
 CK_STYLE_GETTER(NodeCostFontSize)
 CK_STYLE_GETTER(NodeMetaFontSize)
@@ -155,6 +235,7 @@ CK_STYLE_GETTER(RadiusPill)
 CK_STYLE_GETTER(RingWidth)
 
 #undef CK_STYLE_GETTER
+#undef CK_STYLE_PALETTE_GETTER
 
 // ====================================================================================================================
 
