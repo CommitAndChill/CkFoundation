@@ -11,6 +11,16 @@
 
 struct FSlateBrush;
 
+enum class ECk_Style_PaletteMode : uint8;
+
+// --------------------------------------------------------------------------------------------------------------------
+
+enum class ECk_Style_Palette : uint8
+{
+	Dark,
+	Light,
+};
+
 // --------------------------------------------------------------------------------------------------------------------
 
 /**
@@ -41,6 +51,33 @@ namespace CkStyle
 	{
 		auto C = InBase; C.A = InAlpha; return C;
 	}
+
+	// ----- Palette selection --------------------------------------------------
+	// Unattended runs resolve Dark so gates and rendered references stay deterministic.
+	CKEDITORTOOLS_API auto ResolvePalette(
+		ECk_Style_PaletteMode InMode,
+		bool InIsUnattended,
+		const FLinearColor& InThemeBackground) -> ECk_Style_Palette;
+
+	CKEDITORTOOLS_API auto IsLight() -> bool;
+
+	// Dark when the overlays opted out of following the editor theme, unset otherwise.
+	CKEDITORTOOLS_API auto GetOverlayPalette() -> TOptional<ECk_Style_Palette>;
+
+	// Game-thread override of the resolved palette for the scope's lifetime; an unset palette is a no-op.
+	class CKEDITORTOOLS_API FScopedPalette
+	{
+	public:
+		explicit FScopedPalette(TOptional<ECk_Style_Palette> InPalette);
+		~FScopedPalette();
+
+		FScopedPalette(const FScopedPalette&) = delete;
+		auto operator=(const FScopedPalette&) -> FScopedPalette& = delete;
+
+	private:
+		bool _Applied = false;
+		TOptional<ECk_Style_Palette> _Previous;
+	};
 
 	// ----- Palette ------------------------------------------------------------
 	CKEDITORTOOLS_API auto BgRoot()       -> FLinearColor;
