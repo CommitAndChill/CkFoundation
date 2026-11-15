@@ -232,7 +232,7 @@ auto
 {
     const auto* Found = _IsmRenderers.Find(InRendererData);
 
-    if (Found == nullptr || ck::Is_NOT_Valid(*Found))
+    if (Found == nullptr || ck::Is_NOT_Valid(Found->Get()))
     { return nullptr; }
 
     return *Found;
@@ -247,7 +247,7 @@ auto
 
     for (const auto& [Data, Renderer] : _IsmRenderers)
     {
-        if (Data != nullptr && Data->Get_IsTransientFactoryCreated() && ck::IsValid(Renderer))
+        if (Data != nullptr && Data->Get_IsTransientFactoryCreated() && ck::IsValid(Renderer.Get()))
         { ++Count; }
     }
 
