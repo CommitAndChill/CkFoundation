@@ -10,6 +10,8 @@
 #include "CkEcsExt/EntityScript/CkEntityScript_WithActor_Utils.h"
 
 #include "CkIsmRenderer/CkIsmRenderer_EntityScript.h"
+#include "CkIsmRenderer/CkIsmRenderer_Log.h"
+#include "CkIsmRenderer/Proxy/CkIsmProxy_Fragment.h"
 #include "CkIsmRenderer/Renderer/CkIsmRenderer_TransientFactory.h"
 #include "CkIsmRenderer/Renderer/CkIsmRenderer_Utils.h"
 
@@ -95,6 +97,12 @@ auto
 {
     Super::Initialize(Collection);
     DoSweepLeakedRenderers();
+
+    if (const auto* World = GetWorld();
+        ck::IsValid(World) && World->IsGameWorld())
+    {
+        _OnWorldTickStartHandle = FWorldDelegates::OnWorldTickStart.AddUObject(this, &ThisType::DoOnWorldTickStart);
+    }
 }
 
 auto
@@ -102,6 +110,9 @@ auto
     Deinitialize()
     -> void
 {
+    FWorldDelegates::OnWorldTickStart.Remove(_OnWorldTickStartHandle);
+    _OnWorldTickStartHandle.Reset();
+
     UCk_Utils_IsmRenderer_TransientFactory_UE::ClearCache(GetWorld());
 
     Super::Deinitialize();
@@ -205,7 +216,240 @@ auto
 
     const auto IsmRenderer = _IsmRenderers.Add(InDataAsset, SpawnedIsmRendererActor);
 
+    if (InDataAsset->Get_IsTransientFactoryCreated())
+    {
+        _TransientRendererHighWaterMark = FMath::Max(_TransientRendererHighWaterMark, Get_LiveTransientRendererCount());
+    }
+
     return IsmRenderer;
+}
+
+auto
+    UCk_IsmRenderer_Subsystem_UE::
+    Find_IsmRenderer(
+        const UCk_IsmRenderer_Data* InRendererData) const
+    -> ACk_IsmRenderer_Actor_UE*
+{
+    const auto* Found = _IsmRenderers.Find(InRendererData);
+
+    if (Found == nullptr || ck::Is_NOT_Valid(*Found))
+    { return nullptr; }
+
+    return *Found;
+}
+
+auto
+    UCk_IsmRenderer_Subsystem_UE::
+    Get_LiveTransientRendererCount() const
+    -> int32
+{
+    auto Count = 0;
+
+    for (const auto& [Data, Renderer] : _IsmRenderers)
+    {
+        if (Data != nullptr && Data->Get_IsTransientFactoryCreated() && ck::IsValid(Renderer))
+        { ++Count; }
+    }
+
+    return Count;
+}
+
+auto
+    UCk_IsmRenderer_Subsystem_UE::
+    Get_CachedEntryCount(
+        const UCk_IsmRenderer_Data* InRendererData) const
+    -> int32
+{
+    const auto Key = FRendererDataKey{InRendererData};
+
+    auto Count = static_cast<int32>(_IsmRenderers.Contains(InRendererData)) +
+        static_cast<int32>(_IsmComponentCache.Contains(InRendererData));
+
+    const auto CountShadowEntries = [&](const auto& InCache)
+    {
+        for (const auto& [ShadowKey, Shadow] : InCache)
+        {
+            if (ShadowKey.template Get<0>() == Key)
+            { ++Count; }
+        }
+    };
+
+    CountShadowEntries(_OutlineIsmComponentCache);
+    CountShadowEntries(_CelPatternIsmComponentCache);
+    CountShadowEntries(_StylizeMaskIsmComponentCache);
+
+    return Count;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    UCk_IsmRenderer_Subsystem_UE::
+    Request_AcquireProxyRef(
+        const TWeakObjectPtr<const UCk_IsmRenderer_Data>& InRendererData)
+    -> void
+{
+    ++_ProxyRefCounts.FindOrAdd(InRendererData);
+    _PendingTeardown_MarkedOnFrame.Remove(InRendererData);
+}
+
+auto
+    UCk_IsmRenderer_Subsystem_UE::
+    Request_ReleaseProxyRef(
+        const TWeakObjectPtr<const UCk_IsmRenderer_Data>& InRendererData)
+    -> void
+{
+    auto* Count = _ProxyRefCounts.Find(InRendererData);
+
+    CK_ENSURE_IF_NOT(Count != nullptr && *Count > 0,
+        TEXT("Released an IsmRenderer proxy reference for [{}] that was never acquired"), InRendererData.Get())
+    { return; }
+
+    if (--(*Count) > 0)
+    { return; }
+
+    _ProxyRefCounts.Remove(InRendererData);
+
+    const auto* RendererData = InRendererData.Get();
+
+    if (ck::Is_NOT_Valid(RendererData) || NOT RendererData->Get_IsTransientFactoryCreated())
+    { return; }
+
+    if (NOT _OnWorldTickStartHandle.IsValid() || NOT _IsmRenderers.Contains(RendererData))
+    { return; }
+
+    _PendingTeardown_MarkedOnFrame.Add(InRendererData, GFrameCounter);
+}
+
+auto
+    UCk_IsmRenderer_Subsystem_UE::
+    Get_ProxyRefCount(
+        const UCk_IsmRenderer_Data* InRendererData) const
+    -> int32
+{
+    const auto* Count = _ProxyRefCounts.Find(FRendererDataKey{InRendererData});
+    return Count != nullptr ? *Count : 0;
+}
+
+auto
+    UCk_IsmRenderer_Subsystem_UE::
+    Get_IsPendingTeardown(
+        const UCk_IsmRenderer_Data* InRendererData) const
+    -> bool
+{
+    return _PendingTeardown_MarkedOnFrame.Contains(FRendererDataKey{InRendererData});
+}
+
+auto
+    UCk_IsmRenderer_Subsystem_UE::
+    DoOnWorldTickStart(
+        UWorld* InWorld,
+        ELevelTick InTickType,
+        float InDeltaSeconds)
+    -> void
+{
+    if (InWorld != GetWorld())
+    { return; }
+
+    for (auto It = _PendingTeardown_MarkedOnFrame.CreateIterator(); It; ++It)
+    {
+        if (It.Value() >= GFrameCounter)
+        { continue; }
+
+        const auto Key = It.Key();
+        It.RemoveCurrent();
+
+        if (Get_ProxyRefCount(Key.Get()) == 0)
+        { DoTeardown_TransientRenderer(Key); }
+    }
+
+#if !CK_DISABLE_ENSURE_CHECKS
+    constexpr auto RecountIntervalFrames = 600;
+
+    if (GFrameCounter >= _NextRecountFrame)
+    {
+        _NextRecountFrame = GFrameCounter + RecountIntervalFrames;
+        Request_RecountProxyRefs();
+    }
+#endif
+}
+
+auto
+    UCk_IsmRenderer_Subsystem_UE::
+    DoTeardown_TransientRenderer(
+        const TWeakObjectPtr<const UCk_IsmRenderer_Data>& InRendererData)
+    -> void
+{
+    const auto* RendererData = InRendererData.Get();
+
+    if (ck::Is_NOT_Valid(RendererData) || NOT RendererData->Get_IsTransientFactoryCreated())
+    { return; }
+
+    if (auto* Renderer = Find_IsmRenderer(RendererData))
+    {
+        Renderer->Destroy();
+    }
+
+    _IsmRenderers.Remove(RendererData);
+    _IsmComponentCache.Remove(RendererData);
+
+    const auto PurgeShadowCache = [&](auto& InCache)
+    {
+        for (auto It = InCache.CreateIterator(); It; ++It)
+        {
+            if (It.Key().template Get<0>() == InRendererData)
+            { It.RemoveCurrent(); }
+        }
+    };
+
+    PurgeShadowCache(_OutlineIsmComponentCache);
+    PurgeShadowCache(_CelPatternIsmComponentCache);
+    PurgeShadowCache(_StylizeMaskIsmComponentCache);
+
+    ck::ismrenderer::Verbose(TEXT("Tore down the transient ISM renderer for [{}]: no proxies left"), RendererData);
+}
+
+auto
+    UCk_IsmRenderer_Subsystem_UE::
+    Request_RecountProxyRefs()
+    -> void
+{
+    auto TransientEntity = UCk_Utils_EcsWorld_Subsystem_UE::Get_TransientEntity(GetWorld());
+
+    if (ck::Is_NOT_Valid(TransientEntity))
+    { return; }
+
+    auto LiveCounts = TMap<FRendererDataKey, int32>{};
+
+    TransientEntity.View<ck::FFragment_IsmProxy_Params, ck::FFragment_IsmProxy>().ForEach(
+    [&](FCk_Entity, const ck::FFragment_IsmProxy_Params& InParams, const ck::FFragment_IsmProxy& InIsmProxy)
+    {
+        if (InIsmProxy.Get_RendererRefAcquired())
+        { ++LiveCounts.FindOrAdd(FRendererDataKey{InParams.Get_IsmRenderer()}); }
+    });
+
+    for (const auto& [Key, LiveCount] : LiveCounts)
+    {
+        auto& StoredCount = _ProxyRefCounts.FindOrAdd(Key);
+
+        CK_ENSURE_IF_NOT(StoredCount >= LiveCount,
+            TEXT("IsmRenderer [{}] counted [{}] proxy references but [{}] proxies are live; raising the count"),
+            Key.Get(), StoredCount, LiveCount)
+        {
+            StoredCount = LiveCount;
+            _PendingTeardown_MarkedOnFrame.Remove(Key);
+        }
+    }
+
+    for (const auto& [Key, StoredCount] : _ProxyRefCounts)
+    {
+        const auto* LiveCount = LiveCounts.Find(Key);
+        const auto Live = LiveCount != nullptr ? *LiveCount : 0;
+
+        CK_ENSURE(StoredCount <= Live,
+            TEXT("IsmRenderer [{}] counted [{}] proxy references but only [{}] proxies are live; a release was missed and the renderer leaks"),
+            Key.Get(), StoredCount, Live);
+    }
 }
 
 #if WITH_EDITOR
@@ -323,6 +567,36 @@ auto
     { return {}; }
 
     return _IsmComponentCache.Add(InRendererData, StaticMeshComponent);
+}
+
+auto
+    UCk_IsmRenderer_Subsystem_UE::
+    Find_IsmComponent(
+        const UCk_IsmRenderer_Data* InRendererData,
+        const TWeakObjectPtr<AActor>& InEditorSelectionOwner) const
+    -> TWeakObjectPtr<UInstancedStaticMeshComponent>
+{
+    if (ck::Is_NOT_Valid(InRendererData))
+    { return {}; }
+
+#if WITH_EDITOR
+    if (NOT InEditorSelectionOwner.IsExplicitlyNull())
+    {
+        const auto* MaybeFound = _PerOwnerIsmComponentCache.Find(FPerOwnerRendererKey{InRendererData, InEditorSelectionOwner});
+        return MaybeFound != nullptr ? *MaybeFound : TWeakObjectPtr<UInstancedStaticMeshComponent>{};
+    }
+#endif
+
+    if (const auto* MaybeFound = _IsmComponentCache.Find(InRendererData);
+        MaybeFound != nullptr && ck::IsValid(*MaybeFound))
+    { return *MaybeFound; }
+
+    const auto* Renderer = Find_IsmRenderer(InRendererData);
+
+    if (ck::Is_NOT_Valid(Renderer))
+    { return {}; }
+
+    return DoFind_IsmComponentOnRenderer(Renderer, InRendererData);
 }
 
 // --------------------------------------------------------------------------------------------------------------------

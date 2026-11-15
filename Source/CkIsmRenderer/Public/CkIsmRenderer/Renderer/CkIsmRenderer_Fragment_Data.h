@@ -191,6 +191,8 @@ private:
               meta = (AllowPrivateAccess = true))
     FCustomPrimitiveData _CustomPrimitiveDataDefaults;
 
+    bool _IsTransientFactoryCreated = false;
+
 public:
     CK_PROPERTY_GET(_Mobility);
     CK_PROPERTY_GET(_UpdatePolicy);
@@ -205,6 +207,7 @@ public:
     CK_PROPERTY_GET(_RenderPolicy);
     CK_PROPERTY_GET(_NumCustomData);
     CK_PROPERTY_GET(_CustomPrimitiveDataDefaults);
+    CK_PROPERTY_GET(_IsTransientFactoryCreated);
 };
 
 // --------------------------------------------------------------------------------------------------------------------

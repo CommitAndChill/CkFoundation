@@ -47,14 +47,17 @@ namespace ck
         friend class FProcessor_IsmProxy_AddInstance;
         friend class FProcessor_IsmProxy_HandleRequests;
         friend class FProcessor_IsmProxy_HandleLateCustomDataRequests;
+        friend class ::UCk_Utils_IsmProxy_UE;
 
     private:
         FPrimitiveInstanceId _IsmInstanceIndex;
         TArray<float> _CustomInstanceDataValues;
+        bool _RendererRefAcquired = false;
 
     public:
         CK_PROPERTY_GET(_IsmInstanceIndex);
         CK_PROPERTY_GET(_CustomInstanceDataValues);
+        CK_PROPERTY_GET(_RendererRefAcquired);
     };
 
     // --------------------------------------------------------------------------------------------------------------------

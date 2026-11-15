@@ -114,6 +114,48 @@ public:
         const UCk_IsmRenderer_Data* InRendererData,
         const TWeakObjectPtr<AActor>& InEditorSelectionOwner = {}) -> TWeakObjectPtr<UInstancedStaticMeshComponent>;
 
+    // Never spawns a renderer: teardown paths must not resurrect one they are about to leave empty.
+    auto
+    Find_IsmComponent(
+        const UCk_IsmRenderer_Data* InRendererData,
+        const TWeakObjectPtr<AActor>& InEditorSelectionOwner = {}) const -> TWeakObjectPtr<UInstancedStaticMeshComponent>;
+
+    auto
+    Find_IsmRenderer(
+        const UCk_IsmRenderer_Data* InRendererData) const -> ACk_IsmRenderer_Actor_UE*;
+
+    // Live proxies per renderer data. At zero, a game world destroys a transient-factory renderer on its next
+    // tick; an acquire before then cancels it, and one after respawns through FindOrCache_IsmComponent.
+    // The factory data stays rooted. See CkIsmRenderer/CLAUDE.md.
+    auto
+    Request_AcquireProxyRef(
+        const TWeakObjectPtr<const UCk_IsmRenderer_Data>& InRendererData) -> void;
+
+    auto
+    Request_ReleaseProxyRef(
+        const TWeakObjectPtr<const UCk_IsmRenderer_Data>& InRendererData) -> void;
+
+    // Recounts acquired proxies from the registry and ensures on drift. It only ever raises a stored count,
+    // so a missed release leaks a renderer rather than destroying one that is still in use.
+    auto
+    Request_RecountProxyRefs() -> void;
+
+    auto
+    Get_ProxyRefCount(
+        const UCk_IsmRenderer_Data* InRendererData) const -> int32;
+
+    auto
+    Get_IsPendingTeardown(
+        const UCk_IsmRenderer_Data* InRendererData) const -> bool;
+
+    auto
+    Get_LiveTransientRendererCount() const -> int32;
+
+    // Entries across the renderer map, the component cache and the three shadow caches.
+    auto
+    Get_CachedEntryCount(
+        const UCk_IsmRenderer_Data* InRendererData) const -> int32;
+
     // The "shadow ISM" for (renderer data, outline preset): a custom-depth-only twin of the renderer's
     // ISM carrying the preset's stencil value. Custom depth is per-component, so per-instance outlines
     // need this second component. See CkIsmRenderer/CLAUDE.md.
@@ -159,6 +201,29 @@ private:
     DoFind_IsmComponentOnRenderer(
         const ACk_IsmRenderer_Actor_UE* InRenderer,
         const UCk_IsmRenderer_Data* InRendererData) -> UInstancedStaticMeshComponent*;
+
+    auto
+    DoOnWorldTickStart(
+        UWorld* InWorld,
+        ELevelTick InTickType,
+        float InDeltaSeconds) -> void;
+
+    auto
+    DoTeardown_TransientRenderer(
+        const TWeakObjectPtr<const UCk_IsmRenderer_Data>& InRendererData) -> void;
+
+private:
+    using FRendererDataKey = TWeakObjectPtr<const UCk_IsmRenderer_Data>;
+
+    TMap<FRendererDataKey, int32> _ProxyRefCounts;
+    TMap<FRendererDataKey, uint64> _PendingTeardown_MarkedOnFrame;
+
+    int32 _TransientRendererHighWaterMark = 0;
+    uint64 _NextRecountFrame = 0;
+    FDelegateHandle _OnWorldTickStartHandle;
+
+public:
+    CK_PROPERTY_GET(_TransientRendererHighWaterMark);
 
 private:
     UPROPERTY()

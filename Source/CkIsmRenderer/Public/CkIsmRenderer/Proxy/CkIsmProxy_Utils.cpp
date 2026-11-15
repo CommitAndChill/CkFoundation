@@ -3,8 +3,10 @@
 #include "CkCore/Mesh/CkMesh_Utils.h"
 
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
+#include "CkEcs/Net/CkNet_Utils.h"
 #include "CkEcsExt/Transform/CkTransform_Utils.h"
 
+#include "CkIsmRenderer/CkIsmSubsystem.h"
 #include "CkIsmRenderer/Proxy/CkIsmProxy_Fragment.h"
 #include "CkIsmRenderer/Renderer/CkIsmRenderer_Fragment_Data.h"
 
@@ -26,8 +28,20 @@ auto
     { return {}; }
 
     InHandle.Add<ck::FFragment_IsmProxy_Params>(InParams);
-    InHandle.Add<ck::FFragment_IsmProxy>();
+    auto& IsmProxy = InHandle.Add<ck::FFragment_IsmProxy>();
     InHandle.Add<ck::FTag_IsmProxy_NeedsSetup>();
+
+    if (UCk_Utils_Net_UE::Get_CanExecuteCosmeticEvents(UCk_Utils_EntityLifetime_UE::Get_TransientEntity(InHandle)))
+    {
+        if (const auto* World = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InHandle); ck::IsValid(World))
+        {
+            if (auto* IsmRendererSubsystem = World->GetSubsystem<UCk_IsmRenderer_Subsystem_UE>(); ck::IsValid(IsmRendererSubsystem))
+            {
+                IsmRendererSubsystem->Request_AcquireProxyRef(InParams.Get_IsmRenderer());
+                IsmProxy._RendererRefAcquired = true;
+            }
+        }
+    }
 
     if (InParams.Get_StartingState() == ECk_EnableDisable::Disable)
     {
