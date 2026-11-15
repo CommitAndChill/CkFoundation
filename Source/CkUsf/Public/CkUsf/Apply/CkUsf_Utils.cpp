@@ -8,10 +8,36 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "MaterialShared.h"
+#include "Misc/App.h"
 #include "RHIGlobals.h"
 #include "Engine/Texture.h"
 #include "Camera/CameraComponent.h"
 #include "Components/PostProcessComponent.h"
+
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace ck_usf_utils
+{
+    // Without an RHI no shader map is ever built, and the editor compiles masters asynchronously and on demand, so
+    // there a missing shader map only means "not compiled yet"; a real failure leaves its errors on the resource.
+    auto
+        Get_MasterFailedToCompile(
+            UMaterial& InMaterial)
+        -> bool
+    {
+        if (NOT FApp::CanEverRender())
+        { return false; }
+
+        const auto* Resource = InMaterial.GetMaterialResource(GMaxRHIShaderPlatform);
+
+#if WITH_EDITOR
+        return Resource != nullptr && NOT Resource->GetCompileErrors().IsEmpty();
+#else
+        return Resource == nullptr || NOT Resource->HasValidGameThreadShaderMap();
+#endif
+    }
+}
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -42,10 +68,10 @@ auto
     // can miss permutations the generating session never compiled (e.g. ray-tracing hit shaders
     // when RT was enabled after the look was generated).
     if (auto* AsMaterial = Mat->GetMaterial();
-        AsMaterial != nullptr && AsMaterial->IsCompilingOrHadCompileError(GMaxRHIShaderPlatform))
+        AsMaterial != nullptr && ck_usf_utils::Get_MasterFailedToCompile(*AsMaterial))
     {
         ck::usf::Warning(
-            TEXT("Look [{}] master material has shader compile errors (or is still compiling) — it will "
+            TEXT("Look [{}] master material has shader compile errors — it will "
                  "render as the checkered DefaultMaterial. See LogShaderCompilers for the HLSL error, "
                  "then re-run Generate Look Materials or 'RecompileShaders Material {}'."),
             InLook->Get_EffectiveLookName(), AsMaterial->GetName());
