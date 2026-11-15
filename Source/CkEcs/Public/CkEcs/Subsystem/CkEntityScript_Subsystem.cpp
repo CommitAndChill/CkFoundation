@@ -133,7 +133,6 @@ auto
 
 #if WITH_EDITOR
     FCoreUObjectDelegates::OnObjectPreSave.Remove(_OnObjectPreSave_DelegateHandle);
-    FEditorDelegates::OnAssetsPreDelete.Remove(_OnAssetsPreDelete_DelegateHandle);
 
     if (ck::IsValid(GEditor))
     {
@@ -189,7 +188,7 @@ bool
     Request_ProcessPendingSpawnParamsRequests();
     ProcessPendingStructAssetOperations();
 #if WITH_EDITOR
-    if (ck::IsValid(GEditor) && ck::IsValid(GEngine) && GEngine->bIsInitialized && NOT Get_IsPlayInEditorActive())
+    if (ck::IsValid(GEditor) && ck::IsValid(GEngine) && GEngine->bIsInitialized)
     {
         auto PendingSaves = TArray<TObjectPtr<UUserDefinedStruct>>{};
         PendingSaves.Reserve(_EntitySpawnParams_StructsToSave.Num());
@@ -215,6 +214,12 @@ auto
     { return false; }
     if (_StructsBeingSaved.Contains(InStruct))
     { return true; }
+
+    if (Get_IsPlayInEditorActive())
+    {
+        Request_StartCompilationTicker();
+        return false;
+    }
 
     _EntitySpawnParams_StructsToSave.Remove(InStruct);
     _StructsBeingSaved.Add(InStruct);
@@ -1057,8 +1062,6 @@ auto
         _OnInMemoryAssetDeleted_DelegateHandle = AssetRegistry->OnInMemoryAssetDeleted().AddUObject(this, &ThisType::OnInMemoryAssetDeleted);
     }
 
-    _OnAssetsPreDelete_DelegateHandle = FEditorDelegates::OnAssetsPreDelete.AddUObject(this, &ThisType::OnAssetsPreDelete);
-
     RegisterForBlueprintChanges();
 #endif
 }
@@ -1084,7 +1087,7 @@ auto
 
     if (IsEntityScriptStructData(InAssetData) && NOT _EntitySpawnParams_StructsByName.Contains(InAssetData.AssetName))
     {
-        if (auto* Added = Cast<UUserDefinedStruct>(InAssetData.GetAsset());
+        if (auto* Added = FindObject<UUserDefinedStruct>(nullptr, *InAssetData.GetObjectPathString());
             ck::IsValid(Added))
         {
             _EntitySpawnParams_Structs.Add(Added);
@@ -1104,7 +1107,18 @@ auto
     if (UCk_Utils_EditorOnly_UE::Get_IsCommandletOrCooking())
     { return; }
 
-    const auto& Blueprint = Cast<UBlueprint>(InAsset);
+    DoHandle_BlueprintCreatedInProcess(Cast<UBlueprint>(InAsset));
+#endif
+}
+
+auto
+    UCk_EntityScript_Subsystem_UE::
+    DoHandle_BlueprintCreatedInProcess(
+        UBlueprint* InBlueprint)
+    -> void
+{
+#if WITH_EDITOR
+    const auto& Blueprint = InBlueprint;
 
     if (ck::Is_NOT_Valid(Blueprint))
     { return; }
@@ -1115,6 +1129,13 @@ auto
     { return; }
 
     ck::ecs::Display(TEXT("New EntityScript blueprint detected: {} - Creating config struct..."), InAssetData);
+
+    if (const auto [StructPackagePath, StructName] = Get_SpawnParamsStructPackageForBlueprintPath(InAssetData.GetObjectPathString());
+        NOT StructPackagePath.IsEmpty())
+    {
+        _PendingStructAssetOperations.RemoveAll([&](const FPendingStructAssetOperation& InPending)
+        { return InPending.bDelete && InPending.SourcePath == StructPackagePath; });
+    }
 
     const auto& BlueprintGeneratedClass = Blueprint->GeneratedClass;
 
@@ -1140,21 +1161,7 @@ auto
         return;
     }
 
-    if (const auto& BlueprintClassPath = UBlueprint::StaticClass()->GetClassPathName();
-        InAssetData.AssetClassPath != BlueprintClassPath)
-    { return; }
-
-    auto NativeParentClassPath = FString{};
-    if (NOT InAssetData.GetTagValue(FBlueprintTags::NativeParentClassPath, NativeParentClassPath))
-    { return; }
-
-    const auto& ParentClassName = FPackageName::ExportTextPathToObjectPath(NativeParentClassPath);
-    const auto& ParentClass = FindObject<UClass>(nullptr, *ParentClassName);
-
-    if (ck::Is_NOT_Valid(ParentClass))
-    { return; }
-
-    if (NOT ParentClass->IsChildOf(UCk_EntityScript_UE::StaticClass()) && ParentClass != UCk_EntityScript_UE::StaticClass())
+    if (NOT Get_IsEntityScriptBlueprintData(InAssetData))
     { return; }
 
     const auto& NewObjectPath = InAssetData.GetObjectPathString();
@@ -1198,16 +1205,7 @@ auto
             _EntitySpawnParams_StructsByName.Remove(InAssetData.AssetName);
             _EntitySpawnParams_StructsToSave.Remove(Cached.Get());
         }
-        return;
     }
-
-    if (NOT Get_IsEntityScriptBlueprintData(InAssetData))
-    { return; }
-
-    if (_LocallyPreDeletedBlueprintPaths.Remove(InAssetData.GetObjectPathString()) == 0)
-    { return; }
-
-    DoQueue_SpawnParamsRemovalForBlueprint(InAssetData);
 #endif
 }
 
@@ -1228,29 +1226,7 @@ auto
     if (NOT Get_IsEntityScriptBlueprintData(InAssetData))
     { return; }
 
-    _LocallyPreDeletedBlueprintPaths.Remove(InAssetData.GetObjectPathString());
     DoQueue_SpawnParamsRemovalForBlueprint(InAssetData);
-#endif
-}
-
-auto
-    UCk_EntityScript_Subsystem_UE::
-    OnAssetsPreDelete(
-        const TArray<UObject*>& InAssets)
-    -> void
-{
-#if WITH_EDITOR
-    for (const auto* Asset : InAssets)
-    {
-        const auto* Blueprint = Cast<UBlueprint>(Asset);
-
-        if (ck::Is_NOT_Valid(Blueprint, ck::IsValid_Policy_IncludePendingKill{}))
-        { continue; }
-
-        if (const auto Data = FAssetData{Blueprint};
-            Get_IsEntityScriptBlueprintData(Data))
-        { _LocallyPreDeletedBlueprintPaths.Add(Data.GetObjectPathString()); }
-    }
 #endif
 }
 
@@ -1286,22 +1262,35 @@ auto
 
 auto
     UCk_EntityScript_Subsystem_UE::
+    Get_SpawnParamsStructPackageForBlueprintPath(
+        const FString& InBlueprintObjectPath)
+    -> TPair<FString, FName>
+{
+    auto ShortName = FPaths::GetBaseFilename(InBlueprintObjectPath);
+    if (UCk_Utils_IO_UE::Get_IsTemporaryAsset(ShortName))
+    { return {}; }
+
+    ShortName.RemoveFromStart(TEXT("BP_"));
+    const auto StructName = FName{ck::Format_UE(TEXT("{}{}"), _SpawnParamsStructName_Prefix, ShortName)};
+
+    return {Get_StructPathForEntityScriptPath(InBlueprintObjectPath) / StructName.ToString(), StructName};
+}
+
+auto
+    UCk_EntityScript_Subsystem_UE::
     DoQueue_SpawnParamsRemovalForBlueprint(
         const FAssetData& InAssetData)
     -> void
 {
 #if WITH_EDITOR
     const auto& DeletedObjectPath = InAssetData.GetObjectPathString();
-    const auto& DeletedAssetSpawnParamsStructPath = Get_StructPathForEntityScriptPath(DeletedObjectPath);
 
     ck::ecs::Display(TEXT("EntityScript blueprint [{}] has been deleted - Removing its associated Spawn Params struct..."), DeletedObjectPath);
 
-    auto DeletedAssetShortName = FPaths::GetBaseFilename(DeletedObjectPath);
-    if (UCk_Utils_IO_UE::Get_IsTemporaryAsset(DeletedAssetShortName))
+    const auto [DeletedAssetStructPackagePath, DeletedAssetStructName] = Get_SpawnParamsStructPackageForBlueprintPath(DeletedObjectPath);
+    if (DeletedAssetStructPackagePath.IsEmpty())
     { return; }
-    DeletedAssetShortName.RemoveFromStart(TEXT("BP_"));
-    const auto& DeletedAssetStructName = FName{ck::Format_UE(TEXT("{}{}"), _SpawnParamsStructName_Prefix, DeletedAssetShortName)};
-    const auto DeletedAssetStructPackagePath = DeletedAssetSpawnParamsStructPath / DeletedAssetStructName.ToString();
+
     if (_PendingStructAssetOperations.ContainsByPredicate([&](const FPendingStructAssetOperation& InPending)
         { return InPending.bDelete && InPending.SourcePath == DeletedAssetStructPackagePath; }))
     { return; }

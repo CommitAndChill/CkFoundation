@@ -15,6 +15,8 @@
 
 #include "CkEntityScript_Subsystem.generated.h"
 
+class UBlueprint;
+
 // ----------------------------------------------------------------------------------------------------------
 
 /**
@@ -141,8 +143,12 @@ private:
         UObject* InAsset) -> void;
 
     auto
-    OnAssetsPreDelete(
-        const TArray<UObject*>& InAssets) -> void;
+    DoHandle_BlueprintCreatedInProcess(
+        UBlueprint* InBlueprint) -> void;
+
+    auto
+    Get_SpawnParamsStructPackageForBlueprintPath(
+        const FString& InBlueprintObjectPath) -> TPair<FString, FName>;
 
     auto
     DoQueue_SpawnParamsRemovalForBlueprint(
@@ -222,9 +228,6 @@ private:
     FDelegateHandle _OnAssetRenamed_DelegateHandle;
     FDelegateHandle _OnInMemoryAssetCreated_DelegateHandle;
     FDelegateHandle _OnInMemoryAssetDeleted_DelegateHandle;
-    FDelegateHandle _OnAssetsPreDelete_DelegateHandle;
-
-    TSet<FString> _LocallyPreDeletedBlueprintPaths;
     FDelegateHandle _OnObjectPreSave_DelegateHandle;
     FDelegateHandle _OnBlueprintCompiled_DelegateHandle;
     FDelegateHandle _OnBlueprintReinstanced_DelegateHandle;
