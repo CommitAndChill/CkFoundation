@@ -92,6 +92,28 @@ namespace ck_ism_proxy_processor
 #endif
     }
 
+    auto
+        FindExistingRendererIsmComp(
+            const UWorld* InWorld,
+            const UCk_IsmRenderer_Data* InRendererData,
+            const FCk_Handle_IsmProxy& InProxyHandle)
+        -> TWeakObjectPtr<UInstancedStaticMeshComponent>
+    {
+        if (ck::Is_NOT_Valid(InRendererData) || ck::Is_NOT_Valid(InWorld))
+        { return {}; }
+
+        const auto& IsmRendererSubsystem = InWorld->GetSubsystem<UCk_IsmRenderer_Subsystem_UE>(InWorld);
+
+        if (ck::Is_NOT_Valid(IsmRendererSubsystem))
+        { return {}; }
+
+#if WITH_EDITOR
+        return IsmRendererSubsystem->Find_IsmComponent(InRendererData, UCk_Utils_EditorSelectionOwner_UE::TryGet_SelectionOwnerWeak(InProxyHandle));
+#else
+        return IsmRendererSubsystem->Find_IsmComponent(InRendererData);
+#endif
+    }
+
 #if !WITH_EDITOR
     auto
         FindRendererIsmCompForTransform(
@@ -477,16 +499,22 @@ namespace ck
         using namespace ck_ism_proxy_processor;
 
         const auto& RendererData = InParams.Get_IsmRenderer().Get();
-        const auto& IsmComp = FindRendererIsmComp(_World.Get(), RendererData, InHandle);
 
-        if (ck::Is_NOT_Valid(IsmComp))
-        { return; }
-
-        if (IsmComp->IsValidId(InIsmProxy.Get_IsmInstanceIndex()))
+        if (const auto& IsmComp = FindExistingRendererIsmComp(_World.Get(), RendererData, InHandle);
+            ck::IsValid(IsmComp) && IsmComp->IsValidId(InIsmProxy.Get_IsmInstanceIndex()))
         {
             IsmComp->RemoveInstanceById(InIsmProxy.Get_IsmInstanceIndex());
             InIsmProxy._IsmInstanceIndex = FPrimitiveInstanceId{INDEX_NONE};
         }
+
+        if (NOT InIsmProxy._RendererRefAcquired)
+        { return; }
+
+        InIsmProxy._RendererRefAcquired = false;
+
+        if (auto* IsmRendererSubsystem = _World.IsValid() ? _World->GetSubsystem<UCk_IsmRenderer_Subsystem_UE>() : nullptr;
+            ck::IsValid(IsmRendererSubsystem))
+        { IsmRendererSubsystem->Request_ReleaseProxyRef(InParams.Get_IsmRenderer()); }
     }
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -806,7 +834,7 @@ namespace ck
 
                 const auto& RendererData = InParams.Get_IsmRenderer().Get();
 
-                if (const auto& IsmComp = FindRendererIsmComp(_World.Get(), RendererData, InHandle);
+                if (const auto& IsmComp = FindExistingRendererIsmComp(_World.Get(), RendererData, InHandle);
                     ck::IsValid(IsmComp) && IsmComp->IsValidId(InIsmProxy.Get_IsmInstanceIndex()))
                 {
                     IsmComp->RemoveInstanceById(InIsmProxy.Get_IsmInstanceIndex());

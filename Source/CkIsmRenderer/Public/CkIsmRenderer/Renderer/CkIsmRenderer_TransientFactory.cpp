@@ -219,6 +219,7 @@ auto
 
             Data->_MaterialsInfo._MaterialOverrides = InMaterialOverrides;
             Data->_NumCustomData = InNumCustomData;
+            Data->_IsTransientFactoryCreated = true;
         }
     );
 
