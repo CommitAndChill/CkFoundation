@@ -100,6 +100,29 @@ irrelevant; runtime worlds always use the shared renderer. The per-owner caches 
 after the owner actor is destroyed, so teardown removes instances from the component that actually
 holds them instead of silently falling back to the shared one.
 
+**Transient-factory renderers die with their last proxy (game worlds only).**
+`UCk_Utils_IsmProxy_UE::Add` acquires a per-data proxy reference on the subsystem and
+`FProcessor_IsmProxy_EndPlay` releases it, counting proxies rather than instances, so a disabled proxy still holds
+its renderer. When the count reaches zero for data the transient factory created, the subsystem marks it and, on
+the world's NEXT tick start, destroys the renderer actor (its EntityScript entity follows through the owning-actor
+link) and purges `_IsmRenderers`, `_IsmComponentCache` and the three shadow caches. An acquire before that tick
+cancels the teardown; one after it respawns through `FindOrCache_IsmComponent`. EndPlay and Disable resolve the
+component with the find-only `Find_IsmComponent`, so teardown never spawns the renderer it is emptying. Authored
+data assets, editor worlds and per-owner editor renderers are untouched.
+- The factory data object stays rooted until world teardown (`ClearCache`): AngelScript holders that keep it in
+  non-`UPROPERTY` members are not GC-traced, so unrooting it at zero could free data a script still uses. The
+  data and its material instances therefore still accumulate per distinct material; only the actor, component,
+  entity and cache entries are reclaimed.
+- Missing a release must leak, never destroy early. Acquire and release are paired through
+  `FFragment_IsmProxy::_RendererRefAcquired`, and a low-frequency recount (`Request_RecountProxyRefs`, skipped with
+  ensure checks off) compares the stored counts with live proxies: it ensures on any drift and only ever raises a
+  stored count. Telemetry: `Get_LiveTransientRendererCount` and `Get_TransientRendererHighWaterMark`.
+  In a cosmetic game world it also ensures on a live proxy that holds no reference.
+- Known costs: `FProcessor_IsmProxy_Setup` still sets up a proxy whose destroy has begun but whose EndPlay has
+  not run, so a proxy destroyed in the frame it was added spawns its renderer, which is torn down a tick later.
+  EndPlay is not exempt from the snapshot hydration quarantine, so a proxy destroyed while quarantined never
+  releases; that fails safe, as a leaked renderer plus the recount ensure.
+
 **Local rotation offset is post-multiplied, never pre-multiplied.**
 `InTransform.GetRotation() * InParams.Get_LocalRotationOffset().Quaternion()` composes the offset in
 the entity's LOCAL frame, like an Unreal relative transform (`childWorldRot = parentRot * relativeRot`).
