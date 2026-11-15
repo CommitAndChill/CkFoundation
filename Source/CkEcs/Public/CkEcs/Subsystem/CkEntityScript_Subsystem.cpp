@@ -136,8 +136,8 @@ auto
 
     if (ck::IsValid(GEditor))
     {
-        GEditor->OnBlueprintCompiled().Remove(_OnBlueprintCompiled_DelegateHandle);
-        GEditor->OnBlueprintReinstanced().Remove(_OnBlueprintReinstanced_DelegateHandle);
+        GEditor->OnBlueprintPreCompile().Remove(_OnBlueprintCompiled_DelegateHandle);
+        GEditor->OnBlueprintCompiled().Remove(_OnBlueprintReinstanced_DelegateHandle);
     }
 #endif
 
