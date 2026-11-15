@@ -677,6 +677,7 @@ auto
     const auto* Config = Session.IsValid() ? Session->Get_PreviewConfig() : nullptr;
     if (_Closed || InPdi == nullptr || Config == nullptr || NOT Model.IsValid())
     { return; }
+    const auto ScenePalette = CkStyle::FScopedPalette{ECk_Style_Palette::Dark};
     auto SurfaceError = FString{};
     if (Config->ValidateSurface(SurfaceError))
     {
