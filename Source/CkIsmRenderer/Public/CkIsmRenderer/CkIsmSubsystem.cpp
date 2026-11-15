@@ -6,6 +6,8 @@
 
 #include "CkEcs/EditorSelectionOwner/CkEditorSelectionOwner_Utils.h"
 
+#include "CkEcs/EntityLifetime/CkEntityLifetime_Fragment.h"
+#include "CkEcs/Net/CkNet_Utils.h"
 #include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
 #include "CkEcsExt/EntityScript/CkEntityScript_WithActor_Utils.h"
 
@@ -351,14 +353,19 @@ auto
     if (InWorld != GetWorld())
     { return; }
 
+    auto Due = TArray<FRendererDataKey>{};
+
     for (auto It = _PendingTeardown_MarkedOnFrame.CreateIterator(); It; ++It)
     {
         if (It.Value() >= GFrameCounter)
         { continue; }
 
-        const auto Key = It.Key();
+        Due.Add(It.Key());
         It.RemoveCurrent();
+    }
 
+    for (const auto& Key : Due)
+    {
         if (Get_ProxyRefCount(Key.Get()) == 0)
         { DoTeardown_TransientRenderer(Key); }
     }
@@ -427,6 +434,17 @@ auto
         if (InIsmProxy.Get_RendererRefAcquired())
         { ++LiveCounts.FindOrAdd(FRendererDataKey{InParams.Get_IsmRenderer()}); }
     });
+
+    if (UCk_Utils_Net_UE::Get_CanExecuteCosmeticEvents(TransientEntity))
+    {
+        TransientEntity.View<ck::FFragment_IsmProxy_Params, ck::FFragment_IsmProxy, CK_IGNORE_PENDING_KILL>().ForEach(
+        [&](FCk_Entity InEntity, const ck::FFragment_IsmProxy_Params& InParams, const ck::FFragment_IsmProxy& InIsmProxy)
+        {
+            CK_ENSURE(InIsmProxy.Get_RendererRefAcquired(),
+                TEXT("Live IsmProxy [{}] on IsmRenderer [{}] holds no proxy reference; its renderer can be torn down under it"),
+                ck::MakeHandle(InEntity, TransientEntity), InParams.Get_IsmRenderer().Get());
+        });
+    }
 
     for (const auto& [Key, LiveCount] : LiveCounts)
     {
