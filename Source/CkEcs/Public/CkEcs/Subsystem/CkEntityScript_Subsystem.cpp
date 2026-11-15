@@ -127,10 +127,13 @@ auto
         AssetRegistry->OnAssetAdded().Remove(_OnAssetAdded_DelegateHandle);
         AssetRegistry->OnAssetRemoved().Remove(_OnAssetRemoved_DelegateHandle);
         AssetRegistry->OnAssetRenamed().Remove(_OnAssetRenamed_DelegateHandle);
+        AssetRegistry->OnInMemoryAssetCreated().Remove(_OnInMemoryAssetCreated_DelegateHandle);
+        AssetRegistry->OnInMemoryAssetDeleted().Remove(_OnInMemoryAssetDeleted_DelegateHandle);
     }
 
 #if WITH_EDITOR
     FCoreUObjectDelegates::OnObjectPreSave.Remove(_OnObjectPreSave_DelegateHandle);
+    FEditorDelegates::OnAssetsPreDelete.Remove(_OnAssetsPreDelete_DelegateHandle);
 
     if (ck::IsValid(GEditor))
     {
@@ -186,7 +189,7 @@ bool
     Request_ProcessPendingSpawnParamsRequests();
     ProcessPendingStructAssetOperations();
 #if WITH_EDITOR
-    if (ck::IsValid(GEditor) && ck::IsValid(GEngine) && GEngine->bIsInitialized)
+    if (ck::IsValid(GEditor) && ck::IsValid(GEngine) && GEngine->bIsInitialized && NOT Get_IsPlayInEditorActive())
     {
         auto PendingSaves = TArray<TObjectPtr<UUserDefinedStruct>>{};
         PendingSaves.Reserve(_EntitySpawnParams_StructsToSave.Num());
@@ -278,7 +281,7 @@ auto
 #if WITH_EDITOR
     if (_bProcessingStructAssetOperations || _PendingStructAssetOperations.IsEmpty() ||
         ck::Is_NOT_Valid(GEditor) || ck::Is_NOT_Valid(GEngine) || NOT GEngine->bIsInitialized ||
-        ck::IsValid(_ActiveCompilation) || GCompilingBlueprint)
+        ck::IsValid(_ActiveCompilation) || GCompilingBlueprint || Get_IsPlayInEditorActive())
     { return; }
 
     const auto EditorAssets = TObjectPtr<UEditorAssetSubsystem>{GEditor->GetEditorSubsystem<UEditorAssetSubsystem>()};
@@ -1050,7 +1053,11 @@ auto
         _OnAssetAdded_DelegateHandle = AssetRegistry->OnAssetAdded().AddUObject(this, &ThisType::OnAssetAdded);
         _OnAssetRemoved_DelegateHandle = AssetRegistry->OnAssetRemoved().AddUObject(this, &ThisType::OnAssetRemoved);
         _OnAssetRenamed_DelegateHandle = AssetRegistry->OnAssetRenamed().AddUObject(this, &ThisType::OnAssetRenamed);
+        _OnInMemoryAssetCreated_DelegateHandle = AssetRegistry->OnInMemoryAssetCreated().AddUObject(this, &ThisType::OnInMemoryAssetCreated);
+        _OnInMemoryAssetDeleted_DelegateHandle = AssetRegistry->OnInMemoryAssetDeleted().AddUObject(this, &ThisType::OnInMemoryAssetDeleted);
     }
+
+    _OnAssetsPreDelete_DelegateHandle = FEditorDelegates::OnAssetsPreDelete.AddUObject(this, &ThisType::OnAssetsPreDelete);
 
     RegisterForBlueprintChanges();
 #endif
@@ -1083,32 +1090,31 @@ auto
             _EntitySpawnParams_Structs.Add(Added);
             _EntitySpawnParams_StructsByName.Add(InAssetData.AssetName, Added);
         }
-        return;
     }
+#endif
+}
 
-    if (const auto& BlueprintClassPath = UBlueprint::StaticClass()->GetClassPathName();
-        InAssetData.AssetClassPath != BlueprintClassPath)
+auto
+    UCk_EntityScript_Subsystem_UE::
+    OnInMemoryAssetCreated(
+        UObject* InAsset)
+    -> void
+{
+#if WITH_EDITOR
+    if (UCk_Utils_EditorOnly_UE::Get_IsCommandletOrCooking())
     { return; }
 
-    FString ParentClassPath;
-    if (NOT InAssetData.GetTagValue(FBlueprintTags::ParentClassPath, ParentClassPath))
-    { return; }
-
-    const auto& ParentClassName = FPackageName::ExportTextPathToObjectPath(ParentClassPath);
-    const auto& ParentClass = FindObject<UClass>(nullptr, *ParentClassName);
-
-    if (ck::Is_NOT_Valid(ParentClass))
-    { return; }
-
-    if (NOT ParentClass->IsChildOf(UCk_EntityScript_UE::StaticClass()) && ParentClass != UCk_EntityScript_UE::StaticClass())
-    { return; }
-
-    ck::ecs::Display(TEXT("New EntityScript blueprint detected: {} - Creating config struct..."), InAssetData);
-
-    const auto& Blueprint = Cast<UBlueprint>(InAssetData.GetAsset());
+    const auto& Blueprint = Cast<UBlueprint>(InAsset);
 
     if (ck::Is_NOT_Valid(Blueprint))
     { return; }
+
+    const auto InAssetData = FAssetData{Blueprint};
+
+    if (NOT Get_IsEntityScriptBlueprintData(InAssetData))
+    { return; }
+
+    ck::ecs::Display(TEXT("New EntityScript blueprint detected: {} - Creating config struct..."), InAssetData);
 
     const auto& BlueprintGeneratedClass = Blueprint->GeneratedClass;
 
@@ -1195,23 +1201,96 @@ auto
         return;
     }
 
-    if (const auto& BlueprintClassPath = UBlueprint::StaticClass()->GetClassPathName();
-        InAssetData.AssetClassPath != BlueprintClassPath)
+    if (NOT Get_IsEntityScriptBlueprintData(InAssetData))
     { return; }
+
+    if (_LocallyPreDeletedBlueprintPaths.Remove(InAssetData.GetObjectPathString()) == 0)
+    { return; }
+
+    DoQueue_SpawnParamsRemovalForBlueprint(InAssetData);
+#endif
+}
+
+auto
+    UCk_EntityScript_Subsystem_UE::
+    OnInMemoryAssetDeleted(
+        UObject* InAsset)
+    -> void
+{
+#if WITH_EDITOR
+    const auto* Blueprint = Cast<UBlueprint>(InAsset);
+
+    if (ck::Is_NOT_Valid(Blueprint, ck::IsValid_Policy_IncludePendingKill{}))
+    { return; }
+
+    const auto InAssetData = FAssetData{Blueprint};
+
+    if (NOT Get_IsEntityScriptBlueprintData(InAssetData))
+    { return; }
+
+    _LocallyPreDeletedBlueprintPaths.Remove(InAssetData.GetObjectPathString());
+    DoQueue_SpawnParamsRemovalForBlueprint(InAssetData);
+#endif
+}
+
+auto
+    UCk_EntityScript_Subsystem_UE::
+    OnAssetsPreDelete(
+        const TArray<UObject*>& InAssets)
+    -> void
+{
+#if WITH_EDITOR
+    for (const auto* Asset : InAssets)
+    {
+        const auto* Blueprint = Cast<UBlueprint>(Asset);
+
+        if (ck::Is_NOT_Valid(Blueprint, ck::IsValid_Policy_IncludePendingKill{}))
+        { continue; }
+
+        if (const auto Data = FAssetData{Blueprint};
+            Get_IsEntityScriptBlueprintData(Data))
+        { _LocallyPreDeletedBlueprintPaths.Add(Data.GetObjectPathString()); }
+    }
+#endif
+}
+
+auto
+    UCk_EntityScript_Subsystem_UE::
+    Get_IsEntityScriptBlueprintData(
+        const FAssetData& InAssetData)
+    -> bool
+{
+    if (InAssetData.AssetClassPath != UBlueprint::StaticClass()->GetClassPathName())
+    { return false; }
 
     auto NativeParentClassPath = FString{};
     if (NOT InAssetData.GetTagValue(FBlueprintTags::NativeParentClassPath, NativeParentClassPath))
-    { return; }
+    { return false; }
 
-    const auto& ParentClassName = FPackageName::ExportTextPathToObjectPath(NativeParentClassPath);
-    const auto& ParentClass = FindObject<UClass>(nullptr, *ParentClassName);
+    const auto* ParentClass = FindObject<UClass>(nullptr, *FPackageName::ExportTextPathToObjectPath(NativeParentClassPath));
 
-    if (ck::Is_NOT_Valid(ParentClass))
-    { return; }
+    return ck::IsValid(ParentClass) && ParentClass->IsChildOf(UCk_EntityScript_UE::StaticClass());
+}
 
-    if (NOT ParentClass->IsChildOf(UCk_EntityScript_UE::StaticClass()) && ParentClass != UCk_EntityScript_UE::StaticClass())
-    { return; }
+auto
+    UCk_EntityScript_Subsystem_UE::
+    Get_IsPlayInEditorActive()
+    -> bool
+{
+#if WITH_EDITOR
+    return (ck::IsValid(GEditor) && ck::IsValid(GEditor->PlayWorld)) || GIsPlayInEditorWorld;
+#else
+    return false;
+#endif
+}
 
+auto
+    UCk_EntityScript_Subsystem_UE::
+    DoQueue_SpawnParamsRemovalForBlueprint(
+        const FAssetData& InAssetData)
+    -> void
+{
+#if WITH_EDITOR
     const auto& DeletedObjectPath = InAssetData.GetObjectPathString();
     const auto& DeletedAssetSpawnParamsStructPath = Get_StructPathForEntityScriptPath(DeletedObjectPath);
 
@@ -1223,6 +1302,10 @@ auto
     DeletedAssetShortName.RemoveFromStart(TEXT("BP_"));
     const auto& DeletedAssetStructName = FName{ck::Format_UE(TEXT("{}{}"), _SpawnParamsStructName_Prefix, DeletedAssetShortName)};
     const auto DeletedAssetStructPackagePath = DeletedAssetSpawnParamsStructPath / DeletedAssetStructName.ToString();
+    if (_PendingStructAssetOperations.ContainsByPredicate([&](const FPendingStructAssetOperation& InPending)
+        { return InPending.bDelete && InPending.SourcePath == DeletedAssetStructPackagePath; }))
+    { return; }
+
     QueueStructAssetOperation(FPendingStructAssetOperation{
         DeletedAssetStructPackagePath, {}, DeletedAssetStructName, {}, true});
 #endif
