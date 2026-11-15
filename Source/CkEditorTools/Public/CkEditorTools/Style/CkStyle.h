@@ -63,6 +63,9 @@ namespace CkStyle
 	CKEDITORTOOLS_API auto IsLight() -> bool;
 	CKEDITORTOOLS_API auto IsThemeLight() -> bool;
 
+	// Text ink for a hue tuned for a dark surface: the hue itself on Dark, darkened to stay legible on Light.
+	CKEDITORTOOLS_API auto InkOf(const FLinearColor& InHue) -> FLinearColor;
+
 	// Dark when the overlays opted out of following the editor theme, unset otherwise.
 	CKEDITORTOOLS_API auto GetOverlayPalette() -> TOptional<ECk_Style_Palette>;
 
