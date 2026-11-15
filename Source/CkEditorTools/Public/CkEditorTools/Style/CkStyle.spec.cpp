@@ -180,4 +180,43 @@ bool
 
 // --------------------------------------------------------------------------------------------------------------------
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_Style_InkOf,
+    "Ck.CkEditorTools.Style.Palette.InkOfIsLegible",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool
+    FCkTest_Style_InkOf::
+    RunTest(
+        const FString& Parameters)
+{
+    const auto Contrast = [](const FLinearColor& InA, const FLinearColor& InB)
+    {
+        const auto Lum = [](const FLinearColor& C) { return 0.2126f * C.R + 0.7152f * C.G + 0.0722f * C.B; };
+        const auto A = Lum(InA);
+        const auto B = Lum(InB);
+        return (FMath::Max(A, B) + 0.05f) / (FMath::Min(A, B) + 0.05f);
+    };
+
+    for (auto Hue = 0; Hue < 256; Hue += 16)
+    {
+        const auto ProviderHue = FLinearColor::MakeFromHSV8(static_cast<uint8>(Hue), 150, 205);
+
+        {
+            const auto Dark = CkStyle::FScopedPalette{ECk_Style_Palette::Dark};
+            TestTrue(ck::Format_UE(TEXT("Dark keeps hue {}"), Hue), CkStyle::InkOf(ProviderHue) == ProviderHue);
+        }
+
+        const auto Light = CkStyle::FScopedPalette{ECk_Style_Palette::Light};
+        const auto Ink = CkStyle::InkOf(ProviderHue);
+        const auto Tint = FMath::Lerp(CkStyle::Bg2(), ProviderHue, 0.18f);
+        TestTrue(ck::Format_UE(TEXT("Light ink of hue {} reads on Bg2"), Hue), Contrast(Ink, CkStyle::Bg2()) >= 4.5f);
+        TestTrue(ck::Format_UE(TEXT("Light ink of hue {} reads on its 18% tint"), Hue), Contrast(Ink, Tint) >= 4.5f);
+    }
+
+    return true;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
 #endif

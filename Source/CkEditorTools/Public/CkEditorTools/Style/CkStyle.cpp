@@ -69,6 +69,27 @@ auto
 
 auto
 	CkStyle::
+	InkOf(
+		const FLinearColor& InHue)
+	-> FLinearColor
+{
+	if (NOT IsLight())
+	{ return InHue; }
+
+	// Rec. 709 relative luminance; 0.10 keeps anti-aliased text >= 4.5:1 on a tint of the hue over a tinted card.
+	constexpr auto MaxInkLuminance = 0.10f;
+	const auto Luminance = 0.2126f * InHue.R + 0.7152f * InHue.G + 0.0722f * InHue.B;
+
+	if (Luminance <= MaxInkLuminance)
+	{ return InHue; }
+
+	auto Ink = InHue * (MaxInkLuminance / Luminance);
+	Ink.A = InHue.A;
+	return Ink;
+}
+
+auto
+	CkStyle::
 	GetOverlayPalette()
 	-> TOptional<ECk_Style_Palette>
 {
