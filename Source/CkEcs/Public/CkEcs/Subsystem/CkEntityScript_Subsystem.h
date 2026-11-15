@@ -29,6 +29,8 @@ class CKECS_API UCk_EntityScript_Subsystem_UE : public UEngineSubsystem
     friend class FCkEntityScriptSpawnParamsDiscovery;
 #if WITH_DEV_AUTOMATION_TESTS
     friend class FCkTest_EntityScript_EditorServices;
+    friend class FCkTest_EntityScript_EditorServices_ForeignAssetEvents;
+    friend class FCkTest_EntityScript_EditorServices_DeferredDuringPie;
 #endif
 
 public:
@@ -128,6 +130,31 @@ private:
     OnAssetRemoved(
         const FAssetData& InAssetData) -> void;
 
+    // Asset-registry add/remove events also arrive for files another process wrote (directory-watcher rescans).
+    // Only these in-process signals may turn an EntityScript Blueprint change into SpawnParams struct writes.
+    auto
+    OnInMemoryAssetCreated(
+        UObject* InAsset) -> void;
+
+    auto
+    OnInMemoryAssetDeleted(
+        UObject* InAsset) -> void;
+
+    auto
+    OnAssetsPreDelete(
+        const TArray<UObject*>& InAssets) -> void;
+
+    auto
+    DoQueue_SpawnParamsRemovalForBlueprint(
+        const FAssetData& InBlueprintData) -> void;
+
+    static auto
+    Get_IsEntityScriptBlueprintData(
+        const FAssetData& InAssetData) -> bool;
+
+    static auto
+    Get_IsPlayInEditorActive() -> bool;
+
     auto
     RegisterForBlueprintChanges() -> void;
 
@@ -193,6 +220,11 @@ private:
     FDelegateHandle _OnAssetAdded_DelegateHandle;
     FDelegateHandle _OnAssetRemoved_DelegateHandle;
     FDelegateHandle _OnAssetRenamed_DelegateHandle;
+    FDelegateHandle _OnInMemoryAssetCreated_DelegateHandle;
+    FDelegateHandle _OnInMemoryAssetDeleted_DelegateHandle;
+    FDelegateHandle _OnAssetsPreDelete_DelegateHandle;
+
+    TSet<FString> _LocallyPreDeletedBlueprintPaths;
     FDelegateHandle _OnObjectPreSave_DelegateHandle;
     FDelegateHandle _OnBlueprintCompiled_DelegateHandle;
     FDelegateHandle _OnBlueprintReinstanced_DelegateHandle;
