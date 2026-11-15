@@ -209,7 +209,7 @@ auto
     { return nullptr; }
 
     if (auto Found = _IsmRenderers.Find(InDataAsset);
-        Found != nullptr && ck::IsValid(*Found))
+        Found != nullptr && ck::IsValid(Found->Get()))
     { return *Found; }
 
     const auto& SpawnedIsmRendererActor = DoSpawn_IsmRendererActor(InDataAsset, FString{});
