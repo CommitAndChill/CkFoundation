@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "seed": 90341,
+  "cell_size": 0.065,
+  "turbulence_amplitude": 30.0,
+  "source_width": 1.0,
+  "upward_speed": 1.0,
+  "description": "Fresh native CFD, changed seed only; accepted physical scales, lighting and playback retained for fair comparison."
+}

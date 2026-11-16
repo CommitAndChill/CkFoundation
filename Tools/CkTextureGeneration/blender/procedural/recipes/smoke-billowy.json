@@ -1,0 +1,14 @@
+{
+  "density_gain": 1.0,
+  "family": "smoke2d",
+  "resolution": 1024,
+  "smoke_style": "billowy",
+  "seeds": [
+    131,
+    173,
+    211,
+    257,
+    307
+  ],
+  "density_curve": "linear"
+}
