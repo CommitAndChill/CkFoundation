@@ -6,6 +6,7 @@
 // --------------------------------------------------------------------------------------------------------------------
 
 class UCk_Utils_EntityBridge_UE;
+class UCk_EntityBridge_ActorComponent_UE;
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -21,14 +22,17 @@ namespace ck
 
     public:
         FFragment_EntityBridge() = default;
-        explicit FFragment_EntityBridge(
-            AActor* InActor);
+        FFragment_EntityBridge(
+            AActor* InActor,
+            UCk_EntityBridge_ActorComponent_UE* InBridge);
 
     private:
         TWeakObjectPtr<AActor> _Actor;
+        TWeakObjectPtr<UCk_EntityBridge_ActorComponent_UE> _Bridge;
 
     public:
         CK_PROPERTY_GET(_Actor);
+        CK_PROPERTY_GET(_Bridge);
     };
 }
 

@@ -2,6 +2,8 @@
 
 #include "CkActorRelay_Fragment_Data.h"
 
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment_Data.h"
+
 #include <Containers/Ticker.h>
 
 #include "CkActorRelay_Actor.generated.h"
@@ -66,6 +68,9 @@ private:
 
     UPROPERTY(Transient)
     TWeakObjectPtr<UCk_ActorRelay_Group_Subsystem_Base_UE> _GroupSubsystem;
+
+    UPROPERTY(VisibleAnywhere)
+    TObjectPtr<UCk_EntityBridge_ActorComponent_UE> _EntityBridge;
 
     // WALL clock, not FTimerManager. A snapshot load freezes game time (M-C) and FTimerManager ticks the DILATED
     // delta, so a channel whose readiness only arrives on a game-time poll can never become ready DURING a load —

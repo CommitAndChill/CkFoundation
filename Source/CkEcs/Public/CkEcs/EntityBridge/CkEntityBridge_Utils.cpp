@@ -1,65 +1,76 @@
-#pragma once
-
 #include "CkEntityBridge_Utils.h"
 
 #include "CkCore/Actor/CkActor_Utils.h"
-#include "CkCore/Algorithms/CkAlgorithms.h"
 
 #include "CkEcs/CkEcsLog.h"
 
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment.h"
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
+#include "CkEcs/EntityScript/CkEntityScript_Fragment.h"
+#include "CkEcs/Handle/CkHandle.h"
 #include "CkEcs/Net/CkNet_Utils.h"
 #include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_Fragment.h"
 #include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_Utils.h"
-#include "CkEcs/EntityBridge/CkEntityBridge_Fragment.h"
 
-#include "CkEcs/Handle/CkHandle.h"
+#include <HAL/IConsoleManager.h>
+#include <UObject/UObjectIterator.h>
 
 // --------------------------------------------------------------------------------------------------------------------
 
-auto
-    UCk_Utils_EntityBridge_UE::
-    Add(
-        FCk_Handle& InHandle,
-        AActor* InOwningActor)
-    -> void
+namespace ck_entity_bridge_utils
 {
-    InHandle.Add<ck::FFragment_EntityBridge>(InOwningActor);
+    auto
+        Get_ConstructionStageText(
+            const FCk_Handle& InEntity)
+        -> FString
+    {
+        auto Stages = TArray<FString>{};
 
-    if (NOT UCk_Utils_Net_UE::Has(InHandle))
-    { return; }
+        if (InEntity.Has<ck::FTag_EntityScript_ContinueConstruction>())
+        { Stages.Emplace(TEXT("ContinueConstruction")); }
 
-    if (UCk_Utils_Net_UE::Get_Replication(InHandle) != ECk_Replication::Replicates)
-    { return; }
+        if (InEntity.Has<ck::FTag_EntityScript_FinishConstruction>())
+        { Stages.Emplace(TEXT("FinishConstruction")); }
 
-    CK_ENSURE_IF_NOT(NOT InHandle.Has<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>(),
-        TEXT("Entity [{}] already has a ReplicationDriver before its OwningActor [{}] was added. "
-             "The driver UObject's Outer is resolved at add-time by walking the ownership chain for "
-             "a replicated actor; since this entity did not yet own an actor at that moment, the "
-             "driver was Outer'd to an ancestor's actor instead of this entity's own. Add the "
-             "OwningActor BEFORE any code path that can add a ReplicationDriver to this entity."),
-        InHandle, InOwningActor)
-    { return; }
+        if (InEntity.Has<ck::FTag_EntityScript_BeginPlay>())
+        { Stages.Emplace(TEXT("BeginPlay")); }
 
-    UCk_Utils_EntityReplicationDriver_UE::TryAdd(InHandle);
+        if (InEntity.Has<ck::FTag_EntityScript_HasBegunPlay>())
+        { Stages.Emplace(TEXT("HasBegunPlay")); }
+
+        return FString::Join(Stages, TEXT(", "));
+    }
+
+    static FAutoConsoleCommand GDumpNotReadyCommand(
+        TEXT("ck.EntityBridge.DumpNotReady"),
+        TEXT("Logs every Ck Entity Bridge in a game world whose Entity is not Ready."),
+        FConsoleCommandDelegate::CreateLambda([]()
+        {
+            for (const auto* Bridge : TObjectRange<UCk_EntityBridge_ActorComponent_UE>())
+            {
+                if (ck::Is_NOT_Valid(Bridge) || Bridge->IsTemplate())
+                { continue; }
+
+                const auto* World = Bridge->GetWorld();
+
+                if (ck::Is_NOT_Valid(World) || NOT World->IsGameWorld())
+                { continue; }
+
+                if (Bridge->Get_State() == ECk_EntityBridge_State::Ready)
+                { continue; }
+
+                const auto Entity = Bridge->Get_Entity();
+                const auto StageText = Bridge->Get_State() == ECk_EntityBridge_State::Linked && ck::IsValid(Entity)
+                    ? Get_ConstructionStageText(Entity)
+                    : FString{};
+
+                ck::ecs::Display(TEXT("[EntityBridge] Actor [{}] State [{}] EntityScript [{}] Entity [{}] Stages [{}]"),
+                    Bridge->GetOwner(), Bridge->Get_State(), Bridge->_RequestedEntityScriptClass.Get(), Entity, StageText);
+            }
+        }));
 }
 
-auto
-    UCk_Utils_EntityBridge_UE::
-    SetupActorEntityLink(
-        FCk_Handle& InHandle,
-        AActor* InActor)
-    -> void
-{
-    auto EntityOwningActorComponent = DoGetOrAdd_EntityOwningActorComponent(InActor);
-
-    if (ck::Is_NOT_Valid(EntityOwningActorComponent))
-    { return; }
-
-    EntityOwningActorComponent->_EntityHandle = InHandle;
-
-    DoFlush_PendingEcsReady(EntityOwningActorComponent, InActor, InHandle);
-}
+// --------------------------------------------------------------------------------------------------------------------
 
 auto
     UCk_Utils_EntityBridge_UE::
@@ -76,7 +87,7 @@ auto
         const FCk_Handle& InHandle)
     -> bool
 {
-    CK_ENSURE_IF_NOT(Has(InHandle), TEXT("Entity [{}] does NOT have OwningActor Fragment! The Entity has no associated Actor"), InHandle)
+    CK_ENSURE_IF_NOT(Has(InHandle), TEXT("Entity [{}] does NOT have an EntityBridge Fragment! The Entity has no associated Actor"), InHandle)
     { return false; }
 
     return true;
@@ -88,16 +99,11 @@ auto
         const FCk_Handle& InHandle)
     -> FCk_Handle
 {
-    auto MaybeActorEntity = UCk_Utils_EntityLifetime_UE::Get_EntityInOwnershipChain_If(InHandle,
-    [&](const FCk_Handle& Handle)
+    return UCk_Utils_EntityLifetime_UE::Get_EntityInOwnershipChain_If(InHandle,
+    [](const FCk_Handle& InCandidate)
     {
-        if (Has(Handle))
-        { return true; }
-
-        return false;
+        return Has(InCandidate);
     });
-
-    return MaybeActorEntity;
 }
 
 auto
@@ -128,14 +134,14 @@ auto
     UCk_Utils_EntityBridge_UE::
     TryGet_Actor_Recursive(
         const FCk_Handle& InHandle)
-        -> AActor*
+    -> AActor*
 {
-    auto MaybeActorEntity = TryGet_BridgedEntity_InOwnershipChain(InHandle);
+    const auto BridgedEntity = TryGet_BridgedEntity_InOwnershipChain(InHandle);
 
-    if (ck::Is_NOT_Valid(MaybeActorEntity))
+    if (ck::Is_NOT_Valid(BridgedEntity))
     { return {}; }
 
-    return Get_Actor(MaybeActorEntity);
+    return Get_Actor(BridgedEntity);
 }
 
 auto
@@ -160,12 +166,12 @@ auto
         const AActor* InActor)
     -> FCk_EntityBridge_BasicDetails
 {
-    const auto& ActorEcsHandle = Get_Entity(InActor);
+    const auto Entity = Get_Entity(InActor);
 
-    if (ck::Is_NOT_Valid(ActorEcsHandle))
+    if (ck::Is_NOT_Valid(Entity))
     { return {}; }
 
-    return Get_BasicDetails(ActorEcsHandle);
+    return Get_BasicDetails(Entity);
 }
 
 auto
@@ -175,17 +181,17 @@ auto
     -> FCk_Handle
 {
     CK_ENSURE_IF_NOT(ck::IsValid(InActor, ck::IsValid_Policy_IncludePendingKill{}),
-        TEXT("Cannot get the ECS Handle of Actor because the Actor is invalid!"))
+        TEXT("Cannot get the Entity of an Actor because the Actor is invalid!"))
     { return {}; }
 
-    const auto& EntityOwningActorComp = InActor->FindComponentByClass<UCk_EntityBridge_ActorComponent_UE>();
+    const auto* Bridge = TryGet_Bridge(InActor);
 
-    CK_ENSURE_IF_NOT(ck::IsValid(EntityOwningActorComp),
-        TEXT("Actor [{}] does NOT have an Entity Owning Actor Unreal Actor Component! This means it is not ECS ready."),
+    CK_ENSURE_IF_NOT(ck::IsValid(Bridge),
+        TEXT("Actor [{}] does NOT have a Ck Entity Bridge, so it has no Entity."),
         InActor)
     { return {}; }
 
-    return EntityOwningActorComp->Get_EntityHandle();
+    return Bridge->Get_Entity();
 }
 
 auto
@@ -194,15 +200,24 @@ auto
         const AActor* InActor)
     -> FCk_Handle
 {
+    const auto* Bridge = TryGet_Bridge(InActor);
+
+    if (ck::Is_NOT_Valid(Bridge))
+    { return {}; }
+
+    return Bridge->Get_Entity();
+}
+
+auto
+    UCk_Utils_EntityBridge_UE::
+    TryGet_Bridge(
+        const AActor* InActor)
+    -> UCk_EntityBridge_ActorComponent_UE*
+{
     if (ck::Is_NOT_Valid(InActor, ck::IsValid_Policy_IncludePendingKill{}))
     { return {}; }
 
-    const auto& EntityOwningActorComp = InActor->FindComponentByClass<UCk_EntityBridge_ActorComponent_UE>();
-
-    if (ck::Is_NOT_Valid(EntityOwningActorComp))
-    { return {}; }
-
-    return EntityOwningActorComp->Get_EntityHandle();
+    return InActor->FindComponentByClass<UCk_EntityBridge_ActorComponent_UE>();
 }
 
 auto
@@ -211,17 +226,132 @@ auto
         const AActor* InActor)
     -> bool
 {
-    CK_ENSURE_IF_NOT(ck::IsValid(InActor), TEXT("Cannot check if Actor is ECS ready because it is invalid!"))
+    CK_ENSURE_IF_NOT(ck::IsValid(InActor), TEXT("Cannot check whether an invalid Actor has an Entity"))
     { return {}; }
 
-    const auto EntityOwningActorComp = InActor->GetComponentByClass<UCk_EntityBridge_ActorComponent_UE>();
+    const auto* Bridge = TryGet_Bridge(InActor);
 
-    if (ck::Is_NOT_Valid(EntityOwningActorComp))
+    if (ck::Is_NOT_Valid(Bridge))
     { return false; }
 
-    // The component can exist with an unlinked Entity (a promise queued before the link) — readiness
-    // requires the link itself.
-    return ck::IsValid(EntityOwningActorComp->Get_EntityHandle());
+    return ck::IsValid(Bridge->Get_Entity());
+}
+
+auto
+    UCk_Utils_EntityBridge_UE::
+    Get_IsEntityReady(
+        const AActor* InActor)
+    -> bool
+{
+    CK_ENSURE_IF_NOT(ck::IsValid(InActor), TEXT("Cannot check whether an invalid Actor's Entity is Ready"))
+    { return {}; }
+
+    const auto* Bridge = TryGet_Bridge(InActor);
+
+    if (ck::Is_NOT_Valid(Bridge))
+    { return false; }
+
+    return Bridge->Get_State() == ECk_EntityBridge_State::Ready;
+}
+
+auto
+    UCk_Utils_EntityBridge_UE::
+    Promise_OnEntityConstructed(
+        AActor* InActor,
+        const FCk_Delegate_EntityScript_Constructed& InDelegate)
+    -> void
+{
+    CK_ENSURE_IF_NOT(ck::IsValid(InActor), TEXT("Promise_OnEntityConstructed called with an invalid Actor"))
+    { return; }
+
+    auto* Bridge = TryGet_Bridge(InActor);
+
+    CK_ENSURE_IF_NOT(ck::IsValid(Bridge),
+        TEXT("Promise_OnEntityConstructed called on Actor [{}], which has no Ck Entity Bridge. Its Entity can never arrive."),
+        InActor)
+    { return; }
+
+    Bridge->Promise_OnEntityConstructed(InDelegate);
+}
+
+auto
+    UCk_Utils_EntityBridge_UE::
+    Promise_OnEntityReady(
+        AActor* InActor,
+        const FCk_Delegate_EntityBridge_OnEntityReady& InDelegate)
+    -> void
+{
+    CK_ENSURE_IF_NOT(ck::IsValid(InActor), TEXT("Promise_OnEntityReady called with an invalid Actor"))
+    { return; }
+
+    auto* Bridge = TryGet_Bridge(InActor);
+
+    CK_ENSURE_IF_NOT(ck::IsValid(Bridge),
+        TEXT("Promise_OnEntityReady called on Actor [{}], which has no Ck Entity Bridge. Its Entity can never arrive."),
+        InActor)
+    { return; }
+
+    Bridge->Promise_OnEntityReady(InDelegate);
+}
+
+auto
+    UCk_Utils_EntityBridge_UE::
+    Promise_OnEntityReady(
+        AActor* InActor,
+        TFunction<void(AActor*, FCk_Handle)> InCallback)
+    -> void
+{
+    CK_ENSURE_IF_NOT(ck::IsValid(InActor), TEXT("Promise_OnEntityReady called with an invalid Actor"))
+    { return; }
+
+    CK_ENSURE_IF_NOT(static_cast<bool>(InCallback),
+        TEXT("Promise_OnEntityReady called with an empty callback for Actor [{}]"), InActor)
+    { return; }
+
+    auto* Bridge = TryGet_Bridge(InActor);
+
+    CK_ENSURE_IF_NOT(ck::IsValid(Bridge),
+        TEXT("Promise_OnEntityReady called on Actor [{}], which has no Ck Entity Bridge. Its Entity can never arrive."),
+        InActor)
+    { return; }
+
+    if (Bridge->_State == ECk_EntityBridge_State::Ready)
+    {
+        InCallback(InActor, Bridge->_Entity);
+        return;
+    }
+
+    Bridge->_PendingReady_Callbacks.Emplace(MoveTemp(InCallback));
+}
+
+auto
+    UCk_Utils_EntityBridge_UE::
+    Promise_OnEntityLinked(
+        AActor* InActor,
+        TFunction<void(AActor*, FCk_Handle)> InCallback)
+    -> void
+{
+    CK_ENSURE_IF_NOT(ck::IsValid(InActor), TEXT("Promise_OnEntityLinked called with an invalid Actor"))
+    { return; }
+
+    CK_ENSURE_IF_NOT(static_cast<bool>(InCallback),
+        TEXT("Promise_OnEntityLinked called with an empty callback for Actor [{}]"), InActor)
+    { return; }
+
+    auto* Bridge = TryGet_Bridge(InActor);
+
+    CK_ENSURE_IF_NOT(ck::IsValid(Bridge),
+        TEXT("Promise_OnEntityLinked called on Actor [{}], which has no Ck Entity Bridge. Its Entity can never arrive."),
+        InActor)
+    { return; }
+
+    if (Bridge->_State == ECk_EntityBridge_State::Linked || Bridge->_State == ECk_EntityBridge_State::Ready)
+    {
+        InCallback(InActor, Bridge->_Entity);
+        return;
+    }
+
+    Bridge->_PendingLinked_Callbacks.Emplace(MoveTemp(InCallback));
 }
 
 auto
@@ -232,50 +362,36 @@ auto
         ECk_ActorEcsReady_Policy InPolicy)
     -> void
 {
-    CK_ENSURE_IF_NOT(ck::IsValid(InActor),
-        TEXT("Promise_OnActorEcsReady called with an invalid Actor"))
+    CK_ENSURE_IF_NOT(ck::IsValid(InActor), TEXT("Promise_OnActorEcsReady called with an invalid Actor"))
     { return; }
 
     CK_ENSURE_IF_NOT(InDelegate.IsBound(),
         TEXT("Promise_OnActorEcsReady called with an unbound delegate for Actor [{}]"), InActor)
     { return; }
 
-    auto EntityOwningActorComp = DoGetOrAdd_EntityOwningActorComponent(InActor);
-
-    if (ck::Is_NOT_Valid(EntityOwningActorComp))
+    if (ck::Is_NOT_Valid(DoGetOrAdd_DeferredBridge(InActor)))
     { return; }
-
-    if (Get_HasEntity(InActor))
-    {
-        const auto Entity = Get_Entity(InActor);
-
-        if (InPolicy == ECk_ActorEcsReady_Policy::LinkEstablished ||
-            NOT DoGet_ShouldDeferUntilReplicationComplete(Entity))
-        {
-            ck::ecs::Verbose(TEXT("[EcsReadyPromise] Actor [{}] already ready — executing immediately (entity [{}])"),
-                InActor, Entity);
-            InDelegate.ExecuteIfBound(InActor, Entity);
-            return;
-        }
-
-        ck::ecs::Verbose(TEXT("[EcsReadyPromise] Actor [{}] linked but replication incomplete — deferring on "
-            "trampoline (entity [{}])"), InActor, Entity);
-        EntityOwningActorComp->_PendingEcsReadyDelegates_ValuesReplicated.Add(InDelegate);
-        DoBind_ReplicationCompleteTrampoline(EntityOwningActorComp, Entity);
-        return;
-    }
-
-    ck::ecs::Verbose(TEXT("[EcsReadyPromise] Actor [{}] not ECS-ready yet — queueing delegate (policy [{}])"),
-        InActor, InPolicy == ECk_ActorEcsReady_Policy::ValuesReplicated ? TEXT("ValuesReplicated") : TEXT("LinkEstablished"));
 
     switch (InPolicy)
     {
         case ECk_ActorEcsReady_Policy::LinkEstablished:
-            EntityOwningActorComp->_PendingEcsReadyDelegates_LinkEstablished.Add(InDelegate);
+        {
+            Promise_OnEntityLinked(InActor, [InDelegate](AActor* InLinkedActor, FCk_Handle InEntity)
+            {
+                InDelegate.ExecuteIfBound(InLinkedActor, InEntity);
+            });
             break;
+        }
         case ECk_ActorEcsReady_Policy::ValuesReplicated:
-            EntityOwningActorComp->_PendingEcsReadyDelegates_ValuesReplicated.Add(InDelegate);
+        {
+            Promise_OnEntityReady(InActor, InDelegate);
             break;
+        }
+        default:
+        {
+            CK_INVALID_ENUM(InPolicy);
+            break;
+        }
     }
 }
 
@@ -287,43 +403,29 @@ auto
         ECk_ActorEcsReady_Policy InPolicy)
     -> void
 {
-    CK_ENSURE_IF_NOT(ck::IsValid(InActor),
-        TEXT("Promise_OnActorEcsReady called with an invalid Actor"))
+    CK_ENSURE_IF_NOT(ck::IsValid(InActor), TEXT("Promise_OnActorEcsReady called with an invalid Actor"))
     { return; }
 
-    CK_ENSURE_IF_NOT(static_cast<bool>(InCallback),
-        TEXT("Promise_OnActorEcsReady called with an empty callback for Actor [{}]"), InActor)
+    if (ck::Is_NOT_Valid(DoGetOrAdd_DeferredBridge(InActor)))
     { return; }
-
-    auto EntityOwningActorComp = DoGetOrAdd_EntityOwningActorComponent(InActor);
-
-    if (ck::Is_NOT_Valid(EntityOwningActorComp))
-    { return; }
-
-    if (Get_HasEntity(InActor))
-    {
-        const auto Entity = Get_Entity(InActor);
-
-        if (InPolicy == ECk_ActorEcsReady_Policy::LinkEstablished ||
-            NOT DoGet_ShouldDeferUntilReplicationComplete(Entity))
-        {
-            InCallback(InActor, Entity);
-            return;
-        }
-
-        EntityOwningActorComp->_PendingEcsReadyCallbacks_ValuesReplicated.Add(MoveTemp(InCallback));
-        DoBind_ReplicationCompleteTrampoline(EntityOwningActorComp, Entity);
-        return;
-    }
 
     switch (InPolicy)
     {
         case ECk_ActorEcsReady_Policy::LinkEstablished:
-            EntityOwningActorComp->_PendingEcsReadyCallbacks_LinkEstablished.Add(MoveTemp(InCallback));
+        {
+            Promise_OnEntityLinked(InActor, MoveTemp(InCallback));
             break;
+        }
         case ECk_ActorEcsReady_Policy::ValuesReplicated:
-            EntityOwningActorComp->_PendingEcsReadyCallbacks_ValuesReplicated.Add(MoveTemp(InCallback));
+        {
+            Promise_OnEntityReady(InActor, MoveTemp(InCallback));
             break;
+        }
+        default:
+        {
+            CK_INVALID_ENUM(InPolicy);
+            break;
+        }
     }
 }
 
@@ -358,110 +460,95 @@ auto
 
 auto
     UCk_Utils_EntityBridge_UE::
-    DoGetOrAdd_EntityOwningActorComponent(
-        AActor* InActor)
-    -> UCk_EntityBridge_ActorComponent_UE*
+    DoLink(
+        FCk_Handle& InEntity,
+        UCk_EntityBridge_ActorComponent_UE* InBridge)
+    -> void
 {
-    if (auto ExistingComp = InActor->GetComponentByClass<UCk_EntityBridge_ActorComponent_UE>();
-        ck::IsValid(ExistingComp))
-    { return ExistingComp; }
+    CK_ENSURE_IF_NOT(ck::IsValid(InBridge), TEXT("Cannot link Entity [{}] to an invalid Ck Entity Bridge"), InEntity)
+    { return; }
 
-    return UCk_Utils_Actor_UE::Request_AddNewActorComponent<UCk_EntityBridge_ActorComponent_UE>
-    (
-        UCk_Utils_Actor_UE::AddNewActorComponent_Params<UCk_EntityBridge_ActorComponent_UE>
-        {
-            InActor,
-        }
-    );
+    auto* Actor = InBridge->GetOwner();
+
+    CK_ENSURE_IF_NOT(ck::IsValid(Actor), TEXT("Cannot link Entity [{}]: its Ck Entity Bridge [{}] has no owning Actor"),
+        InEntity, InBridge)
+    { return; }
+
+    InEntity.Add<ck::FFragment_EntityBridge>(Actor, InBridge);
+    InEntity.AddOrGet<TWeakObjectPtr<UWorld>>(Actor->GetWorld());
+
+    InBridge->_Entity = InEntity;
+    InBridge->_State = ECk_EntityBridge_State::Linked;
+
+    // Move out before executing: a callback that queues another promise must not mutate the container being iterated.
+    const auto PendingLinkedCallbacks = MoveTemp(InBridge->_PendingLinked_Callbacks);
+    InBridge->_PendingLinked_Callbacks.Reset();
+
+    for (const auto& Callback : PendingLinkedCallbacks)
+    {
+        Callback(Actor, InEntity);
+    }
+
+    const auto PendingConstructedDelegates = MoveTemp(InBridge->_PendingConstructed_Delegates);
+    InBridge->_PendingConstructed_Delegates.Reset();
+
+    for (const auto& Delegate : PendingConstructedDelegates)
+    {
+        ck::UUtils_Signal_OnConstructed_PostFireUnbind::Bind(InEntity, Delegate, ECk_Signal_BindingPolicy::FireIfPayloadInFlight);
+    }
 }
 
 auto
     UCk_Utils_EntityBridge_UE::
-    DoFlush_PendingEcsReady(
-        UCk_EntityBridge_ActorComponent_UE* InComp,
-        AActor* InActor,
+    DoNotify_EntityBegunPlay(
         const FCk_Handle& InEntity)
     -> void
 {
-    if (ck::Is_NOT_Valid(InComp))
+    auto* Bridge = InEntity.Get<ck::FFragment_EntityBridge>().Get_Bridge().Get();
+
+    if (ck::Is_NOT_Valid(Bridge))
     { return; }
 
-    DoFlush_PendingEcsReady_LinkEstablished(InComp, InActor, InEntity);
+    Bridge->_EntityHasBegunPlay = true;
+    DoTryBecomeReady(Bridge);
+}
 
-    if (InComp->_PendingEcsReadyDelegates_ValuesReplicated.IsEmpty() &&
-        InComp->_PendingEcsReadyCallbacks_ValuesReplicated.IsEmpty())
+auto
+    UCk_Utils_EntityBridge_UE::
+    DoTryBecomeReady(
+        UCk_EntityBridge_ActorComponent_UE* InBridge)
+    -> void
+{
+    if (InBridge->_State == ECk_EntityBridge_State::Ready)
     { return; }
 
-    ck::ecs::Verbose(TEXT("[EcsReadyPromise] Flushing for actor [{}] (entity [{}]): [{}] ValuesReplicated "
-        "delegate(s) pending, defer-until-replication-complete [{}]"),
-        InActor, InEntity,
-        InComp->_PendingEcsReadyDelegates_ValuesReplicated.Num() + InComp->_PendingEcsReadyCallbacks_ValuesReplicated.Num(),
-        DoGet_ShouldDeferUntilReplicationComplete(InEntity));
+    if (NOT InBridge->_EntityHasBegunPlay)
+    { return; }
 
-    if (DoGet_ShouldDeferUntilReplicationComplete(InEntity))
+    if (DoGet_ShouldDeferUntilReplicationComplete(InBridge->_Entity))
     {
-        DoBind_ReplicationCompleteTrampoline(InComp, InEntity);
+        DoBind_ReplicationCompleteTrampoline(InBridge, InBridge->_Entity);
         return;
     }
 
-    DoFlush_PendingEcsReady_ValuesReplicated(InComp, InActor, InEntity);
-}
+    InBridge->_State = ECk_EntityBridge_State::Ready;
 
-auto
-    UCk_Utils_EntityBridge_UE::
-    DoFlush_PendingEcsReady_LinkEstablished(
-        UCk_EntityBridge_ActorComponent_UE* InComp,
-        AActor* InActor,
-        const FCk_Handle& InEntity)
-    -> void
-{
-    if (ck::Is_NOT_Valid(InComp))
-    { return; }
+    auto* Actor = InBridge->GetOwner();
+    const auto Entity = InBridge->_Entity;
 
-    // Move out before executing: a promise that queues another promise from its own callback must not
-    // mutate the container being iterated (that new promise fires immediately — the Actor is ready).
-    const auto PendingDelegates = MoveTemp(InComp->_PendingEcsReadyDelegates_LinkEstablished);
-    const auto PendingCallbacks = MoveTemp(InComp->_PendingEcsReadyCallbacks_LinkEstablished);
-    InComp->_PendingEcsReadyDelegates_LinkEstablished.Reset();
-    InComp->_PendingEcsReadyCallbacks_LinkEstablished.Reset();
+    const auto PendingReadyDelegates = MoveTemp(InBridge->_PendingReady_Delegates);
+    const auto PendingReadyCallbacks = MoveTemp(InBridge->_PendingReady_Callbacks);
+    InBridge->_PendingReady_Delegates.Reset();
+    InBridge->_PendingReady_Callbacks.Reset();
 
-    for (const auto& Delegate : PendingDelegates)
+    for (const auto& Delegate : PendingReadyDelegates)
     {
-        Delegate.ExecuteIfBound(InActor, InEntity);
+        Delegate.ExecuteIfBound(Actor, Entity);
     }
 
-    for (const auto& Callback : PendingCallbacks)
+    for (const auto& Callback : PendingReadyCallbacks)
     {
-        if (Callback)
-        { Callback(InActor, InEntity); }
-    }
-}
-
-auto
-    UCk_Utils_EntityBridge_UE::
-    DoFlush_PendingEcsReady_ValuesReplicated(
-        UCk_EntityBridge_ActorComponent_UE* InComp,
-        AActor* InActor,
-        const FCk_Handle& InEntity)
-    -> void
-{
-    if (ck::Is_NOT_Valid(InComp))
-    { return; }
-
-    const auto PendingDelegates = MoveTemp(InComp->_PendingEcsReadyDelegates_ValuesReplicated);
-    const auto PendingCallbacks = MoveTemp(InComp->_PendingEcsReadyCallbacks_ValuesReplicated);
-    InComp->_PendingEcsReadyDelegates_ValuesReplicated.Reset();
-    InComp->_PendingEcsReadyCallbacks_ValuesReplicated.Reset();
-
-    for (const auto& Delegate : PendingDelegates)
-    {
-        Delegate.ExecuteIfBound(InActor, InEntity);
-    }
-
-    for (const auto& Callback : PendingCallbacks)
-    {
-        if (Callback)
-        { Callback(InActor, InEntity); }
+        Callback(Actor, Entity);
     }
 }
 
@@ -479,8 +566,8 @@ auto
     if (UCk_Utils_EntityReplicationDriver_UE::Has(InEntity))
     { return NOT UCk_Utils_EntityReplicationDriver_UE::Get_IsReplicationComplete(InEntity); }
 
-    // The link is established mid-Construct, BEFORE OwningActor::Add adds the ReplicationDriver — fall
-    // back to the Entity's replication setting to decide whether OnReplicationComplete will ever fire.
+    // No driver yet: fall back to the Entity's replication setting to decide whether OnReplicationComplete
+    // will ever fire.
     return UCk_Utils_Net_UE::Has(InEntity) &&
         UCk_Utils_Net_UE::Get_Replication(InEntity) == ECk_Replication::Replicates;
 }
@@ -488,20 +575,45 @@ auto
 auto
     UCk_Utils_EntityBridge_UE::
     DoBind_ReplicationCompleteTrampoline(
-        UCk_EntityBridge_ActorComponent_UE* InComp,
+        UCk_EntityBridge_ActorComponent_UE* InBridge,
         const FCk_Handle& InEntity)
     -> void
 {
-    if (InComp->_OnReplicationCompleteTrampolineBound)
+    if (InBridge->_ReplicationCompleteTrampolineBound)
     { return; }
 
     auto Delegate = FCk_Delegate_EntityReplicationDriver_OnReplicationComplete{};
-    Delegate.BindDynamic(InComp, &UCk_EntityBridge_ActorComponent_UE::DoHandle_LinkedEntityReplicationComplete);
+    Delegate.BindDynamic(InBridge, &UCk_EntityBridge_ActorComponent_UE::DoHandle_EntityReplicationComplete);
 
     auto Entity = InEntity;
     UCk_Utils_EntityReplicationDriver_UE::Promise_OnReplicationComplete(Entity, Delegate);
 
-    InComp->_OnReplicationCompleteTrampolineBound = true;
+    InBridge->_ReplicationCompleteTrampolineBound = true;
+}
+
+auto
+    UCk_Utils_EntityBridge_UE::
+    DoGetOrAdd_DeferredBridge(
+        AActor* InActor)
+    -> UCk_EntityBridge_ActorComponent_UE*
+{
+    if (auto* ExistingBridge = TryGet_Bridge(InActor);
+        ck::IsValid(ExistingBridge))
+    { return ExistingBridge; }
+
+    auto* NewBridge = UCk_Utils_Actor_UE::Request_AddNewActorComponent<UCk_EntityBridge_ActorComponent_UE>
+    (
+        UCk_Utils_Actor_UE::AddNewActorComponent_Params<UCk_EntityBridge_ActorComponent_UE>
+        {
+            InActor,
+        }
+    );
+
+    CK_ENSURE_IF_NOT(ck::IsValid(NewBridge), TEXT("Failed to add a Ck Entity Bridge to Actor [{}]"), InActor)
+    { return {}; }
+
+    NewBridge->Set_RequestTiming(ECk_EntityBridge_RequestTiming::Deferred);
+    return NewBridge;
 }
 
 // --------------------------------------------------------------------------------------------------------------------

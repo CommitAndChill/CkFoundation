@@ -10,7 +10,6 @@
 #include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcs/Snapshot/CkSaveKey_Fragment.h"
 #include "CkEcsExt/EntityScript/CkEntityScript_WithActor.h"
-#include "CkEcsExt/EntityScript/CkEntityScript_WithActor_Utils.h"
 
 #include <Net/UnrealNetwork.h>
 #include <Net/Core/PushModel/PushModel.h>
@@ -25,6 +24,8 @@ ACk_ActorRelay_UE::
     bReplicateUsingRegisteredSubObjectList = true;
     PrimaryActorTick.bCanEverTick = false;
     PrimaryActorTick.bTickEvenWhenPaused = false;
+
+    _EntityBridge = CreateDefaultSubobject<UCk_EntityBridge_ActorComponent_UE>(TEXT("EntityBridge"));
 }
 
 auto
@@ -34,7 +35,7 @@ auto
 {
     Super::BeginPlay();
 
-    UCk_Utils_EntityScript_WithActor_UE::Request_SpawnEntityScript_OnActor(this, UCk_EntityScript_WithActor_UE::StaticClass());
+    _EntityBridge->Request_SpawnEntity(UCk_EntityScript_WithActor_UE::StaticClass());
 
     OnRep_GroupSubsystemClass();
 }
@@ -179,12 +180,11 @@ auto
     // channel-owned subtree with an owner the loader cannot resolve.
     const auto SaveKeyIdentity = GroupSubsystem->Get_GroupTag().GetTagName().ToString();
 
-    UCk_Utils_EntityBridge_UE::Promise_OnActorEcsReady(this,
+    UCk_Utils_EntityBridge_UE::Promise_OnEntityLinked(this,
         [SaveKeyIdentity](AActor*, FCk_Handle InChannelEntity) -> void
         {
             ck::save_key::AssignSharedRendezvousGroup(InChannelEntity, SaveKeyIdentity);
-        },
-        ECk_ActorEcsReady_Policy::LinkEstablished);
+        });
 }
 
 auto

@@ -1,5 +1,7 @@
 #include "CkEntityReplicationDriver_Fragment.h"
 
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
+
 #include "CkCore/Algorithms/CkAlgorithms.h"
 #include "CkCore/Object/CkObject_Utils.h"
 #include "CkCore/Payload/CkPayload.h"
@@ -210,6 +212,39 @@ auto
     const auto SpawnParams = _ReplicationData_EntityScript.Get_SpawnParams();
     const auto IsSelfReferencing = _ReplicationData_EntityScript.Get_OwningEntityDriver() == this;
 
+    const auto* EntityScriptDefault = EntityScriptClass.GetDefaultObject();
+    const auto IsActorBound = ck::IsValid(EntityScriptDefault) && EntityScriptDefault->Get_IsActorBound();
+
+    auto* Bridge = static_cast<UCk_EntityBridge_ActorComponent_UE*>(nullptr);
+
+    if (IsActorBound)
+    {
+        // This notify can arrive more than once. The lifetime owner is set synchronously below the first
+        // time through, so it is the marker that construction was already started for this driver.
+        if (_AssociatedEntity.Has<ck::FFragment_LifetimeOwner>())
+        { return; }
+
+        auto* BoundActor = _ReplicationData_EntityScript.Get_BoundActor().Get();
+
+        // Not resolved on this client yet. The RepNotify fires again when the reference maps, the same
+        // contract the replicated-objects guard above relies on.
+        if (ck::Is_NOT_Valid(BoundActor))
+        { return; }
+
+        // An Actor that requests through an older entry point has no bridge until its own BeginPlay, which a
+        // replica can beat; give it the bridge that entry point would add.
+        Bridge = UCk_Utils_EntityBridge_UE::DoGetOrAdd_DeferredBridge(BoundActor);
+
+        CK_ENSURE_IF_NOT(ck::IsValid(Bridge),
+            TEXT("Replicated actor-bound EntityScript [{}] arrived for Actor [{}], which has no Ck Entity Bridge. "
+                 "Its Entity cannot be constructed on this client."),
+            EntityScriptClass, BoundActor)
+        {
+            UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(_AssociatedEntity);
+            return;
+        }
+    }
+
     if (NOT IsSelfReferencing)
     {
         const auto OwningEntity = _ReplicationData_EntityScript.Get_OwningEntityDriver()->Get_AssociatedEntity();
@@ -246,7 +281,7 @@ auto
     _AssociatedEntity.AddOrGet<TWeakObjectPtr<UWorld>>(GetWorld());
 
     auto ThisAsWeakPtr = TWeakObjectPtr<ThisType>{this};
-    UCk_Utils_EntityScript_UE::Add(_AssociatedEntity, EntityScriptClass, SpawnParams, [ThisAsWeakPtr](FCk_Handle InHandle)
+    const auto OnConstructionFinished = [ThisAsWeakPtr](FCk_Handle InHandle)
     {
         if (ck::Is_NOT_Valid(ThisAsWeakPtr))
         { return; }
@@ -270,16 +305,28 @@ auto
                 InHandle.Add<ck::FTag_EntityReplicationDriver_FireOnDependentReplicationComplete>();
             }
         }
-    });
+    };
+
+    const auto ReplicaConnectionSettings = FCk_Net_ConnectionSettings
+    {
+        ECk_Replication::Replicates,
+        ECk_Net_NetModeType::Client,
+        ECk_Net_EntityNetRole::Proxy
+    };
+
+    if (IsActorBound)
+    {
+        UCk_Utils_Net_UE::Add(_AssociatedEntity, ReplicaConnectionSettings);
+        UCk_Utils_EntityScript_UE::Add_ForBridge(_AssociatedEntity, EntityScriptDefault, SpawnParams, Bridge, OnConstructionFinished);
+        _AssociatedEntity._ReplicationDriver = this;
+        return;
+    }
+
+    UCk_Utils_EntityScript_UE::Add(_AssociatedEntity, EntityScriptClass, SpawnParams, OnConstructionFinished);
 
     _AssociatedEntity._ReplicationDriver = this;
 
-    UCk_Utils_Net_UE::Add(_AssociatedEntity, FCk_Net_ConnectionSettings
-        {
-            ECk_Replication::Replicates,
-            ECk_Net_NetModeType::Client,
-            ECk_Net_EntityNetRole::Proxy
-        });
+    UCk_Utils_Net_UE::Add(_AssociatedEntity, ReplicaConnectionSettings);
 }
 
 auto

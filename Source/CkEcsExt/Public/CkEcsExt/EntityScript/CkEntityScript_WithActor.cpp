@@ -5,6 +5,7 @@
 
 #include <Engine/World.h>
 #include "CkEcs/Handle/CkHandle_Utils.h"
+#include "CkEcs/Net/CkNet_Utils.h"
 #include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcs/Snapshot/CkSaveKey_Fragment.h"
 #include "CkEcsExt/Transform/CkTransform_Utils.h"
@@ -20,26 +21,15 @@ auto
         const FInstancedStruct& InSpawnParams)
     -> ECk_EntityScript_ConstructionFlow
 {
-    CK_ENSURE_IF_NOT(ck::IsValid(_OwningActor),
-        TEXT("EntityScript_WithActor [{}] has no valid OwningActor. "
-             "Did you pass FCk_EntityScript_WithActor_SpawnParams with the Actor?"),
-        GetClass()->GetName())
+    auto* BoundActor = UCk_Utils_EntityBridge_UE::TryGet_Actor(InHandle);
+
+    CK_ENSURE_IF_NOT(ck::IsValid(BoundActor),
+        TEXT("EntityScript_WithActor [{}] is constructing on Entity [{}] which is not linked to an Actor. "
+             "Was it spawned through UCk_EntityBridge_ActorComponent_UE::Request_SpawnEntity?"),
+        GetClass()->GetName(), InHandle)
     { return ECk_EntityScript_ConstructionFlow::Finished; }
 
-    ck::ecs::Display(TEXT("[REP_DEBUG] WithActor::Construct Actor=[{}] ActorReplicates=[{}] EffectiveReplication=[{}]"),
-        _OwningActor->GetName(),
-        _OwningActor->GetIsReplicated(),
-        Get_EffectiveReplication());
-
-    // Self-owned entities don't inherit World from the ownership chain.
-    // Add it directly so Get_WorldForEntity can resolve without recursion.
-    InHandle.AddOrGet<TWeakObjectPtr<UWorld>>(_OwningActor->GetWorld());
-
-    UCk_Utils_EntityBridge_UE::SetupActorEntityLink(InHandle, _OwningActor);
-
-    // Order matters: OwningActor MUST be added before Transform so that Transform
-    // auto-detects the actor's root component and attaches to it
-    UCk_Utils_EntityBridge_UE::Add(InHandle, _OwningActor);
+    _OwningActor = BoundActor;
 
     if (ck::IsValid(_OwningActor->GetRootComponent()))
     {
@@ -74,6 +64,8 @@ auto
     -> void
 {
     Super::EndPlay();
+
+    _OwningActor = nullptr;
 }
 
 auto
@@ -86,46 +78,21 @@ auto
 
 auto
     UCk_EntityScript_WithActor_UE::
-    Get_AreSpawnParamsMatching(
-        const FInstancedStruct& InClientSpawnParams,
-        const UCk_EntityScript_UE* InConstructedScript) const
-    -> bool
-{
-    const auto* WithActorScript =
-        Cast<UCk_EntityScript_WithActor_UE>(InConstructedScript);
-
-    if (ck::Is_NOT_Valid(WithActorScript))
-    { return Super::Get_AreSpawnParamsMatching(InClientSpawnParams, InConstructedScript); }
-
-    const auto* SpawnParams =
-        InClientSpawnParams.GetPtr<FCk_EntityScript_WithActor_SpawnParams>();
-
-    if (ck::Is_NOT_Valid(SpawnParams, ck::IsValid_Policy_NullptrOnly{}))
-    { return Super::Get_AreSpawnParamsMatching(InClientSpawnParams, InConstructedScript); }
-
-    return SpawnParams->Get_OwningActor().Get() == WithActorScript->Get_OwningActor();
-}
-
-auto
-    UCk_EntityScript_WithActor_UE::
     Get_EffectiveReplication() const
     -> ECk_Replication
 {
-    // _OwningActor is injected from spawn params before Construct runs. On the CDO it is
-    // null, in which case we fall through to the script's declared replication — callers
-    // that need the runtime-aware answer must query the instance after spawn-param injection.
-    if (ck::IsValid(_OwningActor) && NOT _OwningActor->GetIsReplicated())
-    { return ECk_Replication::DoesNotReplicate; }
+    if (ck::IsValid(_AssociatedEntity) && UCk_Utils_Net_UE::Has(_AssociatedEntity))
+    { return UCk_Utils_Net_UE::Get_EntityReplication(_AssociatedEntity); }
 
     return Super::Get_EffectiveReplication();
 }
 
 auto
     UCk_EntityScript_WithActor_UE::
-    ShowReplicationInEditor() const
+    Get_IsActorBound() const
     -> bool
 {
-    return false;
+    return true;
 }
 
 // --------------------------------------------------------------------------------------------------------------------

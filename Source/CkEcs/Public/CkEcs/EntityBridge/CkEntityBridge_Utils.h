@@ -10,6 +10,17 @@
 
 // --------------------------------------------------------------------------------------------------------------------
 
+namespace ck
+{
+    class FProcessor_EntityScript_SpawnEntity_HandleRequests;
+    class FProcessor_EntityScript_BeginPlay;
+}
+
+class UCk_Fragment_EntityReplicationDriver_Rep;
+class UCk_Utils_EntityScript_WithActor_UE;
+
+// --------------------------------------------------------------------------------------------------------------------
+
 UCLASS(NotBlueprintable, Meta = (ScriptMixin = "AActor FCk_Handle"))
 class CKECS_API UCk_Utils_EntityBridge_UE : public UBlueprintFunctionLibrary
 {
@@ -19,16 +30,6 @@ public:
     CK_GENERATED_BODY(UCk_Utils_EntityBridge_UE);
 
 public:
-    static void
-    Add(
-        FCk_Handle& InHandle,
-        AActor* InOwningActor);
-
-    static void
-    SetupActorEntityLink(
-        FCk_Handle& InHandle,
-        AActor* InActor);
-
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|EntityBridge",
               DisplayName = "[Ck][EntityBridge] Has Feature",
@@ -111,12 +112,47 @@ public:
         const AActor* InActor);
 
     UFUNCTION(BlueprintPure,
-              DisplayName = "[Ck][EntityBridge] Get Is Actor Ecs Ready",
               Category = "Ck|Utils|EntityBridge",
+              DisplayName = "[Ck][EntityBridge] Try Get Bridge")
+    static UCk_EntityBridge_ActorComponent_UE*
+    TryGet_Bridge(
+        const AActor* InActor);
+
+    /** True once the Actor is linked to a valid Entity. The Entity may not be Ready yet. */
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|EntityBridge",
+              DisplayName = "[Ck][EntityBridge] Get Has Entity",
               meta = (DefaultToSelf = "InActor"))
     static bool
     Get_HasEntity(
         const AActor* InActor);
+
+    /** True once the Actor's Entity is Ready (see UCk_EntityBridge_ActorComponent_UE::Promise_OnEntityReady). */
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|EntityBridge",
+              DisplayName = "[Ck][EntityBridge] Get Is Entity Ready",
+              meta = (DefaultToSelf = "InActor"))
+    static bool
+    Get_IsEntityReady(
+        const AActor* InActor);
+
+    UFUNCTION(BlueprintCallable,
+              Category = "Ck|Utils|EntityBridge",
+              DisplayName = "[Ck][EntityBridge] Promise On Entity Constructed",
+              meta = (DefaultToSelf = "InActor"))
+    static void
+    Promise_OnEntityConstructed(
+        AActor* InActor,
+        const FCk_Delegate_EntityScript_Constructed& InDelegate);
+
+    UFUNCTION(BlueprintCallable,
+              Category = "Ck|Utils|EntityBridge",
+              DisplayName = "[Ck][EntityBridge] Promise On Entity Ready",
+              meta = (DefaultToSelf = "InActor"))
+    static void
+    Promise_OnEntityReady(
+        AActor* InActor,
+        const FCk_Delegate_EntityBridge_OnEntityReady& InDelegate);
 
     UFUNCTION(BlueprintCallable,
               DisplayName = "[Ck][EntityBridge] Promise/Future On Actor Ecs Ready",
@@ -128,12 +164,27 @@ public:
         const FCk_Delegate_EntityBridge_OnEntityReady& InDelegate,
         ECk_ActorEcsReady_Policy InPolicy = ECk_ActorEcsReady_Policy::ValuesReplicated);
 
+public:
+    // C++ only.
+    static auto
+    Promise_OnEntityReady(
+        AActor* InActor,
+        TFunction<void(AActor*, FCk_Handle)> InCallback) -> void;
+
+    // C++ only, framework-internal: fires the moment the Actor and Entity are linked, before the script's
+    // Construct runs. For code that must stamp the Entity before anything can observe it.
+    static auto
+    Promise_OnEntityLinked(
+        AActor* InActor,
+        TFunction<void(AActor*, FCk_Handle)> InCallback) -> void;
+
     static void
     Promise_OnActorEcsReady(
         AActor* InActor,
         TFunction<void(AActor*, FCk_Handle)> InCallback,
         ECk_ActorEcsReady_Policy InPolicy = ECk_ActorEcsReady_Policy::ValuesReplicated);
 
+public:
     UFUNCTION(BlueprintPure,
               DisplayName = "[Ck][EntityBridge] OwningActorBasicDetails == OwningActorBasicDetails",
               Category = "Ck|Utils|EntityBridge",
@@ -162,29 +213,24 @@ private:
         const AActor* InActor);
 
 private:
+    friend class ck::FProcessor_EntityScript_SpawnEntity_HandleRequests;
+    friend class ck::FProcessor_EntityScript_BeginPlay;
     friend class UCk_EntityBridge_ActorComponent_UE;
+    friend class UCk_Fragment_EntityReplicationDriver_Rep;
+    friend class UCk_Utils_EntityScript_WithActor_UE;
 
     static auto
-    DoGetOrAdd_EntityOwningActorComponent(
-        AActor* InActor) -> UCk_EntityBridge_ActorComponent_UE*;
+    DoLink(
+        FCk_Handle& InEntity,
+        UCk_EntityBridge_ActorComponent_UE* InBridge) -> void;
 
     static auto
-    DoFlush_PendingEcsReady(
-        UCk_EntityBridge_ActorComponent_UE* InComp,
-        AActor* InActor,
+    DoNotify_EntityBegunPlay(
         const FCk_Handle& InEntity) -> void;
 
     static auto
-    DoFlush_PendingEcsReady_LinkEstablished(
-        UCk_EntityBridge_ActorComponent_UE* InComp,
-        AActor* InActor,
-        const FCk_Handle& InEntity) -> void;
-
-    static auto
-    DoFlush_PendingEcsReady_ValuesReplicated(
-        UCk_EntityBridge_ActorComponent_UE* InComp,
-        AActor* InActor,
-        const FCk_Handle& InEntity) -> void;
+    DoTryBecomeReady(
+        UCk_EntityBridge_ActorComponent_UE* InBridge) -> void;
 
     static auto
     DoGet_ShouldDeferUntilReplicationComplete(
@@ -192,8 +238,13 @@ private:
 
     static auto
     DoBind_ReplicationCompleteTrampoline(
-        UCk_EntityBridge_ActorComponent_UE* InComp,
+        UCk_EntityBridge_ActorComponent_UE* InBridge,
         const FCk_Handle& InEntity) -> void;
+
+    // The bridge an older entry point adds for an Actor that predates it; requests are made by that entry point.
+    static auto
+    DoGetOrAdd_DeferredBridge(
+        AActor* InActor) -> UCk_EntityBridge_ActorComponent_UE*;
 };
 
 // --------------------------------------------------------------------------------------------------------------------

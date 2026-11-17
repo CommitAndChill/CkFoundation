@@ -24,13 +24,11 @@ public:
 
     [[nodiscard]]
     auto
-    Get_AreSpawnParamsMatching(
-        const FInstancedStruct& InClientSpawnParams,
-        const UCk_EntityScript_UE* InConstructedScript) const -> bool override;
+    Get_EffectiveReplication() const -> ECk_Replication override;
 
     [[nodiscard]]
     auto
-    Get_EffectiveReplication() const -> ECk_Replication override;
+    Get_IsActorBound() const -> bool override;
 
     auto
     EndPlay() -> void override;
@@ -42,10 +40,6 @@ protected:
         meta = (CompactNodeTitle="OwningActor", HideSelfPin = true))
     AActor*
     DoGet_OwningActor() const;
-
-protected:
-    auto
-    ShowReplicationInEditor() const -> bool override;
 
 private:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,

@@ -11,6 +11,10 @@
 
 // --------------------------------------------------------------------------------------------------------------------
 
+class UCk_EntityBridge_ActorComponent_UE;
+
+// --------------------------------------------------------------------------------------------------------------------
+
 USTRUCT(BlueprintType, meta=(HasNativeMake, HasNativeBreak))
 struct CKECS_API FCk_Handle_EntityScript : public FCk_Handle_TypeSafe { GENERATED_BODY() CK_GENERATED_BODY_HANDLE_TYPESAFE(FCk_Handle_EntityScript); };
 CK_DEFINE_CUSTOM_ISVALID_AND_FORMATTER_HANDLE_TYPESAFE(FCk_Handle_EntityScript);
@@ -79,6 +83,9 @@ private:
 private:
     FCk_EntityScript_PostConstruction_Func _PostConstruction_Func;
 
+    // Set only for an actor-bound spawn. Weak: the request sits in the registry, which GC does not trace.
+    TWeakObjectPtr<UCk_EntityBridge_ActorComponent_UE> _Bridge;
+
 public:
     CK_PROPERTY_GET(_NewEntity);
     CK_PROPERTY_GET(_EntityScriptClassArchetype);
@@ -87,6 +94,7 @@ public:
     CK_PROPERTY(_ContextOwner);
     CK_PROPERTY(_SpawnParams);
     CK_PROPERTY(_PostConstruction_Func);
+    CK_PROPERTY(_Bridge);
 
     CK_DEFINE_CONSTRUCTORS(FCk_Request_EntityScript_SpawnEntity, _NewEntity, _Owner, _EntityScriptClassArchetype);
     FCk_Request_EntityScript_SpawnEntity(

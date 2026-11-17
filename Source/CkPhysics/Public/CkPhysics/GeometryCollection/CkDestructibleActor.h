@@ -2,6 +2,8 @@
 
 #include "CkPhysics/GeometryCollection/CkGeometryCollectionComponent.h"
 
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment_Data.h"
+
 #include "CkDestructibleActor.generated.h"
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -42,4 +44,8 @@ private:
     UPROPERTY(Category=Destructible, VisibleAnywhere, BlueprintReadOnly,
         meta=(AllowPrivateAccess = "true"))
     TObjectPtr<UCk_UniformKinematic> _UniformKinematic;
+
+    UPROPERTY(Category=Destructible, VisibleAnywhere, BlueprintReadOnly,
+        meta=(AllowPrivateAccess = "true"))
+    TObjectPtr<UCk_EntityBridge_ActorComponent_UE> _EntityBridge;
 };

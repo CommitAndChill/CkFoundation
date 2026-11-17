@@ -36,6 +36,15 @@ public:
         const FCk_Handle& InHandle);
 
 private:
+    static auto
+    DoAdd(
+        FCk_Handle& InScriptEntity,
+        const TWeakObjectPtr<UCk_EntityScript_UE>& InEntityScriptClassArchetype,
+        const FInstancedStruct& InSpawnParams,
+        const FCk_EntityScript_PostConstruction_Func& InOptionalFunc,
+        const FCk_Delegate_Request_OnCompleted& InDelegate,
+        UCk_EntityBridge_ActorComponent_UE* InBridge) -> FCk_Handle_PendingEntityScript;
+
     UFUNCTION(BlueprintCallable,
         Category = "Ck|Utils|EntityScript",
         DisplayName="[Ck][EntityScript] Cast",
@@ -145,6 +154,16 @@ public:
         const FInstancedStruct& InSpawnParams,
         const FCk_EntityScript_PostConstruction_Func& InOptionalFunc = nullptr,
         const FCk_Delegate_Request_OnCompleted& InDelegate = {}) -> FCk_Handle_PendingEntityScript;
+
+    // Actor-bound spawn. Called only by UCk_EntityBridge_ActorComponent_UE (authority / local) and by the
+    // replication driver (client replica). InScriptEntity must already carry FFragment_Net_Params.
+    static auto
+    Add_ForBridge(
+        FCk_Handle& InScriptEntity,
+        const TWeakObjectPtr<UCk_EntityScript_UE>& InEntityScriptClassArchetype,
+        const FInstancedStruct& InSpawnParams,
+        UCk_EntityBridge_ActorComponent_UE* InBridge,
+        const FCk_EntityScript_PostConstruction_Func& InOptionalFunc) -> FCk_Handle_PendingEntityScript;
 
     static auto
     TryInjectEntityScriptSpawnParams(

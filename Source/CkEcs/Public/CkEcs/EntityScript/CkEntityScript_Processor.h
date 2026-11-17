@@ -44,6 +44,10 @@ namespace ck
         DoHandleRequest(
             HandleType InHandle,
             const FCk_Request_EntityScript_SpawnEntity& InRequest) -> void;
+
+        static auto
+        DoCancel_NewEntity(
+            const FCk_Request_EntityScript_SpawnEntity& InRequest) -> void;
     };
 
     // --------------------------------------------------------------------------------------------------------------------

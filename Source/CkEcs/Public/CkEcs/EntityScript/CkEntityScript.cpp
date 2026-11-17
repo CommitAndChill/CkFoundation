@@ -162,6 +162,14 @@ auto
 
 auto
     UCk_EntityScript_UE::
+    Get_IsActorBound() const
+    -> bool
+{
+    return false;
+}
+
+auto
+    UCk_EntityScript_UE::
     Get_IsSnapshotRespawnable() const
     -> bool
 {

@@ -9,7 +9,6 @@
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Fragment.h"
 #include "CkEcs/Net/CkNet_Utils.h"
 #include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
-#include "CkEcsExt/EntityScript/CkEntityScript_WithActor_Utils.h"
 
 #include "CkIsmRenderer/CkIsmRenderer_EntityScript.h"
 #include "CkIsmRenderer/CkIsmRenderer_Log.h"
@@ -34,6 +33,9 @@ ACk_IsmRenderer_Actor_UE::
     _RootNode = CreateDefaultSubobject<USceneComponent>(TEXT("DefaultSceneRoot"));
     RootComponent = _RootNode;
 
+    _EntityBridge = CreateDefaultSubobject<UCk_EntityBridge_ActorComponent_UE>(TEXT("EntityBridge"));
+    _EntityBridge->Set_RequestTiming(ECk_EntityBridge_RequestTiming::Deferred);
+
 #if WITH_EDITORONLY_DATA
     bListedInSceneOutliner = false;
 #endif
@@ -56,8 +58,7 @@ auto
     if (ck::Is_NOT_Valid(TransientEntity))
     { return; }
 
-    UCk_Utils_EntityScript_WithActor_UE::Request_SpawnEntityScript_OnActor(
-        this, UCk_EntityScript_IsmRenderer_UE::StaticClass());
+    _EntityBridge->Request_SpawnEntity(UCk_EntityScript_IsmRenderer_UE::StaticClass());
 
     _Initialized = true;
 }

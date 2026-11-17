@@ -4,6 +4,8 @@
 
 #include "CkCore/Subsystems/GameWorldSubsytem/CkGameWorldSubsystem.h"
 
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment_Data.h"
+
 #include "CkIsmRenderer/Renderer/CkIsmRenderer_Fragment_Data.h"
 
 #include "CkIsmSubsystem.generated.h"
@@ -48,6 +50,9 @@ public:
 #endif
 
 private:
+    UPROPERTY(VisibleAnywhere)
+    TObjectPtr<UCk_EntityBridge_ActorComponent_UE> _EntityBridge;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta=(AllowPrivateAccess))
     TObjectPtr<USceneComponent> _RootNode;
 

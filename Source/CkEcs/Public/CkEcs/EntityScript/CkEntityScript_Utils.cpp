@@ -17,6 +17,7 @@
 #include "CkEcs/Net/CkNet_Utils.h"
 #include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_Fragment.h"
 #include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment_Data.h"
 #include "CkEcs/CkEcsLog.h"                       // load-gate spawn suppression Warning
 #include "CkEcs/Handle/CkDebugCallstack_Macros.h"
 #include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h" // load-gate + spawn-window queries
@@ -164,14 +165,27 @@ auto
         return {};
     }
 
+    const auto DefaultObject = InEntityScriptClass->GetDefaultObject<UCk_EntityScript_UE>();
+
+    if (ck::IsValid(DefaultObject))
+    {
+        const auto IsNotActorBound = NOT DefaultObject->Get_IsActorBound();
+        CK_ENSURE_IF_NOT(IsNotActorBound,
+            TEXT("EntityScript [{}] is actor-bound. Add a Ck Entity Bridge to its Actor and call Request_SpawnEntity on it"),
+            InEntityScriptClass)
+        {
+            InDelegate.ExecuteIfBound(InLifetimeOwner, ECk_Request_OperationResult::Failed_NotEnqueued);
+            return {};
+        }
+    }
+
     if (ck_entity_script_utils::Get_IsSpawnSuppressedByLoadGate(InLifetimeOwner, InEntityScriptClass))
     {
         InDelegate.ExecuteIfBound(InLifetimeOwner, ECk_Request_OperationResult::Failed_NotEnqueued);
         return {};
     }
 
-    if (const auto DefaultObject = InEntityScriptClass->GetDefaultObject<UCk_EntityScript_UE>();
-        ck::IsValid(DefaultObject))
+    if (ck::IsValid(DefaultObject))
     {
         if (DefaultObject->Get_EffectiveReplication() == ECk_Replication::Replicates &&
             UCk_Utils_Net_UE::Get_EntityNetMode(InLifetimeOwner) == ECk_Net_NetModeType::Client)
@@ -249,6 +263,15 @@ auto
     const auto LifetimeOwnerIsValid = ck::IsValid(InLifetimeOwner);
     CK_ENSURE_IF_NOT(LifetimeOwnerIsValid,
         TEXT("LifetimeOwner is INVALID. Unable to SpawnEntity using EntityScriptClass [{}]."),
+        InEntityScriptClassArchetype)
+    {
+        InDelegate.ExecuteIfBound(InLifetimeOwner, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return {};
+    }
+
+    const auto IsNotActorBound = NOT InEntityScriptClassArchetype->Get_IsActorBound();
+    CK_ENSURE_IF_NOT(IsNotActorBound,
+        TEXT("EntityScript [{}] is actor-bound. Add a Ck Entity Bridge to its Actor and call Request_SpawnEntity on it"),
         InEntityScriptClassArchetype)
     {
         InDelegate.ExecuteIfBound(InLifetimeOwner, ECk_Request_OperationResult::Failed_NotEnqueued);
@@ -344,6 +367,42 @@ auto
         const FCk_Delegate_Request_OnCompleted& InDelegate)
     -> FCk_Handle_PendingEntityScript
 {
+    return DoAdd(InScriptEntity, InEntityScriptClassArchetype, InSpawnParams, InOptionalFunc, InDelegate, nullptr);
+}
+
+auto
+    UCk_Utils_EntityScript_UE::
+    Add_ForBridge(
+        FCk_Handle& InScriptEntity,
+        const TWeakObjectPtr<UCk_EntityScript_UE>& InEntityScriptClassArchetype,
+        const FInstancedStruct& InSpawnParams,
+        UCk_EntityBridge_ActorComponent_UE* InBridge,
+        const FCk_EntityScript_PostConstruction_Func& InOptionalFunc)
+    -> FCk_Handle_PendingEntityScript
+{
+    CK_ENSURE_IF_NOT(ck::IsValid(InBridge),
+        TEXT("Add_ForBridge called for EntityScript [{}] with an invalid Ck Entity Bridge"), InEntityScriptClassArchetype)
+    { return {}; }
+
+    CK_ENSURE_IF_NOT(ck::IsValid(InScriptEntity) && InScriptEntity.Has<ck::FFragment_Net_Params>(),
+        TEXT("Add_ForBridge called for EntityScript [{}] on Entity [{}], which must exist and already carry its NetParams"),
+        InEntityScriptClassArchetype, InScriptEntity)
+    { return {}; }
+
+    return DoAdd(InScriptEntity, InEntityScriptClassArchetype, InSpawnParams, InOptionalFunc, {}, InBridge);
+}
+
+auto
+    UCk_Utils_EntityScript_UE::
+    DoAdd(
+        FCk_Handle& InScriptEntity,
+        const TWeakObjectPtr<UCk_EntityScript_UE>& InEntityScriptClassArchetype,
+        const FInstancedStruct& InSpawnParams,
+        const FCk_EntityScript_PostConstruction_Func& InOptionalFunc,
+        const FCk_Delegate_Request_OnCompleted& InDelegate,
+        UCk_EntityBridge_ActorComponent_UE* InBridge)
+    -> FCk_Handle_PendingEntityScript
+{
     if (NOT ck_entity_script_utils::ValidateRetainedSpawnParams(TEXT("Add EntityScript"), InSpawnParams))
     {
         InDelegate.ExecuteIfBound(InScriptEntity, ECk_Request_OperationResult::Failed_NotEnqueued);
@@ -398,7 +457,8 @@ auto
                              InEntityScriptClassArchetype}
                         .Set_ContextOwner(LifetimeOwner)
                         .Set_SpawnParams(InSpawnParams)
-                        .Set_PostConstruction_Func(InOptionalFunc);
+                        .Set_PostConstruction_Func(InOptionalFunc)
+                        .Set_Bridge(InBridge);
 
     if (InDelegate.IsBound())
     { Request.Set_CompletionDelegate(InDelegate); }

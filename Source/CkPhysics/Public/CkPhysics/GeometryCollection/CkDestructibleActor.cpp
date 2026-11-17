@@ -4,7 +4,6 @@
 
 #include "CkEcs/EntityScript/CkEntityScript_Utils.h"
 #include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
-#include "CkEcsExt/EntityScript/CkEntityScript_WithActor_Data.h"
 
 #include "CkPhysics/GeometryCollection/CkDestructible_EntityScript.h"
 #include "CkPhysics/GeometryCollection/CkDestructibleAnchor.h"
@@ -36,6 +35,8 @@ ACk_Destructible::
     _GeometryCollection->SetupAttachment(GetRootComponent());
 
     _UniformKinematic = CreateDefaultSubobject<UCk_UniformKinematic>(TEXT("Ck_KinematicUniformInteger"));
+
+    _EntityBridge = CreateDefaultSubobject<UCk_EntityBridge_ActorComponent_UE>(TEXT("EntityBridge"));
 }
 
 auto
@@ -109,9 +110,7 @@ auto
 {
     Super::BeginPlay();
 
-    auto TransientEntity = UCk_Utils_EcsWorld_Subsystem_UE::Get_TransientEntity(GetWorld());
-    auto SpawnParams = FInstancedStruct::Make<FCk_EntityScript_WithActor_SpawnParams>(this);
-    UCk_Utils_EntityScript_UE::Request_SpawnEntity(TransientEntity, UCk_EntityScript_Destructible_UE::StaticClass(), SpawnParams, {});
+    _EntityBridge->Request_SpawnEntity(UCk_EntityScript_Destructible_UE::StaticClass());
 }
 
 auto

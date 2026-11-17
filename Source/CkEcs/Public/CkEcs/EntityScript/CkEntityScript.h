@@ -97,6 +97,12 @@ public:
     virtual auto
     Get_EffectiveReplication() const -> ECk_Replication;
 
+    // True for scripts whose Entity is the counterpart of an Actor. Such a script can only be spawned
+    // through UCk_EntityBridge_ActorComponent_UE; any other script can never be.
+    [[nodiscard]]
+    virtual auto
+    Get_IsActorBound() const -> bool;
+
     // Snapshot respawn opt-in, with exactly two consumers:
     //  (a) UCk_EntityScript_WithActor_UE::Construct stamps FFragment_ActorSpawnIntent when this returns true, which
     //      is what makes the capture record an actor recipe and the load re-spawn the bridged actor.

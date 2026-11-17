@@ -133,6 +133,10 @@ private:
     UPROPERTY()
     FCk_Handle _ContextOwnerOverride;
 
+    // The Actor an actor-bound Entity belongs to. Null for every other Entity.
+    UPROPERTY()
+    TObjectPtr<AActor> _BoundActor;
+
 public:
     CK_PROPERTY_GET(_EntityScriptClass);
     CK_PROPERTY_GET(_SpawnParams);
@@ -140,6 +144,7 @@ public:
     CK_PROPERTY_GET(_ReplicatedObjectsData);
     CK_PROPERTY(_IsOwningEntityDriverDependentOnThis);
     CK_PROPERTY(_ContextOwnerOverride);
+    CK_PROPERTY(_BoundActor);
 
     CK_DEFINE_CONSTRUCTORS(FCk_EntityReplicationDriver_ReplicationData_EntityScript, _EntityScriptClass,
         _SpawnParams, _OwningEntityDriver, _ReplicatedObjectsData);

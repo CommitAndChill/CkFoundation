@@ -482,6 +482,7 @@ auto
                 }
                 .Set_IsOwningEntityDriverDependentOnThis(IsOwningEntityDriverDependentOnThis)
                 .Set_ContextOwnerOverride(InReplicatedContextOwnerOverride.Get(FCk_Handle{}))
+                .Set_BoundActor(UCk_Utils_EntityBridge_UE::TryGet_Actor(InHandleToReplicate))
             );
 
             break;

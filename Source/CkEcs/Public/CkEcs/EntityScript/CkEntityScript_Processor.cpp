@@ -14,6 +14,7 @@
 #include "CkEcs/EntityScript/CkEntityScript_SpawnRecipe.h" // FFragment_SpawnRecipe retention (RuntimeSpawned)
 #include "CkEcs/Net/CkNet_Fragment.h"
 #include "CkEcs/Net/CkNet_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment_Data.h"
 #include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcs/Request/CkRequest_Completion.h"
 #include "CkEcs/TransientEntity/CkTransientEntity_Utils.h"
@@ -178,6 +179,50 @@ namespace ck
             TEXT("EntityScriptArchetype [{}] is INVALID. Cannot Spawn Entity"), EntityScriptClassArchetype)
         { return; }
 
+        const auto IsActorBoundScript = EntityScriptClassArchetype->Get_IsActorBound();
+        const auto WasRequestedThroughBridge = NOT InRequest.Get_Bridge().IsExplicitlyNull();
+        const auto IsAdmissionShapeValid = IsActorBoundScript == WasRequestedThroughBridge;
+
+        CK_ENSURE_IF_NOT(IsAdmissionShapeValid,
+            TEXT("EntityScript [{}] cannot be spawned this way. An actor-bound EntityScript is spawned only through "
+                 "UCk_EntityBridge_ActorComponent_UE::Request_SpawnEntity, and only actor-bound EntityScripts can be. "
+                 "IsActorBound [{}], RequestedThroughBridge [{}]"),
+            EntityScriptClassArchetype, IsActorBoundScript, WasRequestedThroughBridge)
+        {
+            DoCancel_NewEntity(InRequest);
+            return;
+        }
+
+        if (IsActorBoundScript)
+        {
+            const auto Bridge = InRequest.Get_Bridge().Get();
+            const auto BoundActor = ck::IsValid(Bridge) ? Bridge->GetOwner() : static_cast<AActor*>(nullptr);
+
+            if (ck::Is_NOT_Valid(BoundActor) || BoundActor->IsActorBeingDestroyed())
+            {
+                ck::ecs::Verbose(TEXT("Cancelling EntityScript spawn of [{}]: its Actor was destroyed before the spawn was processed"),
+                    EntityScriptClassArchetype);
+                Result = ECk_Request_OperationResult::Failed_Cancelled;
+                DoCancel_NewEntity(InRequest);
+                return;
+            }
+
+            const auto BridgeHasNoEntity = ck::Is_NOT_Valid(Bridge->Get_Entity());
+            CK_ENSURE_IF_NOT(BridgeHasNoEntity,
+                TEXT("Actor [{}] already has Entity [{}]. An Actor has exactly one Entity; cancelling the spawn of [{}]"),
+                BoundActor, Bridge->Get_Entity(), EntityScriptClassArchetype)
+            {
+                // A second request for the SAME entity must not destroy the entity the first one linked.
+                if (Bridge->Get_Entity() != InRequest.Get_NewEntity())
+                { DoCancel_NewEntity(InRequest); }
+
+                return;
+            }
+
+            auto EntityToLink = InRequest.Get_NewEntity();
+            UCk_Utils_EntityBridge_UE::DoLink(EntityToLink, Bridge);
+        }
+
         const auto& NewEntityScript = [&]() -> UCk_EntityScript_UE*
         {
             QUICK_SCOPE_CYCLE_COUNTER(FCk_Request_EntityScript_SpawnEntity_CreateObject)
@@ -264,9 +309,8 @@ namespace ck
             NewEntity, EntityScriptClassArchetype) {}
 
         // ---- Replication Driver (before Construct) ----------------------------------------
-        // Non-actor-bearing replicated entities need their driver present BEFORE Construct so utilities called
-        // during Construct find it. Entities that receive their own OwningActor later during Construct (WithActor)
-        // have no actor in the chain yet — TryAdd fails gracefully and OwningActor::Add supplies the driver.
+        // Replicated entities need their driver present BEFORE Construct so utilities called during Construct find
+        // it. An actor-bound entity was linked to its Actor above, so TryAdd finds that Actor on the entity itself.
         UCk_Utils_EntityReplicationDriver_UE::TryAdd(NewEntity);
 
         // ---- Construct --------------------------------------------------------------------
@@ -295,7 +339,7 @@ namespace ck
         }
 
         // ---- Replication Infrastructure (after Construct) ---------------------------------
-        // The driver already exists — added pre-Construct, or during Construct via UCk_Utils_EntityBridge_UE::Add.
+        // The driver already exists: it was added pre-Construct.
         if (NewEntityScript->Get_EffectiveReplication() == ECk_Replication::Replicates)
         {
             // The entity's live ContextOwner fragment is authoritative: it reflects the inherited value AND any
@@ -309,13 +353,13 @@ namespace ck
                 { ContextOwnerOverride = EntityContextOwner; }
             }
 
-            const auto HasOwningActor = UCk_Utils_EntityBridge_UE::Has(NewEntity);
-            ck::ecs::VeryVerbose(TEXT("[REP_DEBUG] SpawnProcessor — HasOwningActor=[{}]"), HasOwningActor);
+            const auto IsBridged = UCk_Utils_EntityBridge_UE::Has(NewEntity);
+            ck::ecs::VeryVerbose(TEXT("[REP_DEBUG] SpawnProcessor — IsBridged=[{}]"), IsBridged);
 
-            if (HasOwningActor)
+            if (IsBridged)
             {
-                const auto* OwningActor = UCk_Utils_EntityBridge_UE::Get_Actor(NewEntity);
-                const auto* World = OwningActor->GetWorld();
+                const auto* BridgedActor = UCk_Utils_EntityBridge_UE::Get_Actor(NewEntity);
+                const auto* World = BridgedActor->GetWorld();
 
                 const auto IsNetworkedAuthority =
                     World->IsNetMode(NM_DedicatedServer) || World->IsNetMode(NM_ListenServer);
@@ -356,6 +400,17 @@ namespace ck
         }
 
         Result = ECk_Request_OperationResult::Succeeded;
+    }
+
+    auto
+        FProcessor_EntityScript_SpawnEntity_HandleRequests::
+        DoCancel_NewEntity(
+            const FCk_Request_EntityScript_SpawnEntity& InRequest)
+        -> void
+    {
+        if (auto NewEntity = InRequest.Get_NewEntity();
+            ck::IsValid(NewEntity))
+        { UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(NewEntity); }
     }
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -420,8 +475,7 @@ namespace ck
         ck::ecs::VeryVerbose(TEXT("[REP_DEBUG] ReplicateProcessor — Handle=[{}] Owner=[{}] IsSelfOwned=[{}]"),
             InHandle, ReplicatedOwner, IsSelfOwned);
 
-        // Defer (retry next frame, KEEP the dirty marker) until the ReplicationDriver exists: WithActor entities
-        // acquire theirs via OwningActor::Add slightly after this request lands.
+        // Defer (retry next frame, KEEP the dirty marker) until the ReplicationDriver exists.
         if (NOT InHandle.Has<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>())
         {
             ck::ecs::VeryVerbose(TEXT("[REP_DEBUG] ReplicateProcessor — Handle [{}] does NOT have ReplicationDriver yet, deferring"), InHandle);
@@ -481,6 +535,10 @@ namespace ck
         UUtils_Signal_OnConstructed::Broadcast(InHandle, ck::MakePayload(InHandle));
 
         if (ck::Is_NOT_Valid(InEntityScript.Get_Script()))
+        { return; }
+
+        // An Actor's Entity is matched to its Actor by the bridge, never by a pending request.
+        if (UCk_Utils_EntityBridge_UE::Has(InHandle))
         { return; }
 
         auto WasConsumed = false;
@@ -598,6 +656,9 @@ namespace ck
         EntityScript->BeginPlay();
 
         InHandle.Add<FTag_EntityScript_HasBegunPlay>();
+
+        if (UCk_Utils_EntityBridge_UE::Has(InHandle))
+        { UCk_Utils_EntityBridge_UE::DoNotify_EntityBegunPlay(InHandle); }
     }
 
     // --------------------------------------------------------------------------------------------------------------------
