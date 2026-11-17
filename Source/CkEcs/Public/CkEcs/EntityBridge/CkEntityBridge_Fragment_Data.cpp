@@ -5,6 +5,9 @@
 #include "CkEcs/EntityScript/CkEntityScript.h"
 #include "CkEcs/EntityScript/CkEntityScript_Fragment.h"
 #include "CkEcs/EntityScript/CkEntityScript_Utils.h"
+#include "CkCore/Object/CkObject_Utils.h"
+#include "CkEcs/CkEcsLog.h"
+#include "CkEcs/Net/CkNet_Fragment.h"
 #include "CkEcs/Net/CkNet_Utils.h"
 #include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
 
@@ -144,7 +147,83 @@ auto
         const FInstancedStruct& InSpawnParams)
     -> FCk_Handle
 {
-    return {};
+    CK_ENSURE_IF_NOT(ck::IsValid(InEntityScriptClass),
+        TEXT("Request_SpawnEntity on the Ck Entity Bridge of [{}] was given an invalid EntityScript class"), GetOwner())
+    { return {}; }
+
+    auto* ScriptDefault = UCk_Utils_Object_UE::Get_ClassDefaultObject<UCk_EntityScript_UE>(InEntityScriptClass);
+    const auto IsActorBoundScript = ck::IsValid(ScriptDefault) && ScriptDefault->Get_IsActorBound();
+
+    CK_ENSURE_IF_NOT(IsActorBoundScript,
+        TEXT("[{}] is not an actor-bound EntityScript; derive it from UCk_EntityScript_WithActor_UE"), InEntityScriptClass)
+    { return {}; }
+
+    CK_ENSURE_IF_NOT(NOT _HasRequested,
+        TEXT("Request_SpawnEntity called more than once on [{}]"), GetOwner())
+    { return {}; }
+
+    auto* Owner = GetOwner();
+    auto* World = ck::IsValid(Owner) ? Owner->GetWorld() : static_cast<UWorld*>(nullptr);
+    auto TransientEntity = ck::IsValid(World) ? UCk_Utils_EcsWorld_Subsystem_UE::Get_TransientEntity(World) : FCk_Handle{};
+
+    CK_ENSURE_IF_NOT(ck::IsValid(TransientEntity),
+        TEXT("Request_SpawnEntity on [{}] was called before the ECS world exists; call it from BeginPlay"), Owner)
+    { return {}; }
+
+    _HasRequested = true;
+    _RequestedEntityScriptClass = InEntityScriptClass.Get();
+
+    if (const auto* EcsWorld = World->GetSubsystem<UCk_EcsWorld_Subsystem_UE>();
+        ck::IsValid(EcsWorld) && EcsWorld->Get_LoadHold() == ECk_EcsWorld_LoadHold::Teardown)
+    {
+        ck::ecs::Verbose(TEXT("Request_SpawnEntity on [{}] ignored: its world is tearing down"), Owner);
+        return {};
+    }
+
+    const auto WouldReplicate = Owner->GetIsReplicated() &&
+        ScriptDefault->Get_EffectiveReplication() == ECk_Replication::Replicates;
+
+    const auto& WorldSettings = TransientEntity.Get<ck::FFragment_Net_Params>().Get_ConnectionSettings();
+    const auto NetMode = WorldSettings.Get_NetMode();
+
+    if (NetMode == ECk_Net_NetModeType::Client && WouldReplicate && Owner->GetLocalRole() != ROLE_Authority)
+    {
+        if (_State == ECk_EntityBridge_State::NotRequested)
+        { _State = ECk_EntityBridge_State::AwaitingReplica; }
+
+        const auto ReplicaMatchesRequest = [&]() -> bool
+        {
+            if (ck::Is_NOT_Valid(_Entity) || NOT _Entity.Has<ck::FFragment_EntityScript>())
+            { return true; }
+
+            const auto& ReplicaScript = _Entity.Get<ck::FFragment_EntityScript>().Get_Script();
+            return ck::Is_NOT_Valid(ReplicaScript) || ReplicaScript->GetClass() == InEntityScriptClass;
+        }();
+
+        CK_ENSURE_IF_NOT(ReplicaMatchesRequest,
+            TEXT("[{}] requested EntityScript [{}] but the authority's replica Entity [{}] was built from another class"),
+            Owner, InEntityScriptClass, _Entity)
+        {}
+
+        return {};
+    }
+
+    const auto Replication = WouldReplicate && NetMode != ECk_Net_NetModeType::Client
+        ? ECk_Replication::Replicates
+        : ECk_Replication::DoesNotReplicate;
+
+    auto NewEntity = UCk_Utils_EntityLifetime_UE::Request_CreateEntity(TransientEntity);
+    UCk_Utils_Net_UE::Add(NewEntity, FCk_Net_ConnectionSettings{Replication, NetMode, WorldSettings.Get_NetRole()});
+
+    if (const auto PendingEntity = UCk_Utils_EntityScript_UE::Add_ForBridge(NewEntity, ScriptDefault, InSpawnParams, this, nullptr);
+        ck::Is_NOT_Valid(PendingEntity))
+    {
+        UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(NewEntity);
+        _HasRequested = false;
+        return {};
+    }
+
+    return NewEntity;
 }
 
 auto

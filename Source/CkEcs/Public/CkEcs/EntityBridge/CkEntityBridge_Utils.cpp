@@ -65,7 +65,7 @@ namespace ck_entity_bridge_utils
                     : FString{};
 
                 ck::ecs::Display(TEXT("[EntityBridge] Actor [{}] State [{}] EntityScript [{}] Entity [{}] Stages [{}]"),
-                    Bridge->GetOwner(), Bridge->Get_State(), Bridge->_RequestedEntityScriptClass.Get(), Entity, StageText);
+                    Bridge->GetOwner(), Bridge->Get_State(), Bridge->Get_RequestedEntityScriptClass().Get(), Entity, StageText);
             }
         }));
 }

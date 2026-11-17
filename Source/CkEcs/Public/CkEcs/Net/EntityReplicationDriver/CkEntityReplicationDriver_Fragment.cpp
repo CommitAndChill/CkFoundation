@@ -212,7 +212,7 @@ auto
     const auto SpawnParams = _ReplicationData_EntityScript.Get_SpawnParams();
     const auto IsSelfReferencing = _ReplicationData_EntityScript.Get_OwningEntityDriver() == this;
 
-    const auto* EntityScriptDefault = EntityScriptClass.GetDefaultObject();
+    auto* EntityScriptDefault = UCk_Utils_Object_UE::Get_ClassDefaultObject<UCk_EntityScript_UE>(EntityScriptClass);
     const auto IsActorBound = ck::IsValid(EntityScriptDefault) && EntityScriptDefault->Get_IsActorBound();
 
     auto* Bridge = static_cast<UCk_EntityBridge_ActorComponent_UE*>(nullptr);

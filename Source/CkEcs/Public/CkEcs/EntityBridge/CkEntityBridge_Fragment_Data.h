@@ -102,6 +102,8 @@ enum class ECk_ActorEcsReady_Policy : uint8
     LinkEstablished,
 };
 
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ActorEcsReady_Policy);
+
 // --------------------------------------------------------------------------------------------------------------------
 
 UCLASS(BlueprintType, ClassGroup = "Ck",
@@ -214,6 +216,7 @@ private:
 
 public:
     CK_PROPERTY(_RequestTiming);
+    CK_PROPERTY_GET(_RequestedEntityScriptClass);
 };
 
 // --------------------------------------------------------------------------------------------------------------------
