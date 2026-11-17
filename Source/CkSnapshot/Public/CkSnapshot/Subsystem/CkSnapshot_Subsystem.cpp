@@ -24,7 +24,7 @@
 #include "CkEcs/EntityScript/CkEntityScript_Utils.h"          // Request_SpawnEntity
 #include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_Utils.h" // Request_BuildAndReplicate (DefinitionBuilt)
 #include "CkEcs/ContextOwner/CkContextOwner_Utils.h"          // Get_ContextOwner (DefinitionBuilt rebuild owner)
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"            // TryGet_ActorEntityHandle (bridged rendezvous)
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"            // TryGet_Entity (bridged rendezvous)
 #include "CkEcs/Snapshot/CkSnapshot_Context.h"                // ck::FSnapshotContext (v3 map-backed mode)
 #include "CkEcs/Snapshot/CkSnapshot_HandleWalk.h"             // ck::snapshot::RemapHandles
 #include "CkEcs/Persistence/CkPersistenceHandlerRegistry.h" // Get_SaveHandlerTypes/Resolve (reconcile payload probe)
@@ -131,7 +131,7 @@ namespace ck_snapshot_subsystem
             const auto* Pawn = InState != nullptr ? InState->GetPawn() : nullptr;
             if (Pawn == nullptr)
             { return {}; }
-            return UCk_Utils_OwningActor_UE::TryGet_ActorEntityHandle(Pawn);
+            return UCk_Utils_EntityBridge_UE::TryGet_Entity(Pawn);
         };
 
         for (const auto* State : TActorRange<APlayerState>{InWorld})
@@ -1100,7 +1100,7 @@ auto
                             // control rotation: a Character's yaw follows it every tick, and the adopt path
                             // (unlike respawn-then-possess) inherits a STALE control rotation that would stomp
                             // the restored facing on the next move tick.
-                            if (auto* AdoptedActor = UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor(Found);
+                            if (auto* AdoptedActor = UCk_Utils_EntityBridge_UE::TryGet_Actor(Found);
                                 AdoptedActor != nullptr)
                             {
                                 // GameMode-created actors have already run BeginPlay, but their saved actor state must
@@ -1181,7 +1181,7 @@ auto
                     if (const auto* Pending = _PendingBridgeActors.Find(SavedId);
                         Pending != nullptr && Pending->IsValid())
                     {
-                        const auto Entity = UCk_Utils_OwningActor_UE::TryGet_ActorEntityHandle(Pending->Get());
+                        const auto Entity = UCk_Utils_EntityBridge_UE::TryGet_Entity(Pending->Get());
                         if (ck::IsValid(Entity))
                         {
                             Resolved = Entity;
@@ -1700,7 +1700,7 @@ auto
 
         // Actor-backed entity (EngineOwned player pawn, EngineOwned SaveKey level actor): drive the ACTOR only. NEVER
         // the entity-side Transform — FProcessor_Transform_SyncFromActor stomps it back from the actor every tick.
-        if (auto* Actor = UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor(Entity);
+        if (auto* Actor = UCk_Utils_EntityBridge_UE::TryGet_Actor(Entity);
             ck::IsValid(Actor))
         {
             // The actor bridge publishes this movement after quarantine lifts. Record the exact pose now; Transform

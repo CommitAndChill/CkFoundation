@@ -2,7 +2,7 @@
 
 #include "CkCore/Algorithms/CkAlgorithms.h"
 
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcsExt/EntityHolder/CkEntityHolder_Utils.h"
 
 #include "CkOverlapBody/CkOverlapBody_Log.h"
@@ -80,7 +80,7 @@ namespace ck
         -> void
     {
         const auto& SensorLifetimeOwner = UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InSensorEntity);
-        const auto& SensorAttachedEntityAndActor = UCk_Utils_OwningActor_UE::Get_EntityOwningActorBasicDetails(SensorLifetimeOwner);
+        const auto& SensorAttachedEntityAndActor = UCk_Utils_EntityBridge_UE::Get_BasicDetails(SensorLifetimeOwner);
         const auto& SensorAttachedEntity = SensorAttachedEntityAndActor.Get_Handle();
 
         constexpr auto IncludePendingKill = true;

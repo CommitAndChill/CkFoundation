@@ -14,7 +14,7 @@
 #include "CkEcs/EntityScript/CkEntityScript_SpawnRecipe.h" // FFragment_SpawnRecipe retention (RuntimeSpawned)
 #include "CkEcs/Net/CkNet_Fragment.h"
 #include "CkEcs/Net/CkNet_Utils.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcs/Request/CkRequest_Completion.h"
 #include "CkEcs/TransientEntity/CkTransientEntity_Utils.h"
 #include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_Utils.h"
@@ -295,7 +295,7 @@ namespace ck
         }
 
         // ---- Replication Infrastructure (after Construct) ---------------------------------
-        // The driver already exists — added pre-Construct, or during Construct via UCk_Utils_OwningActor_UE::Add.
+        // The driver already exists — added pre-Construct, or during Construct via UCk_Utils_EntityBridge_UE::Add.
         if (NewEntityScript->Get_EffectiveReplication() == ECk_Replication::Replicates)
         {
             // The entity's live ContextOwner fragment is authoritative: it reflects the inherited value AND any
@@ -309,12 +309,12 @@ namespace ck
                 { ContextOwnerOverride = EntityContextOwner; }
             }
 
-            const auto HasOwningActor = UCk_Utils_OwningActor_UE::Has(NewEntity);
+            const auto HasOwningActor = UCk_Utils_EntityBridge_UE::Has(NewEntity);
             ck::ecs::VeryVerbose(TEXT("[REP_DEBUG] SpawnProcessor — HasOwningActor=[{}]"), HasOwningActor);
 
             if (HasOwningActor)
             {
-                const auto* OwningActor = UCk_Utils_OwningActor_UE::Get_EntityOwningActor(NewEntity);
+                const auto* OwningActor = UCk_Utils_EntityBridge_UE::Get_Actor(NewEntity);
                 const auto* World = OwningActor->GetWorld();
 
                 const auto IsNetworkedAuthority =

@@ -11,7 +11,7 @@
 #include "CkCore/Math/Arithmetic/CkArithmetic_Utils.h"
 
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 
 #include <GameFramework/PlayerState.h>
 
@@ -326,7 +326,7 @@ auto
             if (ck::Is_NOT_Valid(Channel))
             { continue; }
 
-            if (NOT UCk_Utils_OwningActor_UE::Get_IsActorEcsReady(Channel))
+            if (NOT UCk_Utils_EntityBridge_UE::Get_HasEntity(Channel))
             { continue; }
 
             const auto EntityCount = DoGet_EntityCountOnChannel(Channel);
@@ -344,7 +344,7 @@ auto
         if (ck::Is_NOT_Valid(BestChannel))
         { return {}; }
 
-        const auto ChannelEntity = UCk_Utils_OwningActor_UE::TryGet_ActorEntityHandle(BestChannel);
+        const auto ChannelEntity = UCk_Utils_EntityBridge_UE::TryGet_Entity(BestChannel);
         return FCk_ActorRelay_ChannelResult{TWeakObjectPtr<ACk_ActorRelay_UE>(BestChannel), ChannelEntity};
     }
 
@@ -360,10 +360,10 @@ auto
             auto Channel = InPool[InOutRoundRobinIndex];
 
             if (ck::IsValid(Channel) &&
-                UCk_Utils_OwningActor_UE::Get_IsActorEcsReady(Channel) &&
+                UCk_Utils_EntityBridge_UE::Get_HasEntity(Channel) &&
                 DoGet_EntityCountOnChannel(Channel) < MaxEntities)
             {
-                const auto ChannelEntity = UCk_Utils_OwningActor_UE::TryGet_ActorEntityHandle(Channel);
+                const auto ChannelEntity = UCk_Utils_EntityBridge_UE::TryGet_Entity(Channel);
                 return FCk_ActorRelay_ChannelResult{TWeakObjectPtr<ACk_ActorRelay_UE>(Channel), ChannelEntity};
             }
 
@@ -381,9 +381,9 @@ auto
             InOutRoundRobinIndex, FCk_IntRange{0, InPool.Num()}, ECk_Inclusiveness::Exclusive);
 
         if (auto Channel = InPool[InOutRoundRobinIndex];
-            ck::IsValid(Channel) && UCk_Utils_OwningActor_UE::Get_IsActorEcsReady(Channel))
+            ck::IsValid(Channel) && UCk_Utils_EntityBridge_UE::Get_HasEntity(Channel))
         {
-            const auto ChannelEntity = UCk_Utils_OwningActor_UE::TryGet_ActorEntityHandle(Channel);
+            const auto ChannelEntity = UCk_Utils_EntityBridge_UE::TryGet_Entity(Channel);
             return FCk_ActorRelay_ChannelResult{TWeakObjectPtr<ACk_ActorRelay_UE>(Channel), ChannelEntity};
         }
 
@@ -402,7 +402,7 @@ auto
     if (ck::Is_NOT_Valid(InChannelActor))
     { return 0; }
 
-    auto ChannelEntity = UCk_Utils_OwningActor_UE::Get_ActorEntityHandle(InChannelActor);
+    auto ChannelEntity = UCk_Utils_EntityBridge_UE::Get_Entity(InChannelActor);
 
     if (ck::Is_NOT_Valid(ChannelEntity))
     { return 0; }
@@ -436,7 +436,7 @@ auto
     {
         const auto IsReadyAndFull =
             ck::IsValid(Channel) &&
-            UCk_Utils_OwningActor_UE::Get_IsActorEcsReady(Channel) &&
+            UCk_Utils_EntityBridge_UE::Get_HasEntity(Channel) &&
             DoGet_EntityCountOnChannel(Channel) >= MaxEntities;
 
         if (NOT IsReadyAndFull)
@@ -604,7 +604,7 @@ auto
         if (ck::Is_NOT_Valid(Channel))
         { continue; }
 
-        auto ChannelEntity = UCk_Utils_OwningActor_UE::Get_ActorEntityHandle(Channel);
+        auto ChannelEntity = UCk_Utils_EntityBridge_UE::Get_Entity(Channel);
 
         if (ck::IsValid(ChannelEntity))
         {

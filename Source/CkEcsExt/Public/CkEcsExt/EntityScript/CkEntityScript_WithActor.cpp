@@ -5,10 +5,10 @@
 
 #include <Engine/World.h>
 #include "CkEcs/Handle/CkHandle_Utils.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcs/Snapshot/CkSaveKey_Fragment.h"
 #include "CkEcsExt/Transform/CkTransform_Utils.h"
-#include "CkEcsExt/OwningActor/CkActorSpawnIntent_Fragment.h"
+#include "CkEcsExt/EntityBridge/CkActorSpawnIntent_Fragment.h"
 #include "CkLabel/CkLabel_Utils.h"
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -35,11 +35,11 @@ auto
     // Add it directly so Get_WorldForEntity can resolve without recursion.
     InHandle.AddOrGet<TWeakObjectPtr<UWorld>>(_OwningActor->GetWorld());
 
-    UCk_Utils_OwningActor_UE::SetupActorEntityLink(InHandle, _OwningActor);
+    UCk_Utils_EntityBridge_UE::SetupActorEntityLink(InHandle, _OwningActor);
 
     // Order matters: OwningActor MUST be added before Transform so that Transform
     // auto-detects the actor's root component and attaches to it
-    UCk_Utils_OwningActor_UE::Add(InHandle, _OwningActor);
+    UCk_Utils_EntityBridge_UE::Add(InHandle, _OwningActor);
 
     if (ck::IsValid(_OwningActor->GetRootComponent()))
     {

@@ -162,10 +162,10 @@ auto
     CK_ENSURE_IF_NOT(ck::IsValid(InEntity), TEXT("Entity [{}] is INVALID"), InEntity)
     { return ECk_Utils_Net_IsPlayerControlled_Result::IsNotValidPawn; }
 
-    if (NOT UCk_Utils_OwningActor_UE::Has(InEntity))
+    if (NOT UCk_Utils_EntityBridge_UE::Has(InEntity))
     { return ECk_Utils_Net_IsPlayerControlled_Result::IsNotValidPawn; }
 
-    const auto& EntityOwningActor = UCk_Utils_OwningActor_UE::Get_EntityOwningActor(InEntity);
+    const auto& EntityOwningActor = UCk_Utils_EntityBridge_UE::Get_Actor(InEntity);
 
     if (ck::Is_NOT_Valid(EntityOwningActor))
     { return ECk_Utils_Net_IsPlayerControlled_Result::IsNotValidPawn; }
@@ -182,10 +182,10 @@ auto
     CK_ENSURE_IF_NOT(ck::IsValid(InEntity), TEXT("Entity [{}] is INVALID"), InEntity)
     { return ECk_Utils_Net_IsBotControlled_Result::IsNotValidPawn; }
 
-    if (NOT UCk_Utils_OwningActor_UE::Has(InEntity))
+    if (NOT UCk_Utils_EntityBridge_UE::Has(InEntity))
     { return ECk_Utils_Net_IsBotControlled_Result::IsNotValidPawn; }
 
-    const auto& EntityOwningActor = UCk_Utils_OwningActor_UE::Get_EntityOwningActor(InEntity);
+    const auto& EntityOwningActor = UCk_Utils_EntityBridge_UE::Get_Actor(InEntity);
 
     if (ck::Is_NOT_Valid(EntityOwningActor))
     { return ECk_Utils_Net_IsBotControlled_Result::IsNotValidPawn; }
@@ -202,10 +202,10 @@ auto
     CK_ENSURE_IF_NOT(ck::IsValid(InEntity), TEXT("Entity [{}] is INVALID"), InEntity)
     { return ECk_Utils_Net_IsLocallyControlled_Result::IsNotValidPawn; }
 
-    if (NOT UCk_Utils_OwningActor_UE::Has(InEntity))
+    if (NOT UCk_Utils_EntityBridge_UE::Has(InEntity))
     { return ECk_Utils_Net_IsLocallyControlled_Result::IsNotValidPawn; }
 
-    const auto& EntityOwningActor = UCk_Utils_OwningActor_UE::Get_EntityOwningActor(InEntity);
+    const auto& EntityOwningActor = UCk_Utils_EntityBridge_UE::Get_Actor(InEntity);
 
     if (ck::Is_NOT_Valid(EntityOwningActor))
     { return ECk_Utils_Net_IsLocallyControlled_Result::IsNotValidPawn; }
@@ -222,10 +222,10 @@ auto
     CK_ENSURE_IF_NOT(ck::IsValid(InEntity), TEXT("Entity [{}] is INVALID"), InEntity)
     { return ECk_Utils_Net_IsLocallyControlled_Result::IsNotValidPawn; }
 
-    if (NOT UCk_Utils_OwningActor_UE::Has(InEntity))
+    if (NOT UCk_Utils_EntityBridge_UE::Has(InEntity))
     { return ECk_Utils_Net_IsLocallyControlled_Result::IsNotValidPawn; }
 
-    const auto& EntityOwningActor = UCk_Utils_OwningActor_UE::Get_EntityOwningActor(InEntity);
+    const auto& EntityOwningActor = UCk_Utils_EntityBridge_UE::Get_Actor(InEntity);
 
     if (ck::Is_NOT_Valid(EntityOwningActor))
     { return ECk_Utils_Net_IsLocallyControlled_Result::IsNotValidPawn; }
@@ -273,7 +273,7 @@ auto
     {
         case ECk_Net_ReplicationType::LocalOnly:
         {
-            if (const auto& MaybeActor = UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor_Recursive(InEntity);
+            if (const auto& MaybeActor = UCk_Utils_EntityBridge_UE::TryGet_Actor_Recursive(InEntity);
                 ck::IsValid(MaybeActor))
             {
                 if (MaybeActor->GetLocalRole() == ROLE_AutonomousProxy)

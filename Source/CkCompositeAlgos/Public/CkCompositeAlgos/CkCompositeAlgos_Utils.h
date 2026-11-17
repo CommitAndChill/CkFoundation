@@ -3,7 +3,7 @@
 #include "CkCore/Macros/CkMacros.h"
 
 #include "CkEcs/Delegates/CkDelegates.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 
 #include "CkCompositeAlgos_Utils.generated.h"
 
@@ -199,7 +199,7 @@ private:
               meta = (CompactNodeTitle = "Transform_ToActors"))
     static TArray<AActor*>
     TransformBasicDetails_ToActors(
-        const TArray<FCk_EntityOwningActor_BasicDetails>& InEntitiesWithActor);
+        const TArray<FCk_EntityBridge_BasicDetails>& InEntitiesWithActor);
 
     UFUNCTION(BlueprintPure,
               DisplayName = "[Ck] Transform BasicDetails To Entities",
@@ -207,7 +207,7 @@ private:
               meta = (CompactNodeTitle = "Transform_ToEntities"))
     static TArray<FCk_Handle>
     TransformBasicDetails_ToEntities(
-        const TArray<FCk_EntityOwningActor_BasicDetails>& InEntitiesWithActor);
+        const TArray<FCk_EntityBridge_BasicDetails>& InEntitiesWithActor);
 
     UFUNCTION(BlueprintPure,
               DisplayName = "[Ck] Transform Actors To Entities",

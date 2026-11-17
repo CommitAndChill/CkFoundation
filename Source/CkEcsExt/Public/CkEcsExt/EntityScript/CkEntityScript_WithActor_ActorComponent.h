@@ -2,7 +2,7 @@
 
 #include "CkCore/Macros/CkMacros.h"
 
-#include "CkEcs/OwningActor/CkOwningActor_Fragment_Data.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment_Data.h"
 
 #include "CkEntityScript_WithActor_ActorComponent.generated.h"
 
@@ -18,7 +18,7 @@ class UCk_EntityScript_WithActor_UE;
 UCLASS(BlueprintType, ClassGroup = "Ck",
        meta = (BlueprintSpawnableComponent, DisplayName = "Ck Entity Script (With Actor)"))
 class CKECSEXT_API UCk_EntityScript_WithActor_ActorComponent_UE
-    : public UCk_EntityOwningActor_ActorComponent_UE
+    : public UCk_EntityBridge_ActorComponent_UE
 {
     GENERATED_BODY()
 

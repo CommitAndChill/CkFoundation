@@ -43,7 +43,7 @@ namespace ck
 
     private:
         TWeakObjectPtr<UShapeComponent> _Sensor;
-        FCk_EntityOwningActor_BasicDetails _AttachedEntityAndActor;
+        FCk_EntityBridge_BasicDetails _AttachedEntityAndActor;
         ECk_EnableDisable _EnableDisable = ECk_EnableDisable::Enable;
 
         FCk_Sensor_MarkerOverlaps _CurrentMarkerOverlaps;

@@ -4,7 +4,7 @@
 
 #include "CkEcs/CkEcsLog.h"
 #include "CkEcs/EntityScript/CkEntityScript_Utils.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 
 #include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_Fragment.h"
 #include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_BuildRecipe.h" // FFragment_BuildRecipe retention (definition-built entity recipe)
@@ -68,7 +68,7 @@ auto
     const auto HasNetParams = UCk_Utils_Net_UE::Has(InHandle);
     const auto EntityReplication = HasNetParams ? UCk_Utils_Net_UE::Get_EntityReplication(InHandle) : ECk_Replication::DoesNotReplicate;
     const auto IsHost = UCk_Utils_Net_UE::Get_IsEntityNetMode_Host(InHandle);
-    const auto HasOwningActor = UCk_Utils_OwningActor_UE::TryGet_Entity_OwningActor_InOwnershipChain(InHandle);
+    const auto HasOwningActor = UCk_Utils_EntityBridge_UE::TryGet_BridgedEntity_InOwnershipChain(InHandle);
 
     ck::ecs::VeryVerbose(TEXT("[REP_DEBUG] ReplicationDriver::Add — Handle=[{}] HasNetParams=[{}] EntityReplication=[{}] IsHost=[{}] HasOwningActorInChain=[{}]"),
         InHandle, HasNetParams, EntityReplication, IsHost, ck::IsValid(HasOwningActor));

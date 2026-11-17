@@ -3,7 +3,7 @@
 #include "CkTransform_Fragment.h"
 
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Fragment.h"
-#include "CkEcs/OwningActor/CkOwningActor_Fragment.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment.h"
 
 #include "CkEcs/Processor/CkParallelProcessor.h"
 #include "CkEcs/Processor/CkProcessor.h"

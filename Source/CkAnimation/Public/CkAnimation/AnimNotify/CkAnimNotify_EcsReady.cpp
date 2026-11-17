@@ -83,11 +83,11 @@ auto
         TEXT("Notify [{}] of Animation [{}] has NO valid owning actor!"), this, InAnimation)
     { return {}; }
 
-    CK_ENSURE_IF_NOT(UCk_Utils_OwningActor_UE::Get_IsActorEcsReady(OwningActor),
+    CK_ENSURE_IF_NOT(UCk_Utils_EntityBridge_UE::Get_HasEntity(OwningActor),
         TEXT("Notify [{}] of Animation [{}] has an owner [{}] that is NOT Ecs Ready!"), this, InAnimation, OwningActor)
     { return {}; }
 
-    auto OwningHandle = UCk_Utils_OwningActor_UE::Get_ActorEntityHandle(OwningActor);
+    auto OwningHandle = UCk_Utils_EntityBridge_UE::Get_Entity(OwningActor);
 
     return {OwningActor, OwningHandle};
 }

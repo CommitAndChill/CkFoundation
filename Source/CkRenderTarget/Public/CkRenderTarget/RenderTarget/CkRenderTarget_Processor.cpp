@@ -1678,7 +1678,7 @@ namespace ck
         const auto World = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InRenderTargetEntity);
         auto OwnerEntity = UCk_Utils_ContextOwner_UE::Get_ContextOwner(InRenderTargetEntity);
         const auto SyncName = UCk_Utils_RenderTarget_UE::Get_SyncName(InRenderTargetEntity);
-        const auto* OwningActor = UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor_Recursive(InRenderTargetEntity);
+        const auto* OwningActor = UCk_Utils_EntityBridge_UE::TryGet_Actor_Recursive(InRenderTargetEntity);
 
         for (auto StreamIt = InStreams._Streams.CreateIterator(); StreamIt; ++StreamIt)
         {

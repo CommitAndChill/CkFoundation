@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CkEcs/OwningActor/CkOwningActor_Fragment.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment.h"
 #include "CkEcs/Processor/CkProcessor.h"
 #include "CkEcs/Processor/CkProcessor_NetModePolicy.h"
 #include "CkEcs/Scheduler/CkProcessorGroups.h"
@@ -40,7 +40,7 @@ namespace ck
     class CKUSF_API FProcessor_Usf_OutlineActor_Sync : public TProcessor<
         FProcessor_Usf_OutlineActor_Sync,
         TReadOnly<FFragment_Usf_OutlineResolved>,
-        TReadOnly<FFragment_OwningActor>,
+        TReadOnly<FFragment_EntityBridge>,
         CK_IGNORE_PENDING_KILL>
     {
     public:
@@ -51,7 +51,7 @@ namespace ck
 
         static auto ForEachEntity(TimeType InDeltaT, HandleType InHandle,
                                   const FFragment_Usf_OutlineResolved& InResolved,
-                                  const FFragment_OwningActor& InOwningActor) -> void;
+                                  const FFragment_EntityBridge& InOwningActor) -> void;
     };
 
     class CKUSF_API FProcessor_Usf_OutlineActor_Remove : public TProcessor<

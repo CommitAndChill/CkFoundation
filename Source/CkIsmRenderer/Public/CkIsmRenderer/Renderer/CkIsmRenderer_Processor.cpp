@@ -37,10 +37,10 @@ namespace ck
             TimeType InDeltaT,
             HandleType InHandle,
             const FFragment_IsmRenderer_Params& InParams,
-            const FFragment_OwningActor& InOwningActorCurrent) const
+            const FFragment_EntityBridge& InOwningActorCurrent) const
         -> void
     {
-        const auto& Actor = InOwningActorCurrent.Get_EntityOwningActor().Get();
+        const auto& Actor = InOwningActorCurrent.Get_Actor().Get();
         const auto& Data = InParams.Get_Params();
 
         CK_ENSURE_IF_NOT(ck::IsValid(Actor),

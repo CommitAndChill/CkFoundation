@@ -13,7 +13,7 @@ auto
         ECk_Replication InReplicates)
     -> FCk_Handle_GeometryCollectionOwner
 {
-    CK_ENSURE_IF_NOT(UCk_Utils_OwningActor_UE::Has(InHandle),
+    CK_ENSURE_IF_NOT(UCk_Utils_EntityBridge_UE::Has(InHandle),
         TEXT("Unable to add [{}] as a GeometryCollectionOwner since it does NOT have an owning Actor"), InHandle)
     { return {}; }
 

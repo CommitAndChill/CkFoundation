@@ -27,29 +27,29 @@ you have is "some handle".
 
 ### 3.3 Actor ↔ entity bridge
 
-`UCk_Utils_OwningActor_UE` (`CkEcs/OwningActor/CkOwningActor_Utils.h`) — verified function names:
+`UCk_Utils_EntityBridge_UE` (`CkEcs/EntityBridge/CkEntityBridge_Utils.h`) — verified function names:
 
 | Direction | C++ | header line |
 |---|---|---|
-| Actor → entity | `Get_ActorEntityHandle(InActor)` / `TryGet_ActorEntityHandle(InActor)` | `:97-111` |
-| Entity → actor | `Get_EntityOwningActor(InHandle)` / `TryGet_EntityOwningActor(InHandle)` | `:57-71` |
-| Entity → actor, walk owners | `TryGet_EntityOwningActor_Recursive(InHandle)` | `:73-79` |
-| Bridge readiness | `Get_IsActorEcsReady(InActor)`, `Promise_OnActorEcsReady(InActor, InDelegate)` | `:113-128` |
+| Actor → entity | `Get_Entity(InActor)` / `TryGet_Entity(InActor)` | `:97-111` |
+| Entity → actor | `Get_Actor(InHandle)` / `TryGet_Actor(InHandle)` | `:57-71` |
+| Entity → actor, walk owners | `TryGet_Actor_Recursive(InHandle)` | `:73-79` |
+| Bridge readiness | `Get_HasEntity(InActor)`, `Promise_OnActorEcsReady(InActor, InDelegate)` | `:113-128` |
 
 The three environments (root non-negotiable #4):
 
 ```cpp
 // C++
-auto Entity = UCk_Utils_OwningActor_UE::Get_ActorEntityHandle(InActor);
+auto Entity = UCk_Utils_EntityBridge_UE::Get_Entity(InActor);
 ```
-Blueprint: node **[Ck][OwningActor] Get Actor To Entity** (compact title `ActorToEntity`,
-category `Ck|Utils|OwningActor`); reverse **[Ck][OwningActor] Get Entity To Actor**.
+Blueprint: node **[Ck][EntityBridge] Get Actor To Entity** (compact title `ActorToEntity`,
+category `Ck|Utils|EntityBridge`); reverse **[Ck][EntityBridge] Get Entity To Actor**.
 ```angelscript
 // AngelScript (Script/CkUtils_Common.as:5-20)
 FCk_Handle Entity = ck::ToEntity(Actor);
 FCk_Handle Self   = ck::ToEntity(EntityScript);
 AActor Actor      = ck::ToActor(Handle);   // Checked by default — ensures if no OwningActor;
-                                           // pawn-less ECS entities: TryGet_EntityOwningActor
+                                           // pawn-less ECS entities: TryGet_Actor
 ```
 
 Inside an EntityScript: `Get_AssociatedEntity()` (C++) / `DoGet_ScriptEntity()` (BP/AS).

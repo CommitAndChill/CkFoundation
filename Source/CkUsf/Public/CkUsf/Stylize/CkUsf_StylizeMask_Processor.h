@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Fragment.h"
-#include "CkEcs/OwningActor/CkOwningActor_Fragment.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment.h"
 #include "CkEcs/Processor/CkProcessor.h"
 #include "CkEcs/Processor/CkProcessor_NetModePolicy.h"
 #include "CkEcs/Scheduler/CkProcessorGroups.h"
@@ -25,7 +25,7 @@ namespace ck
     class CKUSF_API FProcessor_Usf_StylizeMaskActor_Sync : public TProcessor<
         FProcessor_Usf_StylizeMaskActor_Sync,
         TReadOnly<FFragment_Usf_StylizeMaskTarget>,
-        TReadOnly<FFragment_OwningActor>,
+        TReadOnly<FFragment_EntityBridge>,
         TExclude<FFragment_Usf_OutlineResolved>,
         TExclude<FFragment_Usf_CelPatternTarget>,
         CK_IGNORE_PENDING_KILL>
@@ -44,7 +44,7 @@ namespace ck
             TimeType InDeltaT,
             HandleType InHandle,
             const FFragment_Usf_StylizeMaskTarget& InTarget,
-            const FFragment_OwningActor& InOwningActor) -> void;
+            const FFragment_EntityBridge& InOwningActor) -> void;
     };
 
     // --------------------------------------------------------------------------------------------------------------------

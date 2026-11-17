@@ -5,30 +5,30 @@
 
 // --------------------------------------------------------------------------------------------------------------------
 
-class UCk_Utils_OwningActor_UE;
+class UCk_Utils_EntityBridge_UE;
 
 // --------------------------------------------------------------------------------------------------------------------
 
 namespace ck
 {
-    struct CKECS_API FFragment_OwningActor
+    struct CKECS_API FFragment_EntityBridge
     {
     public:
-        CK_GENERATED_BODY(FFragment_OwningActor);
+        CK_GENERATED_BODY(FFragment_EntityBridge);
 
     public:
-        friend class UCk_Utils_OwningActor_UE;
+        friend class UCk_Utils_EntityBridge_UE;
 
     public:
-        FFragment_OwningActor() = default;
-        explicit FFragment_OwningActor(
-            AActor* InEntityOwningActor);
+        FFragment_EntityBridge() = default;
+        explicit FFragment_EntityBridge(
+            AActor* InActor);
 
     private:
-        TWeakObjectPtr<AActor> _EntityOwningActor;
+        TWeakObjectPtr<AActor> _Actor;
 
     public:
-        CK_PROPERTY_GET(_EntityOwningActor);
+        CK_PROPERTY_GET(_Actor);
     };
 }
 

@@ -4,7 +4,7 @@ namespace ck
 {
     FCk_Handle ToEntity(const AActor InActor)
     {
-        return InActor.Get_ActorEntityHandle();
+        return InActor.Get_Entity();
     }
 
     FCk_Handle ToEntity(const UCk_EntityScript_UE InEntityScript)
@@ -17,9 +17,9 @@ namespace ck
         switch (InSanityCheck)
         {
             case ECk_SanityCheck::Checked:
-                return InHandle.Get_EntityOwningActor();
+                return InHandle.Get_Actor();
             case ECk_SanityCheck::UnChecked:
-                return InHandle.TryGet_EntityOwningActor();
+                return InHandle.TryGet_Actor();
         }
     }
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CkEcs/OwningActor/CkOwningActor_Fragment_Data.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment_Data.h"
 #include "CkCore/ObjectReplication/CkReplicatedObject.h"
 
 #include "CkEcs/Handle/CkHandle.h"

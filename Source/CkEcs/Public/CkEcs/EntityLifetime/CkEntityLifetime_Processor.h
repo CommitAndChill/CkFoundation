@@ -1,7 +1,7 @@
 #pragma once
 #include "CkEntityLifetime_Fragment.h"
 
-#include "CkEcs/OwningActor/CkOwningActor_Processors.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Processors.h"
 #include "CkEcs/Processor/CkProcessor.h"
 #include "CkEcs/Registry/CkRegistry.h"
 #include "CkEcs/Scheduler/CkProcessorGroups.h"
@@ -92,7 +92,7 @@ namespace ck
     {
     public:
         using Group = FGroup_DestructionPipeline;
-        using RunAfter = TDepList<FProcessor_OwningActor_Destroy>;
+        using RunAfter = TDepList<FProcessor_EntityBridge_Destroy>;
 
     public:
         using Super = TProcessor;

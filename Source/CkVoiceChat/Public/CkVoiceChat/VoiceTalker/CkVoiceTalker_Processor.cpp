@@ -3,7 +3,7 @@
 #include "CkCore/Algorithms/CkAlgorithms.h"
 
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcs/Request/CkRequest_Completion.h"
 #include "CkEcs/Scheduler/CkProcessorRegistration.h"
 
@@ -831,7 +831,7 @@ namespace ck
             Synth->bAutoActivate = false;
             Synth->RegisterComponentWithWorld(World);
 
-            if (auto* OwningActor = UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor(InVoiceTalkerEntity);
+            if (auto* OwningActor = UCk_Utils_EntityBridge_UE::TryGet_Actor(InVoiceTalkerEntity);
                 ck::IsValid(OwningActor))
             {
                 if (auto* AttachTarget = OwningActor->GetRootComponent();
@@ -919,7 +919,7 @@ namespace ck
         // actor's root anyway, and the near/far STATE is a distance decision, not a render one,
         // so it must compute even where no audio device exists (headless: the state is what the
         // specs pin; Apply's attach guard still gates the actual render independently).
-        auto* OwningActor = UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor(InVoiceTalkerEntity);
+        auto* OwningActor = UCk_Utils_EntityBridge_UE::TryGet_Actor(InVoiceTalkerEntity);
 
         if (ck::Is_NOT_Valid(OwningActor))
         { return; }

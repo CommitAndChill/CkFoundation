@@ -86,8 +86,8 @@ namespace ck_raysense
         .Set_ImpactPhysMat(InHitResult.PhysMaterial)
         .Set_MaybeHitActor(InHitResult.GetActor())
         .Set_MaybeHitComponent(InHitResult.GetComponent())
-        .Set_MaybeHitHandle(UCk_Utils_OwningActor_UE::Get_IsActorEcsReady(InHitResult.GetActor()) ?
-            UCk_Utils_OwningActor_UE::Get_ActorEntityHandle(InHitResult.GetActor()) : FCk_Handle{});
+        .Set_MaybeHitHandle(UCk_Utils_EntityBridge_UE::Get_HasEntity(InHitResult.GetActor()) ?
+            UCk_Utils_EntityBridge_UE::Get_Entity(InHitResult.GetActor()) : FCk_Handle{});
 
         switch (InParams.Get_CollisionResponse())
         {

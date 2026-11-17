@@ -204,12 +204,12 @@ auto
     if (ck::Is_NOT_Valid(InteractionSource))
     { return {}; }
 
-    const auto& ActorEntity = UCk_Utils_OwningActor_UE::TryGet_Entity_OwningActor_InOwnershipChain(InteractionSource);
+    const auto& ActorEntity = UCk_Utils_EntityBridge_UE::TryGet_BridgedEntity_InOwnershipChain(InteractionSource);
 
     if (ck::Is_NOT_Valid(ActorEntity))
     { return {}; }
 
-    return UCk_Utils_OwningActor_UE::Get_EntityOwningActor(ActorEntity);
+    return UCk_Utils_EntityBridge_UE::Get_Actor(ActorEntity);
 }
 
 auto
@@ -241,12 +241,12 @@ auto
     if (ck::Is_NOT_Valid(InteractionTarget))
     { return {}; }
 
-    const auto& ActorEntity = UCk_Utils_OwningActor_UE::TryGet_Entity_OwningActor_InOwnershipChain(InteractionTarget);
+    const auto& ActorEntity = UCk_Utils_EntityBridge_UE::TryGet_BridgedEntity_InOwnershipChain(InteractionTarget);
 
     if (ck::Is_NOT_Valid(ActorEntity))
     { return {}; }
 
-    return UCk_Utils_OwningActor_UE::Get_EntityOwningActor(ActorEntity);
+    return UCk_Utils_EntityBridge_UE::Get_Actor(ActorEntity);
 }
 
 auto

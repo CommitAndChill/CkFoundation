@@ -21,7 +21,7 @@
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
 #include "CkEcs/Handle/CkHandle_Utils.h"
 #include "CkEcs/Net/CkNet_Utils.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcs/Signal/CkSignal_Utils.inl.h"
 
 #include "GameFramework/Pawn.h"
@@ -589,7 +589,7 @@ auto
     // on that client the AutonomousProxy with a valid NetConnection, the only actor a client may
     // invoke Server_* RPCs on. Any other pooled channel is a SimulatedProxy there and UE silently
     // drops the RPC. Sync-or-null: an unresolved result means "retry next pump".
-    auto* OwningActor      = UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor_Recursive(InStateMachine);
+    auto* OwningActor      = UCk_Utils_EntityBridge_UE::TryGet_Actor_Recursive(InStateMachine);
     auto* OwningPawn       = ::Cast<APawn>(OwningActor); // ::Cast to avoid the class's own typesafe-handle Cast
     auto* OwningPlayerState = OwningPawn != nullptr ? OwningPawn->GetPlayerState() : nullptr;
 

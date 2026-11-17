@@ -5,7 +5,7 @@
 #include "CkCore/TypeTraits/CkTypeTraits.h"
 
 #include "CkEcs/Handle/CkHandle.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcs/Request/CkRequest_Completion.h"
 
 #include "CkEcsExt/Transform/CkTransform_Fragment.h"

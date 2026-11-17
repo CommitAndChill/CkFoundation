@@ -8,7 +8,7 @@
 #include "CkCore/Enums/CkEnums.h"
 
 #include "CkEcs/Handle/CkHandle.h"
-#include "CkEcs/OwningActor/CkOwningActor_Fragment_Data.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment_Data.h"
 
 #include "CkGraphics/CkGraphics_Utils.h"
 
@@ -56,14 +56,14 @@ public:
     static auto
     Add_MarkerOrSensor_ActorComponent(
         FCk_Handle& InMarkerOrSensorEntity,
-        const FCk_EntityOwningActor_BasicDetails& InMarkerOrSensorAttachedEntityAndActor,
+        const FCk_EntityBridge_BasicDetails& InMarkerOrSensorAttachedEntityAndActor,
         const T_MarkerOrSensorParams& InMarkerOrSensorParams) -> void;
 
     template <typename T_MarkerOrSensorCompType, ECk_ShapeType T_MarkerOrSensorShapeType, typename T_MarkerOrSensorParams>
     static auto
     Add_MarkerOrSensor_ActorComponent(
         FCk_Handle& InMarkerOrSensorEntity,
-        const FCk_EntityOwningActor_BasicDetails& InMarkerOrSensorAttachedEntityAndActor,
+        const FCk_EntityBridge_BasicDetails& InMarkerOrSensorAttachedEntityAndActor,
         const T_MarkerOrSensorParams& InMarkerOrSensorParams) -> void;
 
     template <typename T_MarkerOrSensorCompType, typename T_MarkerOrSensorParams, ECk_ShapeType T_MarkerOrSensorShapeType>
@@ -85,7 +85,7 @@ public:
     static auto
     Get_MarkerOrSensor_BoneFollowTransform(
         const T_HandleType& InMarkerOrSensorEntity,
-        const FCk_EntityOwningActor_BasicDetails& InAttachedEntityAndActor,
+        const FCk_EntityBridge_BasicDetails& InAttachedEntityAndActor,
         const T_AttachmentParams& InAttachmentParams) -> TOptional<FTransform>;
 
 private:
@@ -100,7 +100,7 @@ private:
     static auto
     DoAdd_MarkerOrSensor_ActorComponent(
         FCk_Handle& InMarkerOrSensorEntity,
-        const FCk_EntityOwningActor_BasicDetails& InMarkerOrSensorAttachedEntityAndActor,
+        const FCk_EntityBridge_BasicDetails& InMarkerOrSensorAttachedEntityAndActor,
         const T_MarkerOrSensorParams& InMarkerOrSensorParams) -> void;
 
     template <typename T_MarkerOrSensorCompType, typename T_MarkerOrSensorParams, ECk_ShapeType T_MarkerOrSensorShapeType, std::enable_if_t<ECk_ShapeType::Box == T_MarkerOrSensorShapeType, uint8> = 0>
@@ -258,7 +258,7 @@ auto
     UCk_Utils_MarkerAndSensor_UE::
     Add_MarkerOrSensor_ActorComponent(
         FCk_Handle& InMarkerOrSensorEntity,
-        const FCk_EntityOwningActor_BasicDetails& InMarkerOrSensorAttachedEntityAndActor,
+        const FCk_EntityBridge_BasicDetails& InMarkerOrSensorAttachedEntityAndActor,
         const T_MarkerOrSensorParams& InMarkerOrSensorParams)
     -> void
 {
@@ -285,7 +285,7 @@ auto
     UCk_Utils_MarkerAndSensor_UE::
     Add_MarkerOrSensor_ActorComponent(
         FCk_Handle& InMarkerOrSensorEntity,
-        const FCk_EntityOwningActor_BasicDetails& InMarkerOrSensorAttachedEntityAndActor,
+        const FCk_EntityBridge_BasicDetails& InMarkerOrSensorAttachedEntityAndActor,
         const T_MarkerOrSensorParams& InMarkerOrSensorParams)
     -> void
 {
@@ -297,7 +297,7 @@ auto
     UCk_Utils_MarkerAndSensor_UE::
     DoAdd_MarkerOrSensor_ActorComponent(
         FCk_Handle& InMarkerOrSensorEntity,
-        const FCk_EntityOwningActor_BasicDetails& InMarkerOrSensorAttachedEntityAndActor,
+        const FCk_EntityBridge_BasicDetails& InMarkerOrSensorAttachedEntityAndActor,
         const T_MarkerOrSensorParams& InMarkerOrSensorParams)
     -> void
 {
@@ -639,7 +639,7 @@ auto
     UCk_Utils_MarkerAndSensor_UE::
     Get_MarkerOrSensor_BoneFollowTransform(
         const T_HandleType& InMarkerOrSensorEntity,
-        const FCk_EntityOwningActor_BasicDetails& InAttachedEntityAndActor,
+        const FCk_EntityBridge_BasicDetails& InAttachedEntityAndActor,
         const T_AttachmentParams& InAttachmentParams)
     -> TOptional<FTransform>
 {

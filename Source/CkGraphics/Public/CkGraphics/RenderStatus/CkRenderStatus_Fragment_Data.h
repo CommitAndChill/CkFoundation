@@ -5,7 +5,7 @@
 
 #include "CkEcs/Handle/CkHandle.h"
 #include "CkEcs/Handle/CkHandle_TypeSafe.h"
-#include "CkEcs/OwningActor/CkOwningActor_Fragment_Data.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment_Data.h"
 #include "CkEcs/Request/CkRequest_Data.h"
 
 #include <StructUtils/InstancedStruct.h>
@@ -48,7 +48,7 @@ private:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite,
               meta = (AllowPrivateAccess = true))
-    TArray<FCk_EntityOwningActor_BasicDetails> _RenderedEntityWithActors;
+    TArray<FCk_EntityBridge_BasicDetails> _RenderedEntityWithActors;
 
 public:
     CK_PROPERTY(_RenderGroup);

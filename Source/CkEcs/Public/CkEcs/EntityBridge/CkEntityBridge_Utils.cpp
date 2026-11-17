@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CkOwningActor_Utils.h"
+#include "CkEntityBridge_Utils.h"
 
 #include "CkCore/Actor/CkActor_Utils.h"
 #include "CkCore/Algorithms/CkAlgorithms.h"
@@ -11,20 +11,20 @@
 #include "CkEcs/Net/CkNet_Utils.h"
 #include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_Fragment.h"
 #include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_Utils.h"
-#include "CkEcs/OwningActor/CkOwningActor_Fragment.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment.h"
 
 #include "CkEcs/Handle/CkHandle.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
 auto
-    UCk_Utils_OwningActor_UE::
+    UCk_Utils_EntityBridge_UE::
     Add(
         FCk_Handle& InHandle,
         AActor* InOwningActor)
     -> void
 {
-    InHandle.Add<ck::FFragment_OwningActor>(InOwningActor);
+    InHandle.Add<ck::FFragment_EntityBridge>(InOwningActor);
 
     if (NOT UCk_Utils_Net_UE::Has(InHandle))
     { return; }
@@ -45,7 +45,7 @@ auto
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
+    UCk_Utils_EntityBridge_UE::
     SetupActorEntityLink(
         FCk_Handle& InHandle,
         AActor* InActor)
@@ -62,16 +62,16 @@ auto
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
+    UCk_Utils_EntityBridge_UE::
     Has(
         const FCk_Handle& InHandle)
     -> bool
 {
-    return InHandle.Has<ck::FFragment_OwningActor>();
+    return InHandle.Has<ck::FFragment_EntityBridge>();
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
+    UCk_Utils_EntityBridge_UE::
     Ensure(
         const FCk_Handle& InHandle)
     -> bool
@@ -83,8 +83,8 @@ auto
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
-    TryGet_Entity_OwningActor_InOwnershipChain(
+    UCk_Utils_EntityBridge_UE::
+    TryGet_BridgedEntity_InOwnershipChain(
         const FCk_Handle& InHandle)
     -> FCk_Handle
 {
@@ -101,76 +101,76 @@ auto
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
-    Get_EntityOwningActor(
+    UCk_Utils_EntityBridge_UE::
+    Get_Actor(
         const FCk_Handle& InHandle)
     -> AActor*
 {
     if (NOT Ensure(InHandle))
     { return {}; }
 
-    return Get_EntityOwningActorBasicDetails(InHandle).Get_Actor().Get();
+    return Get_BasicDetails(InHandle).Get_Actor().Get();
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
-    TryGet_EntityOwningActor(
+    UCk_Utils_EntityBridge_UE::
+    TryGet_Actor(
         const FCk_Handle& InHandle)
     -> AActor*
 {
     if (NOT Has(InHandle))
     { return {}; }
 
-    return Get_EntityOwningActorBasicDetails(InHandle).Get_Actor().Get();
+    return Get_BasicDetails(InHandle).Get_Actor().Get();
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
-    TryGet_EntityOwningActor_Recursive(
+    UCk_Utils_EntityBridge_UE::
+    TryGet_Actor_Recursive(
         const FCk_Handle& InHandle)
         -> AActor*
 {
-    auto MaybeActorEntity = TryGet_Entity_OwningActor_InOwnershipChain(InHandle);
+    auto MaybeActorEntity = TryGet_BridgedEntity_InOwnershipChain(InHandle);
 
     if (ck::Is_NOT_Valid(MaybeActorEntity))
     { return {}; }
 
-    return Get_EntityOwningActor(MaybeActorEntity);
+    return Get_Actor(MaybeActorEntity);
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
-    Get_EntityOwningActorBasicDetails(
+    UCk_Utils_EntityBridge_UE::
+    Get_BasicDetails(
         const FCk_Handle& InHandle)
-    -> FCk_EntityOwningActor_BasicDetails
+    -> FCk_EntityBridge_BasicDetails
 {
     if (NOT Ensure(InHandle))
     { return {}; }
 
     constexpr auto EvenIfPendingKill = true;
-    return FCk_EntityOwningActor_BasicDetails
+    return FCk_EntityBridge_BasicDetails
     {
-        InHandle.Get<ck::FFragment_OwningActor, ck::IsValid_Policy_IncludePendingKill>().Get_EntityOwningActor().Get(EvenIfPendingKill), InHandle
+        InHandle.Get<ck::FFragment_EntityBridge, ck::IsValid_Policy_IncludePendingKill>().Get_Actor().Get(EvenIfPendingKill), InHandle
     };
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
-    Get_EntityOwningActorBasicDetails_FromActor(
+    UCk_Utils_EntityBridge_UE::
+    Get_BasicDetails_FromActor(
         const AActor* InActor)
-    -> FCk_EntityOwningActor_BasicDetails
+    -> FCk_EntityBridge_BasicDetails
 {
-    const auto& ActorEcsHandle = Get_ActorEntityHandle(InActor);
+    const auto& ActorEcsHandle = Get_Entity(InActor);
 
     if (ck::Is_NOT_Valid(ActorEcsHandle))
     { return {}; }
 
-    return Get_EntityOwningActorBasicDetails(ActorEcsHandle);
+    return Get_BasicDetails(ActorEcsHandle);
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
-    Get_ActorEntityHandle(
+    UCk_Utils_EntityBridge_UE::
+    Get_Entity(
         const AActor* InActor)
     -> FCk_Handle
 {
@@ -178,7 +178,7 @@ auto
         TEXT("Cannot get the ECS Handle of Actor because the Actor is invalid!"))
     { return {}; }
 
-    const auto& EntityOwningActorComp = InActor->FindComponentByClass<UCk_EntityOwningActor_ActorComponent_UE>();
+    const auto& EntityOwningActorComp = InActor->FindComponentByClass<UCk_EntityBridge_ActorComponent_UE>();
 
     CK_ENSURE_IF_NOT(ck::IsValid(EntityOwningActorComp),
         TEXT("Actor [{}] does NOT have an Entity Owning Actor Unreal Actor Component! This means it is not ECS ready."),
@@ -189,15 +189,15 @@ auto
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
-    TryGet_ActorEntityHandle(
+    UCk_Utils_EntityBridge_UE::
+    TryGet_Entity(
         const AActor* InActor)
     -> FCk_Handle
 {
     if (ck::Is_NOT_Valid(InActor, ck::IsValid_Policy_IncludePendingKill{}))
     { return {}; }
 
-    const auto& EntityOwningActorComp = InActor->FindComponentByClass<UCk_EntityOwningActor_ActorComponent_UE>();
+    const auto& EntityOwningActorComp = InActor->FindComponentByClass<UCk_EntityBridge_ActorComponent_UE>();
 
     if (ck::Is_NOT_Valid(EntityOwningActorComp))
     { return {}; }
@@ -206,15 +206,15 @@ auto
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
-    Get_IsActorEcsReady(
+    UCk_Utils_EntityBridge_UE::
+    Get_HasEntity(
         const AActor* InActor)
     -> bool
 {
     CK_ENSURE_IF_NOT(ck::IsValid(InActor), TEXT("Cannot check if Actor is ECS ready because it is invalid!"))
     { return {}; }
 
-    const auto EntityOwningActorComp = InActor->GetComponentByClass<UCk_EntityOwningActor_ActorComponent_UE>();
+    const auto EntityOwningActorComp = InActor->GetComponentByClass<UCk_EntityBridge_ActorComponent_UE>();
 
     if (ck::Is_NOT_Valid(EntityOwningActorComp))
     { return false; }
@@ -225,10 +225,10 @@ auto
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
+    UCk_Utils_EntityBridge_UE::
     Promise_OnActorEcsReady(
         AActor* InActor,
-        const FCk_Delegate_OwningActor_OnEcsReady& InDelegate,
+        const FCk_Delegate_EntityBridge_OnEntityReady& InDelegate,
         ECk_ActorEcsReady_Policy InPolicy)
     -> void
 {
@@ -245,9 +245,9 @@ auto
     if (ck::Is_NOT_Valid(EntityOwningActorComp))
     { return; }
 
-    if (Get_IsActorEcsReady(InActor))
+    if (Get_HasEntity(InActor))
     {
-        const auto Entity = Get_ActorEntityHandle(InActor);
+        const auto Entity = Get_Entity(InActor);
 
         if (InPolicy == ECk_ActorEcsReady_Policy::LinkEstablished ||
             NOT DoGet_ShouldDeferUntilReplicationComplete(Entity))
@@ -280,7 +280,7 @@ auto
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
+    UCk_Utils_EntityBridge_UE::
     Promise_OnActorEcsReady(
         AActor* InActor,
         TFunction<void(AActor*, FCk_Handle)> InCallback,
@@ -300,9 +300,9 @@ auto
     if (ck::Is_NOT_Valid(EntityOwningActorComp))
     { return; }
 
-    if (Get_IsActorEcsReady(InActor))
+    if (Get_HasEntity(InActor))
     {
-        const auto Entity = Get_ActorEntityHandle(InActor);
+        const auto Entity = Get_Entity(InActor);
 
         if (InPolicy == ECk_ActorEcsReady_Policy::LinkEstablished ||
             NOT DoGet_ShouldDeferUntilReplicationComplete(Entity))
@@ -328,47 +328,47 @@ auto
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
+    UCk_Utils_EntityBridge_UE::
     IsEqual(
-        const FCk_EntityOwningActor_BasicDetails& InBasicDetailsA,
-        const FCk_EntityOwningActor_BasicDetails& InBasicDetailsB)
+        const FCk_EntityBridge_BasicDetails& InBasicDetailsA,
+        const FCk_EntityBridge_BasicDetails& InBasicDetailsB)
     -> bool
 {
     return InBasicDetailsA == InBasicDetailsB;
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
+    UCk_Utils_EntityBridge_UE::
     IsNotEqual(
-        const FCk_EntityOwningActor_BasicDetails& InBasicDetailsA,
-        const FCk_EntityOwningActor_BasicDetails& InBasicDetailsB)
+        const FCk_EntityBridge_BasicDetails& InBasicDetailsA,
+        const FCk_EntityBridge_BasicDetails& InBasicDetailsB)
     -> bool
 {
     return InBasicDetailsA != InBasicDetailsB;
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
-    Get_ActorEntityHandleFromSelf(
+    UCk_Utils_EntityBridge_UE::
+    Get_Entity_FromSelf(
         const AActor* InActor)
     -> FCk_Handle
 {
-    return Get_ActorEntityHandle(InActor);
+    return Get_Entity(InActor);
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
+    UCk_Utils_EntityBridge_UE::
     DoGetOrAdd_EntityOwningActorComponent(
         AActor* InActor)
-    -> UCk_EntityOwningActor_ActorComponent_UE*
+    -> UCk_EntityBridge_ActorComponent_UE*
 {
-    if (auto ExistingComp = InActor->GetComponentByClass<UCk_EntityOwningActor_ActorComponent_UE>();
+    if (auto ExistingComp = InActor->GetComponentByClass<UCk_EntityBridge_ActorComponent_UE>();
         ck::IsValid(ExistingComp))
     { return ExistingComp; }
 
-    return UCk_Utils_Actor_UE::Request_AddNewActorComponent<UCk_EntityOwningActor_ActorComponent_UE>
+    return UCk_Utils_Actor_UE::Request_AddNewActorComponent<UCk_EntityBridge_ActorComponent_UE>
     (
-        UCk_Utils_Actor_UE::AddNewActorComponent_Params<UCk_EntityOwningActor_ActorComponent_UE>
+        UCk_Utils_Actor_UE::AddNewActorComponent_Params<UCk_EntityBridge_ActorComponent_UE>
         {
             InActor,
         }
@@ -376,9 +376,9 @@ auto
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
+    UCk_Utils_EntityBridge_UE::
     DoFlush_PendingEcsReady(
-        UCk_EntityOwningActor_ActorComponent_UE* InComp,
+        UCk_EntityBridge_ActorComponent_UE* InComp,
         AActor* InActor,
         const FCk_Handle& InEntity)
     -> void
@@ -408,9 +408,9 @@ auto
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
+    UCk_Utils_EntityBridge_UE::
     DoFlush_PendingEcsReady_LinkEstablished(
-        UCk_EntityOwningActor_ActorComponent_UE* InComp,
+        UCk_EntityBridge_ActorComponent_UE* InComp,
         AActor* InActor,
         const FCk_Handle& InEntity)
     -> void
@@ -438,9 +438,9 @@ auto
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
+    UCk_Utils_EntityBridge_UE::
     DoFlush_PendingEcsReady_ValuesReplicated(
-        UCk_EntityOwningActor_ActorComponent_UE* InComp,
+        UCk_EntityBridge_ActorComponent_UE* InComp,
         AActor* InActor,
         const FCk_Handle& InEntity)
     -> void
@@ -466,7 +466,7 @@ auto
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
+    UCk_Utils_EntityBridge_UE::
     DoGet_ShouldDeferUntilReplicationComplete(
         const FCk_Handle& InEntity)
     -> bool
@@ -486,9 +486,9 @@ auto
 }
 
 auto
-    UCk_Utils_OwningActor_UE::
+    UCk_Utils_EntityBridge_UE::
     DoBind_ReplicationCompleteTrampoline(
-        UCk_EntityOwningActor_ActorComponent_UE* InComp,
+        UCk_EntityBridge_ActorComponent_UE* InComp,
         const FCk_Handle& InEntity)
     -> void
 {
@@ -496,7 +496,7 @@ auto
     { return; }
 
     auto Delegate = FCk_Delegate_EntityReplicationDriver_OnReplicationComplete{};
-    Delegate.BindDynamic(InComp, &UCk_EntityOwningActor_ActorComponent_UE::DoHandle_LinkedEntityReplicationComplete);
+    Delegate.BindDynamic(InComp, &UCk_EntityBridge_ActorComponent_UE::DoHandle_LinkedEntityReplicationComplete);
 
     auto Entity = InEntity;
     UCk_Utils_EntityReplicationDriver_UE::Promise_OnReplicationComplete(Entity, Delegate);

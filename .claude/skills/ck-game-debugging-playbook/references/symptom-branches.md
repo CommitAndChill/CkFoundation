@@ -84,7 +84,7 @@ invalid" (3-step ladder, incl. the pending-kill window where a handle is default
   handle with `ck::IsValid`, and reset the member after you destroy what it points to.
 - **`ck::ToActor` on an actorless entity**: `ck::ToActor` is the *checked* conversion — it ensures
   when the entity has no OwningActor. Most gameplay entities on this framework are pawn-less pure
-  entities; use `UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor` (AS: the `TryGet_` form) and
+  entities; use `UCk_Utils_EntityBridge_UE::TryGet_Actor` (AS: the `TryGet_` form) and
   handle absence. Bridge forms table: `ckecs-domain-reference` §3.3.
 - **Read-after-destroy in the same frame**: see §2 point 4.
 

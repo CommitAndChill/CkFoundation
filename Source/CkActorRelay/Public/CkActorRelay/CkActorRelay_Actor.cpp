@@ -7,7 +7,7 @@
 #include "CkCore/Ensure/CkEnsure.h"
 
 #include "CkEcs/Handle/CkHandle.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcs/Snapshot/CkSaveKey_Fragment.h"
 #include "CkEcsExt/EntityScript/CkEntityScript_WithActor.h"
 #include "CkEcsExt/EntityScript/CkEntityScript_WithActor_Utils.h"
@@ -179,7 +179,7 @@ auto
     // channel-owned subtree with an owner the loader cannot resolve.
     const auto SaveKeyIdentity = GroupSubsystem->Get_GroupTag().GetTagName().ToString();
 
-    UCk_Utils_OwningActor_UE::Promise_OnActorEcsReady(this,
+    UCk_Utils_EntityBridge_UE::Promise_OnActorEcsReady(this,
         [SaveKeyIdentity](AActor*, FCk_Handle InChannelEntity) -> void
         {
             ck::save_key::AssignSharedRendezvousGroup(InChannelEntity, SaveKeyIdentity);
@@ -202,7 +202,7 @@ auto
         if (ck::Is_NOT_Valid(Subsystem))
         { return false; }
 
-        if (NOT UCk_Utils_OwningActor_UE::Get_IsActorEcsReady(WeakThis.Get()))
+        if (NOT UCk_Utils_EntityBridge_UE::Get_HasEntity(WeakThis.Get()))
         { return false; }
 
         Subsystem->DoBroadcastChannelReadyChanged();

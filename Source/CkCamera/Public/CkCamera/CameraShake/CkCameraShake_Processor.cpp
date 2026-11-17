@@ -59,10 +59,10 @@ namespace ck
         CK_ENSURE_IF_NOT(ck::IsValid(TargetEntity), TEXT("Invalid Camera Shake Target Entity!"))
         { return false; }
 
-        CK_ENSURE_IF_NOT(UCk_Utils_OwningActor_UE::Has(TargetEntity), TEXT("Camera Shake Targets Entity [{}] that does NOT have an Actor Feature!"), TargetEntity)
+        CK_ENSURE_IF_NOT(UCk_Utils_EntityBridge_UE::Has(TargetEntity), TEXT("Camera Shake Targets Entity [{}] that does NOT have an Actor Feature!"), TargetEntity)
         { return false; }
 
-        auto* TargetOwningActor = UCk_Utils_OwningActor_UE::Get_EntityOwningActor(TargetEntity);
+        auto* TargetOwningActor = UCk_Utils_EntityBridge_UE::Get_Actor(TargetEntity);
 
         if (ck::Is_NOT_Valid(TargetOwningActor))
         {

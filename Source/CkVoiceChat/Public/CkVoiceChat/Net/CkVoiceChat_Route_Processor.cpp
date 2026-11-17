@@ -2,7 +2,7 @@
 
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
 #include "CkEcs/Net/CkNet_Utils.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcs/Scheduler/CkProcessorRegistration.h"
 
 #include "CkEcsExt/SceneNode/CkSceneNode_Utils.h"
@@ -63,7 +63,7 @@ namespace ck_voice_chat_route_processor
     ResolveOwningPlayer(
         const FCk_Handle& InEntity) -> APlayerState*
     {
-        auto* OwningActor = UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor_Recursive(InEntity);
+        auto* OwningActor = UCk_Utils_EntityBridge_UE::TryGet_Actor_Recursive(InEntity);
 
         if (ck::Is_NOT_Valid(OwningActor))
         { return nullptr; }

@@ -2,7 +2,7 @@
 
 #include "CkCore/Algorithms/CkAlgorithms.h"
 
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcsExt/EntityHolder/CkEntityHolder_Utils.h"
 
 #include "CkOverlapBody/CkOverlapBody_Log.h"
@@ -49,7 +49,7 @@ namespace ck
         -> void
     {
         const auto& MarkerLifetimeOwner = UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InMarkerEntity);
-        const auto& MarkerAttachedEntityAndActor = UCk_Utils_OwningActor_UE::Get_EntityOwningActorBasicDetails(MarkerLifetimeOwner);
+        const auto& MarkerAttachedEntityAndActor = UCk_Utils_EntityBridge_UE::Get_BasicDetails(MarkerLifetimeOwner);
         const auto& MarkerAttachedEntity = MarkerAttachedEntityAndActor.Get_Handle();
 
         constexpr auto IncludePendingKill = true;

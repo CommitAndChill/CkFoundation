@@ -30,7 +30,7 @@ namespace ck
         const auto PreviousDeltaTime = InPredictedVelocity._PreviousDeltaTime;
         const auto PreviousLocation = InPredictedVelocity._PreviousLocation;
 
-        const auto& OwnerActor = UCk_Utils_OwningActor_UE::Get_EntityOwningActor(InHandle);
+        const auto& OwnerActor = UCk_Utils_EntityBridge_UE::Get_Actor(InHandle);
         CK_ENSURE_IF_NOT(ck::IsValid(OwnerActor),
             TEXT("Entity [{}] does NOT have a valid actor owner!"), InHandle)
         { return; }

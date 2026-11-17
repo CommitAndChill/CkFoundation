@@ -139,7 +139,7 @@ private:
     // Represents the Entity/Actor that the Sensor ActorComp is attached to. Different from the Sensor Entity itself
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
               meta = (AllowPrivateAccess = true))
-    FCk_EntityOwningActor_BasicDetails _SensorAttachedEntityAndActor;
+    FCk_EntityBridge_BasicDetails _SensorAttachedEntityAndActor;
 
 public:
     CK_PROPERTY_GET(_SensorName);

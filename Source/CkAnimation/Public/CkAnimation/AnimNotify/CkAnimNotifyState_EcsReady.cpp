@@ -1,7 +1,7 @@
 ﻿#include "CkAnimNotifyState_EcsReady.h"
 #include "CkCore/Time/CkTime_Utils.h"
 #include "CkEcs/Net/CkNet_Utils.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimSequenceBase.h"
 #include "Animation/AnimNotifies/AnimNotify.h"
@@ -174,11 +174,11 @@ auto
         TEXT("Notify State [{}] of Animation [{}] has NO valid owning actor!"), this, InAnimation)
     { return {}; }
 
-    CK_ENSURE_IF_NOT(UCk_Utils_OwningActor_UE::Get_IsActorEcsReady(OwningActor),
+    CK_ENSURE_IF_NOT(UCk_Utils_EntityBridge_UE::Get_HasEntity(OwningActor),
         TEXT("Notify State [{}] of Animation [{}] has an owner [{}] that is NOT Ecs Ready!"), this, InAnimation, OwningActor)
     { return {}; }
 
-    auto OwningHandle = UCk_Utils_OwningActor_UE::Get_ActorEntityHandle(OwningActor);
+    auto OwningHandle = UCk_Utils_EntityBridge_UE::Get_Entity(OwningActor);
 
     return {OwningActor, OwningHandle};
 }

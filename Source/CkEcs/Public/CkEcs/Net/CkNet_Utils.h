@@ -13,7 +13,7 @@
 #include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_Fragment.h"
 #include "CkEcs/Net/ReplicatedFragmentContainer/CkReplicatedFragmentContainer.h"
 #include "CkEcs/Persistence/CkPersistenceHandlerRegistry.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 
 #include "CkNet_Utils.generated.h"
 
@@ -406,12 +406,12 @@ auto
     if (InHandle.Has<TObjectPtr<T_ReplicatedFragment>>())
     { return ECk_AddedOrNot::AlreadyExists; }
 
-    const auto EntityWithActor = UCk_Utils_OwningActor_UE::TryGet_Entity_OwningActor_InOwnershipChain(InHandle);
+    const auto EntityWithActor = UCk_Utils_EntityBridge_UE::TryGet_BridgedEntity_InOwnershipChain(InHandle);
 
     if (ck::Is_NOT_Valid(EntityWithActor))
     { return ECk_AddedOrNot::NotAdded; }
 
-    const auto& BasicDetails   = UCk_Utils_OwningActor_UE::Get_EntityOwningActorBasicDetails(EntityWithActor);
+    const auto& BasicDetails   = UCk_Utils_EntityBridge_UE::Get_BasicDetails(EntityWithActor);
     const auto& OwningActor    = BasicDetails.Get_Actor().Get();
     const auto& OutermostActor = UCk_Utils_Actor_UE::Get_OutermostActor_RemoteAuthority(OwningActor);
 

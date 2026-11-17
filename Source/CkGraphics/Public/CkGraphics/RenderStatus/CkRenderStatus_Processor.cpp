@@ -3,7 +3,7 @@
 #include "CkCore/Algorithms/CkAlgorithms.h"
 
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
-#include "CkEcs/OwningActor/CkOwningActor_Fragment.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment.h"
 
 #include "CkGraphics/CkGraphics_Utils.h"
 #include "CkGraphics/CkGraphics_Stats.h"
@@ -77,7 +77,7 @@ namespace ck
         const auto& TimeTolerance = InRequest.Get_TimeTolerance();
         const auto& RenderGroup = InRequest.Get_RenderGroup();
 
-        auto RenderedEntityWithActors = TArray<FCk_EntityOwningActor_BasicDetails>{};
+        auto RenderedEntityWithActors = TArray<FCk_EntityBridge_BasicDetails>{};
 
         // Instrumentation-only: counts every actor probed by the view loop below, fed to the DWORD stat at the end.
         auto NumActorsTested = int32{0};
@@ -92,51 +92,51 @@ namespace ck
             if (NOT UCk_Utils_Graphics_UE::Get_WasActorRecentlyRendered(InActor, TimeTolerance))
             { return; }
 
-            RenderedEntityWithActors.Add(FCk_EntityOwningActor_BasicDetails{InActor, InActorEntity});
+            RenderedEntityWithActors.Add(FCk_EntityBridge_BasicDetails{InActor, InActorEntity});
         };
 
         switch (RenderGroup)
         {
             case ECk_RenderStatus_Group::Unspecified:
             {
-                InHandle.View<FFragment_OwningActor, CK_IGNORE_PENDING_KILL>().ForEach(
-                [&](EntityType InEntity, const FFragment_OwningActor& InOwningActorComp)
+                InHandle.View<FFragment_EntityBridge, CK_IGNORE_PENDING_KILL>().ForEach(
+                [&](EntityType InEntity, const FFragment_EntityBridge& InOwningActorComp)
                 {
                     const auto Handle = MakeHandle(InEntity, InHandle);
-                    TryAddToRenderedActorsList(InOwningActorComp.Get_EntityOwningActor().Get(), Handle);
+                    TryAddToRenderedActorsList(InOwningActorComp.Get_Actor().Get(), Handle);
                 });
 
                 break;
             }
             case ECk_RenderStatus_Group::WorldStatic:
             {
-                InHandle.View<FFragment_OwningActor, FTag_RenderStatus_Group_WorldStatic, CK_IGNORE_PENDING_KILL>().ForEach(
-                [&](EntityType InEntity, const FFragment_OwningActor& InOwningActorComp)
+                InHandle.View<FFragment_EntityBridge, FTag_RenderStatus_Group_WorldStatic, CK_IGNORE_PENDING_KILL>().ForEach(
+                [&](EntityType InEntity, const FFragment_EntityBridge& InOwningActorComp)
                 {
                     const auto Handle = MakeHandle(InEntity, InHandle);
-                    TryAddToRenderedActorsList(InOwningActorComp.Get_EntityOwningActor().Get(), Handle);
+                    TryAddToRenderedActorsList(InOwningActorComp.Get_Actor().Get(), Handle);
                 });
 
                 break;
             }
             case ECk_RenderStatus_Group::WorldDynamic:
             {
-                InHandle.View<FFragment_OwningActor, FTag_RenderStatus_Group_WorldDynamic, CK_IGNORE_PENDING_KILL>().ForEach(
-                [&](EntityType InEntity, const FFragment_OwningActor& InOwningActorComp)
+                InHandle.View<FFragment_EntityBridge, FTag_RenderStatus_Group_WorldDynamic, CK_IGNORE_PENDING_KILL>().ForEach(
+                [&](EntityType InEntity, const FFragment_EntityBridge& InOwningActorComp)
                 {
                     const auto Handle = MakeHandle(InEntity, InHandle);
-                    TryAddToRenderedActorsList(InOwningActorComp.Get_EntityOwningActor().Get(), Handle);
+                    TryAddToRenderedActorsList(InOwningActorComp.Get_Actor().Get(), Handle);
                 });
 
                 break;
             }
             case ECk_RenderStatus_Group::Pawn:
             {
-                InHandle.View<FFragment_OwningActor, FTag_RenderStatus_Group_Pawn, CK_IGNORE_PENDING_KILL>().ForEach(
-                [&](EntityType InEntity, const FFragment_OwningActor& InOwningActorComp)
+                InHandle.View<FFragment_EntityBridge, FTag_RenderStatus_Group_Pawn, CK_IGNORE_PENDING_KILL>().ForEach(
+                [&](EntityType InEntity, const FFragment_EntityBridge& InOwningActorComp)
                 {
                     const auto Handle = MakeHandle(InEntity, InHandle);
-                    TryAddToRenderedActorsList(InOwningActorComp.Get_EntityOwningActor().Get(), Handle);
+                    TryAddToRenderedActorsList(InOwningActorComp.Get_Actor().Get(), Handle);
                 });
 
                 break;

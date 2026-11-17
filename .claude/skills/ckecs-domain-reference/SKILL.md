@@ -59,7 +59,7 @@ restricted grammar. Each restriction below produced a house pattern (style itsel
 
 | UHT limitation | Ck pattern it produced | Evidence |
 |---|---|---|
-| No UFUNCTION overloads (one reflected name each) | suffix vocabulary: `_ByName`, `_ByTag`, `_Simple`, `AddOrReplace`, `TryGet_*`; a plain C++ overload MAY shadow a UFUNCTION name | root DEVELOPMENT.md Naming; e.g. `Get_EntityOwningActor` vs `TryGet_EntityOwningActor` (`CkOwningActor_Utils.h:57-71`) |
+| No UFUNCTION overloads (one reflected name each) | suffix vocabulary: `_ByName`, `_ByTag`, `_Simple`, `AddOrReplace`, `TryGet_*`; a plain C++ overload MAY shadow a UFUNCTION name | root DEVELOPMENT.md Naming; e.g. `Get_Actor` vs `TryGet_Actor` (`CkEntityBridge_Utils.h:57-71`) |
 | No trailing return types on UFUNCTION declarations | split declaration: concrete return type on its own line, `static FCk_Handle\nRequest_CreateEntity(...)`; trailing returns everywhere else | `CkEntityLifetime_Utils.h:67-69`; root DEVELOPMENT.md function shapes |
 | Historically no `TOptional` in reflected surfaces | enum-mode + value pair (`ECk_...` + payload). UE 5.5+ UHT now accepts TOptional UPROPERTYs and the 3 newest files use it — open fork, see ADJUDICATIONS **A1** before copying either way | `.claude/reports/ADJUDICATIONS.md` A1 |
 | UFUNCTION parameter defaults must be `()`-constructible expressions, not `{}` | `{}` construction everywhere EXCEPT UFUNCTION param defaults, which use `()`; no `= {}` in UFUNCTION signatures | root DEVELOPMENT.md; live: `FLinearColor InColor = FLinearColor(1.0f, 1.0f, 1.0f, 0.5f)` (`CkPmg/CkPmg_Utils_SymbolShapes.h:28`) |

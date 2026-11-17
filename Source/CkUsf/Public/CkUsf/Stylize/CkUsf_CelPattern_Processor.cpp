@@ -110,10 +110,10 @@ namespace ck
             TimeType InDeltaT,
             HandleType InHandle,
             const FFragment_Usf_CelPatternTarget& InTarget,
-            const FFragment_OwningActor& InOwningActor)
+            const FFragment_EntityBridge& InOwningActor)
         -> void
     {
-        auto* Actor = InOwningActor.Get_EntityOwningActor().Get();
+        auto* Actor = InOwningActor.Get_Actor().Get();
         if (ck::Is_NOT_Valid(Actor))
         { return; }
 

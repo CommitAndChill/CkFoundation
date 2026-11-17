@@ -1,13 +1,13 @@
-#include "CkOwningActor_Fragment.h"
+#include "CkEntityBridge_Fragment.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
 namespace ck
 {
-    FFragment_OwningActor::
-        FFragment_OwningActor(
-            AActor* InEntityOwningActor)
-        : _EntityOwningActor(InEntityOwningActor)
+    FFragment_EntityBridge::
+        FFragment_EntityBridge(
+            AActor* InActor)
+        : _Actor(InActor)
     {
     }
 }

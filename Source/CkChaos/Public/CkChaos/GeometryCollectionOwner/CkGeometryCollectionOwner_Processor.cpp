@@ -45,7 +45,7 @@ namespace ck
             HandleType InHandle) const
         -> void
     {
-        const auto& Actor = UCk_Utils_OwningActor_UE::Get_EntityOwningActor(InHandle);
+        const auto& Actor = UCk_Utils_EntityBridge_UE::Get_Actor(InHandle);
 
         CK_ENSURE_IF_NOT(ck::IsValid(Actor),
             TEXT("OwningActor [{}] of [{}] is NOT valid"), Actor, InHandle)

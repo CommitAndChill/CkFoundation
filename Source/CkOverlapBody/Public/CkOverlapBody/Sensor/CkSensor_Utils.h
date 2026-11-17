@@ -241,7 +241,7 @@ public:
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|Sensor",
               DisplayName = "[Ck][Sensor] Get Attached Entity And Actor")
-    static FCk_EntityOwningActor_BasicDetails
+    static FCk_EntityBridge_BasicDetails
     Get_AttachedEntityAndActor(
         const FCk_Handle_Sensor& InSensorEntity);
 

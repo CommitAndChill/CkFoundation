@@ -10,7 +10,7 @@
 #include "CkCue/Settings/CkCue_Settings.h"
 
 #include "CkEcs/EntityScript/CkEntityScript_Utils.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 

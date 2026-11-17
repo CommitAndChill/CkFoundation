@@ -47,7 +47,7 @@ auto
         ECk_Replication InReplicates)
     -> FCk_Handle_Transform
 {
-    if (const auto MaybeOwningActor = UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor(InHandle);
+    if (const auto MaybeOwningActor = UCk_Utils_EntityBridge_UE::TryGet_Actor(InHandle);
         ck::IsValid(MaybeOwningActor))
     {
         const auto RootComponent = MaybeOwningActor->GetRootComponent();

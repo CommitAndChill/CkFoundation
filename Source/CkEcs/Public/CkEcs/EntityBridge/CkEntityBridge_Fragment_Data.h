@@ -8,21 +8,21 @@
 
 #include <StructUtils/InstancedStruct.h>
 
-#include "CkOwningActor_Fragment_Data.generated.h"
+#include "CkEntityBridge_Fragment_Data.generated.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
 USTRUCT(BlueprintType)
-struct CKECS_API FCk_EntityOwningActor_BasicDetails
+struct CKECS_API FCk_EntityBridge_BasicDetails
 {
     GENERATED_BODY()
 
 public:
-    CK_GENERATED_BODY(FCk_EntityOwningActor_BasicDetails);
+    CK_GENERATED_BODY(FCk_EntityBridge_BasicDetails);
 
 public:
-    FCk_EntityOwningActor_BasicDetails() = default;
-    FCk_EntityOwningActor_BasicDetails(AActor* InActor, FCk_Handle InHandle);
+    FCk_EntityBridge_BasicDetails() = default;
+    FCk_EntityBridge_BasicDetails(AActor* InActor, FCk_Handle InHandle);
 
 public:
     auto operator==(const ThisType& InOther) const -> bool;
@@ -42,13 +42,13 @@ public:
     CK_PROPERTY_GET(_Handle)
 };
 
-auto CKECS_API GetTypeHash(const FCk_EntityOwningActor_BasicDetails& InBasicDetails) -> uint32;
+auto CKECS_API GetTypeHash(const FCk_EntityBridge_BasicDetails& InBasicDetails) -> uint32;
 
 // --------------------------------------------------------------------------------------------------------------------
 
 // Fired once the Actor becomes ECS ready, i.e. its OwningActor component has been linked to a valid Entity.
 DECLARE_DYNAMIC_DELEGATE_TwoParams(
-    FCk_Delegate_OwningActor_OnEcsReady,
+    FCk_Delegate_EntityBridge_OnEntityReady,
     AActor*, InActor,
     FCk_Handle, InEntity);
 
@@ -70,16 +70,16 @@ enum class ECk_ActorEcsReady_Policy : uint8
 // --------------------------------------------------------------------------------------------------------------------
 
 UCLASS(NotBlueprintType, NotBlueprintable)
-class CKECS_API UCk_EntityOwningActor_ActorComponent_UE
+class CKECS_API UCk_EntityBridge_ActorComponent_UE
     : public UCk_ActorComponent_UE
 {
     GENERATED_BODY()
 
 public:
-    CK_GENERATED_BODY(UCk_EntityOwningActor_ActorComponent_UE);
+    CK_GENERATED_BODY(UCk_EntityBridge_ActorComponent_UE);
 
 public:
-    UCk_EntityOwningActor_ActorComponent_UE();
+    UCk_EntityBridge_ActorComponent_UE();
 
 protected:
     auto
@@ -87,7 +87,7 @@ protected:
         const EEndPlayReason::Type InEndPlayReason) -> void override;
 
 public:
-    friend class UCk_Utils_OwningActor_UE;
+    friend class UCk_Utils_EntityBridge_UE;
     friend class UCk_Fragment_EntityReplicationDriver_Rep;
 
 private:
@@ -101,9 +101,9 @@ private:
 
     // Promises queued by Promise_OnActorEcsReady while the Actor was not yet ECS ready. Living on the
     // component means they are discarded automatically if the Actor dies before ever becoming ready.
-    TArray<FCk_Delegate_OwningActor_OnEcsReady> _PendingEcsReadyDelegates_LinkEstablished;
+    TArray<FCk_Delegate_EntityBridge_OnEntityReady> _PendingEcsReadyDelegates_LinkEstablished;
     TArray<TFunction<void(AActor*, FCk_Handle)>> _PendingEcsReadyCallbacks_LinkEstablished;
-    TArray<FCk_Delegate_OwningActor_OnEcsReady> _PendingEcsReadyDelegates_ValuesReplicated;
+    TArray<FCk_Delegate_EntityBridge_OnEntityReady> _PendingEcsReadyDelegates_ValuesReplicated;
     TArray<TFunction<void(AActor*, FCk_Handle)>> _PendingEcsReadyCallbacks_ValuesReplicated;
     bool _OnReplicationCompleteTrampolineBound = false;
 
@@ -113,13 +113,13 @@ public:
 
 // --------------------------------------------------------------------------------------------------------------------
 
-CK_DEFINE_CUSTOM_IS_VALID_INLINE(FCk_EntityOwningActor_BasicDetails, IsValid_Policy_Default,
-[=](const FCk_EntityOwningActor_BasicDetails& InBasicDetails)
+CK_DEFINE_CUSTOM_IS_VALID_INLINE(FCk_EntityBridge_BasicDetails, IsValid_Policy_Default,
+[=](const FCk_EntityBridge_BasicDetails& InBasicDetails)
 {
     return ck::IsValid(InBasicDetails.Get_Actor()) && ck::IsValid(InBasicDetails.Get_Handle());
 });
 
-CK_DEFINE_CUSTOM_FORMATTER_INLINE(FCk_EntityOwningActor_BasicDetails, [](const FCk_EntityOwningActor_BasicDetails& InObj)
+CK_DEFINE_CUSTOM_FORMATTER_INLINE(FCk_EntityBridge_BasicDetails, [](const FCk_EntityBridge_BasicDetails& InObj)
 {
     return ck::Format
     (

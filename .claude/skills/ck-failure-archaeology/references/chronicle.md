@@ -40,7 +40,7 @@ the vendored C++ ECS library under `Source/CkThirdParty/`. Status vocabulary: **
   trace UPROPERTY refs in ECS fragments**), and the actor's `FSubObjectRegistry` is
   `FWeakObjectPtr`. A live netdriver's UNetConnection/UActorChannel/FObjectReplicator chain had
   been *incidentally* keeping it alive; without one, first GC sweep reclaimed it and
-  `BeginDestroy` cascaded `Request_DestroyEntity` → `FProcessor_OwningActor_Destroy` → dead PC.
+  `BeginDestroy` cascaded `Request_DestroyEntity` → `FProcessor_EntityBridge_Destroy` → dead PC.
 - **EVIDENCE:** `56b344310` (2026-05-28, "fix(CkEcs): root replicated-driver objects via
   TStrongObjectPtr in their fragment") — body quoted above almost verbatim.
 - **STATUS:** fixed — fragment owns via `TArray<TStrongObjectPtr>` (non-UPROPERTY; UHT can't

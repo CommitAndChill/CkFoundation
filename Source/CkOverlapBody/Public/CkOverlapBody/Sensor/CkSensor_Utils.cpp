@@ -24,7 +24,7 @@ auto
         ECk_Net_ReplicationType InReplicationType)
     -> FCk_Handle_Sensor
 {
-    CK_ENSURE_IF_NOT(UCk_Utils_OwningActor_UE::Has(InHandle),
+    CK_ENSURE_IF_NOT(UCk_Utils_EntityBridge_UE::Has(InHandle),
         TEXT("Cannot Add a Sensor to Entity [{}] because it does NOT have an Owning Actor"), InHandle)
     { return {}; }
 
@@ -441,7 +441,7 @@ auto
     UCk_Utils_Sensor_UE::
     Get_AttachedEntityAndActor(
         const FCk_Handle_Sensor& InSensorEntity)
-    -> FCk_EntityOwningActor_BasicDetails
+    -> FCk_EntityBridge_BasicDetails
 {
     return InSensorEntity.Get<ck::FFragment_Sensor>().Get_AttachedEntityAndActor();
 }

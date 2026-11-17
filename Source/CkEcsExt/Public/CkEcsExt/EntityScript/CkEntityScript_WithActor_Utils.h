@@ -26,7 +26,7 @@ public:
     // The one-call replacement for the hand-rolled WithActor spawn boilerplate. Spawns only on
     // authority — on clients the Entity arrives through the EntityScript replication pipeline and
     // links up in Construct, so the returned handle is invalid there. The actor-side hook that
-    // works on every world is UCk_Utils_OwningActor_UE::Promise_OnActorEcsReady.
+    // works on every world is UCk_Utils_EntityBridge_UE::Promise_OnActorEcsReady.
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Utils|EntityScript",
               DisplayName = "[Ck][EntityScript] Request Spawn EntityScript On Actor",

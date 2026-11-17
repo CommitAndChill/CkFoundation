@@ -55,7 +55,7 @@ Numbering note: entries are append-ordered; numbers are stable IDs, not a readin
     classes", but unity builds concatenate TUs and collide file-local symbols; maintainer feedback
     (recorded 2026-06) mandates the named-namespace form → high. [DOCTRINE UPDATED 2026-07-02]
 31. **`ck::SelfEntity` correction detail** → the old doc's C++ handle-pattern line described an
-    AS-side global; corrected split: C++ actor→entity = `UCk_Utils_OwningActor_UE` family; AS =
+    AS-side global; corrected split: C++ actor→entity = `UCk_Utils_EntityBridge_UE` family; AS =
     `ck::ToEntity(AActor)` / `ck::ToEntity(UCk_EntityScript_UE)` (Script/CkUtils_Common.as:5,10) → high.
 32. **Tier-table regeneration (Source/CLAUDE.md)** → all 73 non-editor rows re-derived from Build.cs
     2026-07-02 → beyond the 3 known drifts, 6 more found and fixed (CkTween +Spline; CkRaySense

@@ -13,7 +13,7 @@
 #include "CkEcs/EntityScript/CkEntityScript_Fragment.h"
 #include "CkEcs/EntityScript/CkEntityScript_Utils.h"
 #include "CkEcs/Handle/CkHandle_Utils.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcs/Request/CkRequest_Completion.h"
 #include "CkEcs/Scheduler/CkProcessorRegistration.h"
 
@@ -273,7 +273,7 @@ namespace ck
         Input._World                = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InHandle);
         // An actor-less director is legal (Add requires only a transform); with no owning actor there is
         // simply nothing for the boom trace to ignore.
-        Input._TraceIgnoreActor     = UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor_Recursive(InHandle);
+        Input._TraceIgnoreActor     = UCk_Utils_EntityBridge_UE::TryGet_Actor_Recursive(InHandle);
 
         {
             SCOPE_CYCLE_COUNTER(STAT_Camera_PovRun);
@@ -329,7 +329,7 @@ namespace ck
         // rotation, so this can never feed back into the POV.
         if (InHandle.Get<FFragment_Camera_Params>().Get_DriveControllerControlRotation())
         {
-            if (auto* Pawn = Cast<APawn>(UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor_Recursive(InHandle));
+            if (auto* Pawn = Cast<APawn>(UCk_Utils_EntityBridge_UE::TryGet_Actor_Recursive(InHandle));
                 ck::IsValid(Pawn))
             {
                 if (auto* PC = Cast<APlayerController>(Pawn->GetController());

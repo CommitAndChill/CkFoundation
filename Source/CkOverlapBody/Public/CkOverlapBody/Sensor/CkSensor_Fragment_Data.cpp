@@ -1,6 +1,6 @@
 #include "CkSensor_Fragment_Data.h"
 
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkLabel/CkLabel_Utils.h"
 
 #include "CkOverlapBody/Marker/CkMarker_Utils.h"
@@ -128,12 +128,12 @@ namespace ck_sensor
             { return; }
         }
 
-    	CK_ENSURE_IF_NOT(UCk_Utils_OwningActor_UE::Get_IsActorEcsReady(SensorCompAttachedActor),
+    	CK_ENSURE_IF_NOT(UCk_Utils_EntityBridge_UE::Get_HasEntity(SensorCompAttachedActor),
     		TEXT("Sensor Owner Actor {} is NOT ECS ready! This means the sensor component was not added through this feature (maybe through cloning components)"),
     		SensorCompAttachedActor)
     	{ return; }
 
-        const auto& SensorAttachedEntityAndActor = UCk_Utils_OwningActor_UE::Get_EntityOwningActorBasicDetails_FromActor(SensorCompAttachedActor);
+        const auto& SensorAttachedEntityAndActor = UCk_Utils_EntityBridge_UE::Get_BasicDetails_FromActor(SensorCompAttachedActor);
         auto SensorOwningEntity = UCk_Utils_Sensor_UE::CastChecked(sensorOverlapBody->Get_OwningEntity());
         const auto& SensorName = UCk_Utils_GameplayLabel_UE::Get_Label(SensorOwningEntity);
 
@@ -162,7 +162,7 @@ namespace ck_sensor
             return;
         }
 
-        const auto& MarkerAttachedEntityAndActor = UCk_Utils_OwningActor_UE::Get_EntityOwningActorBasicDetails_FromActor(MarkerCompAttachedActor);
+        const auto& MarkerAttachedEntityAndActor = UCk_Utils_EntityBridge_UE::Get_BasicDetails_FromActor(MarkerCompAttachedActor);
         const auto& MarkerOwningEntity = UCk_Utils_Marker_UE::CastChecked(markerOverlapBody->Get_OwningEntity());
         const auto& MarkerName = UCk_Utils_GameplayLabel_UE::Get_Label(MarkerOwningEntity);
 
@@ -227,7 +227,7 @@ namespace ck_sensor
             { return; }
         }
 
-        const auto& SensorAttachedEntityAndActor = UCk_Utils_OwningActor_UE::Get_EntityOwningActorBasicDetails_FromActor(SensorCompAttachedActor);
+        const auto& SensorAttachedEntityAndActor = UCk_Utils_EntityBridge_UE::Get_BasicDetails_FromActor(SensorCompAttachedActor);
         auto SensorOwningEntity                  = UCk_Utils_Sensor_UE::CastChecked(sensorOverlapBody->Get_OwningEntity());
         const auto& SensorName                   = UCk_Utils_GameplayLabel_UE::Get_Label(SensorOwningEntity);
 
@@ -256,7 +256,7 @@ namespace ck_sensor
             return;
         }
 
-        const auto& MarkerAttachedEntityAndActor = UCk_Utils_OwningActor_UE::Get_EntityOwningActorBasicDetails_FromActor(MarkerCompAttachedActor);
+        const auto& MarkerAttachedEntityAndActor = UCk_Utils_EntityBridge_UE::Get_BasicDetails_FromActor(MarkerCompAttachedActor);
         const auto& MarkerOwningEntity           = markerOverlapBody->Get_OwningEntity();
         const auto& MarkerName                   = UCk_Utils_GameplayLabel_UE::Get_Label(MarkerOwningEntity);
 

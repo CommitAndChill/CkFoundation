@@ -7,7 +7,7 @@
 #include "CkEcs/Handle/CkHandle.h"
 #include "CkEcs/Handle/CkHandle_TypeSafe.h"
 #include "CkEcs/Net/CkNet_Common.h"
-#include "CkEcs/OwningActor/CkOwningActor_Fragment_Data.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment_Data.h"
 
 #include "CkOverlapBody/CkOverlapBody_Common.h"
 
@@ -66,7 +66,7 @@ private:
     // Represents the Entity/Actor that the Marker ActorComp is attached to. Different from the Marker Entity itself
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
               meta = (AllowPrivateAccess = true))
-    FCk_EntityOwningActor_BasicDetails _MarkerAttachedEntityAndActor;
+    FCk_EntityBridge_BasicDetails _MarkerAttachedEntityAndActor;
 
 public:
     CK_PROPERTY_GET(_MarkerName);

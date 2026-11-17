@@ -3,7 +3,7 @@
 #include "CkCore/Actor/CkActor_Utils.h"
 
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Fragment.h"
-#include "CkEcs/OwningActor/CkOwningActor_Fragment.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment.h"
 #include "CkEcs/Processor/CkProcessor.h"
 #include "CkEcs/Scheduler/CkProcessorGroups.h"
 
@@ -24,7 +24,7 @@ namespace ck
         FProcessor_IsmRenderer_Setup,
         FCk_Handle_IsmRenderer,
         TReadOnly<FFragment_IsmRenderer_Params>,
-        TReadOnly<FFragment_OwningActor>,
+        TReadOnly<FFragment_EntityBridge>,
         FTag_IsmRenderer_NeedsSetup,
         CK_IGNORE_PENDING_KILL>
     {
@@ -46,7 +46,7 @@ namespace ck
             TimeType InDeltaT,
             HandleType InHandle,
             const FFragment_IsmRenderer_Params& InParams,
-            const FFragment_OwningActor& InOwningActorCurrent) const -> void;
+            const FFragment_EntityBridge& InOwningActorCurrent) const -> void;
 
     private:
         template<typename T_IsmCompType>

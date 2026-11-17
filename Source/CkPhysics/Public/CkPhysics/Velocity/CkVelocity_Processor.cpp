@@ -58,9 +58,9 @@ namespace ck
             FFragment_Velocity& InVelocity) const
         -> void
     {
-        if (UCk_Utils_OwningActor_UE::Has(InHandle))
+        if (UCk_Utils_EntityBridge_UE::Has(InHandle))
         {
-            if (const auto Actor = UCk_Utils_OwningActor_UE::Get_EntityOwningActor(InHandle);
+            if (const auto Actor = UCk_Utils_EntityBridge_UE::Get_Actor(InHandle);
                 ck::IsValid(Actor))
             {
                 if (const auto MovementComponent = Actor->GetComponentByClass<UMovementComponent>();

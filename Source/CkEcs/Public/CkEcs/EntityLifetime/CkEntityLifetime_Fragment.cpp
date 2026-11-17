@@ -74,7 +74,7 @@ namespace ck::algo
  * ==========================
  *
  * Start of Frame Processors:
- * ├── FProcessor_OwningActor_Destroy
+ * ├── FProcessor_EntityBridge_Destroy
  * ├── FProcessor_EntityLifetime_DestructionPhase_Finalize
  * └── FProcessor_EntityLifetime_DestructionPhase_Await
  *

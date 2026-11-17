@@ -111,8 +111,8 @@ auto
     if (DataToIgnore.Get_ActorsToIgnore().Contains(HitActor))
     { return true; }
 
-    const auto& MaybeHitActorEntity = UCk_Utils_OwningActor_UE::Get_IsActorEcsReady(HitActor) ?
-            UCk_Utils_OwningActor_UE::Get_ActorEntityHandle(HitActor) : FCk_Handle{};
+    const auto& MaybeHitActorEntity = UCk_Utils_EntityBridge_UE::Get_HasEntity(HitActor) ?
+            UCk_Utils_EntityBridge_UE::Get_Entity(HitActor) : FCk_Handle{};
 
     if (ck::IsValid(MaybeHitActorEntity) && DataToIgnore.Get_EntitiesToIgnore().Contains(MaybeHitActorEntity))
     { return true; }

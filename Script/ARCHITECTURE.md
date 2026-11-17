@@ -473,8 +473,8 @@ class AMyActor : AActor
 // join), bind the actor-side promise — works whether or not this world did
 // the spawning:
 //
-//   utils_owning_actor::Promise_OnActorEcsReady(
-//       this, FCk_Delegate_OwningActor_OnEcsReady(this, n"OnEcsReady"));
+//   utils_entity_bridge::Promise_OnActorEcsReady(
+//       this, FCk_Delegate_EntityBridge_OnEntityReady(this, n"OnEcsReady"));
 //
 //   UFUNCTION()
 //   private void OnEcsReady(AActor InActor, FCk_Handle InEntity)

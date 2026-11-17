@@ -145,9 +145,9 @@ namespace ck
 
     auto FProcessor_Usf_OutlineActor_Sync::ForEachEntity(
         TimeType InDeltaT, HandleType InHandle, const FFragment_Usf_OutlineResolved& InResolved,
-        const FFragment_OwningActor& InOwningActor) -> void
+        const FFragment_EntityBridge& InOwningActor) -> void
     {
-        auto* Actor = InOwningActor.Get_EntityOwningActor().Get();
+        auto* Actor = InOwningActor.Get_Actor().Get();
         auto* Preset = InResolved.Get_Preset().Get();
         if (ck::Is_NOT_Valid(Actor) || ck::Is_NOT_Valid(Preset)) { return; }
 

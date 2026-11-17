@@ -213,7 +213,7 @@ auto
 {
     return ck::algo::Filter(InActors, [&](AActor* InActor)
     {
-        return ck::IsValid(InActor) && UCk_Utils_OwningActor_UE::Get_IsActorEcsReady(InActor);
+        return ck::IsValid(InActor) && UCk_Utils_EntityBridge_UE::Get_HasEntity(InActor);
     });
 }
 
@@ -404,10 +404,10 @@ auto
 auto
     UCk_Utils_CompositeAlgos_UE::
     TransformBasicDetails_ToActors(
-        const TArray<FCk_EntityOwningActor_BasicDetails>& InEntitiesWithActor)
+        const TArray<FCk_EntityBridge_BasicDetails>& InEntitiesWithActor)
     -> TArray<AActor*>
 {
-    return ck::algo::Transform<TArray<AActor*>>(InEntitiesWithActor, [](const FCk_EntityOwningActor_BasicDetails& InBasicDetails)
+    return ck::algo::Transform<TArray<AActor*>>(InEntitiesWithActor, [](const FCk_EntityBridge_BasicDetails& InBasicDetails)
     {
         return InBasicDetails.Get_Actor().Get();
     });
@@ -416,10 +416,10 @@ auto
 auto
     UCk_Utils_CompositeAlgos_UE::
     TransformBasicDetails_ToEntities(
-        const TArray<FCk_EntityOwningActor_BasicDetails>& InEntitiesWithActor)
+        const TArray<FCk_EntityBridge_BasicDetails>& InEntitiesWithActor)
     -> TArray<FCk_Handle>
 {
-    return ck::algo::Transform<TArray<FCk_Handle>>(InEntitiesWithActor, [](const FCk_EntityOwningActor_BasicDetails& InBasicDetails)
+    return ck::algo::Transform<TArray<FCk_Handle>>(InEntitiesWithActor, [](const FCk_EntityBridge_BasicDetails& InBasicDetails)
     {
         return InBasicDetails.Get_Handle();
     });
@@ -436,10 +436,10 @@ auto
         if (ck::Is_NOT_Valid(InActor))
         { return {}; }
 
-        if (NOT UCk_Utils_OwningActor_UE::Get_IsActorEcsReady(InActor))
+        if (NOT UCk_Utils_EntityBridge_UE::Get_HasEntity(InActor))
         { return {}; }
 
-        return UCk_Utils_OwningActor_UE::Get_ActorEntityHandle(InActor);
+        return UCk_Utils_EntityBridge_UE::Get_Entity(InActor);
     });
 }
 
@@ -454,10 +454,10 @@ auto
         if (ck::Is_NOT_Valid(InEntity))
         { return {}; }
 
-        if (NOT UCk_Utils_OwningActor_UE::Has(InEntity))
+        if (NOT UCk_Utils_EntityBridge_UE::Has(InEntity))
         { return {}; }
 
-        return UCk_Utils_OwningActor_UE::Get_EntityOwningActor(InEntity);
+        return UCk_Utils_EntityBridge_UE::Get_Actor(InEntity);
     });
 }
 

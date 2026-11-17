@@ -13,7 +13,7 @@
 
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
 #include "CkEcs/Net/CkNet_Utils.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcs/Snapshot/CkSnapshot_RestoreMarker.h"
 
 #include "CkEcsExt/Transform/CkTransform_Fragment.h"
@@ -88,7 +88,7 @@ auto
         auto Input = ck::camera::FPov_Input{};
         Input._AnchorTransform  = Director.Get<ck::FFragment_Transform>().Get_Transform();
         Input._World            = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(Director);
-        Input._TraceIgnoreActor = UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor_Recursive(Director);
+        Input._TraceIgnoreActor = UCk_Utils_EntityBridge_UE::TryGet_Actor_Recursive(Director);
 
         ck::camera::FPov::Run(Current.Get_ComposedProfile(), Input, Pov._PovState);
 
@@ -190,7 +190,7 @@ auto
         const FCk_Handle_Camera& InCamera)
     -> AActor*
 {
-    return UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor_Recursive(InCamera);
+    return UCk_Utils_EntityBridge_UE::TryGet_Actor_Recursive(InCamera);
 }
 
 auto

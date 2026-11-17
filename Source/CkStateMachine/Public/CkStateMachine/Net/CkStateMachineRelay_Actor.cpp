@@ -8,7 +8,7 @@
 #include "CkStateMachine/StateMachine/CkStateMachine_Utils.h"
 
 #include "CkEcs/Net/CkNet_Utils.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 //
@@ -55,7 +55,7 @@ namespace ck_state_machine_relay_actor
             return false;
         }
 
-        const auto* OwningActor = UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor_Recursive(FCk_Handle{RootSm});
+        const auto* OwningActor = UCk_Utils_EntityBridge_UE::TryGet_Actor_Recursive(FCk_Handle{RootSm});
         if (OwningActor == nullptr)
         {
             ck::sm::Warning(TEXT("{}: SM [{}] root has no owning actor — cannot verify connection ownership. Dropping."),

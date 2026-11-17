@@ -25,7 +25,7 @@
 #include "CkEcs/EntityScript/CkEntityScript_SpawnRecipe.h" // FFragment_SpawnRecipe
 #include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_BuildRecipe.h" // FFragment_BuildRecipe (DefinitionBuilt)
 #include "CkEcs/ContextOwner/CkContextOwner_Utils.h"
-#include "CkEcs/OwningActor/CkOwningActor_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcs/Net/ReplicatedFragmentContainer/CkReplicatedFragmentContainer.h" // handler registry (Produce)
 #include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
 
@@ -33,7 +33,7 @@
 
 #include "CkLabel/CkLabel_Utils.h"
 
-#include "CkEcsExt/OwningActor/CkActorSpawnIntent_Fragment.h" // FFragment_ActorSpawnIntent
+#include "CkEcsExt/EntityBridge/CkActorSpawnIntent_Fragment.h" // FFragment_ActorSpawnIntent
 #include "CkEcsExt/Transform/CkTransform_Utils.h"             // bridged-actor spawn transform
 
 #include "Algo/Accumulate.h"
@@ -213,7 +213,7 @@ namespace ck::snapshot
                 const FCk_Handle& InHandle)
             -> TOptional<FString>
         {
-            const auto* Actor = UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor(InHandle);
+            const auto* Actor = UCk_Utils_EntityBridge_UE::TryGet_Actor(InHandle);
             if (ck::Is_NOT_Valid(Actor))
             { return {}; }
 
@@ -819,7 +819,7 @@ namespace ck::snapshot
                     {
                         Entry.Set_ActorClassPath(Handle.Get<FFragment_ActorSpawnIntent>().Get_ActorClassPath());
                         Entry.Get_ActorSaveFieldBytes() =
-                            SerializeActorSaveFields(UCk_Utils_OwningActor_UE::TryGet_EntityOwningActor(Handle));
+                            SerializeActorSaveFields(UCk_Utils_EntityBridge_UE::TryGet_Actor(Handle));
                     }
 
                     if (UCk_Utils_Transform_UE::Has(Handle))

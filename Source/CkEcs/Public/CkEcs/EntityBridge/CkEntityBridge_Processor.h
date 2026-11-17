@@ -2,7 +2,7 @@
 
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Fragment.h"
 
-#include "CkEcs/OwningActor/CkOwningActor_Fragment.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Fragment.h"
 
 #include "CkEcs/Processor/CkProcessor.h"
 #include "CkEcs/Scheduler/CkProcessorGroups.h"
@@ -12,9 +12,9 @@
 namespace ck
 {
     // NOTE: CK_IF_TEARING_DOWN on purpose since we only destroy the actor AFTER EndPlay finishes
-    class CKECS_API FProcessor_OwningActor_Destroy : public TProcessor<
-        FProcessor_OwningActor_Destroy,
-        ck::TReadOnly<FFragment_OwningActor>,
+    class CKECS_API FProcessor_EntityBridge_Destroy : public TProcessor<
+        FProcessor_EntityBridge_Destroy,
+        ck::TReadOnly<FFragment_EntityBridge>,
         CK_IF_TEARING_DOWN>
     {
     public:
@@ -28,7 +28,7 @@ namespace ck
         ForEachEntity(
             TimeType InDeltaT,
             HandleType InHandle,
-            const FFragment_OwningActor& InOwningActorComp) -> void;
+            const FFragment_EntityBridge& InOwningActorComp) -> void;
     };
 }
 
