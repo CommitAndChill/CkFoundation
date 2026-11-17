@@ -1,7 +1,7 @@
 #pragma once
 #include "CkEntityLifetime_Fragment.h"
 
-#include "CkEcs/EntityBridge/CkEntityBridge_Processors.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Processor.h"
 #include "CkEcs/Processor/CkProcessor.h"
 #include "CkEcs/Registry/CkRegistry.h"
 #include "CkEcs/Scheduler/CkProcessorGroups.h"
