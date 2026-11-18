@@ -49,7 +49,7 @@ auto
         const auto WasRequestedOrLinked = WeakThis->_HasRequested || WeakThis->_State != ECk_EntityBridge_State::NotRequested;
 
         CK_ENSURE_IF_NOT(WasRequestedOrLinked,
-            TEXT("[{}] has a Ck Entity Bridge but did not call Request_SpawnEntity during BeginPlay. "
+            TEXT("[{}] has a Ck Entity Bridge but did not call Request_SpawnLinkedEntity during BeginPlay. "
                  "Call it, or set the bridge's Request Timing to Deferred."),
             WeakThis->GetOwner())
         {}
@@ -69,21 +69,21 @@ auto
 
 auto
     UCk_EntityBridge_ActorComponent_UE::
-    Request_SpawnEntity(
+    Request_SpawnLinkedEntity(
         TSubclassOf<UCk_EntityScript_UE> InEntityScriptClass)
     -> void
 {
-    DoRequest_SpawnEntity(InEntityScriptClass, {});
+    DoRequest_SpawnLinkedEntity(InEntityScriptClass, {});
 }
 
 auto
     UCk_EntityBridge_ActorComponent_UE::
-    Request_SpawnEntity_WithParams(
+    Request_SpawnLinkedEntity_WithParams(
         TSubclassOf<UCk_EntityScript_UE> InEntityScriptClass,
         FInstancedStruct InSpawnParams)
     -> void
 {
-    DoRequest_SpawnEntity(InEntityScriptClass, InSpawnParams);
+    DoRequest_SpawnLinkedEntity(InEntityScriptClass, InSpawnParams);
 }
 
 auto
@@ -142,13 +142,13 @@ auto
 
 auto
     UCk_EntityBridge_ActorComponent_UE::
-    DoRequest_SpawnEntity(
+    DoRequest_SpawnLinkedEntity(
         TSubclassOf<UCk_EntityScript_UE> InEntityScriptClass,
         const FInstancedStruct& InSpawnParams)
     -> FCk_Handle
 {
     CK_ENSURE_IF_NOT(ck::IsValid(InEntityScriptClass),
-        TEXT("Request_SpawnEntity on the Ck Entity Bridge of [{}] was given an invalid EntityScript class"), GetOwner())
+        TEXT("Request_SpawnLinkedEntity on the Ck Entity Bridge of [{}] was given an invalid EntityScript class"), GetOwner())
     { return {}; }
 
     auto* ScriptDefault = UCk_Utils_Object_UE::Get_ClassDefaultObject<UCk_EntityScript_UE>(InEntityScriptClass);
@@ -159,7 +159,7 @@ auto
     { return {}; }
 
     CK_ENSURE_IF_NOT(NOT _HasRequested,
-        TEXT("Request_SpawnEntity called more than once on [{}]"), GetOwner())
+        TEXT("Request_SpawnLinkedEntity called more than once on [{}]"), GetOwner())
     { return {}; }
 
     auto* Owner = GetOwner();
@@ -167,7 +167,7 @@ auto
     auto TransientEntity = ck::IsValid(World) ? UCk_Utils_EcsWorld_Subsystem_UE::Get_TransientEntity(World) : FCk_Handle{};
 
     CK_ENSURE_IF_NOT(ck::IsValid(TransientEntity),
-        TEXT("Request_SpawnEntity on [{}] was called before the ECS world exists; call it from BeginPlay"), Owner)
+        TEXT("Request_SpawnLinkedEntity on [{}] was called before the ECS world exists; call it from BeginPlay"), Owner)
     { return {}; }
 
     _HasRequested = true;
@@ -176,7 +176,7 @@ auto
     if (const auto* EcsWorld = World->GetSubsystem<UCk_EcsWorld_Subsystem_UE>();
         ck::IsValid(EcsWorld) && EcsWorld->Get_LoadHold() == ECk_EcsWorld_LoadHold::Teardown)
     {
-        ck::ecs::Verbose(TEXT("Request_SpawnEntity on [{}] ignored: its world is tearing down"), Owner);
+        ck::ecs::Verbose(TEXT("Request_SpawnLinkedEntity on [{}] ignored: its world is tearing down"), Owner);
         return {};
     }
 

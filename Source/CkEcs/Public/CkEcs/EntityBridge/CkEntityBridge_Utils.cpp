@@ -474,7 +474,7 @@ auto
         InEntity, InBridge)
     { return; }
 
-    InEntity.Add<ck::FFragment_EntityBridge>(Actor, InBridge);
+    InEntity.Add<ck::FFragment_EntityBridge>(InBridge);
     InEntity.AddOrGet<TWeakObjectPtr<UWorld>>(Actor->GetWorld());
 
     InBridge->_Entity = InEntity;

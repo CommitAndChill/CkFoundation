@@ -110,7 +110,7 @@ auto
 {
     Super::BeginPlay();
 
-    _EntityBridge->Request_SpawnEntity(UCk_EntityScript_Destructible_UE::StaticClass());
+    _EntityBridge->Request_SpawnLinkedEntity(UCk_EntityScript_Destructible_UE::StaticClass());
 }
 
 auto

@@ -171,7 +171,7 @@ auto
     {
         const auto IsNotActorBound = NOT DefaultObject->Get_IsActorBound();
         CK_ENSURE_IF_NOT(IsNotActorBound,
-            TEXT("EntityScript [{}] is actor-bound. Add a Ck Entity Bridge to its Actor and call Request_SpawnEntity on it"),
+            TEXT("EntityScript [{}] is actor-bound. Add a Ck Entity Bridge to its Actor and call Request_SpawnLinkedEntity on it"),
             InEntityScriptClass)
         {
             InDelegate.ExecuteIfBound(InLifetimeOwner, ECk_Request_OperationResult::Failed_NotEnqueued);
@@ -271,7 +271,7 @@ auto
 
     const auto IsNotActorBound = NOT InEntityScriptClassArchetype->Get_IsActorBound();
     CK_ENSURE_IF_NOT(IsNotActorBound,
-        TEXT("EntityScript [{}] is actor-bound. Add a Ck Entity Bridge to its Actor and call Request_SpawnEntity on it"),
+        TEXT("EntityScript [{}] is actor-bound. Add a Ck Entity Bridge to its Actor and call Request_SpawnLinkedEntity on it"),
         InEntityScriptClassArchetype)
     {
         InDelegate.ExecuteIfBound(InLifetimeOwner, ECk_Request_OperationResult::Failed_NotEnqueued);

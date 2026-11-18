@@ -16,17 +16,17 @@ namespace ck
         ForEachEntity(
             TimeType InDeltaT,
             HandleType InHandle,
-            const FFragment_EntityBridge& InOwningActorComp)
+            const FFragment_EntityBridge& InEntityBridge)
             -> void
     {
-        const auto& EntityOwningActor = InOwningActorComp.Get_Actor().Get();
+        const auto& BridgedActor = InEntityBridge.Get_Actor().Get();
 
-        if (ck::Is_NOT_Valid(EntityOwningActor))
+        if (ck::Is_NOT_Valid(BridgedActor))
         { return; }
 
-        ecs::VeryVerbose(TEXT("Destroying Owning Actor [{}] associated with Entity [{}]"), EntityOwningActor, InHandle);
+        ecs::VeryVerbose(TEXT("Destroying Actor [{}] bridged to Entity [{}]"), BridgedActor, InHandle);
 
-        EntityOwningActor->Destroy();
+        BridgedActor->Destroy();
     }
 }
 

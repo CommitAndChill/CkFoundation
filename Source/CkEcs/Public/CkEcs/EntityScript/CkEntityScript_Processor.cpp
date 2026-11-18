@@ -185,7 +185,7 @@ namespace ck
 
         CK_ENSURE_IF_NOT(IsAdmissionShapeValid,
             TEXT("EntityScript [{}] cannot be spawned this way. An actor-bound EntityScript is spawned only through "
-                 "UCk_EntityBridge_ActorComponent_UE::Request_SpawnEntity, and only actor-bound EntityScripts can be. "
+                 "UCk_EntityBridge_ActorComponent_UE::Request_SpawnLinkedEntity, and only actor-bound EntityScripts can be. "
                  "IsActorBound [{}], RequestedThroughBridge [{}]"),
             EntityScriptClassArchetype, IsActorBoundScript, WasRequestedThroughBridge)
         {

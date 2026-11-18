@@ -25,7 +25,7 @@ auto
 
     CK_ENSURE_IF_NOT(ck::IsValid(BoundActor),
         TEXT("EntityScript_WithActor [{}] is constructing on Entity [{}] which is not linked to an Actor. "
-             "Was it spawned through UCk_EntityBridge_ActorComponent_UE::Request_SpawnEntity?"),
+             "Was it spawned through UCk_EntityBridge_ActorComponent_UE::Request_SpawnLinkedEntity?"),
         GetClass()->GetName(), InHandle)
     { return ECk_EntityScript_ConstructionFlow::Finished; }
 

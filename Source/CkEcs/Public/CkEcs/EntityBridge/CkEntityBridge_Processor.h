@@ -28,7 +28,7 @@ namespace ck
         ForEachEntity(
             TimeType InDeltaT,
             HandleType InHandle,
-            const FFragment_EntityBridge& InOwningActorComp) -> void;
+            const FFragment_EntityBridge& InEntityBridge) -> void;
     };
 }
 

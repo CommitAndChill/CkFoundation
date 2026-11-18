@@ -35,7 +35,7 @@ auto
 {
     Super::BeginPlay();
 
-    _EntityBridge->Request_SpawnEntity(UCk_EntityScript_WithActor_UE::StaticClass());
+    _EntityBridge->Request_SpawnLinkedEntity(UCk_EntityScript_WithActor_UE::StaticClass());
 
     OnRep_GroupSubsystemClass();
 }

@@ -58,7 +58,7 @@ auto
     if (ck::Is_NOT_Valid(TransientEntity))
     { return; }
 
-    _EntityBridge->Request_SpawnEntity(UCk_EntityScript_IsmRenderer_UE::StaticClass());
+    _EntityBridge->Request_SpawnLinkedEntity(UCk_EntityScript_IsmRenderer_UE::StaticClass());
 
     _Initialized = true;
 }

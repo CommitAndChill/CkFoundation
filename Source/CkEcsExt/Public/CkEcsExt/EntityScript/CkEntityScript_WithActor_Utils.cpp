@@ -38,7 +38,7 @@ auto
     if (ck::Is_NOT_Valid(Bridge))
     { return {}; }
 
-    return FCk_Handle_PendingEntityScript{Bridge->DoRequest_SpawnEntity(InEntityScriptClass, {})};
+    return FCk_Handle_PendingEntityScript{Bridge->DoRequest_SpawnLinkedEntity(InEntityScriptClass, {})};
 }
 
 // --------------------------------------------------------------------------------------------------------------------

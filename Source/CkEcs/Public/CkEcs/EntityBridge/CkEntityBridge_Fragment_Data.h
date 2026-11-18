@@ -50,7 +50,7 @@ auto CKECS_API GetTypeHash(const FCk_EntityBridge_BasicDetails& InBasicDetails) 
 UENUM(BlueprintType)
 enum class ECk_EntityBridge_State : uint8
 {
-    // Request_SpawnEntity has not been called and no replica has arrived.
+    // Request_SpawnLinkedEntity has not been called and no replica has arrived.
     NotRequested,
 
     // Client of a replicated Actor: the request was acknowledged and the authority's entity has not arrived yet.
@@ -71,10 +71,10 @@ CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_EntityBridge_State);
 UENUM(BlueprintType)
 enum class ECk_EntityBridge_RequestTiming : uint8
 {
-    // The Actor calls Request_SpawnEntity from its BeginPlay. The bridge ensures on the next tick if it did not.
+    // The Actor calls Request_SpawnLinkedEntity from its BeginPlay. The bridge ensures on the next tick if it did not.
     DuringBeginPlay,
 
-    // The Actor calls Request_SpawnEntity later, when it decides to. The bridge does not check.
+    // The Actor calls Request_SpawnLinkedEntity later, when it decides to. The bridge does not check.
     Deferred,
 };
 
@@ -137,18 +137,18 @@ public:
      *  Entity is awaited instead. The Entity arrives through Promise_OnEntityConstructed / Promise_OnEntityReady. */
     UFUNCTION(BlueprintCallable,
               Category = "Ck|EntityBridge",
-              DisplayName = "[Ck][EntityBridge] Request Spawn Entity")
+              DisplayName = "[Ck][EntityBridge] Request Spawn Linked Entity")
     void
-    Request_SpawnEntity(
+    Request_SpawnLinkedEntity(
         TSubclassOf<UCk_EntityScript_UE> InEntityScriptClass);
 
-    /** Request_SpawnEntity with spawn params. On a client of a replicated Actor the params are discarded;
+    /** Request_SpawnLinkedEntity with spawn params. On a client of a replicated Actor the params are discarded;
      *  the authority's params arrive with its Entity. */
     UFUNCTION(BlueprintCallable,
               Category = "Ck|EntityBridge",
-              DisplayName = "[Ck][EntityBridge] Request Spawn Entity (With Params)")
+              DisplayName = "[Ck][EntityBridge] Request Spawn Linked Entity (With Params)")
     void
-    Request_SpawnEntity_WithParams(
+    Request_SpawnLinkedEntity_WithParams(
         TSubclassOf<UCk_EntityScript_UE> InEntityScriptClass,
         FInstancedStruct InSpawnParams);
 
@@ -185,7 +185,7 @@ public:
 
 private:
     auto
-    DoRequest_SpawnEntity(
+    DoRequest_SpawnLinkedEntity(
         TSubclassOf<UCk_EntityScript_UE> InEntityScriptClass,
         const FInstancedStruct& InSpawnParams) -> FCk_Handle;
 

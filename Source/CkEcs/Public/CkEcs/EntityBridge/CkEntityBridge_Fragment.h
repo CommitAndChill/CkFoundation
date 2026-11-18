@@ -22,16 +22,19 @@ namespace ck
 
     public:
         FFragment_EntityBridge() = default;
-        FFragment_EntityBridge(
-            AActor* InActor,
+        explicit FFragment_EntityBridge(
             UCk_EntityBridge_ActorComponent_UE* InBridge);
 
+    public:
+        // The bridge's owner, resolved even while the bridge or its Actor is pending kill.
+        [[nodiscard]]
+        auto
+        Get_Actor() const -> TWeakObjectPtr<AActor>;
+
     private:
-        TWeakObjectPtr<AActor> _Actor;
         TWeakObjectPtr<UCk_EntityBridge_ActorComponent_UE> _Bridge;
 
     public:
-        CK_PROPERTY_GET(_Actor);
         CK_PROPERTY_GET(_Bridge);
     };
 }
