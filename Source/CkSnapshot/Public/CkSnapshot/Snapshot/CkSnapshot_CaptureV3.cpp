@@ -574,6 +574,7 @@ namespace ck::snapshot
         auto AnonymousSkipped = 0;
         auto UnlabeledSkipped = 0;
         auto UnlabeledWithPayloadAudit = 0;
+        auto SharedRendezvousWithPayloadAudit = 0;
         auto SaveTransientSkipped = 0;
 
         auto UncapturedRuntimeWithPayload = 0;
@@ -864,6 +865,24 @@ namespace ck::snapshot
 
             Entities.Emplace(MoveTemp(Entry));
 
+            // A shared-rendezvous member has no identity beyond its group: every saved row of the group rendezvous
+            // onto one live representative, so a payload of its own could not be traced back to the member that
+            // carried it, and restoring it onto the representative makes a save taken after a load differ from the
+            // save that built the world. Its row stays, since its subtree still needs the owner; its payloads do not.
+            if (Handle.Has<FFragment_SaveKey>() && Handle.Get<FFragment_SaveKey>().Get_IsSharedRendezvousGroup())
+            {
+                if (const auto Audit = DoAudit_DroppedPayload(Handle, SharedRendezvousWithPayloadAudit);
+                    Audit && AuditDetailed)
+                {
+                    ck::snapshot::Warning(
+                        TEXT("v3 capture AUDIT: shared-rendezvous member [{}] carries a hydration payload that will be "
+                             "DROPPED (first producer [{}]) — a group member has no identity of its own, so keep that "
+                             "state on an entity that has one. Payload detail: [{}]"),
+                        Handle, GetNameSafe(Audit._ProducingType), Audit._Detail);
+                }
+                continue;
+            }
+
             // ---- Payloads: every Save-flagged handler's Produce for this entity ----
             for (const auto* Type : SaveTypes)
             {
@@ -1008,22 +1027,25 @@ namespace ck::snapshot
         ck::snapshot::Verbose(
             TEXT("Run_CaptureV3: persisted [{}] entities (EngineOwned [{}], ConstructSpawned [{}], RuntimeSpawned [{}], "
                  "DefinitionBuilt [{}]), [{}] payloads; skipped [{}] unlabeled ConstructSpawned + [{}] anonymous scratch "
-                 "+ [{}] save-transient (audit [{}])"),
+                 "+ [{}] save-transient (audit [{}]); [{}] shared-rendezvous members carried payloads that were dropped"),
             Entities.Num(), EngineOwnedCount, ConstructSpawnedCount, RuntimeSpawnedCount, DefinitionBuiltCount, Payloads.Num(),
-            UnlabeledSkipped, AnonymousSkipped, SaveTransientSkipped, UnlabeledWithPayloadAudit);
+            UnlabeledSkipped, AnonymousSkipped, SaveTransientSkipped, UnlabeledWithPayloadAudit,
+            SharedRendezvousWithPayloadAudit);
 
         // Summary's single aggregated report. Same data-loss FACT the per-entity storm carried, minus the
         // per-entity ExportText; Detailed already logged each one individually above.
-        if (const auto DroppedPayloadCount = UnlabeledWithPayloadAudit + SaveTransientWithPayloadAudit;
+        if (const auto DroppedPayloadCount =
+                UnlabeledWithPayloadAudit + SaveTransientWithPayloadAudit + SharedRendezvousWithPayloadAudit;
             DroppedPayloadCount > 0 && NOT AuditDetailed)
         {
             ck::snapshot::Warning(
-                TEXT("v3 capture AUDIT: [{}] skipped entities carry a hydration payload that will be DROPPED "
-                     "([{}] unlabeled ConstructSpawned + [{}] save-transient). Give an unlabeled child a GameplayLabel "
-                     "under its owner to persist it, or move the payload to its persisted owner. Examples: {}. "
+                TEXT("v3 capture AUDIT: [{}] entities carry a hydration payload that will be DROPPED "
+                     "([{}] unlabeled ConstructSpawned + [{}] save-transient + [{}] shared-rendezvous member). Give an "
+                     "unlabeled child a GameplayLabel under its owner to persist it, or move the payload to its persisted "
+                     "owner; a shared-rendezvous member persists only its row. Examples: {}. "
                      "Set CkSnapshot's CaptureAuditMode to Detailed for the per-entity payload dump."),
                 DroppedPayloadCount, UnlabeledWithPayloadAudit, SaveTransientWithPayloadAudit,
-                FString::Join(AuditExamples, TEXT(", ")));
+                SharedRendezvousWithPayloadAudit, FString::Join(AuditExamples, TEXT(", ")));
         }
 
         // The transient-object-reference census. Audit_DurableObjectRefs only RECORDS -- unlike its handle sibling it
