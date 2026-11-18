@@ -48,7 +48,7 @@ public:
 public:
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|EntityBridge",
-              DisplayName="[Ck][EntityBridge] Try Get Entity With OwningActor In Ownership Chain")
+              DisplayName="[Ck][EntityBridge] Try Get Bridged Entity In Ownership Chain")
     static FCk_Handle
     TryGet_BridgedEntity_InOwnershipChain(
         const FCk_Handle& InHandle);
@@ -169,7 +169,7 @@ public:
 
 public:
     UFUNCTION(BlueprintPure,
-              DisplayName = "[Ck][EntityBridge] OwningActorBasicDetails == OwningActorBasicDetails",
+              DisplayName = "[Ck][EntityBridge] BasicDetails == BasicDetails",
               Category = "Ck|Utils|EntityBridge",
               meta = (CompactNodeTitle = "==", KeyWords = "==,equal"))
     static bool
@@ -178,7 +178,7 @@ public:
         const FCk_EntityBridge_BasicDetails& InBasicDetailsB);
 
     UFUNCTION(BlueprintPure,
-              DisplayName = "[Ck][EntityBridge] OwningActorBasicDetails != OwningActorBasicDetails",
+              DisplayName = "[Ck][EntityBridge] BasicDetails != BasicDetails",
               Category = "Ck|Utils|EntityBridge",
               meta = (CompactNodeTitle = "!=", KeyWords = "!=,not,equal"))
     static bool

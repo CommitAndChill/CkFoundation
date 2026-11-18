@@ -406,20 +406,20 @@ auto
     if (InHandle.Has<TObjectPtr<T_ReplicatedFragment>>())
     { return ECk_AddedOrNot::AlreadyExists; }
 
-    const auto EntityWithActor = UCk_Utils_EntityBridge_UE::TryGet_BridgedEntity_InOwnershipChain(InHandle);
+    const auto BridgedEntity = UCk_Utils_EntityBridge_UE::TryGet_BridgedEntity_InOwnershipChain(InHandle);
 
-    if (ck::Is_NOT_Valid(EntityWithActor))
+    if (ck::Is_NOT_Valid(BridgedEntity))
     { return ECk_AddedOrNot::NotAdded; }
 
-    const auto& BasicDetails   = UCk_Utils_EntityBridge_UE::Get_BasicDetails(EntityWithActor);
-    const auto& OwningActor    = BasicDetails.Get_Actor().Get();
-    const auto& OutermostActor = UCk_Utils_Actor_UE::Get_OutermostActor_RemoteAuthority(OwningActor);
+    const auto& BasicDetails   = UCk_Utils_EntityBridge_UE::Get_BasicDetails(BridgedEntity);
+    const auto& BridgedActor   = BasicDetails.Get_Actor().Get();
+    const auto& OutermostActor = UCk_Utils_Actor_UE::Get_OutermostActor_RemoteAuthority(BridgedActor);
 
     CK_ENSURE_IF_NOT(ck::IsValid(OutermostActor),
         TEXT("Unable to add ReplicatedFragment [{}] for Entity [{}]. We require an Entity with an Actor in the Outer chain that has remote "
-            "authority (is Replicated) to be able to add replicated fragments. During this search, we found the Entity [{}] with OwningActor [{}] "
+            "authority (is Replicated) to be able to add replicated fragments. During this search, we found the Entity [{}] bridged to Actor [{}] "
             "that does NOT have remote authority, nor does any owning Actor in the ownership chain. Does this Entity even require replication?"),
-        ck::Get_RuntimeTypeToString<T_ReplicatedFragment>(), InHandle,  EntityWithActor, OwningActor)
+        ck::Get_RuntimeTypeToString<T_ReplicatedFragment>(), InHandle, BridgedEntity, BridgedActor)
     { return ECk_AddedOrNot::NotAdded; }
 
     auto ReplicatedFragment_Object = [&]()

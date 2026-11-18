@@ -445,46 +445,66 @@ auto Pending = utils_entity_script::Request_SpawnEntity(
 //   Pending.Promise_OnConstructed(FCk_Delegate_EntityScript_Constructed(this, n"OnConstructed"));
 
 //============================================================================
-// 10.1 ACTOR ↔ ENTITY LINKUP (EntityScript_WithActor)
+// 10.1 ACTOR <-> ENTITY LINKUP (Ck Entity Bridge)
 //============================================================================
 //
-// To give an Actor an ECS Entity, use the one-call helper — do NOT hand-roll
-// the spawn-params + TransientEntity + HasAuthority boilerplate:
+// An Actor gets its Entity through one door: a UCk_EntityBridge_ActorComponent_UE
+// plus a script class deriving from UCk_EntityScript_WithActor_UE. Call
+// Request_SpawnLinkedEntity once, on EVERY machine, from BeginPlay or any time
+// later. Do NOT guard it by authority and do NOT spawn an actor-bound script
+// with utils_entity_script::Request_SpawnEntity (refused with an ensure).
 
 class AMyActor : AActor
 {
     default bReplicates = true;
 
+    UPROPERTY(DefaultComponent)
+    UCk_EntityBridge_ActorComponent_UE EntityBridge;
+
     UFUNCTION(BlueprintOverride)
     void BeginPlay()
     {
-        // Authority-gated internally: on clients this returns an INVALID pending
-        // handle and the Entity arrives via the EntityScript replication pipeline.
-        auto PendingEntity = utils_entity_script_with_actor::Request_SpawnEntityScript_OnActor(
-            this, UMyEntityScript);
+        EntityBridge.Promise_OnEntityConstructed(FCk_Delegate_EntityScript_Constructed(this, n"OnEntityConstructed"));
+        EntityBridge.Promise_OnEntityReady(FCk_Delegate_EntityBridge_OnEntityReady(this, n"OnEntityReady"));
+        EntityBridge.Request_SpawnLinkedEntity(UMyActor_EntityScript);
     }
+
+    // Composed; on a client replica replicated values may NOT be applied yet.
+    // Bind signals, cache the handle. Do not add features here.
+    UFUNCTION()
+    private void OnEntityConstructed(FCk_Handle_EntityScript InEntity) {}
+
+    // Script has begun play and (client replica) replicated values are applied.
+    // Read replicated state, show UI. Do not add features here.
+    UFUNCTION()
+    private void OnEntityReady(AActor InActor, FCk_Handle InEntity) {}
 }
 
-// Editor/designer path: add the "Ck Entity Script (With Actor)" component
-// (UCk_EntityScript_WithActor_ActorComponent_UE) to the Actor and pick the
-// EntityScript class — zero code, same pipeline.
+class UMyActor_EntityScript : UCk_EntityScript_WithActor_UE
+{
+    // Runs on every machine that has the Entity; compose it here.
+    // DoGet_Actor() is the linked Actor.
+}
+
+// With spawn params (the authority's copy is the one clients receive; a client
+// of a replicated Actor discards its own):
 //
-// To know when the Actor is ECS ready ON EVERY WORLD (server, client, late
-// join), bind the actor-side promise — works whether or not this world did
-// the spawning:
+//   EntityBridge.Request_SpawnLinkedEntity_WithParams(UMyActor_EntityScript,
+//       FInstancedStruct::Make(UMyActor_EntityScript::Params(Speed)));
 //
-//   utils_entity_bridge::Promise_OnActorEcsReady(
-//       this, FCk_Delegate_EntityBridge_OnEntityReady(this, n"OnEcsReady"));
+// Replication: the Entity replicates when the Actor replicates AND the script's
+// _Replication is Replicates (the default). For a local Entity on a replicated
+// Actor: default _Replication = ECk_Replication::DoesNotReplicate; on the script.
+// A client never spawns a replicated Actor's Entity: its call is acknowledged
+// and the authority's replica links to the Actor, whichever arrives first.
 //
-//   UFUNCTION()
-//   private void OnEcsReady(AActor InActor, FCk_Handle InEntity)
-//   { /* Entity linked; replicated values applied (default policy) */ }
+// Another Actor's Entity (that Actor must have a bridge; otherwise an ensure):
 //
-// Policies (3rd param, optional): ValuesReplicated (default — safe to read
-// replicated attributes/team/SM state) | LinkEstablished (earlier; replicated
-// values may not be applied yet on clients).
-// Fires immediately if the Actor is already ready; auto-discards if the Actor
-// is destroyed before ever becoming ready.
+//   utils_entity_bridge::Promise_OnEntityReady(OtherActor,
+//       FCk_Delegate_EntityBridge_OnEntityReady(this, n"OnOtherReady"));
+//
+// Polls: utils_entity_bridge::Get_HasEntity(Actor) (linked) /
+// Get_IsEntityReady(Actor) (Ready). Not-ready bridges: ck.EntityBridge.DumpNotReady.
 
 //============================================================================
 // 11. TIMERS / TICK PATTERN

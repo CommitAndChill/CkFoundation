@@ -38,7 +38,7 @@ Before writing any code, navigate the documentation in this order:
 | create a UObject a feature will hold (component, widget, data object) | `CkCore/ObjectPooling` — `UCk_Utils_Object_UE::Request_CreateNewObject` with `FCk_ObjectPooling_PoolParams` (`DestroyOnRelease` to just pin, `Recycle` when construction cost dominates); the subsystem pin is the GC root, so the fragment holds `TWeakObjectPtr`; release via `TryReleaseToPool`. Poolable EntityScripts: the `InstancedPerEntity_Poolable` policy |
 | write a processor | `CkEcs/Processor` (`TProcessor`, self-registered via `CK_REGISTER_PROCESSOR`) |
 | bind/fire signals | `CkEcs/Signal` + `CK_SIGNAL_BIND` / `CK_SIGNAL_UNBIND` |
-| actor ↔ entity bridge | `CkEcs/OwningActor` (`UCk_Utils_EntityBridge_UE`) + `CkActor`; EntityHolder in `CkEcsExt` |
+| actor ↔ entity bridge | `CkEcs/EntityBridge` (`UCk_EntityBridge_ActorComponent_UE::Request_SpawnLinkedEntity`, `UCk_Utils_EntityBridge_UE`; script derives `UCk_EntityScript_WithActor_UE` in `CkEcsExt`) + `CkActor`; EntityHolder in `CkEcsExt` |
 | data-driven entity logic (spawnable unit) | `CkEcs/EntityScript` (`UCk_EntityScript_UE`) |
 | store entity-role identity (1 tag) | `CkLabel` (`UCk_Utils_GameplayLabel_UE`) |
 | store entity's child entities | `CkRecord` |
@@ -746,10 +746,16 @@ in the plain-aggregate Context, not the Technique.
 taught these but they exist nowhere in Source. The real API is `UCk_Utils_EntityBridge_UE`
 (`CkEcs/Public/CkEcs/EntityBridge/CkEntityBridge_Utils.h`):
 
-- Actor → entity: `Get_Entity(InActor)` (:101) / `TryGet_Entity(InActor)` (:110)
-- Entity → actor: `Get_Actor(InHandle)` (:61) / `TryGet_Actor(InHandle)` (:69)
-  / `TryGet_Actor_Recursive(InHandle)` (:77)
-- Readiness: `Get_HasEntity(InActor)` (:117), `Promise_OnActorEcsReady(InActor, InDelegate)` (:125)
+- Actor → entity: `Get_Entity(InActor)` (:102) / `TryGet_Entity(InActor)` (:110); the component:
+  `TryGet_Bridge(InActor)` (:117)
+- Entity → actor: `Get_Actor(InHandle)` (:62) / `TryGet_Actor(InHandle)` (:70)
+  / `TryGet_Actor_Recursive(InHandle)` (:78); nearest bridged entity up the ownership chain:
+  `TryGet_BridgedEntity_InOwnershipChain(InHandle)` (:53)
+- Readiness: `Get_HasEntity(InActor)` (:126), `Get_IsEntityReady(InActor)` (:135),
+  `Promise_OnEntityConstructed(InActor, InDelegate)` (:143), `Promise_OnEntityReady(InActor, InDelegate)` (:152)
+
+An Actor gets its entity only through `UCk_EntityBridge_ActorComponent_UE::Request_SpawnLinkedEntity`
+(`CkEntityBridge_Fragment_Data.h`); rules in [CkEcs/Claude.md](CkEcs/Claude.md) § Actor entities.
 
 Inside an EntityScript use `Get_AssociatedEntity()`; context owner via
 `UCk_Utils_ContextOwner_UE::Get_ContextOwner(InHandle)` (`CkEcs/ContextOwner/CkContextOwner_Utils.h:30`).

@@ -33,7 +33,7 @@ CkEcs/Public/CkEcs/
 ├── EntityScript/    – UCk_EntityScript_UE base + processor + utils
 ├── ContextReceiver/ – retained UObject context injection and explicit rebuild refresh
 ├── ContextOwner/    – entity context-ownership chain
-├── OwningActor/     – actor-owned entity fragments
+├── EntityBridge/    – Ck Entity Bridge: the one Actor <-> entity link (component, fragment, utils)
 ├── DeferredEntity/  – deferred entity creation
 ├── Fragments/       – shared built-in fragment types
 ├── Net/             – replication fragments, Iris driver, net mode policy
@@ -413,7 +413,7 @@ poll is frozen too: anything a load waits on must not be scheduled on one.
 Group processors define the top-level ordering; a processor joins one with `using Group = FGroup_X;`. The `RunAfter` chain in `CkProcessorGroups.h` is the authority — this roster is the human-readable view of it. All `TG_PrePhysics` unless noted.
 
 ```
-FGroup_DestructionPipeline  (OwningActor_Destroy, DestructionPhase_Finalize, DestructionPhase_Await —
+FGroup_DestructionPipeline  (EntityBridge_Destroy, DestructionPhase_Finalize, DestructionPhase_Await —
                              start-of-tick destruction completion for entities already past EndPlay)
   -> FGroup_Gameplay_TimeDelta   (Timer, Tween, Substep)
     -> FGroup_Gameplay           (core gameplay: Interaction, Inventory, Objectives, ...)
@@ -493,8 +493,8 @@ class UCk_EntityScript_UE : public UCk_GameWorldContextObject_UE
 
 - **Owner-liveness cancel.** A spawn whose lifetime owner is destroyed or pending-destroy is cancelled. The owner's destroy cascade marks only the lifetime dependents that EXIST at destroy time, so a child materializing after it would be a zombie outliving its owner (observed: an SmTask ticking against a destroyed StateMachine). Cancelling is the owner's cascade applied late, not an error. The check must run BEFORE the mid-construction defer, or a request whose owner dies while still constructing defers forever; and `ck::Is_NOT_Valid` must short-circuit the `Has_Any` queries, because a finalized owner is a tombstone handle and any `Has` query on it would itself ensure.
 - **Editor drag-drop churn.** Editor-preview spawns (`ACk_EntitySpawner_UE`) pass the spawner's INSTANCED script as the archetype; runtime spawns pass a CDO, which cannot die. Drag-drop destroys the preview actor on drop — taking its instanced script with it AFTER the request was enqueued — and the entity-destroy cascade races the spawn processor and loses. That staleness is expected churn (the dropped actor enqueues its own fresh request), so the processor drops the request silently and cleans up the orphaned entity-under-construction, gated on `FTag_EditorOnlyEntity` so the runtime ensure on an invalid archetype stays reachable.
-- **Replication-driver ordering.** The driver is added in two places, one per entity shape. **Pre-Construct:** `UCk_Utils_EntityReplicationDriver_UE::TryAdd` walks the lifetime chain for an OwningActor and uses that actor as the driver UObject's Outer, so non-actor-bearing replicated entities (children under a replicated parent) have their driver before Construct — utilities called during Construct (e.g. an attribute `Add` that registers a container fragment) need to find it. Entities that receive their own OwningActor later during Construct (WithActor and similar) have no actor in the chain yet: `TryAdd` fails gracefully (`NotAdded`) and `UCk_Utils_EntityBridge_UE::Add` supplies the driver when the actor links. **Post-Construct:** the processor only enables actor-side replication and enqueues the replicate request, and only on a networked authority (NM_Standalone has no net driver; on NM_Client authority-side replication is not our concern). `FProcessor_EntityScript_Replicate` defers (retry next frame, keeping the dirty marker) until the driver exists — that retry bookkeeping is processor-specific and deliberately not in the shared helper. `Request_ReplicateEntityScript` is the single establishment path: validation, dependent-count accounting, `Request_Replicate`, and the FireOnDependent tag all live there, and the ContextOwnerOverride is threaded through so spawn-time context-owner preservation survives.
-- **`Net_Params` derivation** (`UCk_Utils_EntityScript_UE::Add`): a new script entity's `Net_Params` comes from the archetype's effective replication intent combined with the TransientEntity's NetMode/NetRole context. `Get_EffectiveReplication` is the virtual hook subclasses override to reconcile the CDO default with runtime state (e.g. WithActor returns `DoesNotReplicate` when its OwningActor isn't replicated). This covers the transient-owner case, where `Request_CreateEntity` skips Net_Params inheritance, and direct `Add()` callers (SM condition/state/transition attach — any non-spawn flow attaching a script to an existing transient-owned entity). Net_Params already inherited from a non-transient lifetime owner is respected.
+- **Replication-driver ordering.** The driver is added in one place, **pre-Construct:** `UCk_Utils_EntityReplicationDriver_UE::TryAdd` walks the ownership chain for a bridged entity (`TryGet_BridgedEntity_InOwnershipChain`) and uses its Actor's outermost remote-authority Actor as the driver UObject's Outer, so every replicated entity has its driver before Construct — utilities called during Construct (e.g. an attribute `Add` that registers a container fragment) need to find it. An Actor entity is linked to its Actor earlier in the same processor call (the admission gate's `DoLink`, before `TryAdd`), so `TryAdd` finds the Actor on the entity itself; children under a replicated parent find the parent's Actor up the chain. An entity with no bridged entity in its chain gets `NotAdded`. **Post-Construct:** the processor only enables actor-side replication and enqueues the replicate request, and only on a networked authority (NM_Standalone has no net driver; on NM_Client authority-side replication is not our concern). `FProcessor_EntityScript_Replicate` defers (retry next frame, keeping the dirty marker) until the driver exists — that retry bookkeeping is processor-specific and deliberately not in the shared helper. `Request_ReplicateEntityScript` is the single establishment path: validation, dependent-count accounting, `Request_Replicate`, and the FireOnDependent tag all live there, and the ContextOwnerOverride is threaded through so spawn-time context-owner preservation survives.
+- **`Net_Params` derivation** (`UCk_Utils_EntityScript_UE::Add`): a new script entity's `Net_Params` comes from the archetype's effective replication intent combined with the TransientEntity's NetMode/NetRole context. `Get_EffectiveReplication` is the virtual hook subclasses override to reconcile the CDO default with runtime state. An Actor entity is the exception to the derivation: the bridge decides its replication from the real Actor and writes its `Net_Params` before calling `Add_ForBridge`, which requires them to exist; `UCk_EntityScript_WithActor_UE::Get_EffectiveReplication` then reads them back (on the class default object it is the script's own `_Replication`). See § Actor entities. This covers the transient-owner case, where `Request_CreateEntity` skips Net_Params inheritance, and direct `Add()` callers (SM condition/state/transition attach — any non-spawn flow attaching a script to an existing transient-owned entity). Net_Params already inherited from a non-transient lifetime owner is respected.
 
 ### EntityScript across save/load (v3 rebuild+hydrate)
 
@@ -807,36 +807,75 @@ Its second half is **`UCk_Utils_Snapshot_UE::Promise_OnHydrated`** — the load-
 
 Pinned by `Ck.Snapshot.Ordering.BeginPlayObservesConstructDefaults` and `Ck.Snapshot.Ordering.OnHydratedFiresAfterAllPayloads`.
 
-### Actor-side unified promise
+### Actor entities
 
-For actor-linked entities (`EntityScript_WithActor`), consumers should not juggle the two signals
-directly. `UCk_Utils_EntityBridge_UE::Promise_OnActorEcsReady(Actor, Delegate, Policy)` is the one
-actor-side hook that works on every world:
+An Actor gets its entity through one door, the Ck Entity Bridge (`CkEcs/EntityBridge/`): the component
+`UCk_EntityBridge_ActorComponent_UE`, the fragment `ck::FFragment_EntityBridge` (holds only the bridge; its
+`Get_Actor()` is the bridge's owner) and the outside-in utils `UCk_Utils_EntityBridge_UE` (AngelScript
+`utils_entity_bridge::`). Authoring rules:
 
-- `ECk_ActorEcsReady_Policy::ValuesReplicated` (default) — fires once the Actor↔Entity link exists
-  AND `OnReplicationComplete` has fired for the linked entity. Collapses to link-time on authority
-  and for non-replicated entities. Replicated values are readable inside the callback.
-- `ECk_ActorEcsReady_Policy::LinkEstablished` — fires at link time (OnConstructed-equivalent on
-  clients; replicated values may not be applied yet).
+1. To give an Actor an entity: add `UCk_EntityBridge_ActorComponent_UE`, write a script class deriving from
+   `UCk_EntityScript_WithActor_UE` (CkEcsExt), and call `Request_SpawnLinkedEntity(Class)` (or
+   `Request_SpawnLinkedEntity_WithParams(Class, FInstancedStruct)`) once, from `BeginPlay` or any time later, on
+   every machine. Nothing else links an Actor to an entity: the spawn processor refuses an actor-bound script
+   (`Get_IsActorBound()`) that did not come through a bridge, `Request_SpawnEntity` refuses one up front, and a
+   bridge refuses a script that is not actor-bound.
+2. The script's `DoConstruct` composes the entity. It runs on every machine that has the entity. It reaches its
+   Actor with `DoGet_Actor()`; the Actor is resolved from the link in `Construct`, it is not a spawn param.
+3. `Promise_OnEntityConstructed`: bind signals, cache the handle. `Promise_OnEntityReady`: read replicated state,
+   show UI. Do not add features to the entity from either.
+4. An Actor entity replicates when the Actor replicates and the script's `_Replication` is `Replicates` (the
+   default). For a local entity on a replicated Actor, set `_Replication = ECk_Replication::DoesNotReplicate` on
+   the script.
+5. A value clients need at construction travels in spawn params (the authority's copy is the one clients receive)
+   or is a replicated Actor property. A generated params struct is passed as `FInstancedStruct::Make(X::Params(...))`.
+6. Another Actor's entity: `UCk_Utils_EntityBridge_UE::Promise_OnEntityReady(OtherActor, Delegate)` (or
+   `Promise_OnEntityConstructed`). The other Actor must have a bridge; promising on an Actor without one is an
+   ensure.
 
-The promise fires immediately when bound after the actor is already ready, queues on the
-(non-replicated, auto-added) `UCk_EntityBridge_ActorComponent_UE` otherwise, and is discarded
-if the actor is destroyed before ever becoming ready. To spawn the actor-linked entity in the first
-place, use `UCk_Utils_EntityScript_WithActor_UE::Request_SpawnEntityScript_OnActor` (CkEcsExt) or
-add the `Ck Entity Script (With Actor)` component in the editor — both are authority-gated and
-replication-correct.
+The two promises fire once per machine, immediately when bound after the fact, and are discarded with the Actor.
+What each machine sees:
+
+| Machine | `Promise_OnEntityConstructed` | `Promise_OnEntityReady` |
+|---|---|---|
+| Host / standalone | The script finished construction (`OnConstructed`): the entity is composed. | After the script's `BeginPlay`. |
+| Client replica | The replica finished construction; replicated values may NOT be applied yet. | Script `BeginPlay` + `OnReplicationComplete`, whichever is later. |
+| Client, local entity | The script finished construction. | After the script's `BeginPlay`. |
+
+Both run synchronously inside the processor that reaches the moment. A script whose `Construct` returns
+`Continue` and never calls `DoFinishConstruction` never reaches `BeginPlay`, so its Actor is never Constructed
+and never Ready; `ck.EntityBridge.DumpNotReady` logs every bridge in a game world whose entity is not Ready, with
+its `ECk_EntityBridge_State` (`NotRequested`, `AwaitingReplica`, `Linked`, `Ready`) and construction stage.
+For a poll, `Get_HasEntity` means linked and `Get_IsEntityReady` means Ready; a poll that must not wait on
+anything a load freezes reads `Get_HasEntity`. `Promise_OnEntityLinked` (C++ only, framework-internal) fires at
+the link itself, before the script's `Construct`, for code that must stamp the entity before anything observes it.
+When the entity dies first, `ck::FProcessor_EntityBridge_Destroy` destroys its Actor, so a bridge never outlives
+its entity in normal play.
+
+**Replication.** An Actor entity replicates when its Actor replicates AND its script's `_Replication` is
+`Replicates`; the bridge makes that decision from the real Actor and writes the entity's net params itself. A
+client-authoritative Actor gets a local, non-replicated entity. Clients never request a replicated Actor entity:
+on a client the call only moves the bridge to `AwaitingReplica` (its spawn params are discarded), and the replica
+links through the driver's bound Actor (the authority sends the Actor in the EntityScript replication data; the
+client resolves its bridge and spawns through the same admission gate and `DoLink`). The client's own call may
+come before the replica, after it, or never.
+
+**Load.** The request does not consult the snapshot load gate: an Actor that exists gets its entity, also during a
+rebuild, and under the `Teardown` hold the call is a quiet no-op. Save keys and spawn intents are stamped by the
+script's `Construct`, so the `BeginPlay` a load re-runs on a level Actor gives the loader the fresh entity it maps
+the saved row onto.
 
 **Host collapse is mandatory, not an optimisation.** `DoGet_ShouldDeferUntilReplicationComplete` must NOT defer on the host: replicated values are written locally there, so there is nothing to await and OnReplicationComplete timing is purely a client-convergence concern. Deferring anyway coupled every authority-side consumer (e.g. a HUD's context injection) to the fire processor's schedule, which a v3 load starves for the restored pawn — its OnReplicationComplete never re-fires in the loaded world, so the promise hung forever awaiting a signal with nothing left to signal. Netmode gotcha: gate with `Get_IsEntityNetMode_Host`, NOT `Get_HasAuthority` (which admits clients).
 
 ### EntityScript replication pipeline
 
-**Server:** `Request_SpawnEntity` → `Request_CreateEntity(Owner)` → SpawnProcessor (`Construct()` fires; for WithActor the net params are set, `EntityOwningActor` enables replication, the ReplicationDriver is created and `FRequest_Replicate` added; non-WithActor follows the same shape) → ReplicateProcessor populates the driver's replicated properties and marks them dirty.
+**Server:** `Request_SpawnEntity` → `Request_CreateEntity(Owner)` → SpawnProcessor (the ReplicationDriver is created pre-Construct, `Construct()` fires, and `FRequest_EntityScript_Replicate` is added on a host) → ReplicateProcessor populates the driver's replicated properties and marks them dirty. An Actor entity enters through `Request_SpawnLinkedEntity` instead, which creates the entity and writes its net params (§ Actor entities); the SpawnProcessor links it to its Actor before adding the driver, and `Request_Replicate` sends the bound Actor with the EntityScript replication data.
 
-**Wire:** `UCk_Fragment_EntityReplicationDriver_Rep` is a replicated UObject registered as a sub-object on the EntityOwningActor component via `AddReplicatedSubObject()`.
+**Wire:** `UCk_Fragment_EntityReplicationDriver_Rep` is a replicated UObject registered via `AddReplicatedSubObject()` as a sub-object of the outermost remote-authority Actor of the nearest bridged entity in its ownership chain.
 
-**Client:** the spawn call detects Replicated + Client net mode, creates a PENDING entity on the owner and returns a PendingEntityScript handle the caller binds `Promise_OnConstructed()` to. On receive, `OnRep_ReplicationData_EntityScript()` picks the lifetime owner (self-referencing → the transient entity, otherwise the replicated parent), adds `TWeakObjectPtr<UWorld>` directly (the ownership chain may not resolve to a World yet) and calls `UCk_Utils_EntityScript_UE::Add()`. The client SpawnProcessor then runs with the replication block skipped, and the FinishConstruction processor broadcasts OnConstructed on the real entity, checks the lifetime owner for `FFragment_PendingReplication`, consumes the matching pending entity (FIFO by class), re-broadcasts OnConstructed on it with the real handle as payload, and destroys it.
+**Client (actorless scripts only; an Actor entity links through its bridge, § Actor entities):** the spawn call detects Replicated + Client net mode, creates a PENDING entity on the owner and returns a PendingEntityScript handle the caller binds `Promise_OnConstructed()` to. On receive, `OnRep_ReplicationData_EntityScript()` picks the lifetime owner (self-referencing → the transient entity, otherwise the replicated parent), adds `TWeakObjectPtr<UWorld>` directly (the ownership chain may not resolve to a World yet) and calls `UCk_Utils_EntityScript_UE::Add()`. The client SpawnProcessor then runs with the replication block skipped, and the FinishConstruction processor broadcasts OnConstructed on the real entity, checks the lifetime owner for `FFragment_PendingReplication`, consumes the matching pending entity (FIFO by class), re-broadcasts OnConstructed on it with the real handle as payload, and destroys it.
 
-**Add the OwningActor BEFORE any path that can add a driver.** A ReplicationDriver's Outer is chain-walked to a replicated actor AT ADD TIME, so if the spawn processor's pre-Construct pass added the driver before this entity owned an actor, it got Outer'd to an ancestor's actor. Adding the driver from `UCk_Utils_EntityBridge_UE::Add` (with this entity's actor available) gives the tightest Outer resolution.
+**Link the Actor BEFORE any path that can add a driver.** A ReplicationDriver's Outer is chain-walked to a replicated actor AT ADD TIME, so a driver added before this entity owned an actor would be Outer'd to an ancestor's actor. The spawn processor's admission gate links an Actor entity (`DoLink`) before its pre-Construct `TryAdd`, so the order holds by construction. The client receive path still uses pending-entity matching for actorless scripts; an Actor entity never does (`FProcessor_EntityScript_FinishConstruction` returns before the pending-replication block for a bridged entity).
 
 ### Replicated-object strong ownership
 
@@ -845,7 +884,7 @@ replication-correct.
 ### Replication-driver failure modes worth naming
 
 1. **Driver constructed with no UWorld.** `UCk_Fragment_EntityReplicationDriver_Rep::_AssociatedEntity` is created ONLY in the constructor, so a driver built on a client before its outer Actor had a UWorld stays permanently invalid; every child driver naming it as owner parks in `_PendingChildEntityConstructions` / `_PendingChildAbilityEntityConstructions`, which are never drained. Symptom: a silently-missing replicated subtree followed ~10s later by PendingReplicationRetry timeouts. Investigated 2026-06 — never reproduced across same-actor + cross-actor burst stress (see the EntityReplicationDriver.Net tests). The three OnRep park sites therefore log loudly rather than treating the state as a wait.
-2. **OnReplicationComplete fire-gate stall.** The dispatcher's 5s dev / 2s shipping timeout only bounds entries some dispatcher on this net mode actually drains. An entry NOTHING drains (e.g. `FTag_RepFragments_PendingApply` stamped on a world whose ClientOnly dispatcher never runs) held the gate FOREVER and silently hung every OnReplicationComplete consumer, including `Promise_OnActorEcsReady/ValuesReplicated` — found via the post-v3-load HUD hang, 2026-07-14. `FFragment_RepDriver_FireGateStall` now accumulates the held time and, past 10s, ensures naming the blocking entity.
+2. **OnReplicationComplete fire-gate stall.** The dispatcher's 5s dev / 2s shipping timeout only bounds entries some dispatcher on this net mode actually drains. An entry NOTHING drains (e.g. `FTag_RepFragments_PendingApply` stamped on a world whose ClientOnly dispatcher never runs) held the gate FOREVER and silently hung every OnReplicationComplete consumer, including a client replica's `Promise_OnEntityReady` — found via the post-v3-load HUD hang, 2026-07-14. `FFragment_RepDriver_FireGateStall` now accumulates the held time and, past 10s, ensures naming the blocking entity.
 
 ### Net ↔ Persistence split
 

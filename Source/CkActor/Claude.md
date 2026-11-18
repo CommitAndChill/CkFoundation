@@ -19,21 +19,19 @@ CkActor/Public/CkActor/
 
 ---
 
-## Owning actor pattern
+## Actor entity pattern
 
-Entities that are driven by an actor store an `FFragment_EntityBridge` fragment (defined in `CkEcs/OwningActor/`). `CkActor` extends this with actor-specific modifiers and tag associations.
+An entity that belongs to an Actor carries a `ck::FFragment_EntityBridge` fragment (defined in `CkEcs/EntityBridge/`), which holds the Actor's `UCk_EntityBridge_ActorComponent_UE`. `CkActor` extends this with actor-specific modifiers and tag associations.
 
-Typical creation pattern (through a feature module's Utils):
+Creation pattern (the only one; rules in `CkEcs/Claude.md` § Actor entities):
 
 ```cpp
-// 1. Spawn the entity
-auto EntityHandle = UCk_Utils_EntityLifetime_UE::Request_SpawnEntity(World, SpawnParams);
-
-// 2. Associate the actor (via CkEcsExt's EntityHolder or the OwningActor fragment)
-// The OwningActor fragment is set by the feature module's setup processor.
+// The Actor has a UCk_EntityBridge_ActorComponent_UE; its script derives UCk_EntityScript_WithActor_UE.
+// Called once, on every machine, from BeginPlay or later.
+EntityBridge->Request_SpawnLinkedEntity(UMy_EntityScript::StaticClass());
 ```
 
-Actor utilities (for getting the actor from an entity or vice versa) live in `CkCore/Actor/CkActor_Utils.h` and `CkEcs/OwningActor/`.
+Actor utilities (for getting the actor from an entity or vice versa) live in `CkCore/Actor/CkActor_Utils.h` and `CkEcs/EntityBridge/` (`UCk_Utils_EntityBridge_UE`).
 
 ---
 
@@ -45,12 +43,12 @@ Actor utilities (for getting the actor from an entity or vice versa) live in `Ck
 
 ## Anti-patterns
 
-1. Don't hold an `AActor*` raw pointer directly in a processor fragment — use `TStrongObjectPtr<AActor>` or route through the OwningActor fragment. Raw actor pointers can become stale during streaming.
-2. Don't assume every entity has an actor. ECS entities are independent of actors; only entities explicitly given an OwningActor fragment have one.
+1. Don't hold an `AActor*` raw pointer directly in a processor fragment — use `TStrongObjectPtr<AActor>` or route through the EntityBridge fragment. Raw actor pointers can become stale during streaming.
+2. Don't assume every entity has an actor. ECS entities are independent of actors; only entities linked through a Ck Entity Bridge have one.
 
 ---
 
 ## See also
 - `CkEcsExt/Claude.md` — EntityHolder lifecycle binding (actor destroyed → entity destroyed).
-- `CkEcs/Claude.md` — `FFragment_EntityBridge` in `CkEcs/OwningActor/`.
+- `CkEcs/Claude.md` — `FFragment_EntityBridge` in `CkEcs/EntityBridge/`, § Actor entities.
 - `CkCore/Actor/README.md` — `UCk_Utils_Actor_UE` spawn/find helpers.

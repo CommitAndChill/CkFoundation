@@ -34,7 +34,7 @@ A **Meta Fragment** is an entity whose handle is stored as a fragment on another
 
 ### EntityHolder
 
-Binds an `AActor`'s lifetime to an entity. When the actor is destroyed, the entity is automatically destroyed. When an entity exists without an actor owner, use `OwningActor/` fragments in `CkEcs` instead.
+Binds an `AActor`'s lifetime to an entity. When the actor is destroyed, the entity is automatically destroyed. To give an Actor its own entity, use the Ck Entity Bridge (`CkEcs/EntityBridge/`, `CkEcs/Claude.md` § Actor entities) instead.
 
 ### SceneNode
 
@@ -126,11 +126,11 @@ and a JoltBody both claim Jolt; two Sensors both claim Chaos) — only the cross
 
 ### Bridged actors after a snapshot restore — respawn, not rebind
 
-A restored bridged entity comes back with no live actor (the OwningActor + Transform-root links are not
+A restored bridged entity comes back with no live actor (the EntityBridge + Transform-root links are not
 persistable). The v3 loader's answer is **actor-first respawn**, not a rebind of the restored entity: it
 spawns a FRESH actor of `FFragment_ActorSpawnIntent`'s class at the saved transform (deferred, so the
-saved `UPROPERTY(SaveGame)` fields land before `BeginPlay`), and that actor's own `BeginPlay` re-runs
-`WithActor::Construct`, which composes the entity and links the bridge exactly as in a fresh world. The
+saved `UPROPERTY(SaveGame)` fields land before `BeginPlay`), and that actor's own `BeginPlay` calls
+`Request_SpawnLinkedEntity` again, which links the bridge and runs `WithActor::Construct` exactly as in a fresh world. The
 saved payloads then hydrate onto it. See `CkSnapshot/CLAUDE.md` § "The v3 load machine".
 
 Because Construct DOES re-run, actor-side wiring is rebuilt by the normal construction path and no
