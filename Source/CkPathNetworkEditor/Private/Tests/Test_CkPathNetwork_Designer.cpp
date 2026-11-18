@@ -371,6 +371,18 @@ bool FCk_PathNetworkEditor_Designer_FitLoadedWorldIgnoresLevelBoundsActor_Test::
     { return false; }
     ContentActor->SetActorLocation(FVector{1000.0, -2000.0, 300.0});
 
+    // Infrastructure a host's plugins spawn into every editor world is transient; a fixture copy far from the
+    // content makes the expectation hold whatever the host enables.
+    auto TransientSpawnParams = FActorSpawnParameters{};
+    TransientSpawnParams.ObjectFlags |= RF_Transient;
+    auto* TransientActor = World->SpawnActor<AActor>(AActor::StaticClass(), FTransform::Identity, TransientSpawnParams);
+    auto* TransientBounds = TransientActor != nullptr
+        ? ck::pathnetwork_editor::designer::test::Add_BoxBounds(*TransientActor, FVector{50.0, 50.0, 50.0})
+        : nullptr;
+    if (TransientBounds == nullptr)
+    { return false; }
+    TransientActor->SetActorLocation(FVector{-5000.0, 4000.0, 0.0});
+
     LevelBounds->bAutoUpdateBounds = false;
     LevelBounds->BoxComponent->SetRelativeScale3D(
         FVector{1397139.94, 1397139.94, 1397139.94});

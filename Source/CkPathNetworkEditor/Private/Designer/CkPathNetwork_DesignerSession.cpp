@@ -624,12 +624,15 @@ auto
         return false;
     }
 
+    // Transient actors are never saved, so they are not the level's content: engine and plugin infrastructure
+    // spawns them into every editor world (SmartObjects' rendering actor contributes a box at the origin).
     auto Bounds = FBox{ForceInit};
     for (TActorIterator<AActor> It{World}; It; ++It)
     {
         const auto* Actor = *It;
         if (ck::Is_NOT_Valid(Actor)
             || Actor->IsTemplate()
+            || Actor->HasAnyFlags(RF_Transient)
             || NOT Actor->IsLevelBoundsRelevant()
             || Actor->IsA<ACk_PathNetwork_UE>())
         { continue; }
