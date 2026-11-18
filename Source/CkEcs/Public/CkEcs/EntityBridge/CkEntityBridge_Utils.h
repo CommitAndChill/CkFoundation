@@ -137,15 +137,6 @@ public:
 
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Utils|EntityBridge",
-              DisplayName = "[Ck][EntityBridge] Promise On Entity Constructed",
-              meta = (DefaultToSelf = "InActor"))
-    static void
-    Promise_OnEntityConstructed(
-        AActor* InActor,
-        const FCk_Delegate_EntityScript_Constructed& InDelegate);
-
-    UFUNCTION(BlueprintCallable,
-              Category = "Ck|Utils|EntityBridge",
               DisplayName = "[Ck][EntityBridge] Promise On Entity Ready",
               meta = (DefaultToSelf = "InActor"))
     static void

@@ -464,18 +464,13 @@ class AMyActor : AActor
     UFUNCTION(BlueprintOverride)
     void BeginPlay()
     {
-        EntityBridge.Promise_OnEntityConstructed(FCk_Delegate_EntityScript_Constructed(this, n"OnEntityConstructed"));
         EntityBridge.Promise_OnEntityReady(FCk_Delegate_EntityBridge_OnEntityReady(this, n"OnEntityReady"));
         EntityBridge.Request_SpawnLinkedEntity(UMyActor_EntityScript);
     }
 
-    // Composed; on a client replica replicated values may NOT be applied yet.
-    // Bind signals, cache the handle. Do not add features here.
-    UFUNCTION()
-    private void OnEntityConstructed(FCk_Handle_EntityScript InEntity) {}
-
     // Script has begun play and (client replica) replicated values are applied.
-    // Read replicated state, show UI. Do not add features here.
+    // Cache the handle, bind signals, read replicated state, show UI.
+    // Do not add features here: compose in the script's DoConstruct.
     UFUNCTION()
     private void OnEntityReady(AActor InActor, FCk_Handle InEntity) {}
 }
@@ -483,7 +478,12 @@ class AMyActor : AActor
 class UMyActor_EntityScript : UCk_EntityScript_WithActor_UE
 {
     // Runs on every machine that has the Entity; compose it here.
-    // DoGet_Actor() is the linked Actor.
+    UFUNCTION(BlueprintOverride)
+    ECk_EntityScript_ConstructionFlow DoConstruct(FCk_Handle& InHandle)
+    {
+        auto Actor = Cast<AMyActor>(DoGet_Actor());   // the linked Actor
+        return ECk_EntityScript_ConstructionFlow::Finished;
+    }
 }
 
 // With spawn params (the authority's copy is the one clients receive; a client

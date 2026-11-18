@@ -51,8 +51,12 @@ auto CKECS_API GetTypeHash(const FCk_EntityBridge_BasicDetails& InBasicDetails) 
 UENUM(BlueprintType)
 enum class ECk_EntityBridge_State : uint8
 {
-    // Request_SpawnLinkedEntity has not been called and no replica has arrived.
+    // Request_SpawnLinkedEntity has not been called and no replica has arrived. A request refused or ignored (a world
+    // tearing down) also leaves this state.
     NotRequested,
+
+    // This machine's spawn is queued: the authority, or a local entity. The spawn processor links it next.
+    AwaitingSpawn,
 
     // Client of a replicated Actor: the request was acknowledged and the authority's entity has not arrived yet.
     AwaitingReplica,
@@ -102,7 +106,7 @@ protected:
 public:
     /** Gives this Actor its Entity, built by InEntityScriptClass. Call once, on every machine, from BeginPlay or any
      *  time after it. On a client of a replicated Actor the call is acknowledged and the authority's Entity is awaited
-     *  instead. The Entity arrives through Promise_OnEntityConstructed / Promise_OnEntityReady. */
+     *  instead. The Entity arrives through Promise_OnEntityReady. */
     UFUNCTION(BlueprintCallable,
               Category = "Ck|EntityBridge",
               DisplayName = "[Ck][EntityBridge] Request Spawn Linked Entity")
@@ -120,18 +124,9 @@ public:
         TSubclassOf<UCk_EntityScript_UE> InEntityScriptClass,
         FInstancedStruct InSpawnParams);
 
-    /** Fires once when the Entity's script has finished construction (the Entity's OnConstructed signal):
-     *  the Entity is composed, replicated values may NOT be applied yet. Bind signals here. Fires
-     *  immediately when bound after the fact. */
-    UFUNCTION(BlueprintCallable,
-              Category = "Ck|EntityBridge",
-              DisplayName = "[Ck][EntityBridge] Promise On Entity Constructed")
-    void
-    Promise_OnEntityConstructed(
-        const FCk_Delegate_EntityScript_Constructed& InDelegate);
-
     /** Fires once when the Entity is Ready: its script has begun play and, on a client replica, replicated
-     *  values have been applied. Read replicated state here. Fires immediately when bound after the fact. */
+     *  values have been applied. Cache the handle, bind signals and read replicated state here; the entity's
+     *  features are composed by its script's DoConstruct, never here. Fires immediately when bound after the fact. */
     UFUNCTION(BlueprintCallable,
               Category = "Ck|EntityBridge",
               DisplayName = "[Ck][EntityBridge] Promise On Entity Ready")
@@ -169,14 +164,14 @@ private:
     FCk_Handle _Entity;
     ECk_EntityBridge_State _State = ECk_EntityBridge_State::NotRequested;
     // Set while a request stands. An optional, not a null weak pointer: a class reloaded or collected after the request
-    // must not read as "never requested".
+    // must not read as "never requested". Every state but NotRequested implies it is set, not the reverse: a request
+    // ignored while the world tears down is recorded here and spawns nothing.
     TOptional<TWeakObjectPtr<UClass>> _RequestedEntityScriptClass;
     bool _EntityHasBegunPlay = false;
     bool _ReplicationCompleteTrampolineBound = false;
 
     // Promises queued before their moment. Living on the component means they are discarded with the Actor.
     TArray<TFunction<void(AActor*, FCk_Handle)>> _PendingLinked_Callbacks;
-    TArray<FCk_Delegate_EntityScript_Constructed> _PendingConstructed_Delegates;
     TArray<FCk_Delegate_EntityBridge_OnEntityReady> _PendingReady_Delegates;
     TArray<TFunction<void(AActor*, FCk_Handle)>> _PendingReady_Callbacks;
 

@@ -256,26 +256,6 @@ auto
 
 auto
     UCk_Utils_EntityBridge_UE::
-    Promise_OnEntityConstructed(
-        AActor* InActor,
-        const FCk_Delegate_EntityScript_Constructed& InDelegate)
-    -> void
-{
-    CK_ENSURE_IF_NOT(ck::IsValid(InActor), TEXT("Promise_OnEntityConstructed called with an invalid Actor"))
-    { return; }
-
-    auto* Bridge = TryGet_Bridge(InActor);
-
-    CK_ENSURE_IF_NOT(ck::IsValid(Bridge),
-        TEXT("Promise_OnEntityConstructed called on Actor [{}], which has no Ck Entity Bridge. Its Entity can never arrive."),
-        InActor)
-    { return; }
-
-    Bridge->Promise_OnEntityConstructed(InDelegate);
-}
-
-auto
-    UCk_Utils_EntityBridge_UE::
     Promise_OnEntityReady(
         AActor* InActor,
         const FCk_Delegate_EntityBridge_OnEntityReady& InDelegate)
@@ -413,14 +393,6 @@ auto
     {
         Callback(Actor, InEntity);
     }
-
-    const auto PendingConstructedDelegates = MoveTemp(InBridge->_PendingConstructed_Delegates);
-    InBridge->_PendingConstructed_Delegates.Reset();
-
-    for (const auto& Delegate : PendingConstructedDelegates)
-    {
-        ck::UUtils_Signal_OnConstructed_PostFireUnbind::Bind(InEntity, Delegate, ECk_Signal_BindingPolicy::FireIfPayloadInFlight);
-    }
 }
 
 auto
@@ -430,6 +402,7 @@ auto
     -> void
 {
     InBridge->_RequestedEntityScriptClass.Reset();
+    InBridge->_State = ECk_EntityBridge_State::NotRequested;
 }
 
 auto

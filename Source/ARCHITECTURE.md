@@ -752,7 +752,7 @@ taught these but they exist nowhere in Source. The real API is `UCk_Utils_Entity
   / `TryGet_Actor_Recursive(InHandle)` (:78); nearest bridged entity up the ownership chain:
   `TryGet_BridgedEntity_InOwnershipChain(InHandle)` (:53)
 - Readiness: `Get_HasEntity(InActor)` (:126), `Get_IsEntityReady(InActor)` (:135),
-  `Promise_OnEntityConstructed(InActor, InDelegate)` (:143), `Promise_OnEntityReady(InActor, InDelegate)` (:152)
+  `Promise_OnEntityReady(InActor, InDelegate)` (:143)
 
 An Actor gets its entity only through `UCk_EntityBridge_ActorComponent_UE::Request_SpawnLinkedEntity`
 (`CkEntityBridge_Fragment_Data.h`); rules in [CkEcs/Claude.md](CkEcs/Claude.md) § Actor entities.

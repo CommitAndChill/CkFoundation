@@ -56,25 +56,6 @@ auto
 
 auto
     UCk_EntityBridge_ActorComponent_UE::
-    Promise_OnEntityConstructed(
-        const FCk_Delegate_EntityScript_Constructed& InDelegate)
-    -> void
-{
-    CK_ENSURE_IF_NOT(InDelegate.IsBound(),
-        TEXT("Promise_OnEntityConstructed called with an unbound delegate on the Ck Entity Bridge of [{}]"), GetOwner())
-    { return; }
-
-    if (ck::IsValid(_Entity))
-    {
-        ck::UUtils_Signal_OnConstructed_PostFireUnbind::Bind(_Entity, InDelegate, ECk_Signal_BindingPolicy::FireIfPayloadInFlight);
-        return;
-    }
-
-    _PendingConstructed_Delegates.Emplace(InDelegate);
-}
-
-auto
-    UCk_EntityBridge_ActorComponent_UE::
     Promise_OnEntityReady(
         const FCk_Delegate_EntityBridge_OnEntityReady& InDelegate)
     -> void
@@ -201,6 +182,9 @@ auto
         _RequestedEntityScriptClass.Reset();
         return {};
     }
+
+    if (_State == ECk_EntityBridge_State::NotRequested)
+    { _State = ECk_EntityBridge_State::AwaitingSpawn; }
 
     return NewEntity;
 }

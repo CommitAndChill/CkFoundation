@@ -815,7 +815,7 @@ An Actor gets its entity through one door, the Ck Entity Bridge (`CkEcs/EntityBr
 `utils_entity_bridge::`). Authoring rules:
 
 1. To give an Actor an entity: add `UCk_EntityBridge_ActorComponent_UE`, write a script class deriving from
-   `UCk_EntityScript_WithActor_UE` (CkEcsExt), and call `Request_SpawnLinkedEntity(Class)` (or
+   `UCk_EntityScript_WithActor_UE` (CkEcsExt; an Actor whose entity composes nothing requests that class itself), and call `Request_SpawnLinkedEntity(Class)` (or
    `Request_SpawnLinkedEntity_WithParams(Class, FInstancedStruct)`) once, from `BeginPlay` or any time later, on
    every machine. Nothing else links an Actor to an entity: the spawn processor refuses an actor-bound script
    (`Get_IsActorBound()`) that did not come through a bridge, `Request_SpawnEntity` and `Add` refuse one up front
@@ -824,30 +824,32 @@ An Actor gets its entity through one door, the Ck Entity Bridge (`CkEcs/EntityBr
    a spawn whose script cannot be created (an exhausted pool) links nothing and the bridge accepts a new request.
 2. The script's `DoConstruct` composes the entity. It runs on every machine that has the entity. It reaches its
    Actor with `DoGet_Actor()`; the Actor is resolved from the link in `Construct`, it is not a spawn param.
-3. `Promise_OnEntityConstructed`: bind signals, cache the handle. `Promise_OnEntityReady`: read replicated state,
-   show UI. Do not add features to the entity from either.
+3. `Promise_OnEntityReady`: cache the handle, bind signals, read replicated state, show UI. Do not add features to
+   the entity from it: on a client replica Ready waits for replicated values, and those wait for the feature they
+   belong to, so a feature added there would stall the entity (composition belongs in `DoConstruct`, rule 2).
 4. An Actor entity replicates when the Actor replicates and the script's `_Replication` is `Replicates` (the
    default). For a local entity on a replicated Actor, set `_Replication = ECk_Replication::DoesNotReplicate` on
    the script.
 5. A value clients need at construction travels in spawn params (the authority's copy is the one clients receive)
    or is a replicated Actor property. A generated params struct is passed as `FInstancedStruct::Make(X::Params(...))`.
-6. Another Actor's entity: `UCk_Utils_EntityBridge_UE::Promise_OnEntityReady(OtherActor, Delegate)` (or
-   `Promise_OnEntityConstructed`). The other Actor must have a bridge; promising on an Actor without one is an
-   ensure.
+6. Another Actor's entity: `UCk_Utils_EntityBridge_UE::Promise_OnEntityReady(OtherActor, Delegate)`. The other
+   Actor must have a bridge; promising on an Actor without one is an ensure.
 
-The two promises fire once per machine, immediately when bound after the fact, and are discarded with the Actor.
-What each machine sees:
+The promise fires once per machine, immediately when bound after the fact, and is discarded with the Actor. What
+each machine sees:
 
-| Machine | `Promise_OnEntityConstructed` | `Promise_OnEntityReady` |
-|---|---|---|
-| Host / standalone | The script finished construction (`OnConstructed`): the entity is composed. | After the script's `BeginPlay`. |
-| Client replica | The replica finished construction; replicated values may NOT be applied yet. | Script `BeginPlay` + `OnReplicationComplete`, whichever is later. |
-| Client, local entity | The script finished construction. | After the script's `BeginPlay`. |
+| Machine | `Promise_OnEntityReady` |
+|---|---|
+| Host / standalone | After the script's `BeginPlay`. |
+| Client replica | Script `BeginPlay` + `OnReplicationComplete`, whichever is later. |
+| Client, local entity | After the script's `BeginPlay`. |
 
-Both run synchronously inside the processor that reaches the moment. A script whose `Construct` returns
-`Continue` and never calls `DoFinishConstruction` never reaches `BeginPlay`, so its Actor is never Constructed
-and never Ready; `ck.EntityBridge.DumpNotReady` logs every bridge in a game world whose entity is not Ready, with
-its `ECk_EntityBridge_State` (`NotRequested`, `AwaitingReplica`, `Linked`, `Ready`) and construction stage.
+It runs synchronously inside the processor that reaches the moment. A script whose `Construct` returns
+`Continue` and never calls `DoFinishConstruction` never reaches `BeginPlay`, so its Actor is never Ready;
+`ck.EntityBridge.DumpNotReady` logs every bridge in a game world whose entity is not Ready, with its
+`ECk_EntityBridge_State` (`NotRequested`, `AwaitingSpawn`, `AwaitingReplica`, `Linked`, `Ready`) and construction
+stage. `AwaitingSpawn` is this machine's own queued spawn (the authority, or a local entity); `AwaitingReplica` is a
+client waiting for the authority's entity. The state is per machine; the bridge does not replicate.
 For a poll, `Get_HasEntity` means linked and `Get_IsEntityReady` means Ready; a poll that must not wait on
 anything a load freezes reads `Get_HasEntity`. `Promise_OnEntityLinked` (C++ only, framework-internal) fires at
 the link itself, before the script's `Construct`, for code that must stamp the entity before anything observes it.

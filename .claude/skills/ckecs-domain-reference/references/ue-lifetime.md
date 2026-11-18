@@ -34,7 +34,7 @@ you have is "some handle".
 | Actor → entity | `Get_Entity(InActor)` / `TryGet_Entity(InActor)` | `:97-111` |
 | Entity → actor | `Get_Actor(InHandle)` / `TryGet_Actor(InHandle)` | `:57-71` |
 | Entity → actor, walk owners | `TryGet_Actor_Recursive(InHandle)` | `:73-79` |
-| Bridge readiness | `Get_HasEntity(InActor)`, `Get_IsEntityReady(InActor)`, `Promise_OnEntityConstructed` / `Promise_OnEntityReady(InActor, InDelegate)` | `:113-128` |
+| Bridge readiness | `Get_HasEntity(InActor)`, `Get_IsEntityReady(InActor)`, `Promise_OnEntityReady(InActor, InDelegate)` | `:126-150` |
 
 The three environments (root non-negotiable #4):
 
