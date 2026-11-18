@@ -818,8 +818,10 @@ An Actor gets its entity through one door, the Ck Entity Bridge (`CkEcs/EntityBr
    `UCk_EntityScript_WithActor_UE` (CkEcsExt), and call `Request_SpawnLinkedEntity(Class)` (or
    `Request_SpawnLinkedEntity_WithParams(Class, FInstancedStruct)`) once, from `BeginPlay` or any time later, on
    every machine. Nothing else links an Actor to an entity: the spawn processor refuses an actor-bound script
-   (`Get_IsActorBound()`) that did not come through a bridge, `Request_SpawnEntity` refuses one up front, and a
-   bridge refuses a script that is not actor-bound.
+   (`Get_IsActorBound()`) that did not come through a bridge, `Request_SpawnEntity` and `Add` refuse one up front
+   (before the caller's entity is touched), and a bridge refuses a script that is not actor-bound. An Actor has one
+   bridge: a request on an Actor carrying two is refused. The entity is linked only once its script object exists, so
+   a spawn whose script cannot be created (an exhausted pool) links nothing and the bridge accepts a new request.
 2. The script's `DoConstruct` composes the entity. It runs on every machine that has the entity. It reaches its
    Actor with `DoGet_Actor()`; the Actor is resolved from the link in `Construct`, it is not a spawn param.
 3. `Promise_OnEntityConstructed`: bind signals, cache the handle. `Promise_OnEntityReady`: read replicated state,

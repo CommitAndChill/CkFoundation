@@ -206,6 +206,11 @@ private:
         FCk_Handle& InEntity,
         UCk_EntityBridge_ActorComponent_UE* InBridge) -> void;
 
+    // The spawn processor could not build the requested entity: the bridge accepts a new request.
+    static auto
+    DoRelease_Request(
+        UCk_EntityBridge_ActorComponent_UE* InBridge) -> void;
+
     static auto
     DoNotify_EntityBegunPlay(
         const FCk_Handle& InEntity) -> void;

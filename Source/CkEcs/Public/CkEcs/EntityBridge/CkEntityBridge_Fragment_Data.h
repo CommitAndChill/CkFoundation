@@ -7,6 +7,7 @@
 #include "CkEcs/EntityScript/CkEntityScript_Fragment_Data.h"
 #include "CkEcs/Handle/CkHandle.h"
 
+#include <Misc/Optional.h>
 #include <StructUtils/InstancedStruct.h>
 
 #include "CkEntityBridge_Fragment_Data.generated.h"
@@ -156,6 +157,9 @@ private:
         TSubclassOf<UCk_EntityScript_UE> InEntityScriptClass,
         const FInstancedStruct& InSpawnParams) -> FCk_Handle;
 
+    auto
+    Get_HasRequested() const -> bool;
+
     UFUNCTION()
     void
     DoHandle_EntityReplicationComplete(
@@ -164,8 +168,9 @@ private:
 private:
     FCk_Handle _Entity;
     ECk_EntityBridge_State _State = ECk_EntityBridge_State::NotRequested;
-    TWeakObjectPtr<UClass> _RequestedEntityScriptClass;
-    bool _HasRequested = false;
+    // Set while a request stands. An optional, not a null weak pointer: a class reloaded or collected after the request
+    // must not read as "never requested".
+    TOptional<TWeakObjectPtr<UClass>> _RequestedEntityScriptClass;
     bool _EntityHasBegunPlay = false;
     bool _ReplicationCompleteTrampolineBound = false;
 

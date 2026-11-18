@@ -189,13 +189,17 @@ namespace ck
                  "IsActorBound [{}], RequestedThroughBridge [{}]"),
             EntityScriptClassArchetype, IsActorBoundScript, WasRequestedThroughBridge)
         {
-            DoCancel_NewEntity(InRequest);
+            // Only a bridge's request carries an entity the request created; a plain Add targets the caller's own.
+            if (WasRequestedThroughBridge)
+            { DoCancel_NewEntity(InRequest); }
+
             return;
         }
 
+        auto* Bridge = IsActorBoundScript ? InRequest.Get_Bridge().Get() : nullptr;
+
         if (IsActorBoundScript)
         {
-            const auto Bridge = InRequest.Get_Bridge().Get();
             const auto BoundActor = ck::IsValid(Bridge) ? Bridge->GetOwner() : static_cast<AActor*>(nullptr);
 
             if (ck::Is_NOT_Valid(BoundActor) || BoundActor->IsActorBeingDestroyed())
@@ -218,9 +222,6 @@ namespace ck
 
                 return;
             }
-
-            auto EntityToLink = InRequest.Get_NewEntity();
-            UCk_Utils_EntityBridge_UE::DoLink(EntityToLink, Bridge);
         }
 
         const auto& NewEntityScript = [&]() -> UCk_EntityScript_UE*
@@ -270,7 +271,23 @@ namespace ck
 
         CK_ENSURE_IF_NOT(ck::IsValid(NewEntityScript),
             TEXT("Failed to Spawn New Entity using EntityScript [{}]"), EntityScriptClassArchetype)
-        { return; }
+        {
+            // The bridge's entity was never linked; drop it and let the Actor request again.
+            if (ck::IsValid(Bridge))
+            {
+                DoCancel_NewEntity(InRequest);
+                UCk_Utils_EntityBridge_UE::DoRelease_Request(Bridge);
+            }
+
+            return;
+        }
+
+        // Linked only once the script exists, so a link always leads to a Construct.
+        if (ck::IsValid(Bridge))
+        {
+            auto EntityToLink = InRequest.Get_NewEntity();
+            UCk_Utils_EntityBridge_UE::DoLink(EntityToLink, Bridge);
+        }
 
         if (const auto& SpawnParams = InRequest.Get_SpawnParams();
             ck::IsValid(SpawnParams))

@@ -421,6 +421,15 @@ auto
         TEXT("Entity [{}] ALREADY has an EntityScript"), InScriptEntity)
     { return {}; }
 
+    CK_ENSURE_IF_NOT(InEntityScriptClassArchetype->Get_IsActorBound() == ck::IsValid(InBridge),
+        TEXT("EntityScript [{}] cannot be added to Entity [{}] this way. An actor-bound EntityScript is added only by "
+             "UCk_EntityBridge_ActorComponent_UE::Request_SpawnLinkedEntity, and a bridge adds only actor-bound ones"),
+        InEntityScriptClassArchetype, InScriptEntity)
+    {
+        InDelegate.ExecuteIfBound(InScriptEntity, ECk_Request_OperationResult::Failed_NotEnqueued);
+        return {};
+    }
+
     UCk_Utils_Handle_UE::Set_DebugName(InScriptEntity, *ck::Format_UE(TEXT("{}"), InEntityScriptClassArchetype));
 
     // Derive Net_Params from the archetype's effective replication intent combined with the TransientEntity's

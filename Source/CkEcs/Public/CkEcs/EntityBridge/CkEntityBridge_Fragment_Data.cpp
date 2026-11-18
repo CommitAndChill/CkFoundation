@@ -126,20 +126,31 @@ auto
         TEXT("[{}] is not an actor-bound EntityScript; derive it from UCk_EntityScript_WithActor_UE"), InEntityScriptClass)
     { return {}; }
 
-    CK_ENSURE_IF_NOT(NOT _HasRequested,
+    CK_ENSURE_IF_NOT(NOT Get_HasRequested(),
         TEXT("Request_SpawnLinkedEntity called more than once on [{}]"), GetOwner())
     { return {}; }
 
     auto* Owner = GetOwner();
-    auto* World = ck::IsValid(Owner) ? Owner->GetWorld() : static_cast<UWorld*>(nullptr);
+
+    CK_ENSURE_IF_NOT(ck::IsValid(Owner),
+        TEXT("Request_SpawnLinkedEntity on a Ck Entity Bridge [{}] that has no owning Actor"), this)
+    { return {}; }
+
+    // Everything that resolves an Actor's Entity finds the Actor's first bridge, so a second one would split it.
+    auto Bridges = TInlineComponentArray<UCk_EntityBridge_ActorComponent_UE*>{Owner};
+    CK_ENSURE_IF_NOT(Bridges.Num() == 1,
+        TEXT("Actor [{}] has [{}] Ck Entity Bridges; an Actor has exactly one Entity, so it may have only one bridge"),
+        Owner, Bridges.Num())
+    { return {}; }
+
+    auto* World = Owner->GetWorld();
     auto TransientEntity = ck::IsValid(World) ? UCk_Utils_EcsWorld_Subsystem_UE::Get_TransientEntity(World) : FCk_Handle{};
 
     CK_ENSURE_IF_NOT(ck::IsValid(TransientEntity),
         TEXT("Request_SpawnLinkedEntity on [{}] was called before the ECS world exists; call it from BeginPlay or later"), Owner)
     { return {}; }
 
-    _HasRequested = true;
-    _RequestedEntityScriptClass = InEntityScriptClass.Get();
+    _RequestedEntityScriptClass.Emplace(InEntityScriptClass.Get());
 
     if (const auto* EcsWorld = World->GetSubsystem<UCk_EcsWorld_Subsystem_UE>();
         ck::IsValid(EcsWorld) && EcsWorld->Get_LoadHold() == ECk_EcsWorld_LoadHold::Teardown)
@@ -187,11 +198,19 @@ auto
         ck::Is_NOT_Valid(PendingEntity))
     {
         UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(NewEntity);
-        _HasRequested = false;
+        _RequestedEntityScriptClass.Reset();
         return {};
     }
 
     return NewEntity;
+}
+
+auto
+    UCk_EntityBridge_ActorComponent_UE::
+    Get_HasRequested() const
+    -> bool
+{
+    return _RequestedEntityScriptClass.IsSet();
 }
 
 auto

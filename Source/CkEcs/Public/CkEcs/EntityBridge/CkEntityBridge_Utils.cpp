@@ -62,8 +62,10 @@ namespace ck_entity_bridge_utils
                     ? Get_ConstructionStageText(Entity)
                     : FString{};
 
+                const auto* RequestedClass = Bridge->Get_RequestedEntityScriptClass().Get(nullptr).Get();
+
                 ck::ecs::Display(TEXT("[EntityBridge] Actor [{}] State [{}] EntityScript [{}] Entity [{}] Stages [{}]"),
-                    Bridge->GetOwner(), Bridge->Get_State(), Bridge->Get_RequestedEntityScriptClass().Get(), Entity, StageText);
+                    Bridge->GetOwner(), Bridge->Get_State(), RequestedClass, Entity, StageText);
             }
         }));
 }
@@ -419,6 +421,15 @@ auto
     {
         ck::UUtils_Signal_OnConstructed_PostFireUnbind::Bind(InEntity, Delegate, ECk_Signal_BindingPolicy::FireIfPayloadInFlight);
     }
+}
+
+auto
+    UCk_Utils_EntityBridge_UE::
+    DoRelease_Request(
+        UCk_EntityBridge_ActorComponent_UE* InBridge)
+    -> void
+{
+    InBridge->_RequestedEntityScriptClass.Reset();
 }
 
 auto
