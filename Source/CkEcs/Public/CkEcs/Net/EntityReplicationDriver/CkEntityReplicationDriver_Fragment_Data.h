@@ -4,6 +4,7 @@
 #include "CkCore/Types/DataAsset/CkDataAsset.h"
 
 #include "CkEcs/Entity/CkEntity.h"
+#include "CkEcs/EntityConstructionScript/CkEntity_ConstructionScript.h"
 #include "CkEcs/Handle/CkHandle.h"
 #include "CkEcs/EntityScript/CkEntityScript.h"
 #include "CkEcs/Request/CkRequest_Data.h"
