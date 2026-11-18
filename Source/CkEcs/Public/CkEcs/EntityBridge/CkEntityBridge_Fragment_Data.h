@@ -77,21 +77,6 @@ DECLARE_DYNAMIC_DELEGATE_TwoParams(
 
 // --------------------------------------------------------------------------------------------------------------------
 
-// Controls when Promise_OnActorEcsReady fires.
-UENUM(BlueprintType)
-enum class ECk_ActorEcsReady_Policy : uint8
-{
-    // Fire once the Entity is Ready.
-    ValuesReplicated,
-
-    // Fire as soon as the Actor and Entity are linked, before the script's Construct runs.
-    LinkEstablished,
-};
-
-CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_ActorEcsReady_Policy);
-
-// --------------------------------------------------------------------------------------------------------------------
-
 UCLASS(BlueprintType, ClassGroup = "Ck",
        meta = (BlueprintSpawnableComponent, DisplayName = "Ck Entity Bridge"))
 class CKECS_API UCk_EntityBridge_ActorComponent_UE
@@ -104,7 +89,6 @@ public:
 
 public:
     friend class UCk_Utils_EntityBridge_UE;
-    friend class UCk_Utils_EntityScript_WithActor_UE;
 
 public:
     UCk_EntityBridge_ActorComponent_UE();

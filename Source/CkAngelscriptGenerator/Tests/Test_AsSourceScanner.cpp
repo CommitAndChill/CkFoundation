@@ -231,17 +231,10 @@ bool FCkTest_AsSourceScanner_ScanShape_CppBoundary::RunTest(const FString&)
             Shape.FlattenedProperties[Index].Name, CppProps[Index]->GetName());
     }
 
-    const auto OwningActorIndex = Shape.FlattenedProperties.IndexOfByPredicate(
+    const auto ActorIndex = Shape.FlattenedProperties.IndexOfByPredicate(
         [](const FCk_AsExposedProperty& InProperty)
-        { return InProperty.Name == TEXT("_OwningActor"); });
-    TestTrue(TEXT("C++ boundary includes _OwningActor"), OwningActorIndex != INDEX_NONE);
-    if (OwningActorIndex != INDEX_NONE)
-    {
-        TestEqual(
-            TEXT("self-heal C++ boundary uses the retained weak actor shape"),
-            Shape.FlattenedProperties[OwningActorIndex].TypeText,
-            FString{TEXT("const TWeakObjectPtr<AActor>")});
-    }
+        { return InProperty.Name == TEXT("_OwningActor") || InProperty.Name == TEXT("_Actor"); });
+    TestTrue(TEXT("C++ boundary no longer exposes the WithActor script's Actor on spawn"), ActorIndex == INDEX_NONE);
     TestEqual(TEXT("own prop last"),
         Shape.FlattenedProperties.Last().Name, FString{TEXT("OwnTag")});
 

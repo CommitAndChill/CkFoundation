@@ -7,7 +7,7 @@
 
 // --------------------------------------------------------------------------------------------------------------------
 
-UCLASS(Blueprintable, BlueprintType, meta=(CkSpawnParams="FCk_EntityScript_WithActor_SpawnParams"))
+UCLASS(Blueprintable, BlueprintType)
 class CKECSEXT_API UCk_EntityScript_WithActor_UE : public UCk_GenericEntityScript_UE
 {
     GENERATED_BODY()
@@ -36,18 +36,17 @@ public:
 protected:
     UFUNCTION(BlueprintPure,
         Category = "Ck|EntityScript|WithActor",
-        DisplayName = "[Ck][EntityScript] Get Owning Actor",
-        meta = (CompactNodeTitle="OwningActor", HideSelfPin = true))
+        DisplayName = "[Ck][EntityScript] Get Actor",
+        meta = (CompactNodeTitle="Actor", HideSelfPin = true))
     AActor*
-    DoGet_OwningActor() const;
+    DoGet_Actor() const;
 
 private:
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
-              meta = (ExposeOnSpawn = true, AllowPrivateAccess = true))
-    TObjectPtr<AActor> _OwningActor;
+    UPROPERTY(Transient)
+    TObjectPtr<AActor> _Actor;
 
 public:
-    CK_PROPERTY_GET(_OwningActor);
+    CK_PROPERTY_GET(_Actor);
 };
 
 // --------------------------------------------------------------------------------------------------------------------

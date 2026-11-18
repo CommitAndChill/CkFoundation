@@ -55,7 +55,7 @@ namespace ck
                 CK_TRIGGER_ENSURE(TEXT("OnReplicationComplete for [{}] has been gate-held for over [{}]s by [{}] "
                     "(PendingApply [{}], PendingHydration [{}]) — an undrained entry no dispatcher on this net mode "
                     "drains. Every consumer awaiting OnReplicationComplete on this entity (e.g. "
-                    "Promise_OnActorEcsReady/ValuesReplicated) will never fire."),
+                    "UCk_EntityBridge_ActorComponent_UE::Promise_OnEntityReady) will never fire."),
                     InHandle, StallReportThresholdSeconds, Blocker, BlockedByPendingApply, BlockedByPendingHydration);
             }
             return;

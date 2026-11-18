@@ -17,7 +17,6 @@ namespace ck
 }
 
 class UCk_Fragment_EntityReplicationDriver_Rep;
-class UCk_Utils_EntityScript_WithActor_UE;
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -154,16 +153,6 @@ public:
         AActor* InActor,
         const FCk_Delegate_EntityBridge_OnEntityReady& InDelegate);
 
-    UFUNCTION(BlueprintCallable,
-              DisplayName = "[Ck][EntityBridge] Promise/Future On Actor Ecs Ready",
-              Category = "Ck|Utils|EntityBridge",
-              meta = (DefaultToSelf = "InActor", Keywords = "bind, wait, when, ready, ecs, future, replicated"))
-    static void
-    Promise_OnActorEcsReady(
-        AActor* InActor,
-        const FCk_Delegate_EntityBridge_OnEntityReady& InDelegate,
-        ECk_ActorEcsReady_Policy InPolicy = ECk_ActorEcsReady_Policy::ValuesReplicated);
-
 public:
     // C++ only.
     static auto
@@ -177,12 +166,6 @@ public:
     Promise_OnEntityLinked(
         AActor* InActor,
         TFunction<void(AActor*, FCk_Handle)> InCallback) -> void;
-
-    static void
-    Promise_OnActorEcsReady(
-        AActor* InActor,
-        TFunction<void(AActor*, FCk_Handle)> InCallback,
-        ECk_ActorEcsReady_Policy InPolicy = ECk_ActorEcsReady_Policy::ValuesReplicated);
 
 public:
     UFUNCTION(BlueprintPure,
@@ -217,8 +200,7 @@ private:
     friend class ck::FProcessor_EntityScript_BeginPlay;
     friend class UCk_EntityBridge_ActorComponent_UE;
     friend class UCk_Fragment_EntityReplicationDriver_Rep;
-    friend class UCk_Utils_EntityScript_WithActor_UE;
-
+    friend 
     static auto
     DoLink(
         FCk_Handle& InEntity,
@@ -240,11 +222,6 @@ private:
     DoBind_ReplicationCompleteTrampoline(
         UCk_EntityBridge_ActorComponent_UE* InBridge,
         const FCk_Handle& InEntity) -> void;
-
-    // The bridge an older entry point adds for an Actor that predates it; requests are made by that entry point.
-    static auto
-    DoGetOrAdd_Bridge(
-        AActor* InActor) -> UCk_EntityBridge_ActorComponent_UE*;
 };
 
 // --------------------------------------------------------------------------------------------------------------------

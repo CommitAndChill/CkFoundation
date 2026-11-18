@@ -1,7 +1,5 @@
 #include "CkEntityBridge_Utils.h"
 
-#include "CkCore/Actor/CkActor_Utils.h"
-
 #include "CkEcs/CkEcsLog.h"
 
 #include "CkEcs/EntityBridge/CkEntityBridge_Fragment.h"
@@ -356,81 +354,6 @@ auto
 
 auto
     UCk_Utils_EntityBridge_UE::
-    Promise_OnActorEcsReady(
-        AActor* InActor,
-        const FCk_Delegate_EntityBridge_OnEntityReady& InDelegate,
-        ECk_ActorEcsReady_Policy InPolicy)
-    -> void
-{
-    CK_ENSURE_IF_NOT(ck::IsValid(InActor), TEXT("Promise_OnActorEcsReady called with an invalid Actor"))
-    { return; }
-
-    CK_ENSURE_IF_NOT(InDelegate.IsBound(),
-        TEXT("Promise_OnActorEcsReady called with an unbound delegate for Actor [{}]"), InActor)
-    { return; }
-
-    if (ck::Is_NOT_Valid(DoGetOrAdd_Bridge(InActor)))
-    { return; }
-
-    switch (InPolicy)
-    {
-        case ECk_ActorEcsReady_Policy::LinkEstablished:
-        {
-            Promise_OnEntityLinked(InActor, [InDelegate](AActor* InLinkedActor, FCk_Handle InEntity)
-            {
-                InDelegate.ExecuteIfBound(InLinkedActor, InEntity);
-            });
-            break;
-        }
-        case ECk_ActorEcsReady_Policy::ValuesReplicated:
-        {
-            Promise_OnEntityReady(InActor, InDelegate);
-            break;
-        }
-        default:
-        {
-            CK_INVALID_ENUM(InPolicy);
-            break;
-        }
-    }
-}
-
-auto
-    UCk_Utils_EntityBridge_UE::
-    Promise_OnActorEcsReady(
-        AActor* InActor,
-        TFunction<void(AActor*, FCk_Handle)> InCallback,
-        ECk_ActorEcsReady_Policy InPolicy)
-    -> void
-{
-    CK_ENSURE_IF_NOT(ck::IsValid(InActor), TEXT("Promise_OnActorEcsReady called with an invalid Actor"))
-    { return; }
-
-    if (ck::Is_NOT_Valid(DoGetOrAdd_Bridge(InActor)))
-    { return; }
-
-    switch (InPolicy)
-    {
-        case ECk_ActorEcsReady_Policy::LinkEstablished:
-        {
-            Promise_OnEntityLinked(InActor, MoveTemp(InCallback));
-            break;
-        }
-        case ECk_ActorEcsReady_Policy::ValuesReplicated:
-        {
-            Promise_OnEntityReady(InActor, MoveTemp(InCallback));
-            break;
-        }
-        default:
-        {
-            CK_INVALID_ENUM(InPolicy);
-            break;
-        }
-    }
-}
-
-auto
-    UCk_Utils_EntityBridge_UE::
     IsEqual(
         const FCk_EntityBridge_BasicDetails& InBasicDetailsA,
         const FCk_EntityBridge_BasicDetails& InBasicDetailsB)
@@ -589,30 +512,6 @@ auto
     UCk_Utils_EntityReplicationDriver_UE::Promise_OnReplicationComplete(Entity, Delegate);
 
     InBridge->_ReplicationCompleteTrampolineBound = true;
-}
-
-auto
-    UCk_Utils_EntityBridge_UE::
-    DoGetOrAdd_Bridge(
-        AActor* InActor)
-    -> UCk_EntityBridge_ActorComponent_UE*
-{
-    if (auto* ExistingBridge = TryGet_Bridge(InActor);
-        ck::IsValid(ExistingBridge))
-    { return ExistingBridge; }
-
-    auto* NewBridge = UCk_Utils_Actor_UE::Request_AddNewActorComponent<UCk_EntityBridge_ActorComponent_UE>
-    (
-        UCk_Utils_Actor_UE::AddNewActorComponent_Params<UCk_EntityBridge_ActorComponent_UE>
-        {
-            InActor,
-        }
-    );
-
-    CK_ENSURE_IF_NOT(ck::IsValid(NewBridge), TEXT("Failed to add a Ck Entity Bridge to Actor [{}]"), InActor)
-    { return {}; }
-
-    return NewBridge;
 }
 
 // --------------------------------------------------------------------------------------------------------------------

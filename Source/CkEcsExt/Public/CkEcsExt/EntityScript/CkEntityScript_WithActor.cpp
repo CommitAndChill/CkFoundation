@@ -1,5 +1,4 @@
 #include "CkEntityScript_WithActor.h"
-#include "CkEntityScript_WithActor_Data.h"
 
 #include "CkEcs/CkEcsLog.h"
 
@@ -29,22 +28,22 @@ auto
         GetClass()->GetName(), InHandle)
     { return ECk_EntityScript_ConstructionFlow::Finished; }
 
-    _OwningActor = BoundActor;
+    _Actor = BoundActor;
 
-    if (ck::IsValid(_OwningActor->GetRootComponent()))
+    if (ck::IsValid(_Actor->GetRootComponent()))
     {
-        UCk_Utils_Transform_UE::Add(InHandle, _OwningActor->GetActorTransform(), Get_EffectiveReplication());
+        UCk_Utils_Transform_UE::Add(InHandle, _Actor->GetActorTransform(), Get_EffectiveReplication());
     }
 
     UCk_Utils_GameplayLabel_UE::Add(InHandle, {});
-    UCk_Utils_Handle_UE::Set_DebugName(InHandle, *_OwningActor->GetName());
+    UCk_Utils_Handle_UE::Set_DebugName(InHandle, *_Actor->GetName());
 
     // The two halves of one decision: who re-creates this actor after a load. A level-placed actor is re-created by
     // the LEVEL, so the save must rendezvous its state onto that fresh copy — stamping the respawn intent instead
     // would have the loader build a second actor beside the one the level already made (and the intent outranks the
     // key in capture's classification, so the two cannot both be stamped). A runtime-spawned actor has no such
     // re-creator, so the loader is the only thing that can bring it back and the respawn opt-in still governs.
-    if (const auto PlacedIdentity = ck::save_key::Get_LevelPlacedIdentity(_OwningActor.Get());
+    if (const auto PlacedIdentity = ck::save_key::Get_LevelPlacedIdentity(_Actor.Get());
         NOT PlacedIdentity.IsEmpty())
     {
         ck::save_key::Assign(InHandle, PlacedIdentity);
@@ -52,7 +51,7 @@ auto
     else if (Get_IsSnapshotRespawnable())
     {
         InHandle.AddOrGet<FFragment_ActorSpawnIntent>(
-            FFragment_ActorSpawnIntent{_OwningActor->GetClass()->GetPathName()});
+            FFragment_ActorSpawnIntent{_Actor->GetClass()->GetPathName()});
     }
 
     return Super::Construct(InHandle, InSpawnParams);
@@ -65,15 +64,15 @@ auto
 {
     Super::EndPlay();
 
-    _OwningActor = nullptr;
+    _Actor = nullptr;
 }
 
 auto
     UCk_EntityScript_WithActor_UE::
-    DoGet_OwningActor() const
+    DoGet_Actor() const
     -> AActor*
 {
-    return _OwningActor;
+    return _Actor;
 }
 
 auto

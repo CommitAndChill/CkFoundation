@@ -20,11 +20,11 @@ auto
 {
     const auto Flow = Super::Construct(InHandle, InSpawnParams);
 
-    const auto IsmActor = Cast<ACk_IsmRenderer_Actor_UE>(Get_OwningActor());
+    const auto IsmActor = Cast<ACk_IsmRenderer_Actor_UE>(Get_Actor());
 
     CK_ENSURE_IF_NOT(ck::IsValid(IsmActor),
         TEXT("EntityScript_IsmRenderer expects an ACk_IsmRenderer_Actor_UE but got [{}]"),
-        Get_OwningActor()->GetClass()->GetName())
+        Get_Actor()->GetClass()->GetName())
     { return Flow; }
 
     UCk_Utils_IsmRenderer_UE::Add(InHandle, IsmActor->Get_RenderData());
