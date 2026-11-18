@@ -243,7 +243,7 @@ private:
 
     // The bridge an older entry point adds for an Actor that predates it; requests are made by that entry point.
     static auto
-    DoGetOrAdd_DeferredBridge(
+    DoGetOrAdd_Bridge(
         AActor* InActor) -> UCk_EntityBridge_ActorComponent_UE*;
 };
 

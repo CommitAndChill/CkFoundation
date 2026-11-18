@@ -369,7 +369,7 @@ auto
         TEXT("Promise_OnActorEcsReady called with an unbound delegate for Actor [{}]"), InActor)
     { return; }
 
-    if (ck::Is_NOT_Valid(DoGetOrAdd_DeferredBridge(InActor)))
+    if (ck::Is_NOT_Valid(DoGetOrAdd_Bridge(InActor)))
     { return; }
 
     switch (InPolicy)
@@ -406,7 +406,7 @@ auto
     CK_ENSURE_IF_NOT(ck::IsValid(InActor), TEXT("Promise_OnActorEcsReady called with an invalid Actor"))
     { return; }
 
-    if (ck::Is_NOT_Valid(DoGetOrAdd_DeferredBridge(InActor)))
+    if (ck::Is_NOT_Valid(DoGetOrAdd_Bridge(InActor)))
     { return; }
 
     switch (InPolicy)
@@ -593,7 +593,7 @@ auto
 
 auto
     UCk_Utils_EntityBridge_UE::
-    DoGetOrAdd_DeferredBridge(
+    DoGetOrAdd_Bridge(
         AActor* InActor)
     -> UCk_EntityBridge_ActorComponent_UE*
 {
@@ -612,7 +612,6 @@ auto
     CK_ENSURE_IF_NOT(ck::IsValid(NewBridge), TEXT("Failed to add a Ck Entity Bridge to Actor [{}]"), InActor)
     { return {}; }
 
-    NewBridge->Set_RequestTiming(ECk_EntityBridge_RequestTiming::Deferred);
     return NewBridge;
 }
 

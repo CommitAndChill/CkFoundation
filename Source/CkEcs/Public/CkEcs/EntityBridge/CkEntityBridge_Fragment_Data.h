@@ -68,20 +68,6 @@ CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_EntityBridge_State);
 
 // --------------------------------------------------------------------------------------------------------------------
 
-UENUM(BlueprintType)
-enum class ECk_EntityBridge_RequestTiming : uint8
-{
-    // The Actor calls Request_SpawnLinkedEntity from its BeginPlay. The bridge ensures on the next tick if it did not.
-    DuringBeginPlay,
-
-    // The Actor calls Request_SpawnLinkedEntity later, when it decides to. The bridge does not check.
-    Deferred,
-};
-
-CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_EntityBridge_RequestTiming);
-
-// --------------------------------------------------------------------------------------------------------------------
-
 // Fired once per machine when the Actor's Entity is Ready: its script has begun play and, on a client
 // replica, replicated values have been applied.
 DECLARE_DYNAMIC_DELEGATE_TwoParams(
@@ -125,16 +111,13 @@ public:
 
 protected:
     auto
-    BeginPlay() -> void override;
-
-    auto
     EndPlay(
         const EEndPlayReason::Type InEndPlayReason) -> void override;
 
 public:
-    /** Gives this Actor its Entity, built by InEntityScriptClass. Call once, from the Actor's BeginPlay,
-     *  on every machine. On a client of a replicated Actor the call is acknowledged and the authority's
-     *  Entity is awaited instead. The Entity arrives through Promise_OnEntityConstructed / Promise_OnEntityReady. */
+    /** Gives this Actor its Entity, built by InEntityScriptClass. Call once, on every machine, from BeginPlay or any
+     *  time after it. On a client of a replicated Actor the call is acknowledged and the authority's Entity is awaited
+     *  instead. The Entity arrives through Promise_OnEntityConstructed / Promise_OnEntityReady. */
     UFUNCTION(BlueprintCallable,
               Category = "Ck|EntityBridge",
               DisplayName = "[Ck][EntityBridge] Request Spawn Linked Entity")
@@ -195,12 +178,6 @@ private:
         FCk_Handle InEntity);
 
 private:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly,
-              Category = "Ck|EntityBridge",
-              meta = (AllowPrivateAccess = true))
-    ECk_EntityBridge_RequestTiming _RequestTiming = ECk_EntityBridge_RequestTiming::DuringBeginPlay;
-
-private:
     FCk_Handle _Entity;
     ECk_EntityBridge_State _State = ECk_EntityBridge_State::NotRequested;
     TWeakObjectPtr<UClass> _RequestedEntityScriptClass;
@@ -215,7 +192,6 @@ private:
     TArray<TFunction<void(AActor*, FCk_Handle)>> _PendingReady_Callbacks;
 
 public:
-    CK_PROPERTY(_RequestTiming);
     CK_PROPERTY_GET(_RequestedEntityScriptClass);
 };
 

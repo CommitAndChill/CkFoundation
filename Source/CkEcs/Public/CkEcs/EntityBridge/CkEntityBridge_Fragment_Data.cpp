@@ -12,7 +12,6 @@
 #include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
 
 #include <Engine/World.h>
-#include <TimerManager.h>
 
 #include "Net/UnrealNetwork.h"
 
@@ -23,37 +22,6 @@ UCk_EntityBridge_ActorComponent_UE::
 {
     SetIsReplicated(false);
     bReplicateUsingRegisteredSubObjectList = true;
-}
-
-auto
-    UCk_EntityBridge_ActorComponent_UE::
-    BeginPlay()
-    -> void
-{
-    Super::BeginPlay();
-
-    if (_RequestTiming != ECk_EntityBridge_RequestTiming::DuringBeginPlay)
-    { return; }
-
-    const auto* Owner = GetOwner();
-
-    // On a client of a replicated Actor the call is optional: the authority's Entity arrives either way.
-    if (ck::IsValid(Owner) && Owner->GetIsReplicated() && Owner->GetLocalRole() != ROLE_Authority)
-    { return; }
-
-    GetWorld()->GetTimerManager().SetTimerForNextTick([WeakThis = TWeakObjectPtr<ThisType>{this}]()
-    {
-        if (ck::Is_NOT_Valid(WeakThis) || ck::Is_NOT_Valid(WeakThis->GetOwner()))
-        { return; }
-
-        const auto WasRequestedOrLinked = WeakThis->_HasRequested || WeakThis->_State != ECk_EntityBridge_State::NotRequested;
-
-        CK_ENSURE_IF_NOT(WasRequestedOrLinked,
-            TEXT("[{}] has a Ck Entity Bridge but did not call Request_SpawnLinkedEntity during BeginPlay. "
-                 "Call it, or set the bridge's Request Timing to Deferred."),
-            WeakThis->GetOwner())
-        {}
-    });
 }
 
 auto
@@ -167,7 +135,7 @@ auto
     auto TransientEntity = ck::IsValid(World) ? UCk_Utils_EcsWorld_Subsystem_UE::Get_TransientEntity(World) : FCk_Handle{};
 
     CK_ENSURE_IF_NOT(ck::IsValid(TransientEntity),
-        TEXT("Request_SpawnLinkedEntity on [{}] was called before the ECS world exists; call it from BeginPlay"), Owner)
+        TEXT("Request_SpawnLinkedEntity on [{}] was called before the ECS world exists; call it from BeginPlay or later"), Owner)
     { return {}; }
 
     _HasRequested = true;

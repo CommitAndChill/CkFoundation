@@ -34,7 +34,6 @@ ACk_IsmRenderer_Actor_UE::
     RootComponent = _RootNode;
 
     _EntityBridge = CreateDefaultSubobject<UCk_EntityBridge_ActorComponent_UE>(TEXT("EntityBridge"));
-    _EntityBridge->Set_RequestTiming(ECk_EntityBridge_RequestTiming::Deferred);
 
 #if WITH_EDITORONLY_DATA
     bListedInSceneOutliner = false;

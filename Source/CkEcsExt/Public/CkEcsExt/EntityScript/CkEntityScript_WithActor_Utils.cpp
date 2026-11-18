@@ -33,7 +33,7 @@ auto
         TEXT("Request_SpawnEntityScript_OnActor called with an invalid EntityScript class for Actor [{}]"), InActor)
     { return {}; }
 
-    auto* Bridge = UCk_Utils_EntityBridge_UE::DoGetOrAdd_DeferredBridge(InActor);
+    auto* Bridge = UCk_Utils_EntityBridge_UE::DoGetOrAdd_Bridge(InActor);
 
     if (ck::Is_NOT_Valid(Bridge))
     { return {}; }

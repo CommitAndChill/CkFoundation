@@ -233,7 +233,7 @@ auto
 
         // An Actor that requests through an older entry point has no bridge until its own BeginPlay, which a
         // replica can beat; give it the bridge that entry point would add.
-        Bridge = UCk_Utils_EntityBridge_UE::DoGetOrAdd_DeferredBridge(BoundActor);
+        Bridge = UCk_Utils_EntityBridge_UE::DoGetOrAdd_Bridge(BoundActor);
 
         CK_ENSURE_IF_NOT(ck::IsValid(Bridge),
             TEXT("Replicated actor-bound EntityScript [{}] arrived for Actor [{}], which has no Ck Entity Bridge. "
