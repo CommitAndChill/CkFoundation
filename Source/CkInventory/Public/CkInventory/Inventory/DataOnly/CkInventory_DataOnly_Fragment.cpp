@@ -1,6 +1,7 @@
 #include "CkInventory_DataOnly_Fragment.h"
 
 #include "CkInventory/Inventory/CkInventory_Utils.h"
+#include "CkInventory/Inventory/CkInventory_NetSnapshot.h"
 #include "CkInventory/Inventory/DataOnly/CkInventory_DataOnly_Utils.h" // UCk_Utils_Inventory_DataOnly_UE::Has — Produce
 #include "CkCore/Algorithms/CkAlgorithms.h"                            // ck::algo::ForEachIsValid — Produce
 
@@ -14,9 +15,7 @@
 {
     FInventory_DataOnly_RepHandlerRegistrar()
     {
-        // The payload is keyed on the INVENTORY entity, which the owner-keyed net Apply never resolves —
-        // so the load path connects the saved items into THIS inventory itself; clients still converge
-        // through the ordinary SyncReplication path. All-or-nothing: any unrebuilt item retries next tick.
+        // The saved payload remains keyed on the inventory entity.
         const auto DoHydrateDataOnlyItems = [](FCk_Handle& Entity, const TArray<FCk_InventoryItem_DataOnly_ReplicatedEntry>& NewItems) -> ECk_Persistence_ApplyResult
         {
             if (NOT UCk_Utils_Inventory_DataOnly_UE::Has(Entity))
@@ -57,26 +56,7 @@
             return ECk_Persistence_ApplyResult::Applied;
         };
 
-        // Only stamps the sync fragment — the DataOnly SyncReplication processor owns the diff/apply.
-        const auto DoApplyDataOnlyItems = [](FCk_Handle& Entity, const TArray<FCk_InventoryItem_DataOnly_ReplicatedEntry>& NewItems, const TArray<FCk_InventoryItem_DataOnly_ReplicatedEntry>& OldItems) -> ECk_Persistence_ApplyResult
-        {
-            const auto Inventories = UCk_Utils_Inventory_UE::RecordOfInventories_Utils::Get_ValidEntries(Entity);
-
-            auto Result = ECk_Persistence_ApplyResult::NotReady;
-
-            for (auto InventoryHandle : Inventories)
-            {
-                if (NOT UCk_Utils_Inventory_UE::Get_IsDataOnly(InventoryHandle))
-                { continue; }
-
-                InventoryHandle.AddOrGet<ck::FFragment_Inventory_DataOnly_SyncReplication>(NewItems, OldItems);
-                Result = ECk_Persistence_ApplyResult::Applied;
-            }
-
-            return Result;
-        };
-
-        FCk_PersistenceHandlerRegistry::Register_NetAndSave_SplitApply<FCk_RepData_Inventory_DataOnly_Items>({
+        FCk_PersistenceHandlerRegistry::Register_SaveOnly<FCk_RepData_Inventory_DataOnly_Items>({
                 .Posture = ECk_Snapshot_Posture::Durable,
                 // Keyed on the INVENTORY entity — emits THAT inventory's items. Capture-only, no mutation.
                 .Produce = [](FCk_Handle& Entity) -> TOptional<FInstancedStruct>
@@ -104,17 +84,26 @@
                     Data.Items = MoveTemp(Entries);
                     return FInstancedStruct::Make(Data);
                 },
-                .NetApply = [DoApplyDataOnlyItems](FCk_Handle& Entity, const FInstancedStruct& New, const TOptional<FInstancedStruct>& Old) -> ECk_Persistence_ApplyResult
-                {
-                    return DoApplyDataOnlyItems(Entity,
-                        New.Get<FCk_RepData_Inventory_DataOnly_Items>().Items,
-                        Old.IsSet()
-                            ? Old.GetValue().Get<FCk_RepData_Inventory_DataOnly_Items>().Items
-                            : TArray<FCk_InventoryItem_DataOnly_ReplicatedEntry>{});
-                },
                 .HydrationApply = [DoHydrateDataOnlyItems](FCk_Handle& Entity, const FInstancedStruct& New, const TOptional<FInstancedStruct>& /*Old*/) -> ECk_Persistence_ApplyResult
                 {
                     return DoHydrateDataOnlyItems(Entity, New.Get<FCk_RepData_Inventory_DataOnly_Items>().Items);
                 }});
+
+        FCk_PersistenceHandlerRegistry::Register_NetOnly<FCk_RepData_Inventory_DataOnly_NamedItems>({
+            .Posture = ECk_Snapshot_Posture::Session,
+            .NetApply = [](FCk_Handle& Entity, const FInstancedStruct& New, const TOptional<FInstancedStruct>& /*Old*/) -> ECk_Persistence_ApplyResult
+            {
+                return ck::inventory_net::ApplyNamedSnapshots<FCk_InventoryItem_DataOnly_ReplicatedEntry,
+                    ck::FFragment_Inventory_DataOnly_SyncReplication>(Entity,
+                    New.Get<FCk_RepData_Inventory_DataOnly_NamedItems>().Inventories,
+                    [](const FCk_Handle_Inventory& Inventory)
+                    { return UCk_Utils_Inventory_UE::Get_IsDataOnly(Inventory); },
+                    [](const FCk_Handle_Inventory& /*Inventory*/, const FCk_Handle_Item& Item)
+                    {
+                        return FCk_InventoryItem_DataOnly_ReplicatedEntry{Item};
+                    },
+                    [](const FCk_Handle_Inventory&, const FCk_InventoryItem_DataOnly_ReplicatedEntry&)
+                    { return true; });
+            }});
     }
 } GInventory_DataOnly_RepHandlerRegistrar;

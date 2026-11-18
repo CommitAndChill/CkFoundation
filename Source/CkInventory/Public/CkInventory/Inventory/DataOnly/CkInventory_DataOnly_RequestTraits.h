@@ -11,7 +11,7 @@ namespace ck
     struct CKINVENTORY_API TInventoryRequestTraits<FCk_Handle_Inventory_DataOnly>
     {
         using HandleType          = FCk_Handle_Inventory_DataOnly;
-        using ReplicationFragment = FCk_RepData_Inventory_DataOnly_Items;
+        using ReplicationFragment = FCk_RepData_Inventory_DataOnly_NamedItems;
 
         using AddItem             = inventory_handlers::TAddItem<FCk_Handle_Inventory_DataOnly>;
         using RemoveItem          = inventory_handlers::TRemoveItem<FCk_Handle_Inventory_DataOnly>;

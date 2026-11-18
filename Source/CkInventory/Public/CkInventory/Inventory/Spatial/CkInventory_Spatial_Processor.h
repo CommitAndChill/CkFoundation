@@ -72,6 +72,7 @@ namespace ck
             FCk_Handle_Inventory_Spatial,
             TReadOnly<FFragment_Inventory_Params>,
             FTag_Inventory_Spatial,
+            FTag_Inventory_Replicates,
             FTag_Inventory_MayRequireReplication,
             CK_IGNORE_PENDING_KILL>
     {

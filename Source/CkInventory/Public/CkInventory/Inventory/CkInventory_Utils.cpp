@@ -188,11 +188,14 @@ namespace ck
 
         if (InReplicates == ECk_Replication::Replicates)
         {
+            NewInventoryEntity.Add<ck::FTag_Inventory_Replicates>();
             UCk_Utils_Net_UE::TryAddContainerFragment<typename TraitsType::ReplicationFragment>(InOwnerEntity);
         }
 
         UCk_Utils_Inventory_UE::RecordOfInventories_Utils::AddIfMissing(InOwnerEntity, ECk_Record_EntryHandlingPolicy::DisallowDuplicateNames);
         UCk_Utils_Inventory_UE::RecordOfInventories_Utils::Request_Connect(InOwnerEntity, NewInventoryEntity);
+        if (InReplicates == ECk_Replication::Replicates)
+        { UCk_Utils_Inventory_UE::Request_TryReplicateInventory(NewInventoryEntity); }
 
         return NewInventoryEntity;
     }

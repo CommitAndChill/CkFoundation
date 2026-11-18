@@ -30,11 +30,21 @@ namespace ck
     CK_DEFINE_ECS_TAG(FTag_Inventory_DataOnly);
     CK_DEFINE_ECS_TAG(FTag_Inventory_Spatial);
     CK_DEFINE_ECS_TAG(FTag_Inventory_MayRequireReplication);
+    CK_DEFINE_ECS_TAG(FTag_Inventory_Replicates);
     CK_DEFINE_ECS_TAG(FTag_Inventory_MayHaveChanged);
 
     // --------------------------------------------------------------------------------------------------------------------
 
     using FFragment_Inventory_Params = FCk_Inventory_Spec;
+
+    // Local acknowledgement of a consumed wire snapshot, including identities
+    // whose entities were reclaimed before their removal arrived.
+    template <typename TEntry>
+    struct TFragment_Inventory_AppliedReplication
+    {
+        CK_GENERATED_BODY(TFragment_Inventory_AppliedReplication);
+        TArray<TEntry> Items;
+    };
 
     // --------------------------------------------------------------------------------------------------------------------
 

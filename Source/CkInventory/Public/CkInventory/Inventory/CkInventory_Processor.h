@@ -76,11 +76,13 @@ namespace ck
             const FFragment_Inventory_Params&,
             const TSyncFragment& InSync) -> void
         {
-            const auto& InCurrent  = InSync.Get_ItemsToReplicate();
-            const auto& InPrevious = InSync.Get_ItemsToReplicate_Previous();
+            const auto InCurrent  = InSync.Get_ItemsToReplicate();
+            const auto InPrevious = InSync.Get_ItemsToReplicate_Previous();
+            using FApplied = TFragment_Inventory_AppliedReplication<TEntry>;
 
             if (InCurrent == InPrevious)
             {
+                InHandle.template AddOrGet<FApplied>().Items = InCurrent;
                 InHandle.template Remove<TSyncFragment>();
                 return;
             }
@@ -135,6 +137,21 @@ namespace ck
                 RemovalStates.Add(State);
             }
 
+            for (const auto& Entry : EntriesAdded)
+            {
+                CK_ENSURE_IF_NOT(ck::IsValid(Entry.Get_ItemHandle()),
+                    TEXT("Inventory [{}] replication addition has an unresolved item identity [{}]"),
+                    BaseHandle, Entry.Get_ItemHandle())
+                {
+                    InHandle.template Remove<TSyncFragment>();
+                    return;
+                }
+            }
+
+            // Snapshot and retire the consumed work before callbacks can queue a
+            // newer target. The local baseline is published only after success.
+            InHandle.template Remove<TSyncFragment>();
+
             for (auto Index = int32{0}; Index < EntriesRemoved.Num(); ++Index)
             {
                 auto ItemHandle = EntriesRemoved[Index].Get_ItemHandle();
@@ -145,7 +162,6 @@ namespace ck
                     CK_ENSURE_IF_NOT(Disconnected,
                         TEXT("Inventory [{}] replication removal lost its admitted connection [{}]"), BaseHandle, ItemHandle)
                     {
-                        InHandle.template Remove<TSyncFragment>();
                         return;
                     }
                 }
@@ -177,13 +193,13 @@ namespace ck
                 ItemsAdded.Add(ItemHandle);
             }
 
+            InHandle.template AddOrGet<FApplied>().Items = InCurrent;
+
             if (NOT ItemsAdded.IsEmpty() || NOT ItemsRemoved.IsEmpty())
             {
                 UUtils_Signal_Inventory_OnItemsChanged::Broadcast(
                     BaseHandle, MakePayload(BaseHandle, ItemsAdded, ItemsRemoved));
             }
-
-            InHandle.template Remove<TSyncFragment>();
         }
     };
 

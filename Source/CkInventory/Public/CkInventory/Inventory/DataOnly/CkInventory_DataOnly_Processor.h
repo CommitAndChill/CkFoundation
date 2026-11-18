@@ -64,6 +64,7 @@ namespace ck
             FCk_Handle_Inventory_DataOnly,
             TReadOnly<FFragment_Inventory_Params>,
             FTag_Inventory_DataOnly,
+            FTag_Inventory_Replicates,
             FTag_Inventory_MayRequireReplication,
             CK_IGNORE_PENDING_KILL>
     {

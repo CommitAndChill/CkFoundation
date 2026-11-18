@@ -210,3 +210,27 @@ struct CKINVENTORY_API FCk_RepData_Inventory_DataOnly_Items
     UPROPERTY()
     TArray<FCk_InventoryItem_DataOnly_ReplicatedEntry> Items;
 };
+
+// Named owner snapshots are wire-only; the per-inventory Items schema above remains durable.
+USTRUCT()
+struct CKINVENTORY_API FCk_Inventory_DataOnly_ReplicatedSnapshot
+{
+    GENERATED_BODY()
+    CK_GENERATED_BODY(FCk_Inventory_DataOnly_ReplicatedSnapshot);
+
+    UPROPERTY()
+    FGameplayTag InventoryName;
+
+    UPROPERTY()
+    TArray<FCk_InventoryItem_DataOnly_ReplicatedEntry> Items;
+};
+
+USTRUCT()
+struct CKINVENTORY_API FCk_RepData_Inventory_DataOnly_NamedItems
+{
+    GENERATED_BODY()
+    CK_GENERATED_BODY(FCk_RepData_Inventory_DataOnly_NamedItems);
+
+    UPROPERTY()
+    TArray<FCk_Inventory_DataOnly_ReplicatedSnapshot> Inventories;
+};

@@ -73,10 +73,11 @@ Cross-inventory placement logic that is NOT a request on a single inventory:
   a churn re-bump pass. Relocate-heavy (non-merging) transfers may raise it, provided the caller
   re-verifies zero pump warns.
 
-  **§4.3 caveat (deferred to Adam's pass):** mass transfer into **≥2 candidate inventories that share
-  one lifetime-owner AND shape** inherits the pre-existing multi-same-owner replicated-container
-  clobber on clients. The MVP is correct for distinct-owner targets (the common case). This doc is the
-  only home for the caveat — the gather site carries no marker.
+  **Named sibling replication:** same-owner inventories replicate as a complete, shape-specific
+  NetOnly owner snapshot, keyed by each inventory's gameplay name. Empty siblings remain explicit;
+  applying a snapshot preflights every target and item before staging any sibling. Deferred sync
+  retains the last consumed local baseline when newer wire snapshots coalesce. The durable,
+  per-inventory Items producer and hydrator remain separate from this wire representation.
 
 ## Capacity policies
 

@@ -3,6 +3,7 @@
 #include "CkInventory/CkInventory_Log.h"
 #include "CkInventory/Inventory/CkInventory_Utils.h"
 #include "CkInventory/Inventory/Spatial/CkInventory_Spatial_RequestTraits.h"
+#include "CkInventory/Inventory/Spatial/CkInventory_Spatial_Utils.h"
 #include "CkInventory/Item/CkItem_Definition.h"
 #include "CkInventory/Item/CkItem_Fragment.h"
 #include "CkInventory/Item/CkItem_Utils.h"
@@ -66,12 +67,26 @@ namespace ck
     {
         auto LifetimeOwner = UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InHandle);
 
-        // One projection: the registered Produce (keyed on this inventory entity) rebuilds the identical item
-        // array via the same record walk. Full-replace the owner (lifetime-owner) container with it, as today.
-        // KNOWN PRE-EXISTING GAP (unchanged here): two inventories sharing one owner clobber this container entry.
-        const auto Produced = UCk_Utils_Net_UE::TryProduce<FCk_RepData_Inventory_Spatial_Items>(InHandle);
-        if (Produced.IsSet())
-        { UCk_Utils_Net_UE::TryUpdateContainerFragment<FCk_RepData_Inventory_Spatial_Items>(LifetimeOwner, *Produced); }
+        // Rebuild the complete named owner projection, including empty siblings.
+        // PersistContents affects only the unchanged durable producer/hydrator.
+        auto Data = FCk_RepData_Inventory_Spatial_NamedItems{};
+        for (const auto& Inventory : UCk_Utils_Inventory_UE::RecordOfInventories_Utils::Get_ValidEntries(LifetimeOwner))
+        {
+            if (NOT Inventory.Has<FTag_Inventory_Replicates>() || NOT UCk_Utils_Inventory_UE::Get_IsSpatial(Inventory))
+            { continue; }
+            auto Snapshot = FCk_Inventory_Spatial_ReplicatedSnapshot{};
+            Snapshot.InventoryName = Inventory.Get<FFragment_Inventory_Params>().Get_Name();
+            const auto Spatial = UCk_Utils_Inventory_Spatial_UE::CastChecked(Inventory);
+            for (const auto& Item : UCk_Utils_Inventory_UE::RecordOfInventoryItems_Utils::Get_ValidEntries(Inventory))
+            {
+                auto Entry = FCk_InventoryItem_Spatial_ReplicatedEntry{Item};
+                Entry.Set_Coordinate(UCk_Utils_Inventory_Spatial_UE::Get_ItemPlacementCoordinate(Spatial, Item));
+                Entry.Set_Rotation(UCk_Utils_Inventory_Spatial_UE::Get_ItemPlacementRotation(Item));
+                Snapshot.Items.Add(Entry);
+            }
+            Data.Inventories.Add(MoveTemp(Snapshot));
+        }
+        UCk_Utils_Net_UE::TryUpdateContainerFragment<FCk_RepData_Inventory_Spatial_NamedItems>(LifetimeOwner, Data);
 
         InHandle.Remove<MarkedDirtyBy>();
     }

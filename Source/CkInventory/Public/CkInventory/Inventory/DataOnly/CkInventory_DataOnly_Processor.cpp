@@ -38,21 +38,20 @@ namespace ck
     {
         auto LifetimeOwner = UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InHandle);
 
-        // Full-replace the owner (lifetime-owner) container with the live item projection, as today.
-        // This intentionally bypasses the save handler's Produce path: _PersistContents controls snapshot
-        // capture/hydration only and must not change normal replication.
-        // KNOWN PRE-EXISTING GAP (unchanged here): two inventories sharing one owner clobber this container entry.
-        const auto& Items = UCk_Utils_Inventory_UE::RecordOfInventoryItems_Utils::Get_ValidEntries(InHandle);
-
-        auto Data = FCk_RepData_Inventory_DataOnly_Items{};
-        Data.Items.Reserve(Items.Num());
-
-        ck::algo::ForEachIsValid(Items, [&](const FCk_Handle_Item& InItemHandle)
+        // Rebuild the complete named owner projection, including empty siblings.
+        // PersistContents affects only the unchanged durable producer/hydrator.
+        auto Data = FCk_RepData_Inventory_DataOnly_NamedItems{};
+        for (const auto& Inventory : UCk_Utils_Inventory_UE::RecordOfInventories_Utils::Get_ValidEntries(LifetimeOwner))
         {
-            Data.Items.Emplace(FCk_InventoryItem_DataOnly_ReplicatedEntry(InItemHandle));
-        });
-
-        UCk_Utils_Net_UE::TryUpdateContainerFragment<FCk_RepData_Inventory_DataOnly_Items>(LifetimeOwner, Data);
+            if (NOT Inventory.Has<FTag_Inventory_Replicates>() || NOT UCk_Utils_Inventory_UE::Get_IsDataOnly(Inventory))
+            { continue; }
+            auto Snapshot = FCk_Inventory_DataOnly_ReplicatedSnapshot{};
+            Snapshot.InventoryName = Inventory.Get<FFragment_Inventory_Params>().Get_Name();
+            for (const auto& Item : UCk_Utils_Inventory_UE::RecordOfInventoryItems_Utils::Get_ValidEntries(Inventory))
+            { Snapshot.Items.Emplace(Item); }
+            Data.Inventories.Add(MoveTemp(Snapshot));
+        }
+        UCk_Utils_Net_UE::TryUpdateContainerFragment<FCk_RepData_Inventory_DataOnly_NamedItems>(LifetimeOwner, Data);
 
         InHandle.Remove<MarkedDirtyBy>();
     }

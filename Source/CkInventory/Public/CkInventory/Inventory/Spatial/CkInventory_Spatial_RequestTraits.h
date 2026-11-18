@@ -10,7 +10,7 @@ namespace ck
     struct CKINVENTORY_API TInventoryRequestTraits<FCk_Handle_Inventory_Spatial>
     {
         using HandleType          = FCk_Handle_Inventory_Spatial;
-        using ReplicationFragment = FCk_RepData_Inventory_Spatial_Items;
+        using ReplicationFragment = FCk_RepData_Inventory_Spatial_NamedItems;
 
         using AddItem             = inventory_handlers::TAddItem<FCk_Handle_Inventory_Spatial, FCk_SpatialPlacement>;
         using RemoveItem          = inventory_handlers::TRemoveItem<FCk_Handle_Inventory_Spatial>;
