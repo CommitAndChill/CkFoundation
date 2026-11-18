@@ -907,6 +907,24 @@
       ]
     },
     {
+      "Name": "CkOnlineAchievements",
+      "Type": "Runtime",
+      "LoadingPhase": "Default",
+      "PlatformAllowList": ["Win64", "Mac", "Linux"]
+    },
+    {
+      "Name": "CkOnlineEOS",
+      "Type": "Runtime",
+      "LoadingPhase": "Default",
+      "PlatformAllowList": ["Win64", "Mac", "Linux"]
+    },
+    {
+      "Name": "CkOnlineLobby",
+      "Type": "Runtime",
+      "LoadingPhase": "Default",
+      "PlatformAllowList": ["Win64", "Mac", "Linux"]
+    },
+    {
       "Name": "CkOverlapBody",
       "Type": "Runtime",
       "LoadingPhase": "Default",
@@ -1458,6 +1476,38 @@
     }
   ],
   "Plugins": [
+    {
+      "Name": "OnlineSubsystem",
+      "Enabled": true
+    },
+    {
+      "Name": "OnlineSubsystemUtils",
+      "Enabled": true
+    },
+    {
+      "Name": "OnlineServices",
+      "Enabled": true
+    },
+    {
+      "Name": "OnlineServicesEpicCommon",
+      "Enabled": true,
+      "PlatformAllowList": ["Win64", "Mac", "Linux"]
+    },
+    {
+      "Name": "EOSShared",
+      "Enabled": true,
+      "PlatformAllowList": ["Win64", "Mac", "Linux"]
+    },
+    {
+      "Name": "SocketSubsystemEOS",
+      "Enabled": true,
+      "PlatformAllowList": ["Win64", "Mac", "Linux"]
+    },
+    {
+      "Name": "SteamShared",
+      "Enabled": true,
+      "PlatformAllowList": ["Win64", "Mac", "Linux"]
+    },
     {
       "Name": "CommonUI",
       "Enabled": true
