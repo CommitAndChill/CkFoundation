@@ -200,7 +200,7 @@ private:
     friend class ck::FProcessor_EntityScript_BeginPlay;
     friend class UCk_EntityBridge_ActorComponent_UE;
     friend class UCk_Fragment_EntityReplicationDriver_Rep;
-    friend 
+
     static auto
     DoLink(
         FCk_Handle& InEntity,
