@@ -6,6 +6,10 @@
 
 #include <ThumbnailRendering/ThumbnailManager.h>
 #include <PropertyEditorModule.h>
+#include "Framework/Application/SlateApplication.h"
+#include "HAL/PlatformTime.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 
 #define LOCTEXT_NAMESPACE "FCkEditorStyleModule"
 
@@ -16,8 +20,16 @@ auto
     StartupModule()
     -> void
 {
+    const double StartTime = FPlatformTime::Seconds();
     UCk_Utils_EditorStyle_UE::DoRegister_SlateStyle();
-    UCk_Utils_EditorStyle_UE::DoReloadTextures();
+    // The style set starts empty. Custom brushes load when they are registered.
+    const bool bLegacyReload = FParse::Param(FCommandLine::Get(), TEXT("CkLegacyEmptyStyleReload"));
+    if (bLegacyReload && !IsRunningGame() && FSlateApplication::IsInitialized())
+    {
+        FSlateApplication::Get().GetRenderer()->ReloadTextureResources();
+    }
+    UE_LOG(LogTemp, Log, TEXT("Initial CK style registration completed in %.3f ms (global texture reload: %s)"),
+        (FPlatformTime::Seconds() - StartTime) * 1000.0, bLegacyReload ? TEXT("yes") : TEXT("no"));
 
     auto& PropertyModule = FModuleManager::GetModuleChecked<FPropertyEditorModule>("PropertyEditor");
     PropertyModule.RegisterCustomClassLayout

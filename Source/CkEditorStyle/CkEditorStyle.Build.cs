@@ -9,6 +9,11 @@ public class CkEditorStyle : CkModuleRules
             // ... add other private include paths required here ...
         });
 
+        if (Target.bBuildDeveloperTools)
+        {
+            PrivateDependencyModuleNames.AddRange(new[] { "RenderCore", "RHI" });
+        }
+
         PublicDependencyModuleNames.AddRange(new string[]
         {
             "AssetTools",
