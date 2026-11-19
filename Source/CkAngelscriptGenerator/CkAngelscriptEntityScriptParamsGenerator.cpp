@@ -1,6 +1,7 @@
 #include "CkAngelscriptEntityScriptParamsGenerator.h"
 
 #include "CkAngelscriptGenerator/CkAngelscriptGenerator_Log.h"
+#include "CkAngelscriptGenerator/CkAngelscriptGenerator_PluginLookup.h"
 #include "CkAngelscriptGenerator/CkAngelscriptGenerator_RegenOwnership.h"
 #include "CkAngelscriptGenerator/CkAngelscriptGenerator_SharedUtils.h"
 
@@ -13,10 +14,10 @@
 
 #include <Engine/BlueprintGeneratedClass.h>
 #include <HAL/FileManager.h>
-#include <Interfaces/IPluginManager.h>
 #include <Misc/App.h>
 #include <Misc/FileHelper.h>
 #include <Misc/Paths.h>
+#include <ProfilingDebugging/CpuProfilerTrace.h>
 #include <UObject/Class.h>
 #include <UObject/UObjectIterator.h>
 #include <UObject/UnrealType.h>
@@ -302,78 +303,10 @@ namespace ck_entity_script_params_generator
         TArray<UClass*> Classes;
     };
 
-    auto Build_ModuleToPluginMap() -> TMap<FString, TSharedRef<IPlugin>>
-    {
-        auto Result = TMap<FString, TSharedRef<IPlugin>>{};
-        for (const auto& Plugin : IPluginManager::Get().GetEnabledPlugins())
-        {
-            for (const auto& Module : Plugin->GetDescriptor().Modules)
-            {
-                Result.Add(Module.Name.ToString(), Plugin);
-            }
-        }
-        return Result;
-    }
-
-    auto Find_PluginByPathPrefix(const FString& InPath) -> const IPlugin*
-    {
-        if (InPath.IsEmpty())
-        { return nullptr; }
-
-        auto NormalizedPath = FPaths::ConvertRelativePathToFull(InPath);
-        FPaths::NormalizeFilename(NormalizedPath);
-
-        const IPlugin* BestMatch = nullptr;
-        auto BestMatchLen = int32{0};
-
-        for (const auto& Plugin : IPluginManager::Get().GetEnabledPlugins())
-        {
-            auto PluginDir = FPaths::ConvertRelativePathToFull(Plugin->GetBaseDir());
-            FPaths::NormalizeDirectoryName(PluginDir);
-
-            if (NormalizedPath.StartsWith(PluginDir, ESearchCase::IgnoreCase))
-            {
-                // Pick the longest match so nested plugin dirs win over ancestors.
-                if (PluginDir.Len() > BestMatchLen)
-                {
-                    BestMatch = &Plugin.Get();
-                    BestMatchLen = PluginDir.Len();
-                }
-            }
-        }
-        return BestMatch;
-    }
-
-    auto Find_PluginForClass(
-        const UClass* InClass,
-        const TMap<FString, TSharedRef<IPlugin>>& InModuleToPlugin)
-        -> const IPlugin*
-    {
-        // AS-defined classes all live under /Script/Angelscript, so this only matches C++ classes.
-        const auto PackageName = InClass->GetOutermost()->GetName();
-        constexpr auto ScriptPrefix = TEXT("/Script/");
-        if (PackageName.StartsWith(ScriptPrefix))
-        {
-            const auto ModuleName = PackageName.RightChop(FString(ScriptPrefix).Len());
-            if (const auto* Found = InModuleToPlugin.Find(ModuleName))
-            { return &Found->Get(); }
-        }
-
-#if WITH_ANGELSCRIPT_CK
-        // GetFirstASClass walks the hierarchy; a plain Cast<UASClass> misses derived classes.
-        if (auto* ASClass = UASClass::GetFirstASClass(const_cast<UClass*>(InClass)))
-        {
-            if (const auto* Plugin = Find_PluginByPathPrefix(ASClass->GetSourceFilePath()))
-            { return Plugin; }
-        }
-#endif
-
-        return nullptr;
-    }
-
     auto Bucket_ClassesByPlugin(const TArray<UClass*>& InClasses) -> TArray<FPluginBucket>
     {
-        const auto ModuleToPlugin = Build_ModuleToPluginMap();
+        TRACE_CPUPROFILER_EVENT_SCOPE(CkAS_EntitySpawnParams_BucketClassesByPlugin);
+        const auto PluginLookup = FCkAngelscriptGenerator_PluginLookup{};
 
         auto BucketMap = TMap<FString, FPluginBucket>{};
 
@@ -382,7 +315,7 @@ namespace ck_entity_script_params_generator
             auto PluginName = FString{};
             auto OutputDir = FString{};
 
-            if (const auto* Plugin = Find_PluginForClass(Class, ModuleToPlugin))
+            if (const auto* Plugin = PluginLookup.Find_PluginForClass(Class))
             {
                 PluginName = Plugin->GetName();
                 OutputDir = Plugin->GetBaseDir() / TEXT("Script") / TEXT("Generated");
