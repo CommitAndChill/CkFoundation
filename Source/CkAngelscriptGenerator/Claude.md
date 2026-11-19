@@ -14,6 +14,7 @@ Four loosely-coupled responsibilities under one module:
 1. **Generators** — write the canonical generated `.as` / `.json` accessor files from live reflection + asset state.
    - `FCkAngelscriptEntityScriptParamsGenerator` — `<Plugin>_EntitySpawnParams.as`, one per plugin.
    - `FCkAutoTestWrapperGenerator` — `<Plugin>_AutoTestActors.as`, one per plugin.
+     With `[CkAngelscriptGenerator] ReuseStartupAutoTestWrappers=True` in Engine config, the startup PostCompile pass captures source content hashes, the reflected wrapper descriptions and the generated file hashes. PostEngineInit consumes this snapshot once. It skips parsing unchanged sources and skips emission when the reflected descriptions and existing outputs also match. Further compiles use full generation. The existing writer-ownership check runs on both callbacks.
    - `FCkAutoTestNetStubGenerator` — net-test `.spec.cpp` stubs, one file per feature, routed into the repo that owns the `.as` test. See *Net-test stub generator* below.
    - `UCkAssetRegistrySubsystem` — `BusterBlockAssets.as`, `RawAssets.as`, `EngineAssets.as` (driven by `UCkAssetRegistryConfig` data assets).
    - `UCkDynamicHandleSubsystem::GenerateHandleTypeRegistry()` — `DynamicHandleTypes.json`.
