@@ -33,6 +33,7 @@
 
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_Setup);
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_PushTransform);
+CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_PushTransform_Late);
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_Tick);
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_HandleRequests);
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_EndPlay);
@@ -324,6 +325,20 @@ namespace ck
             cpu_work::Add(ECk_CpuWorkCounter::ComponentChanged, Changed);
             cpu_work::Add(ECk_CpuWorkCounter::ComponentStaticRebakes, StaticRebakes);
         }
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProcessor_UnrealComponent_PushTransform_Late::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_Transform& InTransform,
+            const FFragment_RecordOfUnrealComponents& InComponents)
+        -> void
+    {
+        FProcessor_UnrealComponent_PushTransform::ForEachEntity(InDeltaT, InHandle, InTransform, InComponents);
     }
 
     // --------------------------------------------------------------------------------------------------------------------

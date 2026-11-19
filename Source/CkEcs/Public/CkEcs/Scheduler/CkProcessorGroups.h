@@ -5,7 +5,8 @@
 // --------------------------------------------------------------------------------------------------------------------
 // Group processors define the top-level ordering of the ECS pipeline; a processor joins one with
 // `using Group = FGroup_X;`. The RunAfter chain below IS the order — all TG_PrePhysics except
-// FGroup_Overlap. Group membership rosters and the tick-by-tick destruction timeline: CkEcs/CLAUDE.md.
+// FGroup_Overlap (TG_PostPhysics) and FGroup_Transform_LatePose (TG_PostUpdateWork), each its own scheduler
+// partition. Group membership rosters and the tick-by-tick destruction timeline: CkEcs/CLAUDE.md.
 // --------------------------------------------------------------------------------------------------------------------
 
 namespace ck
@@ -30,6 +31,7 @@ namespace ck
     struct FGroup_EndPlay;
     struct FGroup_Teardown;
     struct FGroup_Overlap;
+    struct FGroup_Transform_LatePose;
 
     // ----------------------------------------------------------------------------------------------------------------
 
@@ -154,6 +156,16 @@ namespace ck
     struct FGroup_Overlap
     {
         static constexpr auto TickGroup = TG_PostPhysics;
+    };
+
+    // Re-samples what follows an animated pose once the frame's animation is final: a skinned mesh publishes its
+    // pose as late as the end of TG_PostPhysics, after every TG_PrePhysics processor has already read last frame's.
+    // Its writes carry FTag_Transform_LateUpdated, never FTag_Transform_Updated (next frame's cleanup would clear that
+    // before any TG_PrePhysics consumer read it); FGroup_Transform_SyncFrom promotes the late tag after that cleanup,
+    // so every TG_PrePhysics consumer sees each late write, once, next frame.
+    struct FGroup_Transform_LatePose
+    {
+        static constexpr auto TickGroup = TG_PostUpdateWork;
     };
 }
 

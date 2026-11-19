@@ -88,6 +88,8 @@ namespace ck
     {
     public:
         using Group = FGroup_Transform_SyncFrom;
+        // After the promotion, so its write can tell a promoted late write (FTag_Transform_LatePromoted) from none.
+        using RunAfter = TDepList<FProcessor_Transform_PromoteLateUpdated>;
 
     public:
         using TParallelProcessor::TParallelProcessor;
@@ -101,6 +103,53 @@ namespace ck
             const FFragment_SceneNode& InSceneNode,
             FFragment_Transform& InTransform,
             FFragment_Transform_Previous& InPrevTransform) -> void;
+
+    public:
+        // The anchor component's or socket's world transform as it reads now; unset once the component is gone.
+        // Both follow passes and UCk_Utils_SceneNode_UE::Get_DriverWorldTransform compose against this.
+        static auto
+        Get_AnchorWorldTransform(
+            const FFragment_SceneNode_UnrealAnchor& InAnchor) -> TOptional<FTransform>;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // The re-sample of a late anchor (FTag_SceneNode_LateAnchor) once the frame's animation is final, and the
+    // composition of its scene-node subtree against it. Every write carries FTag_Transform_LateUpdated: TG_PrePhysics
+    // consumers see it next frame, through FProcessor_Transform_PromoteLateUpdated, and the late consumers in this group
+    // see it now. A ck_exp::TProcessor (not parallel) because the subtree walk writes other entities' transforms.
+    class CKECSEXT_API FProcessor_SceneNode_LateFollowUnrealAnchor : public ck_exp::TProcessor<
+            FProcessor_SceneNode_LateFollowUnrealAnchor,
+            FCk_Handle_SceneNode,
+            ck::TReadOnly<FFragment_SceneNode_UnrealAnchor>,
+            ck::TReadOnly<FFragment_SceneNode>,
+            ck::TReadWrite<FFragment_Transform>,
+            ck::TReadWrite<FFragment_Transform_Previous>,
+            FTag_SceneNode_LateAnchor,
+            CK_IGNORE_PENDING_KILL>
+    {
+    public:
+        using Group = FGroup_Transform_LatePose;
+        using RunBefore = TDepList<FProcessor_Transform_SyncToActor_Late>;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        static auto
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_SceneNode_UnrealAnchor& InAnchor,
+            const FFragment_SceneNode& InSceneNode,
+            FFragment_Transform& InTransform,
+            FFragment_Transform_Previous& InPrevTransform) -> void;
+
+    private:
+        static auto
+        DoCompose_Children(
+            FCk_Handle& InParent,
+            const FTransform& InParentWorld) -> void;
     };
 
     // --------------------------------------------------------------------------------------------------------------------

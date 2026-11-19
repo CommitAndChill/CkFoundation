@@ -393,7 +393,7 @@ gated regardless of how they iterate. The hydration quarantine's view-filter byp
 and does not apply here.
 
 `FGroup_Overlap` is the only `TG_PostPhysics` group, so it lives in its own world actor and its own scheduler
-partition — under the same hold, and pumped in ascending tick-group order so it always runs after the pre-physics
+partition (as `FGroup_Transform_LatePose` does in `TG_PostUpdateWork`) — under the same hold, and pumped in ascending tick-group order so it always runs after the pre-physics
 partition that spends the loader's granted physics steps. `RunsDuringLoad` is unchanged and still framework-only:
 every project script processor is gated by construction.
 
@@ -446,7 +446,15 @@ FGroup_DestructionPipeline  (EntityBridge_Destroy, DestructionPhase_Finalize, De
                                                        tag, ending the EndPlay window)
 
 FGroup_Overlap (TG_PostPhysics)
+
+FGroup_Transform_LatePose (TG_PostUpdateWork: SceneNode late anchors re-sampled once the frame's animation is final,
+                           and the late presentation consumers, SyncToActor_Late and UnrealComponent_PushTransform_Late)
 ```
+
+Each tick group with a processor is its own scheduler partition and its own world actor; the TG_PostUpdateWork actor
+ticks at high priority, ahead of its group's other ticks. The late-pose group's writes reach the TG_PrePhysics groups
+next frame through `FProcessor_Transform_PromoteLateUpdated` (`FGroup_Transform_SyncFrom`); the contract is in
+[CkEcsExt/Claude.md](../CkEcsExt/Claude.md) § "Late pose: anchors that follow an animated socket".
 
 ### Destruction pipeline, tick by tick
 

@@ -24,5 +24,6 @@ CK_REGISTER_GROUP(ck::FGroup_EntityLifecycle);
 CK_REGISTER_GROUP(ck::FGroup_EndPlay);
 CK_REGISTER_GROUP(ck::FGroup_Teardown);
 CK_REGISTER_GROUP(ck::FGroup_Overlap);
+CK_REGISTER_GROUP(ck::FGroup_Transform_LatePose);
 
 // --------------------------------------------------------------------------------------------------------------------

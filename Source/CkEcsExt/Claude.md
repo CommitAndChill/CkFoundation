@@ -111,6 +111,66 @@ pose applies again on detach (it never queues a request, so a detach and re-atta
 reject). The authority's send is unchanged and the policy is inert on a host. The one rule for callers: declare it
 at composition, on every machine.
 
+### Late pose: anchors that follow an animated socket
+
+A skinned mesh publishes its pose (the read buffer `GetSocketTransform` uses) when its animation finishes, which with
+parallel evaluation is as late as the end of `TG_PostPhysics`. Every TG_PrePhysics processor, including
+`FProcessor_SceneNode_FollowUnrealAnchor`, therefore reads last frame's pose: a node on a moving bone trails it by one
+frame of travel. That early sample stays as it is (simulation keeps its estimate); a second pass corrects the pose
+for presentation:
+
+- `CreateAndAttachToUnrealMesh` on a `USkinnedMeshComponent` adds `FTag_SceneNode_LateAnchor`. Component anchors and
+  static-mesh sockets stay untagged and early-only.
+- `FProcessor_SceneNode_LateFollowUnrealAnchor` (`FGroup_Transform_LatePose`, its own `TG_PostUpdateWork` partition)
+  re-samples each late anchor, and where its pose changed writes it and composes its scene-node subtree with the
+  early chain's rules: children with their own Unreal anchor are skipped, anchor-authoritative children (a
+  RootComponent/MeshSocket without `FTag_Transform_ExternallyDriven`) are skipped with everything under them, an
+  unchanged child ends its branch, and a restore rebase is left to the early chain. Each parent it composes is marked
+  published (`FUtils_SceneNodePropagation::MarkPublished`), so the promoted tag next frame queues nothing; a child the
+  walk skips because it is hydration-quarantined is queued for the early chain instead, or it would keep its old pose
+  once the quarantine lifts if the anchor then holds still.
+- **A late write carries `FTag_Transform_LateUpdated`, never `FTag_Transform_Updated`.** An `Updated` added in the late
+  group would be cleared by the next frame's `FProcessor_Transform_Cleanup` before any TG_PrePhysics consumer ran, so
+  they would never see the late write. `FProcessor_Transform_PromoteLateUpdated` (`FGroup_Transform_SyncFrom`, after
+  `FProcessor_Transform_Cleanup`) turns the late tag into `Updated`, plus the one-frame `FTag_Transform_LatePromoted`,
+  after that cleanup, so every TG_PrePhysics consumer (signals, replication, ISM, RaySense) sees each late write once,
+  one frame after the pose, exactly as it saw the early sample before. It has no `MarkedDirtyBy`: the late tag is only
+  added in the TG_PostUpdateWork partition, so the main pass always sees it and a pump pass would only re-run an empty
+  view. When the mesh has not moved since the late pass, that frame's early sample reads the same pose and writes
+  nothing.
+- **Previous stays contiguous for TG_PrePhysics consumers.** A late write is the normal direct write:
+  `FFragment_Transform_Previous` becomes the value this frame's TG_PrePhysics consumers already read. If the mesh moved
+  between the late pass and next frame's early sample (a character that moved before the ECS tick, a script moving the
+  actor), that early write would start the pair at the late value and drop the early -> late step from every pair (a
+  probe's linear cast, a ray-sense sweep, an ISM's previous transform). So an early write that follows a promoted late
+  write (`FTag_Transform_LatePromoted`; both early sites, `FProcessor_SceneNode_FollowUnrealAnchor`, which runs after the
+  promotion, and the `TProcessor_SceneNode_Update` layers) writes Current only: the pair runs from last frame's early
+  value to this frame's and covers the late step. Without an early write the pair is (early -> late). Pinned by
+  `CkAutoTest_SceneNode_AnimatedSocketAnchor_PreviousStaysContiguousForAnEarlyConsumer`.
+- The late presentation consumers, `FProcessor_Transform_SyncToActor_Late` and
+  `FProcessor_UnrealComponent_PushTransform_Late`, push this frame's late writes to actors and hosted components. They
+  are idempotent, so the promoted tag repeating the push next frame is a comparison. The render-state flush follows
+  every tick group, so what they push is what renders. `SyncToActor_Late` skips an entity whose root component is gone,
+  and drops its late tag: its actor can be destroyed between the passes, a destruction that has only begun is not
+  excluded by the view, and the promoted tag would hand the same dead actor to next frame's early `SyncToActor` (both
+  hit its root-component ensure before the fix; pinned by
+  `CkAutoTest_SceneNode_AnimatedSocketAnchor_AnActorUnderALateAnchorFollowsAndCanDie`).
+- The late processors are `ck_exp` processors, so the scheduler's empty-view skip makes the pass free in a world with no
+  late anchor. That verdict is re-derived only when one of a view's include types is added or removed somewhere, and
+  destroying an entity is not such a mutation, so after the last late anchor dies the pass can keep running over an
+  empty view until the next such mutation. Only that direction can be stale: a late anchor appears by adding its tag,
+  which re-derives the verdict, so a non-empty view is never skipped.
+- The TG_PostUpdateWork world actor ticks at high priority, so another TG_PostUpdateWork tick that reads a late node
+  reads this frame's pose.
+
+Known limits: a Jolt kinematic body on a late node is pushed in TG_PrePhysics and still trails the rendered pose by
+one frame; ISM and ISKM proxies of a late node read its transform in TG_PrePhysics and render one frame behind it too;
+a skinned mesh that finalizes its own pose in TG_PostUpdateWork (its tick or its animation completion lands there)
+can finalize after the high-priority late pass, which then reads last frame's pose for it; the camera manager updates before TG_PostUpdateWork, so a camera driven by a late node sees the early pose;
+a component attached under an animated bone and anchored through `CreateAndAttachToUnrealComponent` is not late;
+`FProcessor_Transform_SyncFromMeshSocket` (the Transform module's own socket bridge) has the same one-frame lag and is
+not covered by this pass. Replication sends the same values at the same cadence as before.
+
 ### Physics ownership
 
 An entity is EITHER Chaos-simulated (CkOverlapBody's `UShapeComponent` path, CkRaySense's engine-trace

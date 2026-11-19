@@ -6,6 +6,7 @@
 #include "CkEcs/Processor/CkProcessor.h"
 #include "CkEcs/Scheduler/CkProcessorGroups.h"
 
+#include "CkEcsExt/SceneNode/CkSceneNode_Processor.h"
 #include "CkEcsExt/Transform/CkTransform_Fragment.h"
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -48,6 +49,34 @@ namespace ck
     public:
         using Group = FGroup_PostTransform;
         using RunAfter = TDepList<FProcessor_UnrealComponent_Setup>;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        static auto
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_Transform& InTransform,
+            const FFragment_RecordOfUnrealComponents& InComponents) -> void;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // FProcessor_UnrealComponent_PushTransform for this frame's late writes (FGroup_Transform_LatePose), so hosted
+    // components render at the pose their owner was re-sampled at.
+    class CKUNREALCOMPONENT_API FProcessor_UnrealComponent_PushTransform_Late : public ck_exp::TProcessor<
+            FProcessor_UnrealComponent_PushTransform_Late,
+            FCk_Handle_Transform,
+            ck::TReadOnly<FFragment_Transform>,
+            ck::TReadOnly<FFragment_RecordOfUnrealComponents>,
+            FTag_Transform_LateUpdated,
+            CK_IGNORE_PENDING_KILL>
+    {
+    public:
+        using Group = FGroup_Transform_LatePose;
+        using RunAfter = TDepList<FProcessor_SceneNode_LateFollowUnrealAnchor>;
 
     public:
         using TProcessor::TProcessor;

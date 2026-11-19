@@ -27,6 +27,19 @@ namespace ck
     CK_DEFINE_ECS_TAG(FTag_Transform_Updated);
     CK_DEFINE_ECS_TAG(FTag_Transform_Movable);
 
+    // A write made by FGroup_Transform_LatePose, after this frame's TG_PrePhysics consumers already ran. Late
+    // presentation consumers in that group react to it; FProcessor_Transform_PromoteLateUpdated turns it into
+    // FTag_Transform_Updated at the start of the next frame's transform pass. The late group never adds
+    // FTag_Transform_Updated itself: FProcessor_Transform_Cleanup clears that tag at the start of the next frame's pass,
+    // before any TG_PrePhysics consumer reads it, so those consumers would never see the late write.
+    CK_DEFINE_ECS_TAG(FTag_Transform_LateUpdated);
+
+    // One frame: this frame's FTag_Transform_Updated is a promoted late write (FProcessor_Transform_PromoteLateUpdated
+    // adds it, FProcessor_Transform_Cleanup clears it). An early write that follows it leaves
+    // FFragment_Transform_Previous alone, so this frame's pair still starts at the value last frame's TG_PrePhysics
+    // consumers read and covers the late step too.
+    CK_DEFINE_ECS_TAG(FTag_Transform_LatePromoted);
+
     // Flips an anchor-bound entity from anchor-authoritative to parent-driven (Unreal AttachToComponent
     // semantics): SyncFrom* back off, SyncToActor still pushes. See CkEcsExt/CLAUDE.md § "SceneNode Unreal anchors".
     CK_DEFINE_ECS_TAG(FTag_Transform_ExternallyDriven);

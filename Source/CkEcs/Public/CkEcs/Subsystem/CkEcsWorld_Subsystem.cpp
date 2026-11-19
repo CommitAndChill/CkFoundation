@@ -6,6 +6,7 @@
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
 #include "CkEcs/Handle/CkHandle_Utils.h"
 #include "CkEcs/Scheduler/CkProcessorGraph.h"
+#include "CkEcs/Scheduler/CkProcessorGroups.h"
 #include "CkEcs/Scheduler/CkProcessorRegistry.h"
 #include "CkEcs/Subsystem/CkEcsEditor_Subsystem.h"
 
@@ -165,6 +166,11 @@ auto
     _TickStatName = ck::Format_UE(TEXT("[{}] EcsScheduler_Actor"), _UnrealTickingGroup);
     _TickStatId = CK_CREATE_DYNAMIC_STAT_ID(STATGROUP_CkEcsWorldActor_Tick, _TickStatName);
     _EcsWorldDisplayName = FName{_TickStatName};
+
+    // The late-pose pass exists so that whatever else reads a pose in its tick group reads this frame's. High priority
+    // dispatches it ahead of that group's other ticks, which have no prerequisite on it.
+    if (_UnrealTickingGroup == ck::FGroup_Transform_LatePose::TickGroup)
+    { PrimaryActorTick.SetPriorityIncludingPrerequisites(true); }
 
     SetTickGroup(_UnrealTickingGroup);
 }

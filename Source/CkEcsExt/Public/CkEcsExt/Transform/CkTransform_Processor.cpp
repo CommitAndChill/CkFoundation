@@ -36,6 +36,8 @@ CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_InterpolateToGoal_Rotation);
 CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_ApplyReplicatedPose);
 CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_HandleRequests);
 CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_SyncToActor);
+CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_SyncToActor_Late);
+CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_PromoteLateUpdated);
 CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_FireSignals);
 CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_Replicate);
 CK_REGISTER_PROCESSOR(ck::FProcessor_Transform_Cleanup);
@@ -833,6 +835,30 @@ namespace ck
     // --------------------------------------------------------------------------------------------------------------------
 
     auto
+        FProcessor_Transform_SyncToActor_Late::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_Transform_RootComponent& InTransformRootComp,
+            const FFragment_Transform& InComp)
+            -> void
+    {
+        // Its actor can be destroyed between the passes (a TG_PrePhysics..TG_PostPhysics tick): the destroy only
+        // initiates the entity's destruction, which the view does not exclude, so the gone root component is an
+        // expected lifecycle event here, not the early processor's broken invariant. The late write is dropped too:
+        // promoted next frame, it would hand the early SyncToActor the same dead actor before EndPlay excludes it.
+        if (ck::Is_NOT_Valid(InTransformRootComp.Get_RootComponent().Get()))
+        {
+            InHandle.Remove<FTag_Transform_LateUpdated>();
+            return;
+        }
+
+        FProcessor_Transform_SyncToActor::ForEachEntity(InDeltaT, InHandle, InTransformRootComp, InComp);
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
         FProcessor_Transform_FireSignals::
         ForEachEntity(
             TimeType InDeltaT,
@@ -862,6 +888,21 @@ namespace ck
         // and the load writes restored transforms, so preserving it would leave every restored entity permanently
         // dirty to every consumer that polls it.
         _TransientEntity.Clear_Unconditional<FTag_Transform_Updated>();
+        _TransientEntity.Clear_Unconditional<FTag_Transform_LatePromoted>();
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProcessor_Transform_PromoteLateUpdated::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle)
+        -> void
+    {
+        InHandle.AddOrGet<FTag_Transform_Updated>();
+        InHandle.AddOrGet<FTag_Transform_LatePromoted>();
+        InHandle.Remove<FTag_Transform_LateUpdated>();
     }
 
     // --------------------------------------------------------------------------------------------------------------------

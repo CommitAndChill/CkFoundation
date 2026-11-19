@@ -7,6 +7,7 @@
 #include "CkEcs/Handle/CkHandle_Utils.h"
 
 #include "CkEcsExt/SceneNode/CkSceneNode_Fragment.h"
+#include "CkEcsExt/SceneNode/CkSceneNode_Processor.h"
 #include "CkEcsExt/Transform/CkTransform_Fragment.h"
 #include "CkEcsExt/Transform/CkTransform_Utils.h"
 
@@ -14,6 +15,7 @@
 
 #include "Components/SceneComponent.h"
 #include "Components/MeshComponent.h"
+#include "Components/SkinnedMeshComponent.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -115,6 +117,18 @@ auto
     });
     if (Enabled)
     { cpu_work::Add(ECk_CpuWorkCounter::SceneChildrenVisited, ChildrenVisited); }
+}
+
+auto
+    ck::FUtils_SceneNodePropagation::
+    MarkPublished(
+        FCk_Handle& InParent,
+        const FTransform& InWorldTransform)
+    -> void
+{
+    auto& State = InParent.AddOrGet<ck::FFragment_SceneNode_PropagationState>();
+    State._LastPublishedWorldTransform = InWorldTransform;
+    State._HasPublishedWorldTransform = true;
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -377,6 +391,9 @@ auto
     auto SceneNodeWithTransform = UCk_Utils_Transform_UE::Add(SceneNodeEntity, InLocalTransform * InMeshComponent->GetSocketTransform(InSocketName), ECk_Replication::DoesNotReplicate);
     SceneNodeWithTransform.Add<ck::FFragment_SceneNode_UnrealAnchor>(InMeshComponent, InSocketName);
 
+    if (InMeshComponent->IsA<USkinnedMeshComponent>())
+    { SceneNodeWithTransform.Add<ck::FTag_SceneNode_LateAnchor>(); }
+
     return DoAdd(SceneNodeWithTransform, InAttachTo, InLocalTransform, ECk_SceneNode_DrivenBy::Anchor);
 }
 
@@ -473,16 +490,10 @@ auto
 {
     if (InSceneNode.Has<ck::FFragment_SceneNode_UnrealAnchor>())
     {
-        const auto& Anchor = InSceneNode.Get<ck::FFragment_SceneNode_UnrealAnchor>();
-        const auto& Component = Anchor.Get_Component();
+        const auto AnchorWorld = ck::FProcessor_SceneNode_FollowUnrealAnchor::Get_AnchorWorldTransform(
+            InSceneNode.Get<ck::FFragment_SceneNode_UnrealAnchor>());
 
-        if (ck::Is_NOT_Valid(Component))
-        { return FTransform::Identity; }
-
-        // Same expression FProcessor_SceneNode_FollowUnrealAnchor composes against.
-        return Anchor.Get_Socket().IsNone()
-            ? Component->GetComponentTransform()
-            : Component->GetSocketTransform(Anchor.Get_Socket());
+        return AnchorWorld.Get(FTransform::Identity);
     }
 
     const auto Parent = Get_Parent(InSceneNode);
@@ -535,6 +546,7 @@ auto
     InSceneNode.Try_Remove<ck::SceneNodeParent>();
     InSceneNode.Try_Remove<ck::FFragment_SceneNode>();
     InSceneNode.Try_Remove<ck::FTag_SceneNode_PropagationQueued>();
+    InSceneNode.Try_Remove<ck::FTag_SceneNode_LateAnchor>();
 
     RemoveExistingLayerTag(NodeAsTransform);
     NodeAsTransform.Try_Remove<ck::FTag_Transform_ExternallyDriven>();

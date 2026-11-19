@@ -20,6 +20,10 @@ namespace ck
     CK_DEFINE_ECS_TAG(FTag_SceneNode_RelativeTransformUpdated);
     CK_DEFINE_ECS_TAG(FTag_SceneNode_PropagationQueued);
 
+    // An Unreal-anchored node whose anchor moves with an animated pose (a skinned-mesh socket or bone): it is
+    // re-sampled in FGroup_Transform_LatePose, after the frame's animation is final, on top of the early sample.
+    CK_DEFINE_ECS_TAG(FTag_SceneNode_LateAnchor);
+
     CK_DEFINE_ECS_TAG(FTag_SceneNode_Layer0);
     CK_DEFINE_ECS_TAG(FTag_SceneNode_Layer1);
     CK_DEFINE_ECS_TAG(FTag_SceneNode_Layer2);
@@ -56,6 +60,9 @@ namespace ck
         static auto Queue(FCk_Handle& InSceneNode) -> void;
         static auto DeferConsume(const FCk_Handle_ReadOnly& InSceneNode, uint64 InGeneration) -> void;
         static auto PublishChildrenIfChanged(FCk_Handle& InParent, const FTransform& InWorldTransform) -> void;
+        // Records that InParent's children already compose against InWorldTransform, so the next
+        // PublishChildrenIfChanged at that transform queues nothing.
+        static auto MarkPublished(FCk_Handle& InParent, const FTransform& InWorldTransform) -> void;
     };
 
     // --------------------------------------------------------------------------------------------------------------------

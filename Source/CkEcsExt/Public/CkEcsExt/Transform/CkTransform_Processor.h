@@ -209,6 +209,35 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
+    // FProcessor_Transform_SyncToActor for this frame's late writes (FGroup_Transform_LatePose), so the actor renders
+    // the pose its anchor was re-sampled at. Pushing an unchanged transform is a no-op, so the promoted tag repeating it
+    // next frame costs one comparison.
+    class CKECSEXT_API FProcessor_Transform_SyncToActor_Late : public ck_exp::TProcessor<
+            FProcessor_Transform_SyncToActor_Late,
+            FCk_Handle_Transform,
+            ck::TReadOnly<FFragment_Transform_RootComponent>,
+            ck::TReadOnly<FFragment_Transform>,
+            FTag_Transform_LateUpdated,
+            FTag_Transform_Movable,
+            CK_IGNORE_PENDING_KILL>
+    {
+    public:
+        using Group = FGroup_Transform_LatePose;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        static auto
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_Transform_RootComponent& InTransformRootComp,
+            const FFragment_Transform& InComp) -> void;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
     class CKECSEXT_API FProcessor_Transform_FireSignals : public ck_exp::TProcessor<
             FProcessor_Transform_FireSignals,
             FCk_Handle_Transform,
@@ -254,6 +283,32 @@ namespace ck
 
     public:
         auto DoTick(TimeType) -> void;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // Hands last frame's late writes (FTag_Transform_LateUpdated) to this frame's consumers as FTag_Transform_Updated
+    // (and FTag_Transform_LatePromoted), after Cleanup cleared last frame's and before SceneNode propagation reads it.
+    // No MarkedDirtyBy: the late tag is only ever added in the TG_PostUpdateWork partition, so this partition's main
+    // pass always sees it and a pump pass would only re-run an empty view.
+    class CKECSEXT_API FProcessor_Transform_PromoteLateUpdated : public ck_exp::TProcessor<
+            FProcessor_Transform_PromoteLateUpdated,
+            FCk_Handle_Transform,
+            FTag_Transform_LateUpdated,
+            CK_IGNORE_PENDING_KILL>
+    {
+    public:
+        using Group = FGroup_Transform_SyncFrom;
+        using RunAfter = TDepList<FProcessor_Transform_Cleanup>;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        static auto
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle) -> void;
     };
 
     // --------------------------------------------------------------------------------------------------------------------
