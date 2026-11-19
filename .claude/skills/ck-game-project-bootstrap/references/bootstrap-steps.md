@@ -349,6 +349,28 @@ DefaultGameTarget=<Game>
   `Plugins/CkFoundation/Source/CkOverlapBodyEditor/CkOverlapBodyEditor_Module.cpp:43-112`. Do not
   hand-copy BB's serialized profile lines; they are the editor-saved result of that registration.
 
+**Windows editor startup options** — with the current CK engine fork and CkFoundation, add these
+project settings to `Config/Windows/WindowsEngine.ini`:
+
+```ini
+[Zen.AutoLaunch]
+OverlapEditorSponsor=True
+
+[D3D12.AdapterSetup]
+SkipDominatedProbes=True
+
+[CkAngelscriptGenerator]
+ReuseStartupAutoTestWrappers=True
+```
+
+To retain a lifetime-limited local Zen server between editor sessions, add
+`KeepZenForDesktopSession=True` under `[CkEditor]` in the same file. On normal interactive editor
+exit, the Windows desktop shell can sponsor the current server until the shell exits.
+
+Projects using Text3D can enable `bLoadSystemFontsOnDemand=True` and
+`bUseLocalFontFileReferences=True` under `[Text3DEditor.Fonts]` in `Config/DefaultEditor.ini`.
+Enable GitLink in the project descriptor when the editor needs Git source control.
+
 **`Config/DefaultCkFoundation.ini`** — the framework's own settings category:
 
 ```ini
