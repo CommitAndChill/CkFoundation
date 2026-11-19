@@ -13,6 +13,8 @@
 
 #if WITH_ANGELSCRIPT_CK
 
+namespace cleantype { struct CleanConfiguration; }
+
 // --------------------------------------------------------------------------------------------------------------------
 
 #define CK_ANGELSCRIPT_BIND_OPERATOR_EQUALS(_Type_)                                                                                        \
@@ -243,6 +245,9 @@ class CKCORE_API FCkAngelScriptPropertyFunctionRegistration
 {
 public:
     using FPropertyFunction = TFunction<void()>;
+    using FTypeNameFunction = FString (*)();
+
+    static auto ResolveTypeName(FTypeNameFunction InFormat, const cleantype::CleanConfiguration& InConfig) -> FString;
 
     static auto
     RegisterPropertyFunction(
@@ -309,7 +314,7 @@ private:
     {\
         /* Get the class type from ThisType (defined by CK_GENERATED_BODY) */\
         using ClassType = ThisType;\
-        auto ClassTypeStr = ck::Get_RuntimeTypeToString_AngelScript<ClassType>();\
+        auto ClassTypeStr = FCkAngelScriptPropertyFunctionRegistration::ResolveTypeName(&ck::Get_RuntimeTypeToString_AngelScript<ClassType>, cleantype::CleanConfiguration::GlobalConfig());\
         auto ExistingClass = FAngelscriptBinds::ExistingClass(FBindString(ClassTypeStr));\
         /* Skip if type not registered in AngelScript */\
         if (ExistingClass.GetTypeInfo() == nullptr)\
@@ -318,7 +323,7 @@ private:
         { return; }\
         \
         /* Get runtime type string for the property */\
-        auto PropertyTypeStr = ck::Get_RuntimeTypeToString_AngelScript<decltype(_InVar_)>();\
+        auto PropertyTypeStr = FCkAngelScriptPropertyFunctionRegistration::ResolveTypeName(&ck::Get_RuntimeTypeToString_AngelScript<decltype(_InVar_)>, cleantype::CleanConfiguration::GlobalConfig());\
         \
         /* Skip if property type contains unsupported patterns */\
         if (NOT ck::angelscript::IsTypeValidForAngelScript(PropertyTypeStr))\
@@ -381,7 +386,7 @@ private:
     {\
         /* Get the class type from ThisType (defined by CK_GENERATED_BODY) */\
         using ClassType = ThisType;\
-        auto ClassTypeStr = ck::Get_RuntimeTypeToString_AngelScript<ClassType>();\
+        auto ClassTypeStr = FCkAngelScriptPropertyFunctionRegistration::ResolveTypeName(&ck::Get_RuntimeTypeToString_AngelScript<ClassType>, cleantype::CleanConfiguration::GlobalConfig());\
         auto ExistingClass = FAngelscriptBinds::ExistingClass(FBindString(ClassTypeStr));\
         /* Skip if type not registered in AngelScript */\
         if (ExistingClass.GetTypeInfo() == nullptr)\
@@ -390,7 +395,7 @@ private:
         { return; }\
         \
         /* Get runtime type string for the property */\
-        auto PropertyTypeStr = ck::Get_RuntimeTypeToString_AngelScript<decltype(_InVar_)>();\
+        auto PropertyTypeStr = FCkAngelScriptPropertyFunctionRegistration::ResolveTypeName(&ck::Get_RuntimeTypeToString_AngelScript<decltype(_InVar_)>, cleantype::CleanConfiguration::GlobalConfig());\
         \
         /* Skip if property type contains unsupported patterns */\
         if (NOT ck::angelscript::IsTypeValidForAngelScript(PropertyTypeStr))\
@@ -438,7 +443,7 @@ private:
     {\
         /* Get the class type from ThisType (defined by CK_GENERATED_BODY) */\
         using ClassType = ThisType;\
-        auto ClassTypeStr = ck::Get_RuntimeTypeToString_AngelScript<ClassType>();\
+        auto ClassTypeStr = FCkAngelScriptPropertyFunctionRegistration::ResolveTypeName(&ck::Get_RuntimeTypeToString_AngelScript<ClassType>, cleantype::CleanConfiguration::GlobalConfig());\
         auto ExistingClass = FAngelscriptBinds::ExistingClass(FBindString(ClassTypeStr));\
         /* Skip if type not registered in AngelScript */\
         if (ExistingClass.GetTypeInfo() == nullptr)\
@@ -447,7 +452,7 @@ private:
         { return; }\
         \
         /* Get runtime type string for the property */\
-        auto PropertyTypeStr = ck::Get_RuntimeTypeToString_AngelScript<decltype(_InVar_)>();\
+        auto PropertyTypeStr = FCkAngelScriptPropertyFunctionRegistration::ResolveTypeName(&ck::Get_RuntimeTypeToString_AngelScript<decltype(_InVar_)>, cleantype::CleanConfiguration::GlobalConfig());\
         \
         /* Skip if property type contains unsupported patterns */\
         if (NOT ck::angelscript::IsTypeValidForAngelScript(PropertyTypeStr))\

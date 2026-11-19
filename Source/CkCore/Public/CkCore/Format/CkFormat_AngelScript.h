@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cleantype/details/cleantype_clean.hpp"
+#include "CkCore/Format/CkAccessorTypeFormatting.h"
 
 namespace ck
 {
@@ -58,12 +58,12 @@ namespace ck
         }
         else if constexpr (std::is_enum_v<T>)
         {
-            const auto& CleanName = cleantype::clean<T>();
+            const auto& CleanName = ck::detail::Get_CleanAccessorTypeName<T>();
             const auto CleanNameStr = FString{static_cast<int32>(CleanName.length()), CleanName.data()};
             return CleanNameStr.Replace(TEXT("enum "), TEXT(""), ESearchCase::CaseSensitive);
         }
-        // UObject pointers are AS reference types, so the pointer itself has no AS-side syntax — but
-        // const MUST propagate to the type string, or AS accepts a const→non-const conversion.
+        // UObject pointers are AS reference types, so the pointer itself has no AS-side syntax â€” but
+        // const MUST propagate to the type string, or AS accepts a constâ†’non-const conversion.
         else if constexpr (std::is_pointer_v<T>)
         {
             using PointeeType     = std::remove_pointer_t<T>;
@@ -80,7 +80,7 @@ namespace ck
         }
         else
         {
-            const auto& CleanName = cleantype::clean<T>();
+            const auto& CleanName = ck::detail::Get_CleanAccessorTypeName<T>();
             return FString{static_cast<int32>(CleanName.length()), CleanName.data()};
         }
     }

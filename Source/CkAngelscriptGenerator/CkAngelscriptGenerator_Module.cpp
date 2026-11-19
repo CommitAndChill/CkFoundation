@@ -25,6 +25,7 @@
 #include <MessageLogModule.h>
 #include <Misc/CoreDelegates.h>
 #include <Misc/CommandLine.h>
+#include <Misc/ConfigCacheIni.h>
 #include <Misc/FileHelper.h>
 #include <Misc/Parse.h>
 #include <Misc/Paths.h>
@@ -55,12 +56,36 @@ namespace ck_angelscript_generator_module
     constexpr auto* sStubPattern_AssetRegistry     = TEXT("_StubRecovery_*Assets.as");
     constexpr auto* sStubPattern_DynamicHandle     = TEXT("_StubRecovery_*.json");
 
-    auto Run_AllGenerators() -> void
+    static bool sg_PostEngineInitGeneratorsRan = false;
+
+    auto Run_AllGenerators(bool IsPostEngineInit) -> void
     {
+        const auto Start = FPlatformTime::Seconds();
         FCkAngelscriptEntityScriptParamsGenerator::GenerateAll();
-        FCkAutoTestWrapperGenerator::GenerateAll();
+        const auto EntityEnd = FPlatformTime::Seconds();
+        const bool Candidate = FParse::Param(FCommandLine::Get(), TEXT("CkReuseAutoTestWrapperPass"));
+        const bool Control = FParse::Param(FCommandLine::Get(), TEXT("CkLegacyAutoTestWrapperPass"));
+        bool Reuse = false;
+        GConfig->GetBool(TEXT("CkAngelscriptGenerator"), TEXT("ReuseStartupAutoTestWrappers"), Reuse, GEngineIni);
+        Reuse = !Control && (Reuse || Candidate);
+        if (Reuse && IsPostEngineInit)
+        { FCkAutoTestWrapperGenerator::GenerateAllForStartupPostInit(); }
+        else if (Reuse && !sg_PostEngineInitGeneratorsRan)
+        { FCkAutoTestWrapperGenerator::GenerateAllForStartupPostCompile(); }
+        else
+        { FCkAutoTestWrapperGenerator::GenerateAll(); }
+        const auto WrapperEnd = FPlatformTime::Seconds();
         FCkAutoTestNetStubGenerator::GenerateAll();
+        const auto NetEnd = FPlatformTime::Seconds();
         FCkScriptProcessorDriverGenerator::GenerateAll();
+        const auto DriverEnd = FPlatformTime::Seconds();
+        if (Candidate || Control)
+        {
+            UE_LOG(LogTemp, Display, TEXT("[CkGeneratorTiming] phase=%s entity_ms=%.3f wrappers_ms=%.3f net_ms=%.3f drivers_ms=%.3f"),
+                IsPostEngineInit ? TEXT("PostEngineInit") : TEXT("PostCompile"),
+                (EntityEnd - Start) * 1000, (WrapperEnd - EntityEnd) * 1000,
+                (NetEnd - WrapperEnd) * 1000, (DriverEnd - NetEnd) * 1000);
+        }
     }
 
     auto Delete_StubRecoveryFiles_ForPatterns(
@@ -515,6 +540,7 @@ namespace ck_angelscript_generator_module
 void FCkAngelscriptGeneratorModule::StartupModule()
 {
 #if WITH_EDITOR
+    ck_angelscript_generator_module::sg_PostEngineInitGeneratorsRan = false;
     // Must resolve ownership BEFORE the first mutation (the stub sweep below).
     FCkAngelscriptGenerator_RegenOwnership::Try_AcquireOrGet_IsOwner(TEXT("Module.StartupModule"));
 
@@ -546,7 +572,8 @@ void FCkAngelscriptGeneratorModule::StartupModule()
 
     _PostEngineInitHandle = FCoreDelegates::OnPostEngineInit.AddLambda([]()
     {
-        ck_angelscript_generator_module::Run_AllGenerators();
+        ck_angelscript_generator_module::sg_PostEngineInitGeneratorsRan = true;
+        ck_angelscript_generator_module::Run_AllGenerators(true);
         ck_angelscript_generator_module::Maybe_RegenDynamicHandleJson_OnPostInit();
         ck_angelscript_generator_module::Maybe_RegenAssetRegistry_OnPostInit();
     });
@@ -567,7 +594,7 @@ void FCkAngelscriptGeneratorModule::StartupModule()
             // would re-synthesize stubs from stale records into the now-healthy state.
             ck::angelscriptgenerator::self_heal::FCkAsRecoveryDispatcher::Clear_PendingRecoveryState();
 
-            ck_angelscript_generator_module::Run_AllGenerators();
+            ck_angelscript_generator_module::Run_AllGenerators(false);
             ck_angelscript_generator_module::Maybe_RegenDynamicHandleJson_OnPostCompile();
             ck_angelscript_generator_module::Maybe_RegenAssetRegistry_OnPostCompile();
 

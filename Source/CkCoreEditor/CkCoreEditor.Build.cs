@@ -8,6 +8,11 @@ public class CkCoreEditor : CkModuleRules
         PrivateIncludePaths.AddRange(new string[] {
         });
 
+        if (Target.Platform == UnrealTargetPlatform.Win64)
+        {
+            PrivateDependencyModuleNames.Add("Zen");
+        }
+
         PublicDependencyModuleNames.AddRange(new string[]
         {
             "Core",

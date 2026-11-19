@@ -116,15 +116,13 @@ auto
     DoReloadTextures()
     -> void
 {
-    // ReloadTextureResources deletes the Slate texture atlas; in a game process that is the frame
-    // that fires the FRenderResource fatal. See DoRegister_SlateStyle.
-    if (IsRunningGame())
+    if (IsRunningGame() || NOT FSlateApplication::IsInitialized())
     { return; }
 
-    if (NOT FSlateApplication::IsInitialized())
-    { return; }
-
-    FSlateApplication::Get().GetRenderer()->ReloadTextureResources();
+    auto& Slate = FSlateApplication::Get();
+    // Cached draw elements refer to atlas resources that the reload destroys.
+    Slate.InvalidateAllWidgets(false);
+    Slate.GetRenderer()->ReloadTextureResources();
 }
 
 auto

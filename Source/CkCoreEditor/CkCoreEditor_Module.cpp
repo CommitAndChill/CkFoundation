@@ -1,4 +1,5 @@
 #include "CkCoreEditor_Module.h"
+#include "CkCoreEditor_Log.h"
 #include "UObject/UObjectIterator.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/PackageName.h"
@@ -21,9 +22,52 @@
 #include <Engine/SCS_Node.h>
 #include <Engine/SimpleConstructionScript.h>
 
+#if PLATFORM_WINDOWS
+#include <Experimental/ZenServerInterface.h>
+#include <Misc/App.h>
+#include <Misc/CoreDelegates.h>
+#include <Windows/WindowsHWrapper.h>
+#endif
+
 #define LOCTEXT_NAMESPACE "FCkCoreEditorModule"
 
 // ----------------------------------------------------------------------------------------------------------------
+
+#if PLATFORM_WINDOWS
+namespace
+{
+    auto Try_SponsorLocalZenWithDesktopShell() -> void
+    {
+        if (NOT GIsEditor || IsRunningCommandlet() || FApp::IsUnattended() || GConfig == nullptr)
+        { return; }
+
+        auto KeepZen = false;
+        if (NOT GConfig->GetBool(TEXT("CkEditor"), TEXT("KeepZenForDesktopSession"), KeepZen, GEngineIni) ||
+            NOT KeepZen || NOT UE::Zen::IsDefaultServicePresent())
+        { return; }
+
+        auto& Service = UE::Zen::GetDefaultServiceInstance();
+        const auto& Settings = Service.GetServiceSettings();
+        if (Settings.IsSystemService() || NOT Settings.IsAutoLaunch() ||
+            NOT Settings.SettingsVariant.Get<UE::Zen::FServiceAutoLaunchSettings>().bLimitProcessLifetime ||
+            NOT Service.IsServiceRunningLocally() || NOT Service.IsServiceRunning())
+        { return; }
+
+        const auto ShellWindow = ::GetShellWindow();
+        auto ShellPid = DWORD{0};
+        if (NOT ShellWindow || NOT ::GetWindowThreadProcessId(ShellWindow, &ShellPid) || ShellPid == 0)
+        { return; }
+
+        // Zen may wait for sponsor pickup, so run this during editor shutdown.
+        uint32 Sponsors[] = {static_cast<uint32>(ShellPid)};
+        const auto Attached = Service.AddSponsorProcessIDs(MakeArrayView(Sponsors));
+        UE_LOG(CkCoreEditor, Display, TEXT("Desktop Zen sponsorship: %s (shell %u, port %u)"),
+            Attached ? TEXT("accepted") : TEXT("unavailable"), Sponsors[0], Service.GetEndpoint().GetPort());
+    }
+}
+#endif
+
+// --------------------------------------------------------------------------------------------------------------------
 
 auto
     FCkCoreEditorModule::
@@ -42,6 +86,10 @@ auto
     _MapOpened_DelegateHandle = FEditorDelegates::OnMapOpened.AddRaw(this, &FCkCoreEditorModule::OnMapOpened);
     _NewCurrentLevel_DelegateHandle = FEditorDelegates::NewCurrentLevel.AddRaw(this, &FCkCoreEditorModule::OnNewCurrentLevel);
 
+#if PLATFORM_WINDOWS
+    _EnginePreExit_DelegateHandle = FCoreDelegates::OnEnginePreExit.AddStatic(&Try_SponsorLocalZenWithDesktopShell);
+#endif
+
     RegisterHiddenBlueprintFields();
 }
 
@@ -50,6 +98,10 @@ auto
     ShutdownModule()
     -> void
 {
+#if PLATFORM_WINDOWS
+    FCoreDelegates::OnEnginePreExit.Remove(_EnginePreExit_DelegateHandle);
+#endif
+
     if (IAssetRegistry* AssetRegistry = IAssetRegistry::Get();
         ck::IsValid(AssetRegistry, ck::IsValid_Policy_NullptrOnly{}))
     {

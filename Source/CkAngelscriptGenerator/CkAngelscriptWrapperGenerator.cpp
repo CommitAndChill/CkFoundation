@@ -21,6 +21,10 @@
 #include <PhysicsEngine/PhysicsSettings.h>
 
 #include <HAL/FileManager.h>
+#include <HAL/PlatformTime.h>
+#include <Misc/CommandLine.h>
+#include <Templates/UnrealTemplate.h>
+#include <Misc/Parse.h>
 
 #include <Interfaces/IPluginManager.h>
 #include <ModuleDescriptor.h>
@@ -33,6 +37,122 @@
 
 // --------------------------------------------------------------------------------------------------------------------
 
+namespace
+{
+    // Descriptor host types also catch editor-only modules without "Editor" in their name.
+    auto IsWrapperEditorOnlyHostType(EHostType::Type InType) -> bool
+    {
+        switch (InType)
+        {
+            case EHostType::Editor:
+            case EHostType::EditorNoCommandlet:
+            case EHostType::EditorAndProgram:
+            case EHostType::UncookedOnly:
+            case EHostType::DeveloperTool:
+            case EHostType::Developer:
+            case EHostType::Program:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    struct FWrapperModuleInfo
+    {
+        FString PluginName;
+        bool IsEditorOnly;
+    };
+
+    struct FWrapperTiming
+    {
+        uint64 Cycles = 0;
+        uint64 Count = 0;
+    };
+
+    struct FWrapperGenerationContext
+    {
+        bool ProfileGeneration = FParse::Param(FCommandLine::Get(), TEXT("CkProfileWrapperGeneration"));
+        bool LegacyLookup = FParse::Param(FCommandLine::Get(), TEXT("CkLegacyWrapperLookup"));
+        TMap<FString, FWrapperModuleInfo> Modules;
+        TSet<FString> FoundationModules;
+        FWrapperTiming FoundationLookup;
+        FWrapperTiming PluginLookup;
+        FWrapperTiming EditorLookup;
+        FWrapperTiming Output;
+        int32 DiscoveredPluginCount = 0;
+        int32 DescriptorModuleCount = 0;
+
+        auto Get_ProfileCycles() const -> uint64
+        {
+            return ProfileGeneration ? FPlatformTime::Cycles64() : 0;
+        }
+
+        auto Build_ModuleIndex() -> void
+        {
+            if (LegacyLookup)
+            { return; }
+
+            const auto Plugins = IPluginManager::Get().GetDiscoveredPlugins();
+            if (ProfileGeneration)
+            { DiscoveredPluginCount = Plugins.Num(); }
+            for (const auto& Plugin : Plugins)
+            {
+                for (const auto& Module : Plugin->GetDescriptor().Modules)
+                {
+                    if (ProfileGeneration)
+                    { ++DescriptorModuleCount; }
+                    const auto ModuleName = Module.Name.ToString();
+                    // Both legacy discovered-plugin scans return the first descriptor match.
+                    if (NOT Modules.Contains(ModuleName))
+                    {
+                        Modules.Add(ModuleName, FWrapperModuleInfo{
+                            Plugin->GetName(), IsWrapperEditorOnlyHostType(Module.Type)});
+                    }
+                }
+            }
+
+            // Membership uses FindPlugin, independently of discovered-plugin first matches.
+            if (const auto Plugin = IPluginManager::Get().FindPlugin(TEXT("CkFoundation")); Plugin.IsValid())
+            {
+                for (const auto& Module : Plugin->GetDescriptor().Modules)
+                {
+                    FoundationModules.Add(Module.Name.ToString());
+                }
+            }
+        }
+    };
+
+    // Only synchronous calls inside this generation pass share the snapshot. Standalone callers
+    // retain the live legacy lookup; the next pass rebuilds after any plugin-manager changes.
+    thread_local FWrapperGenerationContext* ActiveWrapperGeneration = nullptr;
+
+    struct FScopedWrapperTiming
+    {
+        FWrapperTiming* Timing;
+        uint64 StartCycles;
+
+        explicit FScopedWrapperTiming(FWrapperTiming* InTiming)
+            : Timing(InTiming), StartCycles(InTiming ? FPlatformTime::Cycles64() : 0)
+        {}
+
+        ~FScopedWrapperTiming()
+        {
+            if (Timing)
+            {
+                Timing->Cycles += FPlatformTime::Cycles64() - StartCycles;
+                ++Timing->Count;
+            }
+        }
+    };
+
+    auto WrapperMilliseconds(uint64 InCycles) -> double
+    {
+        return FPlatformTime::ToSeconds64(InCycles) * 1000.0;
+    }
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
 // Identical writes must be skipped: the AS hot-reload checker baselines mtimes, so rewriting
 // unchanged bytes costs a soft-reload sweep of every wrapper module after engine init.
 static auto
@@ -40,6 +160,8 @@ SaveWrapperFile_IfChanged(
     const FString& InContent,
     const FString& InPath) -> bool
 {
+    const auto OutputTiming = FScopedWrapperTiming{
+        ActiveWrapperGeneration && ActiveWrapperGeneration->ProfileGeneration ? &ActiveWrapperGeneration->Output : nullptr};
     auto ExistingContent = FString{};
     if (FFileHelper::LoadFileToString(ExistingContent, *InPath))
     {
@@ -64,6 +186,13 @@ auto
     if (NOT FCkAngelscriptGenerator_RegenOwnership::Try_AcquireOrGet_IsOwner(
             TEXT("WrapperGenerator.GenerateAllWrappers")))
     { return; }
+
+    auto Context = FWrapperGenerationContext{};
+    const auto TotalStart = Context.Get_ProfileCycles();
+    const auto ContextScope = TGuardValue<FWrapperGenerationContext*>{ActiveWrapperGeneration, &Context};
+    const auto IndexStart = Context.Get_ProfileCycles();
+    Context.Build_ModuleIndex();
+    const auto IndexCycles = Context.Get_ProfileCycles() - IndexStart;
 
     ck::angelscriptgenerator::Log(TEXT("=== Generating Angelscript Wrappers from Reflection ==="));
 
@@ -102,8 +231,13 @@ auto
     auto ProcessedCount = int32{0};
     auto SkippedCount = int32{0};
 
+    const auto ClassLoopStart = Context.Get_ProfileCycles();
+    const auto SetupCycles = ClassLoopStart - TotalStart - IndexCycles;
+    auto VisitedClassCount = int32{0};
     for (TObjectIterator<UClass> ClassIterator; ClassIterator; ++ClassIterator)
     {
+        if (Context.ProfileGeneration)
+        { ++VisitedClassCount; }
         auto Class = *ClassIterator;
 
         if (Class->IsChildOf(UBlueprintFunctionLibrary::StaticClass()) &&
@@ -140,17 +274,26 @@ auto
         GeneratedFiles.Add(NamespaceName + TEXT(".as"));
     }
 
+    const auto ClassLoopCycles = Context.Get_ProfileCycles() - ClassLoopStart;
     ck::angelscriptgenerator::Log(TEXT("Processed {} classes, skipped {} classes"), ProcessedCount, SkippedCount);
+
+    const auto CVarStart = Context.Get_ProfileCycles();
 
     Request_GenerateCVarConstants(GeneratedDir);
     GeneratedFiles.Add(TEXT("cvar.as"));
 
+    const auto CVarCycles = Context.Get_ProfileCycles() - CVarStart;
+    const auto CollisionStart = Context.Get_ProfileCycles();
     Request_GenerateCollisionConstants(GeneratedDir);
     GeneratedFiles.Add(TEXT("collision.as"));
 
+    const auto CollisionCycles = Context.Get_ProfileCycles() - CollisionStart;
+    const auto SurfaceStart = Context.Get_ProfileCycles();
     Request_GeneratePhysicalSurfaceConstants(GeneratedDir);
     GeneratedFiles.Add(TEXT("physicalsurface.as"));
 
+    const auto SurfaceCycles = Context.Get_ProfileCycles() - SurfaceStart;
+    const auto ManifestStart = Context.Get_ProfileCycles();
     // TObjectIterator order varies per boot; an order-churned _index.as is an mtime change.
     GeneratedFiles.Sort();
 
@@ -189,6 +332,28 @@ auto
         {
             ck::angelscriptgenerator::Log(TEXT("Deleted stale wrapper file [{}] (no longer generated)"), StaleFile);
         }
+    }
+
+    if (Context.ProfileGeneration)
+    {
+        const auto ManifestCycles = Context.Get_ProfileCycles() - ManifestStart;
+        const auto TotalCycles = Context.Get_ProfileCycles() - TotalStart;
+        const auto ClassificationCycles = Context.FoundationLookup.Cycles + Context.PluginLookup.Cycles + Context.EditorLookup.Cycles;
+        ck::angelscriptgenerator::Log(
+            TEXT("WrapperTiming mode={} total_ms={} classification_ms={} output_ms={} rest_ms={} classes={} files={}"),
+            Context.LegacyLookup ? TEXT("legacy") : TEXT("indexed"), WrapperMilliseconds(TotalCycles),
+            WrapperMilliseconds(ClassificationCycles), WrapperMilliseconds(Context.Output.Cycles),
+            WrapperMilliseconds(TotalCycles - ClassificationCycles - Context.Output.Cycles), VisitedClassCount, GeneratedFiles.Num());
+        ck::angelscriptgenerator::Log(
+            TEXT("WrapperTiming phases setup_ms={} index_ms={} class_loop_ms={} cvar_ms={} collision_ms={} surface_ms={} manifest_cleanup_ms={}"),
+            WrapperMilliseconds(SetupCycles), WrapperMilliseconds(IndexCycles), WrapperMilliseconds(ClassLoopCycles),
+            WrapperMilliseconds(CVarCycles), WrapperMilliseconds(CollisionCycles), WrapperMilliseconds(SurfaceCycles), WrapperMilliseconds(ManifestCycles));
+        ck::angelscriptgenerator::Log(
+            TEXT("WrapperTiming queries foundation_count={} foundation_ms={} plugin_count={} plugin_ms={} editor_count={} editor_ms={} output_count={} discovered_plugins={} descriptor_modules={} indexed_modules={}"),
+            Context.FoundationLookup.Count, WrapperMilliseconds(Context.FoundationLookup.Cycles),
+            Context.PluginLookup.Count, WrapperMilliseconds(Context.PluginLookup.Cycles),
+            Context.EditorLookup.Count, WrapperMilliseconds(Context.EditorLookup.Cycles), Context.Output.Count,
+            Context.DiscoveredPluginCount, Context.DescriptorModuleCount, Context.Modules.Num());
     }
 }
 
@@ -266,6 +431,8 @@ auto
         UClass* Class)
     -> bool
 {
+    const auto LookupTiming = FScopedWrapperTiming{
+        ActiveWrapperGeneration && ActiveWrapperGeneration->ProfileGeneration ? &ActiveWrapperGeneration->FoundationLookup : nullptr};
     if (ck::Is_NOT_Valid(Class))
     { return false; }
 
@@ -280,6 +447,9 @@ auto
     {
         return false; // Not a script package
     }
+
+    if (ActiveWrapperGeneration && NOT ActiveWrapperGeneration->LegacyLookup)
+    { return ActiveWrapperGeneration->FoundationModules.Contains(ModuleName); }
 
     auto Plugin = IPluginManager::Get().FindPlugin(TEXT("CkFoundation"));
     if (Plugin.IsValid())
@@ -305,6 +475,8 @@ auto
         UClass* Class)
     -> FString
 {
+    const auto LookupTiming = FScopedWrapperTiming{
+        ActiveWrapperGeneration && ActiveWrapperGeneration->ProfileGeneration ? &ActiveWrapperGeneration->PluginLookup : nullptr};
     if (ck::Is_NOT_Valid(Class))
     { return TEXT("Unknown"); }
 
@@ -318,6 +490,12 @@ auto
     else
     {
         return TEXT("Unknown"); // Not a script package
+    }
+
+    if (ActiveWrapperGeneration && NOT ActiveWrapperGeneration->LegacyLookup)
+    {
+        const auto* ModuleInfo = ActiveWrapperGeneration->Modules.Find(ModuleName);
+        return ModuleInfo ? ModuleInfo->PluginName : FString{TEXT("Engine")};
     }
 
     auto AllPlugins = IPluginManager::Get().GetDiscoveredPlugins();
@@ -344,6 +522,8 @@ auto
         UClass* Class)
     -> bool
 {
+    const auto LookupTiming = FScopedWrapperTiming{
+        ActiveWrapperGeneration && ActiveWrapperGeneration->ProfileGeneration ? &ActiveWrapperGeneration->EditorLookup : nullptr};
     if (ck::Is_NOT_Valid(Class))
     { return false; }
 
@@ -359,31 +539,19 @@ auto
         return false;
     }
 
-    // A module whose descriptor Type is editor-only is absent from a cooked game, so its wrappers
-    // must be `#if EDITOR`-guarded. The name-substring heuristic below misses e.g. "CkFooTooling".
-    const auto IsEditorOnlyHostType = [](EHostType::Type InType) -> bool
+    if (ActiveWrapperGeneration && NOT ActiveWrapperGeneration->LegacyLookup)
     {
-        switch (InType)
-        {
-            case EHostType::Editor:
-            case EHostType::EditorNoCommandlet:
-            case EHostType::EditorAndProgram:
-            case EHostType::UncookedOnly:
-            case EHostType::DeveloperTool:
-            case EHostType::Developer:
-            case EHostType::Program:
-                return true;
-            default:
-                return false;
-        }
-    };
+        if (const auto* ModuleInfo = ActiveWrapperGeneration->Modules.Find(ModuleName))
+        { return ModuleInfo->IsEditorOnly; }
+        return ModuleName.Contains(TEXT("Editor"));
+    }
 
     for (const auto& Plugin : IPluginManager::Get().GetDiscoveredPlugins())
     {
         for (const auto& ModuleDesc : Plugin->GetDescriptor().Modules)
         {
             if (ModuleDesc.Name.ToString() == ModuleName)
-            { return IsEditorOnlyHostType(ModuleDesc.Type); }
+            { return IsWrapperEditorOnlyHostType(ModuleDesc.Type); }
         }
     }
 

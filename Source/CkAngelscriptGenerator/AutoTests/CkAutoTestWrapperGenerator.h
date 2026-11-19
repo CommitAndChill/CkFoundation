@@ -14,6 +14,14 @@ public:
     static auto
     GenerateAll() -> void;
 
+    // Records the completed initial compile pass for the one follow-up at engine init.
+    static auto
+    GenerateAllForStartupPostCompile() -> void;
+
+    // Consumes the startup record and falls back to generation when inputs or outputs differ.
+    static auto
+    GenerateAllForStartupPostInit() -> void;
+
     // Answers "which `A<X>_Actor` wrappers does the .as SOURCE declare", as BARE names (no leading
     // `A` — the form `Get_WrapperBareName` produces), so a hand-authored wrapper suppresses emission
     // even while its file fails to compile and no live UClass answers for it.

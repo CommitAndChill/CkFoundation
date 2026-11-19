@@ -2,6 +2,7 @@
 
 #include "CkAngelscriptGenerator/AutoTests/CkAutoTestNetStubGenerator.h"
 #include "CkAngelscriptGenerator/CkAngelscriptGenerator_Log.h"
+#include "CkAngelscriptGenerator/CkAngelscriptGenerator_PluginLookup.h"
 #include "CkAngelscriptGenerator/CkAngelscriptGenerator_RegenOwnership.h"
 #include "CkAngelscriptGenerator/SelfHeal/CkAngelscriptGenerator_AsSourceScanner.h"
 
@@ -10,13 +11,19 @@
 #include "CkCore/Reflection/CkReflection_Utils.h"
 
 #include <HAL/FileManager.h>
-#include <Interfaces/IPluginManager.h>
+#include <Hash/Blake3.h>
 #include <Internationalization/Regex.h>
 #include <Misc/App.h>
 #include <Misc/FileHelper.h>
 #include <Misc/Paths.h>
+#include <ProfilingDebugging/CpuProfilerTrace.h>
 #include <UObject/Class.h>
 #include <UObject/UObjectIterator.h>
+
+#if WITH_EDITOR && WITH_DEV_AUTOMATION_TESTS
+#include <Misc/AutomationTest.h>
+#include <Misc/ScopeExit.h>
+#endif
 
 #if WITH_ANGELSCRIPT_CK
 #include "ClassGenerator/ASClass.h"
@@ -26,6 +33,31 @@
 
 namespace ck_autotest_wrapper_generator
 {
+    auto
+        Collect_DeclaredWrappersFromFile(
+            const FString& InContents,
+            const FString& InSourceFilePath,
+            TSet<FString>& OutNames)
+        -> void
+    {
+        using ck::angelscriptgenerator::self_heal::FCkAsSourceScanner;
+
+        // The regex finds candidates in raw text. The parser rejects comments and string literals.
+        static const auto WrapperDeclarationPattern = FRegexPattern{TEXT(R"(class\s+(A[A-Za-z0-9_]+_Actor)\b)")};
+        auto Candidates = TSet<FString>{};
+        auto Matcher = FRegexMatcher{WrapperDeclarationPattern, InContents};
+        while (Matcher.FindNext())
+        {
+            Candidates.Add(Matcher.GetCaptureGroup(1));
+        }
+
+        for (const auto& Candidate : Candidates)
+        {
+            if (FCkAsSourceScanner::Parse_ClassDeclaration(InContents, Candidate, InSourceFilePath).Found)
+            { OutNames.Add(Candidate.RightChop(1)); }
+        }
+    }
+
 #if WITH_EDITOR
 
     // ---- Constants -----------------------------------------------------
@@ -114,13 +146,6 @@ namespace ck_autotest_wrapper_generator
     auto Get_WrapperBareName(const UClass* InEntityScriptClass) -> FString
     {
         return FString::Printf(TEXT("%s_Actor"), *InEntityScriptClass->GetName());
-    }
-
-    // Prefix preserved: the AS compiler expects `U<X>` in the emitted source.
-    auto Get_EntityScriptSourceName(const UClass* InEntityScriptClass) -> FString
-    {
-        return ck::Format_UE(TEXT("{}{}"),
-            InEntityScriptClass->GetPrefixCPP(), InEntityScriptClass->GetName());
     }
 
     // ---- Hand-authored wrapper detection -------------------------------
@@ -213,29 +238,46 @@ namespace ck_autotest_wrapper_generator
         return Value;
     }
 
-    auto Format_WrapperBlock(const UClass* InEntityScriptClass) -> FString
+    struct FWrapperInput
     {
-        const auto WrapperSourceName = Get_WrapperSourceName(InEntityScriptClass);
+        FString _SourceName;
+        FString _TestClassPath;
+        FString _TimeoutLiteral;
 
-        // Emitted as a string literal resolved at runtime, NOT as a compile-time class reference —
-        // FileHeader below carries the full rationale into the generated file itself.
-        const auto EntityScriptPath = InEntityScriptClass->GetPathName();
-        const auto TimeoutOverride = Get_TimeoutOverride(InEntityScriptClass);
-
-        auto Block = FString{};
-        Block += ck::Format_UE(TEXT("class {} : {}\n"), WrapperSourceName, AutoTestRunnerSourceName);
-        Block += TEXT("{\n");
-        if (TimeoutOverride.IsSet())
+        auto operator==(const FWrapperInput& InOther) const -> bool
         {
-            // The wrapper's own _TimeoutSeconds is what ACk_AutoTestRunner::PrepareTest turns into
-            // AFunctionalTest::TimeLimit. MinFractionalDigits=1 forces "2.0f" over "2f".
-            const auto Literal = FString::SanitizeFloat(*TimeoutOverride, /*MinFractionalDigits=*/1);
-            Block += ck::Format_UE(TEXT("    default _TimeoutSeconds = {}f;\n"), Literal);
+            return _SourceName.Equals(InOther._SourceName, ESearchCase::CaseSensitive) &&
+                _TestClassPath.Equals(InOther._TestClassPath, ESearchCase::CaseSensitive) &&
+                _TimeoutLiteral.Equals(InOther._TimeoutLiteral, ESearchCase::CaseSensitive);
+        }
+    };
+
+    auto
+        Make_WrapperInput(
+            const UClass& InClass)
+        -> FWrapperInput
+    {
+        const auto TimeoutOverride = Get_TimeoutOverride(&InClass);
+        // MinFractionalDigits=1 forces "2.0f" over "2f".
+        return FWrapperInput{
+            Get_WrapperSourceName(&InClass),
+            InClass.GetPathName(),
+            TimeoutOverride.IsSet() ? FString::SanitizeFloat(*TimeoutOverride, /*MinFractionalDigits=*/1) : FString{}};
+    }
+
+    auto Format_WrapperBlock(const FWrapperInput& InWrapper) -> FString
+    {
+        auto Block = FString{};
+        Block += ck::Format_UE(TEXT("class {} : {}\n"), InWrapper._SourceName, AutoTestRunnerSourceName);
+        Block += TEXT("{\n");
+        if (NOT InWrapper._TimeoutLiteral.IsEmpty())
+        {
+            Block += ck::Format_UE(TEXT("    default _TimeoutSeconds = {}f;\n"), InWrapper._TimeoutLiteral);
         }
         Block += TEXT("    UFUNCTION(BlueprintOverride)\n");
         Block += TEXT("    TSubclassOf<UCk_EntityScript_UE> Get_TestEntityScriptClass() const\n");
         Block += TEXT("    {\n");
-        Block += ck::Format_UE(TEXT("        auto Path = FSoftClassPath(\"{}\");\n"), EntityScriptPath);
+        Block += ck::Format_UE(TEXT("        auto Path = FSoftClassPath(\"{}\");\n"), InWrapper._TestClassPath);
         Block += TEXT("        TSubclassOf<UCk_EntityScript_UE> ResolvedClass;\n");
         Block += TEXT("        ResolvedClass = Path.TryLoadClass();\n");
         Block += TEXT("        return ResolvedClass;\n");
@@ -250,78 +292,22 @@ namespace ck_autotest_wrapper_generator
     {
         FString PluginName;
         FString OutputFilePath;
-        TArray<UClass*> Classes;
+        bool _IsProjectBucket = false;
+        TArray<FWrapperInput> _Wrappers;
+
+        auto operator==(const FPluginBucket& InOther) const -> bool
+        {
+            return PluginName.Equals(InOther.PluginName, ESearchCase::CaseSensitive) &&
+                OutputFilePath.Equals(InOther.OutputFilePath, ESearchCase::CaseSensitive) &&
+                _IsProjectBucket == InOther._IsProjectBucket &&
+                _Wrappers == InOther._Wrappers;
+        }
     };
-
-    auto Build_ModuleToPluginMap() -> TMap<FString, TSharedRef<IPlugin>>
-    {
-        auto Result = TMap<FString, TSharedRef<IPlugin>>{};
-        for (const auto& Plugin : IPluginManager::Get().GetEnabledPlugins())
-        {
-            for (const auto& Module : Plugin->GetDescriptor().Modules)
-            {
-                Result.Add(Module.Name.ToString(), Plugin);
-            }
-        }
-        return Result;
-    }
-
-    auto Find_PluginByPathPrefix(const FString& InPath) -> const IPlugin*
-    {
-        if (InPath.IsEmpty())
-        { return nullptr; }
-
-        auto NormalizedPath = FPaths::ConvertRelativePathToFull(InPath);
-        FPaths::NormalizeFilename(NormalizedPath);
-
-        const IPlugin* BestMatch = nullptr;
-        auto BestMatchLen = int32{0};
-
-        for (const auto& Plugin : IPluginManager::Get().GetEnabledPlugins())
-        {
-            auto PluginDir = FPaths::ConvertRelativePathToFull(Plugin->GetBaseDir());
-            FPaths::NormalizeDirectoryName(PluginDir);
-
-            if (NormalizedPath.StartsWith(PluginDir, ESearchCase::IgnoreCase))
-            {
-                if (PluginDir.Len() > BestMatchLen)
-                {
-                    BestMatch = &Plugin.Get();
-                    BestMatchLen = PluginDir.Len();
-                }
-            }
-        }
-        return BestMatch;
-    }
-
-    auto Find_PluginForClass(
-        const UClass* InClass,
-        const TMap<FString, TSharedRef<IPlugin>>& InModuleToPlugin)
-        -> const IPlugin*
-    {
-        const auto PackageName = InClass->GetOutermost()->GetName();
-        constexpr auto ScriptPrefix = TEXT("/Script/");
-        if (PackageName.StartsWith(ScriptPrefix))
-        {
-            const auto ModuleName = PackageName.RightChop(FString(ScriptPrefix).Len());
-            if (const auto* Found = InModuleToPlugin.Find(ModuleName))
-            { return &Found->Get(); }
-        }
-
-#if WITH_ANGELSCRIPT_CK
-        if (auto* ASClass = UASClass::GetFirstASClass(const_cast<UClass*>(InClass)))
-        {
-            if (const auto* Plugin = Find_PluginByPathPrefix(ASClass->GetSourceFilePath()))
-            { return Plugin; }
-        }
-#endif
-
-        return nullptr;
-    }
 
     auto Bucket_ClassesByPlugin(const TArray<UClass*>& InClasses) -> TArray<FPluginBucket>
     {
-        const auto ModuleToPlugin = Build_ModuleToPluginMap();
+        TRACE_CPUPROFILER_EVENT_SCOPE(CkAS_AutoTestWrappers_BucketClassesByPlugin);
+        const auto PluginLookup = FCkAngelscriptGenerator_PluginLookup{};
 
         auto BucketMap = TMap<FString, FPluginBucket>{};
 
@@ -330,7 +316,7 @@ namespace ck_autotest_wrapper_generator
             auto PluginName = FString{};
             auto OutputDir = FString{};
 
-            if (const auto* Plugin = Find_PluginForClass(Class, ModuleToPlugin))
+            if (const auto* Plugin = PluginLookup.Find_PluginForClass(Class))
             {
                 PluginName = Plugin->GetName();
                 OutputDir = Plugin->GetBaseDir() / TEXT("Script") / TEXT("Generated");
@@ -346,10 +332,11 @@ namespace ck_autotest_wrapper_generator
                 auto Bucket = FPluginBucket{};
                 Bucket.PluginName = PluginName;
                 Bucket.OutputFilePath = OutputDir / (PluginName + TEXT("_AutoTestActors.as"));
+                Bucket._IsProjectBucket = PluginName == FApp::GetProjectName();
                 BucketMap.Add(PluginName, MoveTemp(Bucket));
             }
 
-            BucketMap[PluginName].Classes.Add(Class);
+            BucketMap[PluginName]._Wrappers.Add(Make_WrapperInput(*Class));
         }
 
         auto Result = TArray<FPluginBucket>{};
@@ -415,8 +402,212 @@ namespace ck_autotest_wrapper_generator
         TEXT("// deleting the .as file removes BOTH classes atomically - no stale\n")
         TEXT("// generated file to get out of sync.)\n\n");
 
+
+    enum class EStartupPass
+    {
+        None,
+        PostCompile,
+        PostInit
+    };
+
+    struct FSourceFingerprint
+    {
+        FString _Path;
+        FBlake3Hash _Hash;
+    };
+
+    struct FStartupSnapshot
+    {
+        TArray<FSourceFingerprint> _Sources;
+        TSet<FString> _SourceDeclared;
+        TArray<FPluginBucket> _Buckets;
+        TArray<FBlake3Hash> _OutputHashes;
+    };
+
+    TOptional<FStartupSnapshot> sStartupSnapshot;
+
+    auto
+        Try_GetFileHash(
+            const FString& InPath)
+        -> TOptional<FBlake3Hash>
+    {
+        auto Bytes = TArray<uint8>{};
+        if (NOT FFileHelper::LoadFileToArray(Bytes, *InPath, FILEREAD_Silent))
+        { return {}; }
+
+        return FBlake3::HashBuffer(Bytes.GetData(), Bytes.Num());
+    }
+
+    auto
+        Capture_StartupSources(
+            const TArray<FString>& InSourcePaths,
+            FStartupSnapshot& OutSnapshot)
+        -> bool
+    {
+        auto Complete = true;
+        for (const auto& Path : InSourcePaths)
+        {
+            auto Bytes = TArray<uint8>{};
+            if (NOT FFileHelper::LoadFileToArray(Bytes, *Path, FILEREAD_Silent))
+            {
+                Complete = false;
+                continue;
+            }
+
+            // Parse the same bytes whose hash is used by the follow-up.
+            OutSnapshot._Sources.Add(FSourceFingerprint{Path, FBlake3::HashBuffer(Bytes.GetData(), Bytes.Num())});
+            auto Contents = FString{};
+            FFileHelper::BufferToString(Contents, Bytes.GetData(), Bytes.Num());
+            Collect_DeclaredWrappersFromFile(Contents, Path, OutSnapshot._SourceDeclared);
+        }
+        return Complete;
+    }
+
+    auto
+        Are_StartupSourcesUnchanged(
+            const TArray<FString>& InSourcePaths,
+            const TArray<FSourceFingerprint>& InPreviousSources)
+        -> bool
+    {
+        if (InSourcePaths.Num() != InPreviousSources.Num())
+        { return false; }
+
+        for (auto Index = 0; Index < InSourcePaths.Num(); ++Index)
+        {
+            const auto& Path = InSourcePaths[Index];
+            const auto& Previous = InPreviousSources[Index];
+            if (NOT Path.Equals(Previous._Path, ESearchCase::CaseSensitive))
+            { return false; }
+
+            const auto CurrentHash = Try_GetFileHash(Path);
+            if (NOT CurrentHash.IsSet() || *CurrentHash != Previous._Hash)
+            { return false; }
+        }
+        return true;
+    }
+
+    auto
+        Are_StartupOutputsUnchanged(
+            const TArray<FPluginBucket>& InBuckets,
+            const FStartupSnapshot& InPrevious)
+        -> bool
+    {
+        if (InBuckets != InPrevious._Buckets || InBuckets.Num() != InPrevious._OutputHashes.Num())
+        { return false; }
+
+        for (auto Index = 0; Index < InBuckets.Num(); ++Index)
+        {
+            const auto CurrentHash = Try_GetFileHash(InBuckets[Index].OutputFilePath);
+            if (NOT CurrentHash.IsSet() || *CurrentHash != InPrevious._OutputHashes[Index])
+            { return false; }
+        }
+        return true;
+    }
+
+    auto
+        Try_CaptureValidatedOutput(
+            const FString& InPath,
+            const FString& InExpectedContent)
+        -> TOptional<FBlake3Hash>
+    {
+        auto Bytes = TArray<uint8>{};
+        if (NOT FFileHelper::LoadFileToArray(Bytes, *InPath, FILEREAD_Silent))
+        { return {}; }
+
+        auto Contents = FString{};
+        FFileHelper::BufferToString(Contents, Bytes.GetData(), Bytes.Num());
+        Contents.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
+        if (NOT Contents.Equals(InExpectedContent, ESearchCase::CaseSensitive))
+        { return {}; }
+
+        return FBlake3::HashBuffer(Bytes.GetData(), Bytes.Num());
+    }
+
+    auto GenerateAll(EStartupPass InStartupPass) -> void;
+
 #endif // WITH_EDITOR
 }
+
+// --------------------------------------------------------------------------------------------------------------------
+
+#if WITH_EDITOR && WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_AutoTestWrapperGenerator_StartupSnapshot,
+    "CkAngelscriptGenerator.UnitTests.AutoTestWrapperGenerator.StartupSnapshot",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCkTest_AutoTestWrapperGenerator_StartupSnapshot::RunTest(const FString&)
+{
+    using namespace ck_autotest_wrapper_generator;
+
+    auto& FileManager = IFileManager::Get();
+    const auto Directory = FPaths::ProjectIntermediateDir();
+    if (NOT TestTrue(TEXT("Fixture directory exists"), FileManager.MakeDirectory(*Directory, true)))
+    { return false; }
+
+    const auto SourcePath = FPaths::CreateTempFilename(*Directory, TEXT("CkWrapperStartupSource"), TEXT(".as"));
+    const auto OutputPath = FPaths::CreateTempFilename(*Directory, TEXT("CkWrapperStartupOutput"), TEXT(".as"));
+    ON_SCOPE_EXIT
+    {
+        FileManager.Delete(*SourcePath);
+        FileManager.Delete(*OutputPath);
+    };
+
+    const auto SaveFixture = [](const FString& InPath, const TCHAR* InContents)
+    {
+        return FFileHelper::SaveStringToFile(InContents, *InPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+    };
+    if (NOT TestTrue(TEXT("Source fixture written"),
+            SaveFixture(SourcePath, TEXT("class ATestOne_Actor : ACk_AutoTestRunner {}\n"))) ||
+        NOT TestTrue(TEXT("Output fixture written"), SaveFixture(OutputPath, TEXT("// expected\n"))))
+    { return false; }
+
+    const auto SourcePaths = TArray<FString>{SourcePath};
+    auto Snapshot = FStartupSnapshot{};
+    if (NOT TestTrue(TEXT("Source inputs captured"), Capture_StartupSources(SourcePaths, Snapshot)))
+    { return false; }
+    TestTrue(TEXT("Source declarations came from captured bytes"), Snapshot._SourceDeclared.Contains(TEXT("TestOne_Actor")));
+    TestTrue(TEXT("Unchanged source matches"), Are_StartupSourcesUnchanged(SourcePaths, Snapshot._Sources));
+
+    const auto SourceTime = FileManager.GetTimeStamp(*SourcePath);
+    const auto SourceSize = FileManager.FileSize(*SourcePath);
+    if (NOT TestTrue(TEXT("Same-length source edit written"),
+            SaveFixture(SourcePath, TEXT("class ATestTwo_Actor : ACk_AutoTestRunner {}\n"))) ||
+        NOT TestTrue(TEXT("Original timestamp restored"), FileManager.SetTimeStamp(*SourcePath, SourceTime)))
+    { return false; }
+    TestTrue(TEXT("Edit preserved size and timestamp"),
+        FileManager.FileSize(*SourcePath) == SourceSize && FileManager.GetTimeStamp(*SourcePath) == SourceTime);
+    TestFalse(TEXT("Source edit invalidates the snapshot despite equal metadata"),
+        Are_StartupSourcesUnchanged(SourcePaths, Snapshot._Sources));
+
+    auto Bucket = FPluginBucket{};
+    Bucket.PluginName = TEXT("StartupSnapshotTest");
+    Bucket.OutputFilePath = OutputPath;
+    Bucket._Wrappers.Add(FWrapperInput{TEXT("ATestOne_Actor"), TEXT("/Script/Angelscript.TestOne"), TEXT("2.0")});
+    Snapshot._Buckets.Add(MoveTemp(Bucket));
+    const auto Hash = Try_CaptureValidatedOutput(OutputPath, TEXT("// expected\n"));
+    if (NOT TestTrue(TEXT("Expected output captured"), Hash.IsSet()))
+    { return false; }
+
+    Snapshot._OutputHashes.Add(*Hash);
+    TestTrue(TEXT("Unchanged output matches"), Are_StartupOutputsUnchanged(Snapshot._Buckets, Snapshot));
+    auto ChangedBuckets = Snapshot._Buckets;
+    ChangedBuckets[0]._Wrappers[0]._TimeoutLiteral = TEXT("3.0");
+    TestFalse(TEXT("Changed effective timeout invalidates the snapshot"), Are_StartupOutputsUnchanged(ChangedBuckets, Snapshot));
+
+    if (NOT TestTrue(TEXT("Modified output written"), SaveFixture(OutputPath, TEXT("// modified\n"))))
+    { return false; }
+    TestFalse(TEXT("Modified output cannot be captured as expected content"),
+        Try_CaptureValidatedOutput(OutputPath, TEXT("// expected\n")).IsSet());
+    TestFalse(TEXT("Modified output invalidates the snapshot"), Are_StartupOutputsUnchanged(Snapshot._Buckets, Snapshot));
+    if (NOT TestTrue(TEXT("Generated output removed"), FileManager.Delete(*OutputPath, /*RequireExists=*/true)))
+    { return false; }
+    TestFalse(TEXT("Missing output invalidates the snapshot"), Are_StartupOutputsUnchanged(Snapshot._Buckets, Snapshot));
+    return true;
+}
+
+#endif // WITH_EDITOR && WITH_DEV_AUTOMATION_TESTS
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -426,60 +617,39 @@ auto
         const TArray<FString>& InAsSourceFiles)
     -> TSet<FString>
 {
-    using ck::angelscriptgenerator::self_heal::FCkAsSourceScanner;
-
-    // Raw text, so this over-matches into comments and string literals on purpose — the scanner
-    // below is what decides, and a regex is far cheaper than parsing every file for every name.
-    static const auto WrapperDeclarationPattern = FRegexPattern{TEXT(R"(class\s+(A[A-Za-z0-9_]+_Actor)\b)")};
-
     auto Result = TSet<FString>{};
-
     for (const auto& SourceFilePath : InAsSourceFiles)
     {
         auto Contents = FString{};
-        if (NOT FFileHelper::LoadFileToString(Contents, *SourceFilePath))
-        { continue; }
-
-        auto Candidates = TSet<FString>{};
-        auto Matcher = FRegexMatcher{WrapperDeclarationPattern, Contents};
-        while (Matcher.FindNext())
-        {
-            Candidates.Add(Matcher.GetCaptureGroup(1));
-        }
-
-        for (const auto& Candidate : Candidates)
-        {
-            // Blanks comments and string literals first, so a commented-out or quoted declaration
-            // never suppresses emission.
-            if (NOT FCkAsSourceScanner::Parse_ClassDeclaration(Contents, Candidate, SourceFilePath).Found)
-            { continue; }
-
-            Result.Add(Candidate.RightChop(1));
-        }
+        if (FFileHelper::LoadFileToString(Contents, *SourceFilePath))
+        { ck_autotest_wrapper_generator::Collect_DeclaredWrappersFromFile(Contents, SourceFilePath, Result); }
     }
-
     return Result;
 }
 
 // --------------------------------------------------------------------------------------------------------------------
 
-auto
-    FCkAutoTestWrapperGenerator::
-    GenerateAll()
-    -> void
-{
 #if WITH_EDITOR
 
+auto
+    ck_autotest_wrapper_generator::
+    GenerateAll(
+        EStartupPass InStartupPass)
+    -> void
+{
     using ck::angelscriptgenerator::self_heal::FCkAsSourceScanner;
+
+    auto Previous = InStartupPass == EStartupPass::PostInit
+        ? MoveTemp(sStartupSnapshot)
+        : TOptional<FStartupSnapshot>{};
+    sStartupSnapshot.Reset();
 
     // Single-writer gate (G4): a secondary instance must not rewrite <Plugin>_AutoTestActors.as.
     if (NOT FCkAngelscriptGenerator_RegenOwnership::Try_AcquireOrGet_IsOwner(
             TEXT("AutoTestWrapperGenerator.GenerateAll")))
     { return; }
 
-    ck::angelscriptgenerator::Log(TEXT("[CkAS AutoTest Wrappers] === Generating AutoTest actor wrappers ==="));
-
-    auto* AutoTestBase = ck_autotest_wrapper_generator::Find_AutoTestBaseClass();
+    auto* AutoTestBase = Find_AutoTestBaseClass();
     if (ck::Is_NOT_Valid(AutoTestBase))
     {
         // Normal during early startup. Log rather than VeryVerbose so the silent-no-write case
@@ -494,7 +664,7 @@ auto
     for (TObjectIterator<UClass> ClassIterator; ClassIterator; ++ClassIterator)
     {
         auto* Class = *ClassIterator;
-        if (ck_autotest_wrapper_generator::Is_IncludedAutoTestClass(Class, AutoTestBase))
+        if (Is_IncludedAutoTestClass(Class, AutoTestBase))
         {
             AllSubclasses.Add(Class);
         }
@@ -505,17 +675,31 @@ auto
         return InA.GetPathName() < InB.GetPathName();
     });
 
-    const auto SourceDeclared = Collect_SourceDeclaredWrapperNames(
-        FCkAsSourceScanner::Enumerate_AsSourceFiles(FCkAsSourceScanner::Get_DefaultScanRoots()));
+    const auto SourcePaths = FCkAsSourceScanner::Enumerate_AsSourceFiles(FCkAsSourceScanner::Get_DefaultScanRoots());
+    auto Current = FStartupSnapshot{};
+    const auto CanReuseSourceDeclarations = Previous.IsSet() &&
+        Are_StartupSourcesUnchanged(SourcePaths, Previous->_Sources);
+    auto CaptureComplete = false;
+    if (InStartupPass == EStartupPass::PostCompile)
+    {
+        CaptureComplete = Capture_StartupSources(SourcePaths, Current);
+    }
+    else
+    {
+        Current._SourceDeclared = CanReuseSourceDeclarations
+            ? MoveTemp(Previous->_SourceDeclared)
+            : FCkAutoTestWrapperGenerator::Collect_SourceDeclaredWrapperNames(SourcePaths);
+    }
+    const auto& SourceDeclared = Current._SourceDeclared;
 
     auto Emittable = TArray<UClass*>{};
     auto SkippedCount = int32{0};
     auto SkippedBySourceOnlyCount = int32{0};
     for (auto* Class : AllSubclasses)
     {
-        const auto WrapperBareName = ck_autotest_wrapper_generator::Get_WrapperBareName(Class);
+        const auto WrapperBareName = Get_WrapperBareName(Class);
 
-        const auto HasLiveWrapper = ck_autotest_wrapper_generator::Has_HandAuthoredWrapper(WrapperBareName);
+        const auto HasLiveWrapper = Has_HandAuthoredWrapper(WrapperBareName);
         const auto HasSourceDeclaredWrapper = SourceDeclared.Contains(WrapperBareName);
 
         if (HasLiveWrapper || HasSourceDeclaredWrapper)
@@ -524,50 +708,50 @@ auto
 
             if (NOT HasLiveWrapper && HasSourceDeclaredWrapper)
             { ++SkippedBySourceOnlyCount; }
-
             const auto Authority = HasLiveWrapper
                 ? FString{TEXT("live class")}
                 : FString{TEXT("declared in source")};
-
             ck::angelscriptgenerator::VeryVerbose(
                 TEXT("[CkAS AutoTest Wrappers] Skipping {} - hand-authored {} already exists ({})."),
                 Class->GetName(),
-                ck_autotest_wrapper_generator::Get_WrapperSourceName(Class),
+                Get_WrapperSourceName(Class),
                 Authority);
             continue;
         }
         Emittable.Add(Class);
     }
 
+    auto Buckets = Bucket_ClassesByPlugin(Emittable);
+    if (CanReuseSourceDeclarations && Are_StartupOutputsUnchanged(Buckets, *Previous))
+    {
+        ck::angelscriptgenerator::Log(
+            TEXT("[CkAS AutoTest Wrappers] Reused startup pass ({} output files)."), Buckets.Num());
+        return;
+    }
+
+    ck::angelscriptgenerator::Log(TEXT("[CkAS AutoTest Wrappers] === Generating AutoTest actor wrappers ==="));
     ck::angelscriptgenerator::Log(
         TEXT("[CkAS AutoTest Wrappers] Discovered {} subclasses of Ck_AutoTest_Base - ")
         TEXT("{} will be emitted, {} have hand-authored wrappers (skipped; {} of those found only by ")
         TEXT("the source scan); {} wrapper classes are declared in .as source."),
         AllSubclasses.Num(), Emittable.Num(), SkippedCount, SkippedBySourceOnlyCount, SourceDeclared.Num());
 
-    const auto Buckets = ck_autotest_wrapper_generator::Bucket_ClassesByPlugin(Emittable);
-
     auto TotalEmitted = int32{0};
-
     for (const auto& Bucket : Buckets)
     {
-        auto Content = FString{ck_autotest_wrapper_generator::FileHeader};
+        auto Content = FString{FileHeader};
 
-        // Only the PROJECT bucket is guarded. Its Script root is always compiled, so without the
-        // guard its wrappers reference an absent ACk_AutoTestRunner and break the packaged AS
-        // compile. Plugin buckets must stay UNguarded: a disabled test plugin drops its whole
-        // Script root anyway, and its sibling *Assets.as references these wrapper types outside
-        // any EDITOR block, which would then fail "editor-only type outside of an EDITOR block".
-        const auto IsProjectBucket = Bucket.PluginName == FApp::GetProjectName();
-        if (IsProjectBucket)
+        // Only the project bucket is guarded. Its Script root is always compiled, while a disabled
+        // test plugin drops its whole Script root. Plugin Assets.as references these types outside EDITOR.
+        if (Bucket._IsProjectBucket)
         { Content += TEXT("#if EDITOR\n\n"); }
 
-        for (auto* Class : Bucket.Classes)
+        for (const auto& Wrapper : Bucket._Wrappers)
         {
-            Content += ck_autotest_wrapper_generator::Format_WrapperBlock(Class);
+            Content += Format_WrapperBlock(Wrapper);
         }
 
-        if (IsProjectBucket)
+        if (Bucket._IsProjectBucket)
         { Content += TEXT("#endif // EDITOR\n"); }
 
         const auto OutputDir = FPaths::GetPath(Bucket.OutputFilePath);
@@ -580,46 +764,89 @@ auto
 
         auto ContentForCompare = Content;
         ContentForCompare.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
-        auto ExistingForCompare = ExistingContent;
-        ExistingForCompare.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
+        ExistingContent.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
 
-        if (HasExisting && ExistingForCompare.Equals(ContentForCompare, ESearchCase::CaseSensitive))
+        if (HasExisting && ExistingContent.Equals(ContentForCompare, ESearchCase::CaseSensitive))
         {
             ck::angelscriptgenerator::VeryVerbose(
                 TEXT("[CkAS AutoTest Wrappers] [{}] up-to-date ({} wrappers)"),
-                Bucket.PluginName, Bucket.Classes.Num());
-            TotalEmitted += Bucket.Classes.Num();
-            continue;
-        }
-
-#if PLATFORM_WINDOWS
-        // .as files live as CRLF on Windows disk (core.autocrlf). Writing LF makes git flag the
-        // file modified on every editor startup even though `git diff` shows nothing.
-        Content.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
-        Content.ReplaceInline(TEXT("\n"), TEXT("\r\n"));
-#endif
-
-        if (FFileHelper::SaveStringToFile(Content, *Bucket.OutputFilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
-        {
-            ck::angelscriptgenerator::Log(
-                TEXT("[CkAS AutoTest Wrappers] [{}] {} wrappers -> {}"),
-                Bucket.PluginName, Bucket.Classes.Num(), Bucket.OutputFilePath);
+                Bucket.PluginName, Bucket._Wrappers.Num());
         }
         else
         {
-            ck::angelscriptgenerator::Error(
-                TEXT("[CkAS AutoTest Wrappers] Failed to write to [{}]"),
-                Bucket.OutputFilePath);
+#if PLATFORM_WINDOWS
+            // Match the CRLF on-disk convention on Windows.
+            Content.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
+            Content.ReplaceInline(TEXT("\n"), TEXT("\r\n"));
+#endif
+
+            if (FFileHelper::SaveStringToFile(Content, *Bucket.OutputFilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+            {
+                ck::angelscriptgenerator::Log(
+                    TEXT("[CkAS AutoTest Wrappers] [{}] {} wrappers -> {}"),
+                    Bucket.PluginName, Bucket._Wrappers.Num(), Bucket.OutputFilePath);
+            }
+            else
+            {
+                CaptureComplete = false;
+                ck::angelscriptgenerator::Error(
+                    TEXT("[CkAS AutoTest Wrappers] Failed to write to [{}]"), Bucket.OutputFilePath);
+            }
         }
 
-        TotalEmitted += Bucket.Classes.Num();
+        if (CaptureComplete)
+        {
+            const auto OutputHash = Try_CaptureValidatedOutput(Bucket.OutputFilePath, ContentForCompare);
+            CaptureComplete = OutputHash.IsSet();
+            if (CaptureComplete)
+            { Current._OutputHashes.Add(*OutputHash); }
+        }
+        TotalEmitted += Bucket._Wrappers.Num();
     }
 
     ck::angelscriptgenerator::Log(
         TEXT("[CkAS AutoTest Wrappers] Done - {} plugins, {} wrappers emitted, {} skipped (hand-authored)"),
         Buckets.Num(), TotalEmitted, SkippedCount);
 
+    if (CaptureComplete)
+    {
+        Current._Buckets = MoveTemp(Buckets);
+        sStartupSnapshot.Emplace(MoveTemp(Current));
+    }
+}
+
 #endif // WITH_EDITOR
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    FCkAutoTestWrapperGenerator::
+    GenerateAll()
+    -> void
+{
+#if WITH_EDITOR
+    ck_autotest_wrapper_generator::GenerateAll(ck_autotest_wrapper_generator::EStartupPass::None);
+#endif
+}
+
+auto
+    FCkAutoTestWrapperGenerator::
+    GenerateAllForStartupPostCompile()
+    -> void
+{
+#if WITH_EDITOR
+    ck_autotest_wrapper_generator::GenerateAll(ck_autotest_wrapper_generator::EStartupPass::PostCompile);
+#endif
+}
+
+auto
+    FCkAutoTestWrapperGenerator::
+    GenerateAllForStartupPostInit()
+    -> void
+{
+#if WITH_EDITOR
+    ck_autotest_wrapper_generator::GenerateAll(ck_autotest_wrapper_generator::EStartupPass::PostInit);
+#endif
 }
 
 // --------------------------------------------------------------------------------------------------------------------
