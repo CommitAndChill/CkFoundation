@@ -57,9 +57,26 @@ auto
     if (ck::Is_NOT_Valid(TransientEntity))
     { return; }
 
-    _EntityBridge->Request_SpawnLinkedEntity(UCk_EntityScript_IsmRenderer_UE::StaticClass());
+    CK_ENSURE_IF_NOT(ck::IsValid(_EntityBridge), TEXT("IsmRenderer [{}] has no EntityBridge"), this)
+    { return; }
 
-    _Initialized = true;
+    const auto ExpectedScript = UCk_EntityScript_IsmRenderer_UE::StaticClass();
+    const auto& RequestedScript = _EntityBridge->Get_RequestedEntityScriptClass();
+    if (RequestedScript.IsSet())
+    {
+        CK_ENSURE_IF_NOT(RequestedScript.GetValue().Get() == ExpectedScript,
+            TEXT("IsmRenderer [{}] already requested a different EntityScript"), this)
+        { return; }
+
+        // A teardown request is recorded but not admitted. Do not request it a second time.
+        _Initialized = _EntityBridge->Get_State() != ECk_EntityBridge_State::NotRequested;
+        return;
+    }
+
+    _EntityBridge->Request_SpawnLinkedEntity(ExpectedScript);
+
+    // AwaitingSpawn and AwaitingReplica both mean admitted; neither requires a linked entity yet.
+    _Initialized = _EntityBridge->Get_State() != ECk_EntityBridge_State::NotRequested;
 }
 
 auto
@@ -68,6 +85,15 @@ auto
     -> void
 {
     Super::BeginPlay();
+
+    // World Partition may load old serialized renderer caches after the subsystem's initial sweep.
+    // Factory renderers are marked transient before FinishSpawning; baked caches must never acquire an entity.
+    if (NOT HasAnyFlags(RF_Transient))
+    {
+        Destroy();
+        return;
+    }
+
     DoInitialize();
 }
 
