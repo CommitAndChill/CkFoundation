@@ -15,6 +15,7 @@
 #include "Misc/Parse.h"
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemModule.h"
+#include "TextureResource.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Misc/AutomationTest.h"
