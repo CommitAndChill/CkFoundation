@@ -30,6 +30,40 @@ namespace ck
     // main-pass would be stomped) and the last dispatcher clears it registry-wide. Transient — never snapshotted.
     CK_DEFINE_ECS_TAG(FTag_EntityScript_ConstructedThisFrame);
 
+    // Stamped by FinishConstruction / BeginPlay on an ordered script instead of running the step on it; the step's
+    // _InOrder processor consumes it and runs the step in sequence order. Transient — never snapshotted.
+    CK_DEFINE_ECS_TAG(FTag_EntityScript_FinishConstruction_InOrder);
+    CK_DEFINE_ECS_TAG(FTag_EntityScript_BeginPlay_InOrder);
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // An ordered script's place in its ordering group: the group (the empty tag is the world's default group) and the
+    // sequence its spawn was given when it was requested on this machine. Written once, by
+    // UCk_Utils_EntityScript_UE::DoAdd, on the script entity. Transient — never snapshotted.
+    struct FFragment_EntityScript_OrderingSequence
+    {
+    public:
+        CK_GENERATED_BODY(FFragment_EntityScript_OrderingSequence);
+
+    private:
+        FGameplayTag _Group;
+        int64 _Sequence = 0;
+
+    public:
+        CK_PROPERTY_GET(_Group);
+        CK_PROPERTY_GET(_Sequence);
+
+    public:
+        CK_DEFINE_CONSTRUCTORS(FFragment_EntityScript_OrderingSequence, _Group, _Sequence);
+    };
+
+    // The next sequence of each ordering group of one world, keyed by group (the empty tag is the default group).
+    // Lives in the registry's ctx; monotonic and never reset.
+    struct FCtx_EntityScript_OrderingSequence
+    {
+        TMap<FGameplayTag, int64> _NextByGroup;
+    };
+
     // --------------------------------------------------------------------------------------------------------------------
 
     struct FFragment_EntityScript_PendingReplicationRetryTimestamp
@@ -50,6 +84,28 @@ namespace ck
     // --------------------------------------------------------------------------------------------------------------------
 
     using FFragment_EntityScript_RequestSpawnEntity = FCk_Request_EntityScript_SpawnEntity;
+
+    // An ordered script's spawn request: a distinct type, so FProcessor_EntityScript_SpawnEntity_HandleRequests never
+    // sees it and FProcessor_EntityScript_SpawnEntity_HandleRequests_InOrder runs it in sequence order. It carries a
+    // copy of the script entity's FFragment_EntityScript_OrderingSequence.
+    struct CKECS_API FFragment_EntityScript_RequestSpawnEntity_InOrder : public FCk_Request_EntityScript_SpawnEntity
+    {
+    public:
+        CK_GENERATED_BODY(FFragment_EntityScript_RequestSpawnEntity_InOrder);
+
+    public:
+        FFragment_EntityScript_RequestSpawnEntity_InOrder() = default;
+
+        FFragment_EntityScript_RequestSpawnEntity_InOrder(
+            const FCk_Request_EntityScript_SpawnEntity& InRequest,
+            const FFragment_EntityScript_OrderingSequence& InOrdering);
+
+    private:
+        FFragment_EntityScript_OrderingSequence _Ordering;
+
+    public:
+        CK_PROPERTY_GET(_Ordering);
+    };
 
     // --------------------------------------------------------------------------------------------------------------------
 

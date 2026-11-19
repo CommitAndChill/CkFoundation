@@ -27,12 +27,16 @@
 // --------------------------------------------------------------------------------------------------------------------
 
 CK_REGISTER_PROCESSOR(ck::FProcessor_EntityScript_SpawnEntity_HandleRequests);
+CK_REGISTER_PROCESSOR(ck::FProcessor_EntityScript_SpawnEntity_HandleRequests_InOrder);
 CK_REGISTER_PROCESSOR(ck::FProcessor_EntityScript_SpawnEntity_CancelPendingRequests);
+CK_REGISTER_PROCESSOR(ck::FProcessor_EntityScript_SpawnEntity_CancelPendingOrderedRequests);
 CK_REGISTER_PROCESSOR(ck::FProcessor_EntityScript_ContinueConstruction);
 CK_REGISTER_PROCESSOR(ck::FProcessor_EntityScript_Replicate);
 CK_REGISTER_PROCESSOR(ck::FProcessor_EntityScript_FinishConstruction);
+CK_REGISTER_PROCESSOR(ck::FProcessor_EntityScript_FinishConstruction_InOrder);
 CK_REGISTER_PROCESSOR(ck::FProcessor_EntityScript_PendingReplicationRetry);
 CK_REGISTER_PROCESSOR(ck::FProcessor_EntityScript_BeginPlay);
+CK_REGISTER_PROCESSOR(ck::FProcessor_EntityScript_BeginPlay_InOrder);
 CK_REGISTER_PROCESSOR(ck::FProcessor_EntityScript_EndPlay);
 #include "CkEcs/Handle/CkDebugCallstack_Macros.h"
 
@@ -63,6 +67,27 @@ namespace ck_entity_script_spawn_trace
             <= 0)
         { return; }
 
+        // An ordered script's entity carries its group and sequence (the empty group is the default group).
+        if (const auto& NewEntity = InRequest.Get_NewEntity();
+            ck::IsValid(NewEntity) && NewEntity.Has<ck::FFragment_EntityScript_OrderingSequence>())
+        {
+            const auto& Ordering = NewEntity.Get<ck::FFragment_EntityScript_OrderingSequence>();
+
+            ck::ecs::Display(
+                TEXT(
+                    "[EntityScript SpawnTrace] frame=[{}] disposition=[{}] "
+                    "script=[{}] entity=[{}] owner=[{}] request=[{}] group=[{}] sequence=[{}]"),
+                GFrameCounter,
+                InDisposition,
+                InRequest.Get_EntityScriptClassArchetype(),
+                InRequest.Get_NewEntity(),
+                InRequest.Get_Owner(),
+                InRequestEntity,
+                Ordering.Get_Group(),
+                Ordering.Get_Sequence());
+            return;
+        }
+
         ck::ecs::Display(
             TEXT(
                 "[EntityScript SpawnTrace] frame=[{}] disposition=[{}] "
@@ -78,14 +103,52 @@ namespace ck_entity_script_spawn_trace
 
 // --------------------------------------------------------------------------------------------------------------------
 
+namespace ck_entity_script_ordering
+{
+    // The test the steps' views apply (CK_IGNORE_PENDING_KILL), evaluated at an ordered entry's turn: an earlier
+    // entry's code may have destroyed it. An initiated destruction is not pending kill, as in the views.
+    // Defensive and untested: Request_DestroyEntity only initiates, and these tags are added by the destruction
+    // pipeline's own groups, so an entry gains one between collection and its turn only if an earlier entry's code runs
+    // that pipeline synchronously.
+    auto
+    Get_IsVisibleToStep(
+        const FCk_Handle& InHandle)
+        -> bool
+    {
+        return ck::IsValid(InHandle) && NOT InHandle.Has_Any<ck::FTag_DestroyEntity_EndPlay, ck::FTag_DestroyEntity_Teardown,
+            ck::FTag_DestroyEntity_Await, ck::FTag_DestroyEntity_Finalize>();
+    }
+
+    // By group (any deterministic order: groups never constrain each other), then by sequence. Stable.
+    template <typename T_Entry>
+    auto
+    DoSort(
+        TArray<T_Entry>& InEntries)
+        -> void
+    {
+        InEntries.StableSort([](const T_Entry& InA, const T_Entry& InB)
+        {
+            const auto GroupA = InA._Ordering.Get_Group().GetTagName();
+            const auto GroupB = InB._Ordering.Get_Group().GetTagName();
+
+            if (GroupA != GroupB)
+            { return GroupA.LexicalLess(GroupB); }
+
+            return InA._Ordering.Get_Sequence() < InB._Ordering.Get_Sequence();
+        });
+    }
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
 namespace ck
 {
+    template <typename T_RequestFragment>
     auto
         FProcessor_EntityScript_SpawnEntity_HandleRequests::
-        ForEachEntity(
-            const TimeType& InDeltaT,
+        DoProcess_Request(
             HandleType InHandle,
-            const FFragment_EntityScript_RequestSpawnEntity& InRequestFragment)
+            const T_RequestFragment& InRequestFragment)
         -> void
     {
         // World teardown leaves the transient owner alive while destroying both the request and its new entity.
@@ -118,13 +181,15 @@ namespace ck
             { UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(OrphanedEntity); }
 
             UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(InHandle);
-            InHandle.Remove<MarkedDirtyBy>();
+            InHandle.Remove<T_RequestFragment>();
             return;
         }
 
         // A child EntityScript spawned from inside a parent's Construct callback must wait for the parent to
-        // finish its own pipeline — these two tags are the true "construction in progress" markers.
-        if (LifetimeOwner.Has_Any<FTag_EntityScript_ContinueConstruction, FTag_EntityScript_FinishConstruction>())
+        // finish its own pipeline — these tags are the true "construction in progress" markers (an ordered parent
+        // waiting for its finish turn carries the third).
+        if (LifetimeOwner.Has_Any<FTag_EntityScript_ContinueConstruction, FTag_EntityScript_FinishConstruction,
+            FTag_EntityScript_FinishConstruction_InOrder>())
         {
             ck_entity_script_spawn_trace::LogVisit(
                 TEXT("deferred"),
@@ -139,7 +204,18 @@ namespace ck
             InRequestFragment);
         DoHandleRequest(InHandle, InRequestFragment);
         UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(InHandle);
-        InHandle.Remove<MarkedDirtyBy>();
+        InHandle.Remove<T_RequestFragment>();
+    }
+
+    auto
+        FProcessor_EntityScript_SpawnEntity_HandleRequests::
+        ForEachEntity(
+            const TimeType& InDeltaT,
+            HandleType InHandle,
+            const FFragment_EntityScript_RequestSpawnEntity& InRequestFragment)
+        -> void
+    {
+        DoProcess_Request(InHandle, InRequestFragment);
     }
 
     auto
@@ -433,6 +509,46 @@ namespace ck
     // --------------------------------------------------------------------------------------------------------------------
 
     auto
+        FProcessor_EntityScript_SpawnEntity_HandleRequests_InOrder::
+        DoTick(
+            TimeType InDeltaT)
+        -> void
+    {
+        _Collected.Reset();
+
+        TProcessor::DoTick(InDeltaT);
+
+        ck_entity_script_ordering::DoSort(_Collected);
+
+        // Moved out so a spawn that re-enters this processor cannot reset the list under the loop.
+        const auto Collected = MoveTemp(_Collected);
+
+        for (const auto& Entry : Collected)
+        {
+            auto RequestEntity = Entry._Handle;
+
+            if (NOT ck_entity_script_ordering::Get_IsVisibleToStep(RequestEntity) || NOT RequestEntity.Has<MarkedDirtyBy>())
+            { continue; }
+
+            FProcessor_EntityScript_SpawnEntity_HandleRequests::DoProcess_Request(RequestEntity, RequestEntity.Get<MarkedDirtyBy>());
+        }
+    }
+
+    auto
+        FProcessor_EntityScript_SpawnEntity_HandleRequests_InOrder::
+        ForEachEntity(
+            const TimeType&,
+            HandleType InHandle,
+            const FFragment_EntityScript_RequestSpawnEntity_InOrder& InRequestFragment)
+        -> void
+    {
+        // The marker stays until the request is served: a deferred request keeps it, as an unordered one does.
+        _Collected.Add({InRequestFragment.Get_Ordering(), InHandle});
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
         FProcessor_EntityScript_SpawnEntity_CancelPendingRequests::
         ForEachEntity(
             const TimeType& InDeltaT,
@@ -442,6 +558,17 @@ namespace ck
     {
         InRequestFragment.TryFireCompletion(InRequestFragment.Get_NewEntity(),
             ECk_Request_OperationResult::Failed_Cancelled);
+    }
+
+    auto
+        FProcessor_EntityScript_SpawnEntity_CancelPendingOrderedRequests::
+        ForEachEntity(
+            const TimeType& InDeltaT,
+            HandleType InHandle,
+            const FFragment_EntityScript_RequestSpawnEntity_InOrder& InRequestFragment)
+        -> void
+    {
+        FProcessor_EntityScript_SpawnEntity_CancelPendingRequests::ForEachEntity(InDeltaT, InHandle, InRequestFragment);
     }
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -520,8 +647,27 @@ namespace ck
             const FFragment_EntityScript& InEntityScript)
         -> void
     {
-        // The tag removed below is one the replicate processor's view requires, so a request still pending here would
-        // never be served. The request exists only for a Replicates script on a host; a driverless entity is the
+        InHandle.Remove<MarkedDirtyBy>();
+
+        // An ordered script finishes in FProcessor_EntityScript_FinishConstruction_InOrder, in sequence order.
+        if (InHandle.Has<FFragment_EntityScript_OrderingSequence>())
+        {
+            InHandle.AddOrGet<FTag_EntityScript_FinishConstruction_InOrder>();
+            return;
+        }
+
+        DoFinish(InHandle, InEntityScript);
+    }
+
+    auto
+        FProcessor_EntityScript_FinishConstruction::
+        DoFinish(
+            HandleType InHandle,
+            const FFragment_EntityScript& InEntityScript)
+        -> void
+    {
+        // The finish tag the caller removed is one the replicate processor's view requires, so a request still pending
+        // here would never be served. The request exists only for a Replicates script on a host; a driverless entity is the
         // WithActor deferral (its driver arrives later); an editor-world entity never replicates.
         CK_ENSURE_IF_NOT(NOT (InHandle.Has<FRequest_EntityScript_Replicate>()
                 and InHandle.Has<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>()
@@ -538,8 +684,6 @@ namespace ck
                     Request.Get_SpawnParams(), Request.Get_ContextOwnerOverride());
             }
         }
-
-        InHandle.Remove<MarkedDirtyBy>();
 
         CK_CALLSTACK_RECORD_MSG(ck::FFragment_EntityScript, InHandle,
             TEXT("Construction finished, ready for BeginPlay"));
@@ -591,6 +735,55 @@ namespace ck
             InHandle.Add<FTag_EntityScript_PendingReplicationRetry>();
             InHandle.Add<FFragment_EntityScript_PendingReplicationRetryTimestamp>(CurrentTime);
         }
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProcessor_EntityScript_FinishConstruction_InOrder::
+        DoTick(
+            TimeType InDeltaT)
+        -> void
+    {
+        _Collected.Reset();
+
+        TProcessor::DoTick(InDeltaT);
+
+        ck_entity_script_ordering::DoSort(_Collected);
+
+        // Moved out so an OnConstructed listener that re-enters this processor cannot reset the list under the loop.
+        const auto Collected = MoveTemp(_Collected);
+
+        for (const auto& Entry : Collected)
+        {
+            auto Handle = Entry._Handle;
+
+            // The park tag stays on an entry until its turn, so while an earlier entry's code runs a later one still
+            // reads as mid-construction (a second FinishConstruction is refused, a child it requests defers). A
+            // re-entrant pass that already served the entry took the tag.
+            if (NOT ck::IsValid(Handle) || NOT Handle.Has<MarkedDirtyBy>())
+            { continue; }
+
+            Handle.Remove<MarkedDirtyBy>();
+
+            if (NOT ck_entity_script_ordering::Get_IsVisibleToStep(Handle) || NOT Handle.Has<FFragment_EntityScript>())
+            { continue; }
+
+            FProcessor_EntityScript_FinishConstruction::DoFinish(Handle, Handle.Get<FFragment_EntityScript>());
+        }
+    }
+
+    auto
+        FProcessor_EntityScript_FinishConstruction_InOrder::
+        ForEachEntity(
+            const TimeType&,
+            HandleType InHandle,
+            const FFragment_EntityScript&,
+            const FFragment_EntityScript_OrderingSequence& InOrdering)
+        -> void
+    {
+        // The park tag is removed at the entry's turn (DoTick).
+        _Collected.Add({InOrdering, InHandle});
     }
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -664,6 +857,23 @@ namespace ck
     {
         InHandle.Remove<MarkedDirtyBy>();
 
+        // An ordered script begins play in FProcessor_EntityScript_BeginPlay_InOrder, in sequence order.
+        if (InHandle.Has<FFragment_EntityScript_OrderingSequence>())
+        {
+            InHandle.AddOrGet<FTag_EntityScript_BeginPlay_InOrder>();
+            return;
+        }
+
+        DoBeginPlay(InHandle, InEntityScript);
+    }
+
+    auto
+        FProcessor_EntityScript_BeginPlay::
+        DoBeginPlay(
+            HandleType InHandle,
+            const FFragment_EntityScript& InEntityScript)
+        -> void
+    {
         const auto& EntityScript = InEntityScript.Get_Script().Get();
 
         CK_ENSURE_IF_NOT(ck::IsValid(EntityScript), TEXT("EntityScript is INVALID for [{}] when attempting to invoke BeginPlay on it"), InHandle)
@@ -676,6 +886,55 @@ namespace ck
 
         if (UCk_Utils_EntityBridge_UE::Has(InHandle))
         { UCk_Utils_EntityBridge_UE::DoNotify_EntityBegunPlay(InHandle); }
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProcessor_EntityScript_BeginPlay_InOrder::
+        DoTick(
+            TimeType InDeltaT)
+        -> void
+    {
+        _Collected.Reset();
+
+        TProcessor::DoTick(InDeltaT);
+
+        ck_entity_script_ordering::DoSort(_Collected);
+
+        // Moved out so a BeginPlay that re-enters this processor cannot reset the list under the loop.
+        const auto Collected = MoveTemp(_Collected);
+
+        for (const auto& Entry : Collected)
+        {
+            auto Handle = Entry._Handle;
+
+            // The park tag stays on an entry until its turn, so while an earlier entry's code runs a later one still
+            // reads as asked to begin play (a FinishConstruction on it is refused). A re-entrant pass that already
+            // served the entry took the tag.
+            if (NOT ck::IsValid(Handle) || NOT Handle.Has<MarkedDirtyBy>())
+            { continue; }
+
+            Handle.Remove<MarkedDirtyBy>();
+
+            if (NOT ck_entity_script_ordering::Get_IsVisibleToStep(Handle) || NOT Handle.Has<FFragment_EntityScript>())
+            { continue; }
+
+            FProcessor_EntityScript_BeginPlay::DoBeginPlay(Handle, Handle.Get<FFragment_EntityScript>());
+        }
+    }
+
+    auto
+        FProcessor_EntityScript_BeginPlay_InOrder::
+        ForEachEntity(
+            const TimeType&,
+            HandleType InHandle,
+            const FFragment_EntityScript&,
+            const FFragment_EntityScript_OrderingSequence& InOrdering)
+        -> void
+    {
+        // The park tag is removed at the entry's turn (DoTick).
+        _Collected.Add({InOrdering, InHandle});
     }
 
     // --------------------------------------------------------------------------------------------------------------------

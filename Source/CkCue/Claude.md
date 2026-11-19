@@ -26,6 +26,13 @@ Don't reach into cue internals from feature modules — use the Audio/VFX/Object
 
 ---
 
+## Order
+
+A cue class that needs its cues to begin in arrival order sets `_OrderingPolicy` on its class defaults (an entity-script
+policy, `CkEcs/Claude.md` § EntityScript, Ordered spawns). The order is the order the cues reached this machine.
+
+---
+
 ## See also
 
 - `CkAudio/Claude.md`, `CkVfx/Claude.md`, `CkObjective/Claude.md`, `CkActorRelay/Claude.md`.

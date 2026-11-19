@@ -113,6 +113,40 @@ namespace ck_entity_script_utils
 
         return true;
     }
+
+    // The ordering group a script class's instances are ordered in (the empty tag is the world's default group), or
+    // unset for an unordered class. A CustomGroup class that names no group is ordered in the default group.
+    auto Get_OrderingGroup(const UCk_EntityScript_UE* InScriptDefaults) -> TOptional<FGameplayTag>
+    {
+        if (ck::Is_NOT_Valid(InScriptDefaults))
+        { return {}; }
+
+        switch (InScriptDefaults->Get_OrderingPolicy())
+        {
+            case ECk_EntityScript_OrderingPolicy::Unordered:
+            {
+                return {};
+            }
+            case ECk_EntityScript_OrderingPolicy::DefaultGroup:
+            {
+                return FGameplayTag::EmptyTag;
+            }
+            case ECk_EntityScript_OrderingPolicy::CustomGroup:
+            {
+                CK_ENSURE_IF_NOT(InScriptDefaults->Get_OrderingGroup().IsValid(),
+                    TEXT("EntityScript [{}] is ordered in a custom group but names no _OrderingGroup; ordering it in the default group"),
+                    InScriptDefaults->GetClass())
+                { return FGameplayTag::EmptyTag; }
+
+                return InScriptDefaults->Get_OrderingGroup();
+            }
+            default:
+            {
+                CK_INVALID_ENUM(InScriptDefaults->Get_OrderingPolicy());
+                return {};
+            }
+        }
+    }
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -472,7 +506,24 @@ auto
     if (InDelegate.IsBound())
     { Request.Set_CompletionDelegate(InDelegate); }
 
-    RequestEntity.Add<ck::FFragment_EntityScript_RequestSpawnEntity>(Request);
+    // The class default decides, never the archetype: an editor preview passes an instance.
+    const auto* ScriptDefaults = InEntityScriptClassArchetype->GetClass()->GetDefaultObject<UCk_EntityScript_UE>();
+
+    if (const auto OrderingGroup = ck_entity_script_utils::Get_OrderingGroup(ScriptDefaults);
+        OrderingGroup.IsSet())
+    {
+        auto Registry = InScriptEntity.Get_RegistryView();
+        auto& NextSequence = Registry.SetContext<ck::FCtx_EntityScript_OrderingSequence>()._NextByGroup.FindOrAdd(*OrderingGroup, 0);
+        const auto Ordering = ck::FFragment_EntityScript_OrderingSequence{*OrderingGroup, NextSequence};
+        ++NextSequence;
+
+        InScriptEntity.Add<ck::FFragment_EntityScript_OrderingSequence>(Ordering);
+        RequestEntity.Add<ck::FFragment_EntityScript_RequestSpawnEntity_InOrder>(Request, Ordering);
+    }
+    else
+    {
+        RequestEntity.Add<ck::FFragment_EntityScript_RequestSpawnEntity>(Request);
+    }
 
     CK_CALLSTACK_RECORD_MSG(ck::FFragment_EntityScript, InScriptEntity,
         TEXT("Spawn request entity created, awaiting processing"));

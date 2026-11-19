@@ -208,11 +208,18 @@ namespace ck
                 auto TaskChildren = UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(InTask);
                 for (const auto& RequestChild : TaskChildren)
                 {
-                    if (NOT RequestChild.Has<FFragment_EntityScript_RequestSpawnEntity>())
+                    // An ordered script's request is queued under its own type.
+                    const auto* Request = static_cast<const FCk_Request_EntityScript_SpawnEntity*>(nullptr);
+
+                    if (RequestChild.Has<FFragment_EntityScript_RequestSpawnEntity>())
+                    { Request = &RequestChild.Get<FFragment_EntityScript_RequestSpawnEntity>(); }
+                    else if (RequestChild.Has<FFragment_EntityScript_RequestSpawnEntity_InOrder>())
+                    { Request = &RequestChild.Get<FFragment_EntityScript_RequestSpawnEntity_InOrder>(); }
+
+                    if (Request == nullptr)
                     { continue; }
 
-                    const auto& Request = RequestChild.Get<FFragment_EntityScript_RequestSpawnEntity>();
-                    auto* Archetype = Request.Get_EntityScriptClassArchetype().Get();
+                    auto* Archetype = Request->Get_EntityScriptClassArchetype().Get();
 
                     if (ck::Is_NOT_Valid(Archetype))
                     { continue; }

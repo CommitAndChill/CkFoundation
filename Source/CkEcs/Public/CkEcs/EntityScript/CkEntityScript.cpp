@@ -76,7 +76,8 @@ auto
     if (ck::Is_NOT_Valid(_AssociatedEntity))
     { return; }
 
-    CK_ENSURE_IF_NOT(NOT (_AssociatedEntity.Has<ck::FTag_EntityScript_BeginPlay>()),
+    // An ordered script waiting for its turn at a step carries that step's _InOrder tag instead of the step's own.
+    CK_ENSURE_IF_NOT(NOT (_AssociatedEntity.Has_Any<ck::FTag_EntityScript_BeginPlay, ck::FTag_EntityScript_BeginPlay_InOrder>()),
         TEXT("Called Finish Construction on EntityScript [{}] that has been ASKED to BeginPlay"), _AssociatedEntity)
     { return; }
 
@@ -90,7 +91,8 @@ auto
     // done, so the hook is moot.
     _AssociatedEntity.Try_Remove<ck::FTag_EntityScript_ContinueConstruction>();
 
-    CK_ENSURE_IF_NOT(NOT (_AssociatedEntity.Has<ck::FTag_EntityScript_FinishConstruction>()),
+    CK_ENSURE_IF_NOT(NOT (_AssociatedEntity.Has_Any<ck::FTag_EntityScript_FinishConstruction,
+            ck::FTag_EntityScript_FinishConstruction_InOrder>()),
         TEXT("Called Finish Construction on EntityScript [{}] that has already FINISHED Construction"), _AssociatedEntity)
     { return; }
 

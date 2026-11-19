@@ -30,8 +30,14 @@ namespace ck_entity_bridge_utils
         if (InEntity.Has<ck::FTag_EntityScript_FinishConstruction>())
         { Stages.Emplace(TEXT("FinishConstruction")); }
 
+        if (InEntity.Has<ck::FTag_EntityScript_FinishConstruction_InOrder>())
+        { Stages.Emplace(TEXT("FinishConstruction (awaiting its ordered turn)")); }
+
         if (InEntity.Has<ck::FTag_EntityScript_BeginPlay>())
         { Stages.Emplace(TEXT("BeginPlay")); }
+
+        if (InEntity.Has<ck::FTag_EntityScript_BeginPlay_InOrder>())
+        { Stages.Emplace(TEXT("BeginPlay (awaiting its ordered turn)")); }
 
         if (InEntity.Has<ck::FTag_EntityScript_HasBegunPlay>())
         { Stages.Emplace(TEXT("HasBegunPlay")); }

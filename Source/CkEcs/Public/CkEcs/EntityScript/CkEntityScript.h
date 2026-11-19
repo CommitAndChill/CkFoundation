@@ -6,6 +6,8 @@
 #include "CkEcs/Handle/CkHandle.h"
 #include "CoreMinimal.h"
 
+#include <GameplayTagContainer.h>
+
 #include "CkEntityScript.generated.h"
 
 // -----------------------------------------------------------------------------------------------------------
@@ -47,6 +49,28 @@ enum class ECk_EntityScript_InstancingPolicy : uint8
 };
 
 CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_EntityScript_InstancingPolicy);
+
+// -----------------------------------------------------------------------------------------------------------
+
+// Whether the instances of an EntityScript class go through the entity-script pipeline in the order their spawns were
+// requested on this machine. Ordered scripts that reach a step (Construct, OnConstructed, BeginPlay) in the same pass
+// go through it in request order within their group, after that step's unordered scripts of the pass; an entry held
+// back from a step reaches it in a later pass, and nothing waits for it. Nothing replicates: each machine reads the
+// policy from the class default object and orders the requests it saw.
+UENUM(BlueprintType)
+enum class ECk_EntityScript_OrderingPolicy : uint8
+{
+    // The instances go through each step in whatever order the pass visits them.
+    Unordered,
+
+    // The instances are ordered in the world's one default group.
+    DefaultGroup UMETA(DisplayName = "Default Group"),
+
+    // The instances are ordered in the group named by _OrderingGroup. Groups never constrain each other.
+    CustomGroup UMETA(DisplayName = "Custom Group"),
+};
+
+CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_EntityScript_OrderingPolicy);
 
 // -----------------------------------------------------------------------------------------------------------
 
@@ -176,6 +200,21 @@ protected:
         meta=(AllowPrivateAccess = true))
     bool _ShowInPlaceActors = false;
 
+    // Class defaults only: there is no per-instance override. See ECk_EntityScript_OrderingPolicy.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Ck|EntityScript",
+        meta=(AllowPrivateAccess = true))
+    ECk_EntityScript_OrderingPolicy _OrderingPolicy = ECk_EntityScript_OrderingPolicy::Unordered;
+
+    // The group a CustomGroup script is ordered in. Leaving it empty is a validation error at request time; the
+    // script is then ordered in the default group.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+        Category = "Ck|EntityScript",
+        meta=(AllowPrivateAccess = true,
+            EditCondition="_OrderingPolicy == ECk_EntityScript_OrderingPolicy::CustomGroup",
+            EditConditionHides))
+    FGameplayTag _OrderingGroup;
+
     UPROPERTY(Transient)
     FCk_Handle _AssociatedEntity;
 
@@ -190,6 +229,8 @@ public:
     CK_PROPERTY_GET(_PoolParams);
     CK_PROPERTY_GET(_AssociatedEntity);
     CK_PROPERTY_GET(_ShowInPlaceActors);
+    CK_PROPERTY_GET(_OrderingPolicy);
+    CK_PROPERTY_GET(_OrderingGroup);
 };
 
 // ----------------------------------------------------------------------------------------------------------

@@ -261,8 +261,9 @@ any. That is deliberate and conservative — a custom body may do registry-wide 
 processor that under-reported would have its follow-up pass skipped and its cascade deferred a frame — but it is
 also why a pump can stay awake on a world where nothing is happening.
 
-**A custom `DoTick` that CALLS the base one inherits the real count** — that is why 59 of the 84 custom bodies in
-CkFoundation are already truthful and are not listed below. The family is what is left, and it comes in **three
+**A custom `DoTick` that CALLS the base one inherits the real count** — that is why 62 of the 87 custom bodies in
+CkFoundation are already truthful and are not listed below (59 of 84 when measured, plus the three ordered
+EntityScript steps' bodies, which call the base first). The family is what is left, and it comes in **three
 shapes**, measured on CkFoundation at `fa0aad517` by reading all 84 bodies. **That measurement predates this
 branch's rebase onto dev**, which brought in commits that may have added or retired members — treat the counts
 and tables below as a starting point and re-derive (command at the end of this section) before relying on them:
@@ -318,9 +319,10 @@ Re-derive: read every `DoTick` body under `Source` and classify it on two questi
 adopting Shape 3 per-processor is not, and is where the cheap wins are.
 Declared barriers: `Transform_HandleRequests` (trigger) + the `SceneNode_Update` layers (replay)
 after `FGroup_Transform_Derived`; and since 2026-08-24 the **SM cascade barrier** after
-`FGroup_Gameplay_Script` — 16 triggers (the CkStateMachine decision/exit chain in
-`FGroup_Gameplay_AI`, `SmScript_CommitPendingAttach`, and the four EntityScript pipeline
-processors) and one replay-only participant, `FProcessor_EntityScript_Replicate`: a
+`FGroup_Gameplay_Script` — 19 triggers (the CkStateMachine decision/exit chain in
+`FGroup_Gameplay_AI`, `SmScript_CommitPendingAttach`, the four EntityScript pipeline
+processors, and their three ordered siblings `SpawnEntity_HandleRequests_InOrder`,
+`FinishConstruction_InOrder` and `BeginPlay_InOrder`, § EntityScript) and one replay-only participant, `FProcessor_EntityScript_Replicate`: a
 `Replicates` spawn the barrier executes must be replicated in the same pass, before
 `FinishConstruction` (a trigger) consumes the finish tag the replicate view requires; without
 it such a spawn is built on the host and never replicated. Its markers are the replicate
@@ -488,6 +490,38 @@ class UCk_EntityScript_UE : public UCk_GameWorldContextObject_UE
 - `Get_AssociatedEntity()` — the entity this script is attached to (from C++).
 - `DoGet_ScriptEntity()` — same, exposed as a Blueprint callable (use from BPs/AS).
 - Instancing policy: `InstancedPerEntity` (default) creates one instance per spawned entity; `NotInstanced` shares the CDO — use the CDO mode only for stateless scripts.
+
+**Ordered spawns.** A script class can declare, in its class defaults only (`EditDefaultsOnly`, no per-instance
+override), that its instances are ordered: `_OrderingPolicy` is `Unordered` (the default), `DefaultGroup` (the world's
+one default group) or `CustomGroup` (the group named by `_OrderingGroup`; an empty tag there ensures at request time and
+the script is ordered in the default group). The contract: ordered scripts that reach a step of the pipeline in the same
+pass go through that step in the order their spawns were requested on this machine, within their group. The ordered
+steps are the three where script code observes the order: the spawn step (`Construct`), the finish step
+(`OnConstructed`) and `BeginPlay`. Ordering is per pass with no barrier: an entry the pipeline holds back (a child whose
+owner is mid-construction, a `Continue` construction, anything that keeps it out of a step's view this pass) reaches
+the step in a later pass and nothing waits for it; an entry that fails the step's own liveness test at its turn (an
+earlier entry's code may have destroyed it) is skipped, with the test the step applies to unordered scripts. Groups
+never constrain each other, and a pass's ordered entries of a step run after that step's unordered ones. A script
+requested while an ordered script is being built (from its `Construct`, `OnConstructed` or `BeginPlay`) takes the next
+sequence of its group, so it sits at the group's end: it is not in the pass under way and reaches the step in a later
+pump pass, the same frame when nothing holds it. **Nothing replicates: the class default decides on each machine**, and
+each machine orders the requests it saw (on a client, a replicated script in the order its replication arrived).
+Mechanism: `UCk_Utils_EntityScript_UE::DoAdd`, the one funnel every spawn reaches, reads the policy from the class
+default object (never the archetype, which an editor preview passes as an instance), takes the group's next value from
+`ck::FCtx_EntityScript_OrderingSequence` (registry ctx, per world and per group, monotonic, never reset), stamps
+`ck::FFragment_EntityScript_OrderingSequence` on the script entity (transient) and queues the request as
+`FFragment_EntityScript_RequestSpawnEntity_InOrder`, a type the unordered spawn view never sees. The finish and BeginPlay
+processors check `Has<FFragment_EntityScript_OrderingSequence>` once and park an ordered script under
+`FTag_EntityScript_FinishConstruction_InOrder` / `FTag_EntityScript_BeginPlay_InOrder`. A parked script keeps its park
+tag until its turn, and every "is it mid-step" check reads the park tags beside the step tags (`DoFinishConstruction`'s
+guards, the spawn step's mid-construction defer, the bridge's stage text), so while an earlier entry's code runs a later
+one cannot be finished a second time and a child it owns still defers. Three `_InOrder` processors, each
+right after its unordered sibling and identical to it in every policy line, collect their view, sort it by (group,
+sequence) and run each entry through the step function their sibling also calls
+(`FProcessor_EntityScript_SpawnEntity_HandleRequests::DoProcess_Request`,
+`FProcessor_EntityScript_FinishConstruction::DoFinish`, `FProcessor_EntityScript_BeginPlay::DoBeginPlay`). An unordered
+script pays one class-default read at request time and one `Has` per step. `ck.EntityScript.LogSpawnRequestVisits`
+prints the group and sequence of an ordered request.
 
 ### Spawn processor rules (`FProcessor_EntityScript_SpawnEntity_HandleRequests`)
 

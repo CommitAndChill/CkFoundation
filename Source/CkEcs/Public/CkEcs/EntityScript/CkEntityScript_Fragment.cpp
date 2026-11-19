@@ -20,6 +20,15 @@ namespace ck
     {
     }
 
+    FFragment_EntityScript_RequestSpawnEntity_InOrder::
+        FFragment_EntityScript_RequestSpawnEntity_InOrder(
+            const FCk_Request_EntityScript_SpawnEntity& InRequest,
+            const FFragment_EntityScript_OrderingSequence& InOrdering)
+        : FCk_Request_EntityScript_SpawnEntity(InRequest)
+        , _Ordering(InOrdering)
+    {
+    }
+
     FRequest_EntityScript_Replicate::
         FRequest_EntityScript_Replicate(
             const FCk_Handle& InOwner,

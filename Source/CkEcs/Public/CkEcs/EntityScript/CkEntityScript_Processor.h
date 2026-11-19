@@ -16,6 +16,16 @@ namespace ck { class FProcessor_EntityLifetime_DestructionPhase_Endplay; }
 
 namespace ck
 {
+    // One entry an _InOrder processor collected from its view in the pass under way.
+    template <typename T_HandleType>
+    struct TEntityScript_OrderedEntry
+    {
+        FFragment_EntityScript_OrderingSequence _Ordering;
+        T_HandleType _Handle;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
     class CKECS_API FProcessor_EntityScript_SpawnEntity_HandleRequests : public TProcessor<
             FProcessor_EntityScript_SpawnEntity_HandleRequests,
             ck::TReadOnly<FFragment_EntityScript_RequestSpawnEntity>,
@@ -40,6 +50,17 @@ namespace ck
             const FFragment_EntityScript_RequestSpawnEntity& InRequestFragment) -> void;
 
     private:
+        friend class FProcessor_EntityScript_SpawnEntity_HandleRequests_InOrder;
+
+        // The spawn step for one request, shared with FProcessor_EntityScript_SpawnEntity_HandleRequests_InOrder: the
+        // liveness cancel, the mid-construction defer, the spawn and the request's destruction. A deferred request keeps
+        // its marker (T_RequestFragment); every other outcome removes it. Defined in the .cpp, which is its only caller.
+        template <typename T_RequestFragment>
+        static auto
+        DoProcess_Request(
+            HandleType InHandle,
+            const T_RequestFragment& InRequestFragment) -> void;
+
         static auto
         DoHandleRequest(
             HandleType InHandle,
@@ -48,6 +69,46 @@ namespace ck
         static auto
         DoCancel_NewEntity(
             const FCk_Request_EntityScript_SpawnEntity& InRequest) -> void;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // The spawn step for ordered scripts (FFragment_EntityScript_RequestSpawnEntity_InOrder). Ordered requests that reach
+    // the step in one pass go through it in (group, sequence) order, after the pass's unordered requests; a deferred one
+    // reaches it in a later pass and nothing waits for it. Liveness is evaluated at each entry's turn.
+    class CKECS_API FProcessor_EntityScript_SpawnEntity_HandleRequests_InOrder : public TProcessor<
+            FProcessor_EntityScript_SpawnEntity_HandleRequests_InOrder,
+            ck::TReadOnly<FFragment_EntityScript_RequestSpawnEntity_InOrder>,
+            CK_IGNORE_PENDING_KILL>
+    {
+    public:
+        using Group = FGroup_Gameplay_Script;
+        using RunAfter = TDepList<FProcessor_EntityScript_SpawnEntity_HandleRequests>;
+        using MarkedDirtyBy = FFragment_EntityScript_RequestSpawnEntity_InOrder;
+        // Every pass of this processor's custom DoTick works only on entities carrying its marker, so the scheduler may
+        // skip it while none exists (CkProcessorDescriptor.h, MainPassRequiredFragments).
+        using MainPassRequiredFragments = entt::type_list<FFragment_EntityScript_RequestSpawnEntity_InOrder>;
+        static constexpr auto LoadPolicy = ECk_ProcessorLoadPolicy::RunsDuringLoad; // load-gate kernel
+        static constexpr auto HydrationQuarantinePolicy = ECk_ProcessorHydrationQuarantine::Exempt; // load-gate kernel
+        using LocalSettleAfter = FGroup_Gameplay_Script;
+        static constexpr auto LocalSettleTrigger = true;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        auto
+        DoTick(
+            TimeType InDeltaT) -> void;
+
+        auto
+        ForEachEntity(
+            const TimeType& InDeltaT,
+            HandleType InHandle,
+            const FFragment_EntityScript_RequestSpawnEntity_InOrder& InRequestFragment) -> void;
+
+    private:
+        TArray<TEntityScript_OrderedEntry<HandleType>> _Collected;
     };
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -76,6 +137,26 @@ namespace ck
             const FFragment_EntityScript_RequestSpawnEntity& InRequestFragment) -> void;
     };
 
+    // The same cancellation for an ordered script's request (FFragment_EntityScript_RequestSpawnEntity_InOrder).
+    class CKECS_API FProcessor_EntityScript_SpawnEntity_CancelPendingOrderedRequests : public TProcessor<
+            FProcessor_EntityScript_SpawnEntity_CancelPendingOrderedRequests,
+            ck::TReadOnly<FFragment_EntityScript_RequestSpawnEntity_InOrder>,
+            CK_IF_END_PLAY>
+    {
+    public:
+        using Group = FGroup_EndPlay;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        static auto
+        ForEachEntity(
+            const TimeType& InDeltaT,
+            HandleType InHandle,
+            const FFragment_EntityScript_RequestSpawnEntity_InOrder& InRequestFragment) -> void;
+    };
+
     // --------------------------------------------------------------------------------------------------------------------
 
     class CKECS_API FProcessor_EntityScript_ContinueConstruction : public ck_exp::TProcessor<
@@ -87,7 +168,8 @@ namespace ck
     {
     public:
         using Group = FGroup_Gameplay_Script;
-        using RunAfter = TDepList<FProcessor_EntityScript_SpawnEntity_HandleRequests>;
+        // After both spawn processors, so an ordered script built this pass goes on through the pipeline this pass.
+        using RunAfter = TDepList<FProcessor_EntityScript_SpawnEntity_HandleRequests, FProcessor_EntityScript_SpawnEntity_HandleRequests_InOrder>;
         using MarkedDirtyBy = FTag_EntityScript_ContinueConstruction;
         static constexpr auto LoadPolicy = ECk_ProcessorLoadPolicy::RunsDuringLoad; // load-gate kernel
         static constexpr auto HydrationQuarantinePolicy = ECk_ProcessorHydrationQuarantine::Exempt; // load-gate kernel
@@ -166,6 +248,60 @@ namespace ck
             const TimeType& InDeltaT,
             HandleType InHandle,
             const FFragment_EntityScript&) -> void;
+
+    private:
+        friend class FProcessor_EntityScript_FinishConstruction_InOrder;
+
+        // The finish step for one script, shared with FProcessor_EntityScript_FinishConstruction_InOrder. The caller has
+        // already removed FTag_EntityScript_FinishConstruction.
+        static auto
+        DoFinish(
+            HandleType InHandle,
+            const FFragment_EntityScript& InEntityScript) -> void;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // The finish step for ordered scripts, which FinishConstruction parks (FTag_EntityScript_FinishConstruction_InOrder).
+    // Ordered scripts parked in one pass finish in (group, sequence) order, after the pass's unordered scripts.
+    // Liveness is evaluated at each entry's turn, with the test this step's view applies.
+    class CKECS_API FProcessor_EntityScript_FinishConstruction_InOrder : public ck_exp::TProcessor<
+            FProcessor_EntityScript_FinishConstruction_InOrder,
+            FCk_Handle_EntityScript,
+            ck::TReadOnly<FFragment_EntityScript>,
+            ck::TReadOnly<FFragment_EntityScript_OrderingSequence>,
+            FTag_EntityScript_FinishConstruction_InOrder,
+            CK_IGNORE_PENDING_KILL>
+    {
+    public:
+        using Group = FGroup_Gameplay_Script;
+        using RunAfter = TDepList<FProcessor_EntityScript_FinishConstruction>;
+        using MarkedDirtyBy = FTag_EntityScript_FinishConstruction_InOrder;
+        // Every pass of this processor's custom DoTick works only on entities carrying its marker, so the scheduler may
+        // skip it while none exists (CkProcessorDescriptor.h, MainPassRequiredFragments).
+        using MainPassRequiredFragments = entt::type_list<FTag_EntityScript_FinishConstruction_InOrder>;
+        static constexpr auto LoadPolicy = ECk_ProcessorLoadPolicy::RunsDuringLoad; // load-gate kernel
+        static constexpr auto HydrationQuarantinePolicy = ECk_ProcessorHydrationQuarantine::Exempt; // load-gate kernel
+        using LocalSettleAfter = FGroup_Gameplay_Script;
+        static constexpr auto LocalSettleTrigger = true;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        auto
+        DoTick(
+            TimeType InDeltaT) -> void;
+
+        auto
+        ForEachEntity(
+            const TimeType& InDeltaT,
+            HandleType InHandle,
+            const FFragment_EntityScript& InEntityScript,
+            const FFragment_EntityScript_OrderingSequence& InOrdering) -> void;
+
+    private:
+        TArray<TEntityScript_OrderedEntry<HandleType>> _Collected;
     };
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -180,7 +316,7 @@ namespace ck
     {
     public:
         using Group = FGroup_Gameplay_Script;
-        using RunAfter = TDepList<FProcessor_EntityScript_FinishConstruction>;
+        using RunAfter = TDepList<FProcessor_EntityScript_FinishConstruction, FProcessor_EntityScript_FinishConstruction_InOrder>;
         static constexpr auto WorldTypeRequirement = ECk_ProcessorWorldTypeRequirement::RuntimeOnly;
         static constexpr auto LoadPolicy = ECk_ProcessorLoadPolicy::RunsDuringLoad; // load-gate kernel
         static constexpr auto HydrationQuarantinePolicy = ECk_ProcessorHydrationQuarantine::Exempt; // load-gate kernel
@@ -208,7 +344,8 @@ namespace ck
     {
     public:
         using Group = FGroup_Gameplay_Script;
-        using RunAfter = TDepList<FProcessor_EntityScript_FinishConstruction>;
+        // After both finish processors, so an ordered script finished this pass begins play this pass.
+        using RunAfter = TDepList<FProcessor_EntityScript_FinishConstruction, FProcessor_EntityScript_FinishConstruction_InOrder>;
         static constexpr auto WorldTypeRequirement = ECk_ProcessorWorldTypeRequirement::RuntimeOnly;
         using MarkedDirtyBy = FTag_EntityScript_BeginPlay;
         static constexpr auto LoadPolicy = ECk_ProcessorLoadPolicy::RunsDuringLoad; // load-gate kernel
@@ -225,6 +362,61 @@ namespace ck
             const TimeType& InDeltaT,
             HandleType InHandle,
             const FFragment_EntityScript& InEntityScript) -> void;
+
+    private:
+        friend class FProcessor_EntityScript_BeginPlay_InOrder;
+
+        // The BeginPlay step for one script, shared with FProcessor_EntityScript_BeginPlay_InOrder. The caller has
+        // already removed FTag_EntityScript_BeginPlay.
+        static auto
+        DoBeginPlay(
+            HandleType InHandle,
+            const FFragment_EntityScript& InEntityScript) -> void;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // BeginPlay for ordered scripts, which BeginPlay parks (FTag_EntityScript_BeginPlay_InOrder). Ordered scripts parked
+    // in one pass begin play in (group, sequence) order, after the pass's unordered scripts. Liveness is evaluated at
+    // each entry's turn, with the test this step's view applies.
+    class CKECS_API FProcessor_EntityScript_BeginPlay_InOrder : public ck_exp::TProcessor<
+            FProcessor_EntityScript_BeginPlay_InOrder,
+            FCk_Handle_EntityScript,
+            ck::TReadOnly<FFragment_EntityScript>,
+            ck::TReadOnly<FFragment_EntityScript_OrderingSequence>,
+            FTag_EntityScript_BeginPlay_InOrder,
+            CK_IGNORE_PENDING_KILL>
+    {
+    public:
+        using Group = FGroup_Gameplay_Script;
+        using RunAfter = TDepList<FProcessor_EntityScript_BeginPlay>;
+        static constexpr auto WorldTypeRequirement = ECk_ProcessorWorldTypeRequirement::RuntimeOnly;
+        using MarkedDirtyBy = FTag_EntityScript_BeginPlay_InOrder;
+        // Every pass of this processor's custom DoTick works only on entities carrying its marker, so the scheduler may
+        // skip it while none exists (CkProcessorDescriptor.h, MainPassRequiredFragments).
+        using MainPassRequiredFragments = entt::type_list<FTag_EntityScript_BeginPlay_InOrder>;
+        static constexpr auto LoadPolicy = ECk_ProcessorLoadPolicy::RunsDuringLoad; // load-gate kernel
+        static constexpr auto HydrationQuarantinePolicy = ECk_ProcessorHydrationQuarantine::Exempt; // load-gate kernel
+        using LocalSettleAfter = FGroup_Gameplay_Script;
+        static constexpr auto LocalSettleTrigger = true;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        auto
+        DoTick(
+            TimeType InDeltaT) -> void;
+
+        auto
+        ForEachEntity(
+            const TimeType& InDeltaT,
+            HandleType InHandle,
+            const FFragment_EntityScript& InEntityScript,
+            const FFragment_EntityScript_OrderingSequence& InOrdering) -> void;
+
+    private:
+        TArray<TEntityScript_OrderedEntry<HandleType>> _Collected;
     };
 
     // --------------------------------------------------------------------------------------------------------------------
