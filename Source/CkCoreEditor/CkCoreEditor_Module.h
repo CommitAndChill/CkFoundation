@@ -57,6 +57,10 @@ private:
     FDelegateHandle _AssetRenamed_DelegateHandle;
     FDelegateHandle _MapOpened_DelegateHandle;
     FDelegateHandle _NewCurrentLevel_DelegateHandle;
+
+#if PLATFORM_WINDOWS
+    FDelegateHandle _EnginePreExit_DelegateHandle;
+#endif
 };
 
 // ----------------------------------------------------------------------------------------------------------------
