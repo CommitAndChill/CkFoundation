@@ -99,28 +99,28 @@ auto
     ck::sm::Verbose(TEXT("Server_PushTransitionBatch: enqueuing [{}] events on SM [{}]"),
         InBatch.Num(), InSMHandle);
 
-    // Identity routing: an empty _SubSmIdentity is a root-level event and enqueues on InSMHandle.
-    // A parent-hierarchy path means the event was relayed through the root on behalf of a
-    // non-replicated sub-SM, so it must land on the server's matching local sub-SM, not the root.
+    // Address routing: an empty address is a root-level event and enqueues on InSMHandle. A sub-SM
+    // address (ck::statemachine::FSubSmAddress) means the event was relayed through the root on behalf
+    // of a non-replicated sub-SM, so it must land on the server's matching local sub-SM, not the root.
     const auto RootHandle = UCk_Utils_StateMachine_UE::CastChecked(InSMHandle);
 
     for (const auto& Event : InBatch)
     {
-        const auto& SubSmIdentity = Event.Get_SubSmIdentity();
+        const auto SubSmAddress = ck::statemachine::FSubSmAddress::Make(Event);
 
-        if (SubSmIdentity.IsEmpty())
+        if (SubSmAddress.Get_IsRoot())
         {
             InSMHandle.AddOrGet<ck::FFragment_Sm_ReplayQueue>().Get_Queue().Add(Event);
             continue;
         }
 
-        auto TargetSubSm = UCk_Utils_StateMachine_UE::TryFind_ActiveSubSm_ByParentHierarchy(RootHandle, SubSmIdentity);
+        auto TargetSubSm = UCk_Utils_StateMachine_UE::TryFind_ActiveSubSm_ByAddress(RootHandle, SubSmAddress);
         if (ck::Is_NOT_Valid(TargetSubSm))
         {
             // The hosting parent state isn't active yet, so the sub-SM doesn't exist here. Log and
             // drop rather than stash — a mis-timed event must not land on the wrong SM.
-            ck::sm::Warning(TEXT("Server_PushTransitionBatch: sub-SM for identity-path [{}] not active under root [{}]; dropping event (seq [{}])"),
-                SubSmIdentity.Num(), InSMHandle, Event.Get_Seq());
+            ck::sm::Warning(TEXT("Server_PushTransitionBatch: sub-SM {} (depth [{}]) not active under root [{}]; dropping event (seq [{}])"),
+                SubSmAddress.ToString(), SubSmAddress.Get_Hierarchy().Num(), InSMHandle, Event.Get_Seq());
             continue;
         }
 

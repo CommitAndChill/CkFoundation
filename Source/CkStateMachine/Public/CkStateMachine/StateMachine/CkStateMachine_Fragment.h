@@ -155,8 +155,11 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
-    // Hierarchy prefix applied to every state spawned within this StateMachine.
-    // Empty for top-level SMs. Seeded by sub-StateMachine spawners with the hosting state's hierarchy.
+    // A sub-SM's place under its root, and its cross-machine address (ck::statemachine::FSubSmAddress).
+    // Empty for top-level SMs. Seeded by UCk_SmTask_SubStateMachine at EnterTask:
+    //   _ParentHierarchy - the hosting state's hierarchy; also the prefix of every state spawned within this SM.
+    //   _SubSmOrdinals   - per level, which of that level's hosting state's sub-SM tasks hosts the SM below it
+    //                      (index among the state's UCk_SmTask_SubStateMachine tasks, in definition order).
     struct CKSTATEMACHINE_API FFragment_Sm_ParentHierarchy
     {
     public:
@@ -164,12 +167,14 @@ namespace ck
 
     private:
         TArray<FGameplayTag> _ParentHierarchy;
+        TArray<uint8> _SubSmOrdinals;
 
     public:
         CK_PROPERTY_GET(_ParentHierarchy);
+        CK_PROPERTY_GET(_SubSmOrdinals);
 
     public:
-        CK_DEFINE_CONSTRUCTORS(FFragment_Sm_ParentHierarchy, _ParentHierarchy);
+        CK_DEFINE_CONSTRUCTORS(FFragment_Sm_ParentHierarchy, _ParentHierarchy, _SubSmOrdinals);
     };
 
     // --------------------------------------------------------------------------------------------------------------------

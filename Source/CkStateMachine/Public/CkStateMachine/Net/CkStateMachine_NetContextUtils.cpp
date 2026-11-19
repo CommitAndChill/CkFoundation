@@ -209,3 +209,81 @@ namespace ck::statemachine
         MirrorRunStatus(InEntity, InNewStatus);
     }
 }
+
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace ck::statemachine
+{
+    auto
+        FSubSmAddress::
+        Make(
+            const TArray<FGameplayTag>& InHierarchy,
+            const TArray<uint8>& InOrdinals)
+        -> FSubSmAddress
+    {
+        auto Address = FSubSmAddress{};
+        Address._Hierarchy = InHierarchy;
+        Address._Ordinals = InOrdinals;
+
+        if (Address._Ordinals.IsEmpty() && NOT Address._Hierarchy.IsEmpty())
+        { Address._Ordinals.SetNumZeroed(Address._Hierarchy.Num()); }
+
+        return Address;
+    }
+
+    auto
+        FSubSmAddress::
+        Make(
+            const FCk_Sm_TransitionEvent& InEvent)
+        -> FSubSmAddress
+    {
+        return Make(InEvent.Get_SubSmIdentity(), InEvent.Get_SubSmOrdinals());
+    }
+
+    auto
+        FSubSmAddress::
+        Get_IsRoot() const
+        -> bool
+    {
+        return _Hierarchy.IsEmpty();
+    }
+
+    auto
+        FSubSmAddress::
+        operator==(
+            const FSubSmAddress& InOther) const
+        -> bool
+    {
+        return _Hierarchy == InOther._Hierarchy && _Ordinals == InOther._Ordinals;
+    }
+
+    auto
+        FSubSmAddress::
+        ToString() const
+        -> FString
+    {
+        if (Get_IsRoot())
+        { return TEXT("(root)"); }
+
+        auto Levels = TArray<FString>{};
+        for (auto Index = 0; Index < _Hierarchy.Num(); ++Index)
+        {
+            const auto Ordinal = _Ordinals.IsValidIndex(Index) ? static_cast<int32>(_Ordinals[Index]) : -1;
+            Levels.Add(FString::Printf(TEXT("%s#%d"), *_Hierarchy[Index].ToString(), Ordinal));
+        }
+
+        return FString::Printf(TEXT("(%s)"), *FString::Join(Levels, TEXT(" > ")));
+    }
+
+    auto
+        FSubSmAddress::
+        Request_WriteTo(
+            FCk_Sm_TransitionEvent& InEvent) const
+        -> void
+    {
+        InEvent.Set_SubSmIdentity(_Hierarchy);
+        InEvent.Set_SubSmOrdinals(_Ordinals);
+    }
+}
+
+// --------------------------------------------------------------------------------------------------------------------

@@ -105,13 +105,15 @@ namespace ck_state_machine_replication
             return {};
         }
 
-        const auto SnapEvent = FCk_Sm_TransitionEvent
+        auto SnapEvent = FCk_Sm_TransitionEvent
         {
             LocalCurrentClass,
             Latest.Get_NewStateClass(),
             Latest.Get_Seq(),
             Latest.Get_NewStateFingerprint()
         };
+        // Same target, same address: the replay check drops an event whose address is not its SM's.
+        ck::statemachine::FSubSmAddress::Make(Latest).Request_WriteTo(SnapEvent);
 
         return TArray<FCk_Sm_TransitionEvent>{SnapEvent};
     }
@@ -160,8 +162,8 @@ namespace ck_state_machine_replication
     }
 
     // Leg-2 receive dispatch. The root's container carries a MIX of root-level events (empty
-    // _SubSmIdentity) and sub-SM events relayed through the root, each in its OWN seq space.
-    // Partitioning per identity is load-bearing: a shared seq space corrupts the dedup watermark and
+    // address) and sub-SM events relayed through the root, each in its OWN seq space.
+    // Partitioning per address is load-bearing: a shared seq space corrupts the dedup watermark and
     // lets lagged-out recovery snap the root to a sub-SM's state class.
     auto
     Sm_DispatchWithHistory(
@@ -170,8 +172,8 @@ namespace ck_state_machine_replication
     {
         struct FSubSmBucket
         {
-            TArray<FGameplayTag>           Identity;
-            TArray<FCk_Sm_TransitionEvent> Events;
+            ck::statemachine::FSubSmAddress Address;
+            TArray<FCk_Sm_TransitionEvent>  Events;
         };
 
         auto RootEvents = TArray<FCk_Sm_TransitionEvent>{};
@@ -179,21 +181,21 @@ namespace ck_state_machine_replication
 
         for (const auto& Event : InHistory)
         {
-            const auto& Identity = Event.Get_SubSmIdentity();
-            if (Identity.IsEmpty())
+            const auto Address = ck::statemachine::FSubSmAddress::Make(Event);
+            if (Address.Get_IsRoot())
             {
                 RootEvents.Add(Event);
                 continue;
             }
 
             if (auto* Bucket = SubBuckets.FindByPredicate(
-                    [&](const FSubSmBucket& InBucket) -> bool { return InBucket.Identity == Identity; }))
+                    [&](const FSubSmBucket& InBucket) -> bool { return InBucket.Address == Address; }))
             {
                 Bucket->Events.Add(Event);
             }
             else
             {
-                SubBuckets.Add(FSubSmBucket{Identity, TArray<FCk_Sm_TransitionEvent>{Event}});
+                SubBuckets.Add(FSubSmBucket{Address, TArray<FCk_Sm_TransitionEvent>{Event}});
             }
         }
 
@@ -210,13 +212,13 @@ namespace ck_state_machine_replication
 
         for (auto& Bucket : SubBuckets)
         {
-            auto TargetSubSm = UCk_Utils_StateMachine_UE::TryFind_ActiveSubSm_ByParentHierarchy(RootHandle, Bucket.Identity);
+            auto TargetSubSm = UCk_Utils_StateMachine_UE::TryFind_ActiveSubSm_ByAddress(RootHandle, Bucket.Address);
             if (ck::Is_NOT_Valid(TargetSubSm))
             {
                 // The hosting parent state isn't active on this machine. A true parent-then-child race
                 // (stash-and-defer) is NOT handled — log + drop beats landing on the wrong SM.
-                ck::sm::Warning(TEXT("WithHistory Apply: sub-SM for identity-path (depth [{}]) not active under root [{}]; dropping [{}] relayed event(s)"),
-                    Bucket.Identity.Num(), RootEntity, Bucket.Events.Num());
+                ck::sm::Warning(TEXT("WithHistory Apply: sub-SM {} (depth [{}]) not active under root [{}]; dropping [{}] relayed event(s)"),
+                    Bucket.Address.ToString(), Bucket.Address.Get_Hierarchy().Num(), RootEntity, Bucket.Events.Num());
                 continue;
             }
 

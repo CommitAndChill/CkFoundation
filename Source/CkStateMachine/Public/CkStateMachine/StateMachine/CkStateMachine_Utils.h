@@ -212,24 +212,32 @@ public:
     // --------------------------------------------------------------------------------------------------------------------
     // SUB-SM TRANSITION RELAY. Sub-SMs have no transport of their own, so an owning-client sub-SM's
     // transitions are routed through the ROOT SM's transport and addressed by a deterministic
-    // identity: FFragment_Sm_ParentHierarchy, the root->leaf state-tag path to its hosting state.
+    // ck::statemachine::FSubSmAddress: per nesting level, the hosting state's tag AND the sub-SM
+    // task's ordinal among that state's sub-SM tasks. The ordinal is what keeps two sub-SM tasks on
+    // one state apart; the tag path alone is shared by them.
 
     // Walks OwningStateMachine to the top-level SM; returns InStateMachine itself when already a root.
     static auto
     Get_RootStateMachine(
         const FCk_Handle_StateMachine& InStateMachine) -> FCk_Handle_StateMachine;
 
-    // The cross-machine identity of a sub-SM. Empty for a root SM.
+    // The tag half of a sub-SM's address: its hosting state's hierarchy. Empty for a root SM.
     static auto
     Get_SubSmParentHierarchy(
         const FCk_Handle_StateMachine& InStateMachine) -> TArray<FGameplayTag>;
 
-    // Returns an invalid handle when no ACTIVE sub-SM matches — e.g. the hosting parent state isn't
-    // currently active, in which case the caller must defer/stash.
+    // The cross-machine address of a sub-SM. Empty (Get_IsRoot) for a root SM.
     static auto
-    TryFind_ActiveSubSm_ByParentHierarchy(
+    Get_SubSmAddress(
+        const FCk_Handle_StateMachine& InStateMachine) -> ck::statemachine::FSubSmAddress;
+
+    // The live sub-SM at InAddress under InRoot's ACTIVE state tree. Returns an invalid handle when
+    // none matches — e.g. the hosting parent state isn't currently active, in which case the caller
+    // drops the event.
+    static auto
+    TryFind_ActiveSubSm_ByAddress(
         const FCk_Handle_StateMachine& InRoot,
-        const TArray<FGameplayTag>& InParentHierarchy) -> FCk_Handle_StateMachine;
+        const ck::statemachine::FSubSmAddress& InAddress) -> FCk_Handle_StateMachine;
 
     // --------------------------------------------------------------------------------------------------------------------
 

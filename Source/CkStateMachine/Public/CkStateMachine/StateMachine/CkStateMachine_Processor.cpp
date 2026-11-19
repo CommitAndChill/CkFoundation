@@ -54,6 +54,45 @@ DECLARE_DWORD_COUNTER_STAT(TEXT("Sm Transitions Committed"), STAT_SmTransitionsC
 
 // --------------------------------------------------------------------------------------------------------------------
 
+namespace ck_state_machine_processor
+{
+    // True when InStateClass names the state this SM stands in. A never-entered SM (first-sync not run
+    // yet) stands at its initial state. Overrides are installed on the authority only and never ride
+    // the wire, so the class an event names may be the authority's override of the state this machine
+    // entered under its requested class: such an override class stands for the state whose tag it
+    // overrides.
+    auto
+    DoGet_IsStandingIn(
+        const FCk_Handle_StateMachine& InSm,
+        const ck::FFragment_Sm_Params& InParams,
+        const ck::FFragment_Sm& InSmFragment,
+        const TSubclassOf<UCk_SmState_EntityScript>& InStateClass) -> bool
+    {
+        if (ck::Is_NOT_Valid(InStateClass))
+        { return false; }
+
+        const auto& CurrentState = InSmFragment.Get_CurrentStateHandle();
+        const auto RequestedClass = ck::IsValid(CurrentState) && CurrentState.Has<ck::FFragment_SmState_Params>()
+            ? CurrentState.Get<ck::FFragment_SmState_Params>().Get_RequestedScriptClass()
+            : InParams.Get_InitialStateClass();
+        const auto ResolvedClass = ck::IsValid(CurrentState)
+            ? InSmFragment.Get_CurrentStateClass()
+            : UCk_Utils_SmState_UE::Get_ResolvedStateClass(InSm, RequestedClass);
+
+        if (InStateClass == RequestedClass || InStateClass == ResolvedClass)
+        { return true; }
+
+        if (ck::Is_NOT_Valid(RequestedClass))
+        { return false; }
+
+        const auto* StateCdo = InStateClass->GetDefaultObject<UCk_SmState_EntityScript>();
+        return ck::IsValid(StateCdo)
+            && StateCdo->Get_StatesToOverride().Contains(UCk_SmState_EntityScript::Get_StateTagForClass(RequestedClass));
+    }
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
 namespace ck
 {
     // --------------------------------------------------------------------------------------------------------------------
@@ -717,12 +756,12 @@ namespace ck
 
         // Sub-SM transition relay: a sub-SM is DoesNotReplicate, so it has no transport of its own and
         // the publish block above is skipped for it. Its transitions ride the ROOT's client->server
-        // batch / rep container, tagged with the sub-SM's parent-hierarchy identity so peers dispatch
-        // to the matching local sub-SM.
+        // batch / rep container, tagged with the sub-SM's address (ck::statemachine::FSubSmAddress) so
+        // peers dispatch to the matching local sub-SM.
         if (InParams.Get_Replication() != ECk_Replication::Replicates)
         {
-            const auto SubSmIdentity = UCk_Utils_StateMachine_UE::Get_SubSmParentHierarchy(InHandle);
-            if (NOT SubSmIdentity.IsEmpty())
+            const auto SubSmAddress = UCk_Utils_StateMachine_UE::Get_SubSmAddress(InHandle);
+            if (NOT SubSmAddress.Get_IsRoot())
             {
                 const auto NetContext = ck::statemachine::ComputeNetContext(InHandle);
                 const auto AuthModel  = UCk_Utils_StateMachine_UE::Get_EffectiveAuthorityModel(InHandle);
@@ -751,7 +790,7 @@ namespace ck
                             SeqValue,
                             UCk_SmState_EntityScript::Get_CachedFingerprint(TargetStateClass)
                         };
-                        Event.Set_SubSmIdentity(SubSmIdentity);
+                        SubSmAddress.Request_WriteTo(Event);
 
                         if (IsOwningClientOriginator)
                         {
@@ -763,8 +802,8 @@ namespace ck
                         else // IsServerRepublisher
                         {
                             // Republish onto the ROOT's WithHistory container so non-owning observers
-                            // dispatch by identity; the owning client echo-suppresses it. NoHistory roots
-                            // have no field to carry the identity, so the relay is WithHistory-only.
+                            // dispatch by address; the owning client echo-suppresses it. NoHistory roots
+                            // have no field to carry the address, so the relay is WithHistory-only.
                             if (UCk_Utils_StateMachine_UE::Get_ReplicationModel(Root) == ECk_Sm_ReplicationModel::WithHistory)
                             {
                                 UCk_Utils_Net_UE::TryUpdateContainerFragment<FCk_RepData_StateMachine_WithHistory>(
@@ -777,8 +816,8 @@ namespace ck
                                         { History.RemoveAt(0); }
                                     });
 
-                                ck::sm::Verbose(TEXT("[SubSmRelay] server republished sub-SM transition [{}] -> [{}] (seq [{}]) onto root [{}] WithHistory container"),
-                                    PreviousStateClass, TargetStateClass, SeqValue, Root);
+                                ck::sm::Verbose(TEXT("[SubSmRelay] server republished sub-SM {} transition [{}] -> [{}] (seq [{}]) onto root [{}] WithHistory container"),
+                                    SubSmAddress.ToString(), PreviousStateClass, TargetStateClass, SeqValue, Root);
                             }
                         }
                     }
@@ -879,9 +918,69 @@ namespace ck
         const auto Event = Queue[0];
         Queue.RemoveAt(0);
 
+        // Where it stands, before anything is applied (CkStateMachine/Claude.md § Replay checks where it stands).
+        // 1. The event must be addressed to this SM. Routing resolves the address, so a mismatch means
+        //    the event was delivered to the wrong SM: nothing can make it right here.
+        const auto EventAddress = ck::statemachine::FSubSmAddress::Make(Event);
+        if (const auto OwnAddress = UCk_Utils_StateMachine_UE::Get_SubSmAddress(InHandle);
+            NOT (EventAddress == OwnAddress))
+        {
+            ck::sm::Warning(TEXT("Replay check: SM [{}] at {} dropped an event addressed to {} ([{}] -> [{}], seq [{}])"),
+                InHandle, OwnAddress.ToString(), EventAddress.ToString(),
+                Event.Get_PreviousStateClass(), Event.Get_NewStateClass(), Event.Get_Seq());
+            return;
+        }
+
+        const auto LastApplied = InHandle.Has<FFragment_Sm_ClientReplayState>()
+            ? InHandle.Get<FFragment_Sm_ClientReplayState>().Get_ClientLastAppliedSeq()
+            : 0;
+
+        // 2. The event's previous state must be where this SM stands. A null previous state makes no
+        //    claim (synthesized snaps). Otherwise the stream decides:
+        //    - latest-state (NoHistory) replication snaps to current by design -> resync;
+        //    - events missing before this one (seq gap) explain the difference: this SM missed
+        //      transitions, the event is the authority's truth -> resync, as lagged-out recovery does;
+        //    - nothing missing means the stream says this SM should already be in the event's previous
+        //      state; it is not, so the event does not describe it -> drop. The watermark is not
+        //      advanced, so the next event of a genuine stream reads as a gap and resyncs.
+        auto PreviousStateClass = Event.Get_PreviousStateClass();
+
+        if (ck::IsValid(PreviousStateClass)
+            && NOT ck_state_machine_processor::DoGet_IsStandingIn(InHandle, InParams, InSm, PreviousStateClass))
+        {
+            const auto IsLatestStateModel = InParams.Get_ReplicationModel() == ECk_Sm_ReplicationModel::WithoutHistory;
+            const auto HasMissedEvents = Event.Get_Seq() > LastApplied + 1;
+
+            if (NOT IsLatestStateModel && NOT HasMissedEvents)
+            {
+                ck::sm::Warning(TEXT("Replay check: SM [{}] at {} dropped event [{}] -> [{}] (seq [{}]): it stands in [{}] and nothing is missing after seq [{}]"),
+                    InHandle, EventAddress.ToString(), PreviousStateClass, Event.Get_NewStateClass(), Event.Get_Seq(),
+                    InSm.Get_CurrentStateClass(), LastApplied);
+                return;
+            }
+
+            // Already where the authority is: consume the event without a spurious Exit/Enter. History only: a
+            // latest-state event with a new seq is always a transition the authority committed, so one naming the
+            // state this SM stands in is a re-entry (B -> B behind a multi-frame exit) and must re-enter.
+            if (NOT IsLatestStateModel
+                && ck_state_machine_processor::DoGet_IsStandingIn(InHandle, InParams, InSm, Event.Get_NewStateClass()))
+            {
+                auto& ReplayState = InHandle.AddOrGet<FFragment_Sm_ClientReplayState>();
+                ReplayState.Set_ClientLastAppliedSeq(FMath::Max(ReplayState.Get_ClientLastAppliedSeq(), Event.Get_Seq()));
+                return;
+            }
+
+            ck::sm::Warning(TEXT("Replay check: SM [{}] at {} resyncs from [{}] to [{}] (event [{}] -> [{}], seq [{}], last applied [{}]): {}"),
+                InHandle, EventAddress.ToString(), InSm.Get_CurrentStateClass(), Event.Get_NewStateClass(),
+                PreviousStateClass, Event.Get_NewStateClass(), Event.Get_Seq(), LastApplied,
+                FString{IsLatestStateModel ? TEXT("latest-state replication snaps to current") : TEXT("events before it were missed")});
+
+            PreviousStateClass = InSm.Get_CurrentStateClass();
+        }
+
         auto& Pending = InHandle.AddOrGet<FFragment_Sm_PendingTransition>();
         Pending._PreviousStateHandle = InSm.Get_CurrentStateHandle();
-        Pending._PreviousStateClass  = Event.Get_PreviousStateClass();
+        Pending._PreviousStateClass  = PreviousStateClass;
         Pending._TargetStateClass    = Event.Get_NewStateClass();
         Pending._NewStateFingerprint = Event.Get_NewStateFingerprint();
 

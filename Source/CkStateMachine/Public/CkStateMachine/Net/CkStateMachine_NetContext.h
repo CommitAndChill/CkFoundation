@@ -82,14 +82,21 @@ private:
         meta = (AllowPrivateAccess = true))
     int32 _NewStateFingerprint = 0;
 
-    // Cross-machine address of the sub-SM this event belongs to: its FFragment_Sm_ParentHierarchy
-    // (root->leaf state-tag path to its hosting state). EMPTY means a root-level event. Non-empty
-    // means the event was relayed through the root SM's transport on behalf of a non-replicated
-    // sub-SM, and the receiver must dispatch it to the local sub-SM resolved by this path (see
-    // UCk_Utils_StateMachine_UE::TryFind_ActiveSubSm_ByParentHierarchy). Set via Set_SubSmIdentity.
+    // Cross-machine address of the sub-SM this event belongs to (ck::statemachine::FSubSmAddress),
+    // as two parallel arrays. EMPTY means a root-level event. Non-empty means the event was relayed
+    // through the root SM's transport on behalf of a non-replicated sub-SM, and the receiver must
+    // dispatch it to the local sub-SM at this address (UCk_Utils_StateMachine_UE::TryFind_ActiveSubSm_ByAddress).
+    //   _SubSmIdentity - the hosting state's tag path, root -> leaf (FFragment_Sm_ParentHierarchy).
+    //   _SubSmOrdinals - per level, the sub-SM task's index among its hosting state's sub-SM tasks. EMPTY
+    //                    with a non-empty identity is the shape written before ordinals existed; it reads
+    //                    as ordinal 0 per level.
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
         meta = (AllowPrivateAccess = true))
     TArray<FGameplayTag> _SubSmIdentity;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
+        meta = (AllowPrivateAccess = true))
+    TArray<uint8> _SubSmOrdinals;
 
 public:
     CK_PROPERTY(_PreviousStateClass);
@@ -97,9 +104,62 @@ public:
     CK_PROPERTY(_Seq);
     CK_PROPERTY(_NewStateFingerprint);
     CK_PROPERTY(_SubSmIdentity);
+    CK_PROPERTY(_SubSmOrdinals);
 
 public:
     CK_DEFINE_CONSTRUCTORS(FCk_Sm_TransitionEvent, _PreviousStateClass, _NewStateClass, _Seq, _NewStateFingerprint);
 };
+
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace ck::statemachine
+{
+    // A sub-SM's cross-machine address. One entry per nesting level, root -> leaf:
+    //   _Hierarchy - the hosting state's tag (the hosting state's hierarchy, FFragment_Sm_ParentHierarchy)
+    //   _Ordinals  - which of that state's sub-SM tasks hosts the level below: the task's index among the
+    //                state's UCk_SmTask_SubStateMachine tasks, in definition order
+    // Unique among the live sub-SMs under one root: two sub-SM tasks on one state differ by ordinal, and
+    // nested levels carry every level's ordinal. Identical on every machine without extra replication,
+    // because DefineState output is (fingerprint-enforced). Empty for a root SM.
+    struct CKSTATEMACHINE_API FSubSmAddress
+    {
+    public:
+        CK_GENERATED_BODY(FSubSmAddress);
+
+    public:
+        // Reads the shape written before ordinals existed (a tag path, no ordinals) as ordinal 0 per level.
+        static auto
+        Make(
+            const TArray<FGameplayTag>& InHierarchy,
+            const TArray<uint8>& InOrdinals) -> FSubSmAddress;
+
+        static auto
+        Make(
+            const FCk_Sm_TransitionEvent& InEvent) -> FSubSmAddress;
+
+        auto
+        Get_IsRoot() const -> bool;
+
+        auto
+        operator==(
+            const FSubSmAddress& InOther) const -> bool;
+
+        // "(A#0 > B#1)"; "(root)" for an empty address.
+        auto
+        ToString() const -> FString;
+
+        auto
+        Request_WriteTo(
+            FCk_Sm_TransitionEvent& InEvent) const -> void;
+
+    private:
+        TArray<FGameplayTag> _Hierarchy;
+        TArray<uint8> _Ordinals;
+
+    public:
+        CK_PROPERTY_GET(_Hierarchy);
+        CK_PROPERTY_GET(_Ordinals);
+    };
+}
 
 // --------------------------------------------------------------------------------------------------------------------

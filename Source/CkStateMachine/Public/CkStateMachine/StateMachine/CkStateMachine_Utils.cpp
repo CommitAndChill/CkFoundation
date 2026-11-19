@@ -335,14 +335,29 @@ auto
     return {};
 }
 
+auto
+    UCk_Utils_StateMachine_UE::
+    Get_SubSmAddress(
+        const FCk_Handle_StateMachine& InStateMachine)
+    -> ck::statemachine::FSubSmAddress
+{
+    if (NOT InStateMachine.Has<ck::FFragment_Sm_ParentHierarchy>())
+    { return {}; }
+
+    const auto& ParentHierarchy = InStateMachine.Get<ck::FFragment_Sm_ParentHierarchy>();
+    return ck::statemachine::FSubSmAddress::Make(ParentHierarchy.Get_ParentHierarchy(), ParentHierarchy.Get_SubSmOrdinals());
+}
+
 namespace ck_state_machine_utils
 {
-    // Depth-first walk of the ACTIVE state tree: current state -> hosted sub-SMs -> recurse. The
-    // hierarchy path is a unique deterministic address, so the first exact match is the one.
+    // Depth-first walk of the ACTIVE state tree: current state -> hosted sub-SMs -> recurse. An
+    // address names every level's hosting state AND sub-SM task ordinal, so it is unique among the
+    // live sub-SMs under one root (UCk_SmTask_SubStateMachine ensures on a duplicate) and the first
+    // exact match is the only one.
     auto
     DoFind_ActiveSubSm(
         const FCk_Handle_StateMachine& InSm,
-        const TArray<FGameplayTag>& InTarget)
+        const ck::statemachine::FSubSmAddress& InTarget)
     -> FCk_Handle_StateMachine
     {
         const auto CurrentState = UCk_Utils_StateMachine_UE::Get_CurrentStateHandle(InSm);
@@ -361,7 +376,7 @@ namespace ck_state_machine_utils
             if (ck::Is_NOT_Valid(SubSm))
             { return ECk_Record_ForEachIterationResult::Continue; }
 
-            if (UCk_Utils_StateMachine_UE::Get_SubSmParentHierarchy(SubSm) == InTarget)
+            if (UCk_Utils_StateMachine_UE::Get_SubSmAddress(SubSm) == InTarget)
             {
                 Result = SubSm;
                 return ECk_Record_ForEachIterationResult::Break;
@@ -383,15 +398,15 @@ namespace ck_state_machine_utils
 
 auto
     UCk_Utils_StateMachine_UE::
-    TryFind_ActiveSubSm_ByParentHierarchy(
+    TryFind_ActiveSubSm_ByAddress(
         const FCk_Handle_StateMachine& InRoot,
-        const TArray<FGameplayTag>& InParentHierarchy)
+        const ck::statemachine::FSubSmAddress& InAddress)
     -> FCk_Handle_StateMachine
 {
-    if (ck::Is_NOT_Valid(InRoot) || InParentHierarchy.IsEmpty())
+    if (ck::Is_NOT_Valid(InRoot) || InAddress.Get_IsRoot())
     { return {}; }
 
-    return ck_state_machine_utils::DoFind_ActiveSubSm(InRoot, InParentHierarchy);
+    return ck_state_machine_utils::DoFind_ActiveSubSm(InRoot, InAddress);
 }
 
 // --------------------------------------------------------------------------------------------------------------------

@@ -64,6 +64,14 @@ public:
     CK_PROPERTY_GET(_CompletionBehavior);
 
 private:
+    // Seeds the sub-SM's FFragment_Sm_ParentHierarchy: the hosting state's hierarchy and, per level, the
+    // sub-SM task's ordinal among its hosting state's sub-SM tasks (ck::statemachine::FSubSmAddress).
+    auto
+    DoAdd_Address(
+        const FCk_Handle_SmTask& InTask,
+        const FCk_Handle_SmState& InHostingState) -> void;
+
+private:
     FCk_Handle_StateMachine _SubSmHandle;
 };
 
