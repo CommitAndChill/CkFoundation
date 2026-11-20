@@ -1,5 +1,7 @@
 #include "CkClipboard_Utils.h"
 
+#include "CkCore/Ensure/CkEnsure.h"
+
 #include <HAL/PlatformApplicationMisc.h>
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -10,6 +12,12 @@ namespace ck::clipboard
     Copy(
         const FString& InText) -> void
     {
+        CK_ENSURE_IF_NOT(IsInGameThread(), TEXT("ck::clipboard::Copy called off the game thread; bypassing capture"))
+        {
+            FPlatformApplicationMisc::ClipboardCopy(*InText);
+            return;
+        }
+
         if (auto* Capture = FCk_ClipboardCapture_Scope::_Active)
         {
             Capture->_Text = InText;
@@ -35,6 +43,19 @@ FCk_ClipboardCapture_Scope::
 FCk_ClipboardCapture_Scope::
     ~FCk_ClipboardCapture_Scope()
 {
+    CK_ENSURE_IF_NOT(_Active == this, TEXT("FCk_ClipboardCapture_Scope destroyed out of order; unlinking it from the capture chain"))
+    {
+        for (auto* Scope = _Active; Scope != nullptr; Scope = Scope->_Previous)
+        {
+            if (Scope->_Previous == this)
+            {
+                Scope->_Previous = _Previous;
+                break;
+            }
+        }
+        return;
+    }
+
     _Active = _Previous;
 }
 
