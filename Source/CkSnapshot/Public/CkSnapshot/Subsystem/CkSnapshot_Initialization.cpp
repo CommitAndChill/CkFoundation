@@ -8,6 +8,7 @@
 
 #include <GameFramework/Actor.h>
 #include <Misc/PackageName.h>
+#include <ProfilingDebugging/CpuProfilerTrace.h>
 #include <UObject/SoftObjectPath.h>
 
 auto
@@ -292,6 +293,15 @@ auto
 
 auto
     UCk_Snapshot_Subsystem_UE::
+    DoFind_PendingBridgeRow(const AActor& InActor) const
+    -> const uint32*
+{
+    TRACE_CPUPROFILER_EVENT_SCOPE(CkSnapshot_FindPendingBridgeRow);
+    return _PendingBridgeRowsByActor.Find(&InActor);
+}
+
+auto
+    UCk_Snapshot_Subsystem_UE::
     DoResolve_Initialization(FCk_Handle& InEntity, const UScriptStruct* InType,
         const FInitializationIdentity& InIdentity)
     -> void
@@ -310,20 +320,17 @@ auto
     // The bridge handle may appear after FinishSpawning has entered BeginPlay. Only the actor's exact
     // linked entity can consume its loader row. Other subjects still need their own declaration.
     bool AwaitingBridge = false;
-    if (NOT _InitializationLoaderRows.Contains(InEntity) && NOT _PendingBridgeActors.IsEmpty())
+    if (NOT _InitializationLoaderRows.Contains(InEntity) && NOT _PendingBridgeRowsByActor.IsEmpty())
     {
         if (const auto* Actor = UCk_Utils_EntityBridge_UE::TryGet_Actor(InEntity))
         {
-            for (const auto& Pair : _PendingBridgeActors)
+            if (const auto* SavedId = DoFind_PendingBridgeRow(*Actor))
             {
-                if (Pair.Value.Get() != Actor)
-                { continue; }
                 const auto Linked = UCk_Utils_EntityBridge_UE::TryGet_Entity(Actor);
                 if (Linked == InEntity)
-                { _InitializationLoaderRows.Add(InEntity, Pair.Key); }
+                { _InitializationLoaderRows.Add(InEntity, *SavedId); }
                 else if (ck::Is_NOT_Valid(Linked))
                 { AwaitingBridge = true; }
-                break;
             }
         }
     }

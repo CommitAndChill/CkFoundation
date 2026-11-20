@@ -704,6 +704,7 @@ void
     for (const auto& Entry : _V3Tables.Get_Entities())
     { _PersistedIds.Add(Entry.Get_SavedId()); }
     _PendingBridgeActors.Reset();
+    _PendingBridgeRowsByActor.Reset();
     _V3LoadReport = FCk_Snapshot_LoadReport{};
     _V3LoadReport.Set_Result(ECk_SnapshotResult::Success);
     _V3LoadReport.Set_SaveTimestamp(_V3Header.Get_TimestampUTC());
@@ -1177,8 +1178,13 @@ auto
                     // WithActor entity (Construct composes features). Rendezvous-map via the actor once the bridge links.
                     if (NOT _SpawnedRuntimeIds.Contains(SavedId))
                     {
+                        TRACE_CPUPROFILER_EVENT_SCOPE(CkSnapshot_RebuildBridgedActor);
                         _SpawnedRuntimeIds.Add(SavedId);
-                        auto* ActorClass = FSoftClassPath{Entry.Get_ActorClassPath()}.TryLoadClass<AActor>();
+                        UClass* ActorClass = nullptr;
+                        {
+                            TRACE_CPUPROFILER_EVENT_SCOPE(CkSnapshot_ResolveBridgedActorClass);
+                            ActorClass = FSoftClassPath{Entry.Get_ActorClassPath()}.TryLoadClass<AActor>();
+                        }
                         if (ActorClass == nullptr)
                         {
                             ck::snapshot::Error(TEXT("v3 load: RuntimeSpawned bridged entity [{}] actor class [{}] "
@@ -1197,6 +1203,7 @@ auto
                             if (Actor != nullptr)
                             {
                                 _PendingBridgeActors.Add(SavedId, Actor);
+                                _PendingBridgeRowsByActor.Add(Actor, SavedId);
                                 ck_snapshot_subsystem::DoApply_ActorSaveFields(Actor, Entry.Get_ActorSaveFieldBytes());
 
                                 // The finish transform IS the one the deferred spawn already applied, so it is the
@@ -1218,11 +1225,13 @@ auto
                     if (const auto* Pending = _PendingBridgeActors.Find(SavedId);
                         Pending != nullptr && Pending->IsValid())
                     {
+                        TRACE_CPUPROFILER_EVENT_SCOPE(CkSnapshot_ResolveRebuiltBridge);
                         const auto Entity = UCk_Utils_EntityBridge_UE::TryGet_Entity(Pending->Get());
                         if (ck::IsValid(Entity))
                         {
                             Resolved = Entity;
                             _InitializationLoaderRows.Add(Entity, SavedId);
+                            _PendingBridgeRowsByActor.Remove(Pending->Get());
                             _PendingBridgeActors.Remove(SavedId);
                         }
                     }
@@ -1476,7 +1485,10 @@ auto
 
     // Drain kernel work (construction cascades, actor bridges) so pending spawns resolve next tick. No payloads are
     // enqueued yet, so this pump never applies hydration — it only settles construction (avoids the Setup-stomp).
-    EcsWorld->Request_PumpToQuiescence(ck::ECk_SchedulerTickScope::LoadKernel);
+    {
+        TRACE_CPUPROFILER_EVENT_SCOPE(CkSnapshot_PumpRebuildKernel);
+        EcsWorld->Request_PumpToQuiescence(ck::ECk_SchedulerTickScope::LoadKernel);
+    }
 
     // A suppressed level root must be fully gone before the load can expose the world. Merely queueing its destroy
     // would allow the rebuild to advance in the same tick and briefly hand gameplay both the carried replacement
@@ -3757,6 +3769,7 @@ auto
     _SkipRecords.Reset();
     _PersistedIds.Reset();
     _PendingBridgeActors.Reset();
+    _PendingBridgeRowsByActor.Reset();
 
     const auto Delegate = _PendingLoadDelegate;
     _PendingLoadDelegate.Unbind();

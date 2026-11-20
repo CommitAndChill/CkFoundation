@@ -24,6 +24,7 @@
 #include "Containers/Ticker.h"
 
 #include <StructUtils/InstancedStruct.h> // DoDeserialize_V3Blob return type
+#include <UObject/ObjectKey.h>
 
 #include "CkSnapshot_Subsystem.generated.h"
 
@@ -402,6 +403,7 @@ private:
     auto DoPrepare_InitializationManifest() -> void;
     auto DoClear_InitializationManifest() -> void;
     auto DoBind_InitializationRow(uint32 InRow, const FCk_Handle& InEntity) -> void;
+    auto DoFind_PendingBridgeRow(const AActor& InActor) const -> const uint32*;
     auto DoResolve_Initialization(FCk_Handle& InEntity, const UScriptStruct* InType,
         const FInitializationIdentity& InIdentity) -> void;
     auto DoIs_InitializationPlayer(const FCk_Handle& InEntity, const FString& InPlayerId) const -> bool;
@@ -610,6 +612,7 @@ private:
     TSet<uint32> _SkippedIds;                           // entries the loader deliberately does NOT rebuild
     TArray<FCk_Snapshot_SkipRecord> _SkipRecords;       // one reasoned record per _SkippedIds entry; copied into the report
     TMap<uint32, TWeakObjectPtr<AActor>> _PendingBridgeActors; // bridged saved-id -> spawned actor awaiting its bridge
+    TMap<TObjectKey<AActor>, uint32> _PendingBridgeRowsByActor;
     FCk_Snapshot_LoadReport _V3LoadReport;             // accumulates orphan/skip counts; DoFinish_Load reports it
     FCk_Snapshot_LoadReport _LastLoadReport;           // frozen copy of the last finished load's report (pull channel)
     FCk_Snapshot_SaveReport _LastSaveReport;           // same, for the last attempted save
