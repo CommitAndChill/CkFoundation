@@ -23,6 +23,8 @@ public:
         FCk_Handle& InHandle) -> ECk_AddedOrNot;
 
 public:
+    static auto Get_IsIncomingReplica(const FCk_Handle& InHandle) -> bool;
+
     static auto
     Get_NumOfReplicationDriversIncludingDependents(
         const FCk_Handle& InHandle) -> int32;

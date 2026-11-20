@@ -30,9 +30,16 @@ namespace ck
 // --------------------------------------------------------------------------------------------------------------------
 
 class UCk_Utils_EntityReplicationDriver_UE;
+class UCk_Fragment_EntityReplicationDriver_Rep;
 
 namespace ck
 {
+    // Installed by the receiving driver before any user construction on its exact entity.
+    struct FFragment_IncomingReplicationDriver
+    {
+        TWeakObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep> _Driver;
+    };
+
     CK_DEFINE_ECS_TAG(FTag_EntityReplicationDriver_FireOnDependentReplicationComplete);
 
     // How long FireOnDependentReplicationComplete has been held by undrained fragments; past a threshold

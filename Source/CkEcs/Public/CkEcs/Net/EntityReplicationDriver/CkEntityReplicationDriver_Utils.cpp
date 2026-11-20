@@ -29,6 +29,15 @@
 
 // --------------------------------------------------------------------------------------------------------------------
 
+auto UCk_Utils_EntityReplicationDriver_UE::Get_IsIncomingReplica(const FCk_Handle& InHandle) -> bool
+{
+    if (ck::Is_NOT_Valid(InHandle) || !InHandle.Has<ck::FFragment_IncomingReplicationDriver>() ||
+        UCk_Utils_EntityLifetime_UE::Get_IsPendingDestroy(InHandle, ECk_EntityLifetime_DestructionPhase::BeginDestroy))
+    { return false; }
+    const auto* Driver = InHandle.Get<ck::FFragment_IncomingReplicationDriver>()._Driver.Get();
+    return IsValid(Driver) && Driver->Get_AssociatedEntity() == InHandle;
+}
+
 namespace ck_entity_replication_driver_utils
 {
     // A runtime-minted archetype is RF_Transient, so it is not net-addressable: the object reference in the

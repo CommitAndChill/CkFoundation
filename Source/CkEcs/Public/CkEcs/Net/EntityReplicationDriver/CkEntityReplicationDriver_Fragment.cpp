@@ -127,6 +127,7 @@ auto
     OnRep_ReplicationData()
     -> void
 {
+    if (ck::Is_NOT_Valid(_AssociatedEntity)) { return; }
     if ([[maybe_unused]] const auto ShouldSkipIfAllObjectsAreNotYetResolved =
         AnyOf(_ReplicationData.Get_ReplicatedObjectsData().Get_Objects(), ck::algo::Is_NOT_Valid{}))
     { return; }
@@ -170,6 +171,7 @@ auto
 
     // --------------------------------------------------------------------------------------------------------------------
 
+    _AssociatedEntity.AddOrGet<ck::FFragment_IncomingReplicationDriver>()._Driver = this;
     _AssociatedEntity._ReplicationDriver = this;
 
     UCk_Utils_EntityLifetime_UE::Request_SetupEntityWithLifetimeOwner(_AssociatedEntity, OwningEntity);
@@ -203,6 +205,7 @@ auto
     UCk_Fragment_EntityReplicationDriver_Rep::
     OnRep_ReplicationData_EntityScript() -> void
 {
+    if (ck::Is_NOT_Valid(_AssociatedEntity)) { return; }
     if ([[maybe_unused]] const auto ShouldSkipIfAllObjectsAreNotYetResolved =
         AnyOf(_ReplicationData_EntityScript.Get_ReplicatedObjectsData().Get_Objects(), ck::algo::Is_NOT_Valid{}))
     {
@@ -243,6 +246,7 @@ auto
         }
     }
 
+    _AssociatedEntity.AddOrGet<ck::FFragment_IncomingReplicationDriver>()._Driver = this;
     if (NOT IsSelfReferencing)
     {
         const auto OwningEntity = _ReplicationData_EntityScript.Get_OwningEntityDriver()->Get_AssociatedEntity();
@@ -332,6 +336,7 @@ auto
     OnRep_ReplicationData_Ability()
     -> void
 {
+    if (ck::Is_NOT_Valid(_AssociatedEntity)) { return; }
     // TODO: This is a temporary fix. We need to find a better way to handle this
     if (_AssociatedEntity.Has<ck::FFragment_LifetimeOwner>())
     { return; }
@@ -365,6 +370,7 @@ auto
 
     // --------------------------------------------------------------------------------------------------------------------
 
+    _AssociatedEntity.AddOrGet<ck::FFragment_IncomingReplicationDriver>()._Driver = this;
     _AssociatedEntity._ReplicationDriver = this;
 
     UCk_Utils_EntityLifetime_UE::Request_SetupEntityWithLifetimeOwner(_AssociatedEntity, OwningEntity);
