@@ -26,6 +26,8 @@ public class CkGrid : CkModuleRules
             "CkSettings",
         });
 
+        PrivateDependencyModuleNames.Add("CkResourceLoader");
+
         // Editor-only: the DebugDrawAll processor draws a grid preview when its owning spawner
         // actor is selected in the editor. Resolving the selected spawner -> preview entity needs
         // UnrealEd (GEditor / USelection) and CkEntitySpawner (ACk_EntitySpawner_UE accessor).
