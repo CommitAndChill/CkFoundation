@@ -208,8 +208,31 @@ public:
     CK_PROPERTY(_Reason);
 };
 
-// One convergence fact the load waited on and never got, named. Same reason as every other record here: a count
-// says the world was handed back before it was coherent; only a name says which part of it had not settled.
+// A projected type requires one baseline even when several saved infrastructure rows share a live owner.
+USTRUCT(BlueprintType)
+struct CKSNAPSHOT_API FCk_Snapshot_InitializationConflict
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(FCk_Snapshot_InitializationConflict);
+
+private:
+    UPROPERTY()
+    FString _PayloadType;
+
+    UPROPERTY()
+    FString _OwnerIdentity;
+
+    UPROPERTY()
+    TArray<uint32> _SavedRows;
+
+public:
+    CK_PROPERTY(_PayloadType);
+    CK_PROPERTY(_OwnerIdentity);
+    CK_PROPERTY(_SavedRows);
+};
+
 USTRUCT(BlueprintType)
 struct CKSNAPSHOT_API FCk_Snapshot_ConvergenceLossRecord
 {
@@ -340,11 +363,9 @@ private:
     UPROPERTY()
     TArray<FCk_Snapshot_PayloadLossRecord> _PayloadLosses;
 
-    // Convergence facts still Pending when the convergence phase hit its frame cap and the loader handed the
-    // world back anyway. Empty on a healthy load. Like the two above it is outside the accounting closure —
-    // those partition the SAVE's rows, and this records a LIVE-side fact — but unlike them it DOES move _Result:
-    // a world resumed before its physics, overlaps or queues settled is a world the player watches finish
-    // loading, which is the one thing the hold exists to prevent, so it says so instead of passing as Success.
+    UPROPERTY()
+    TArray<FCk_Snapshot_InitializationConflict> _InitializationConflicts;
+
     UPROPERTY()
     TArray<FCk_Snapshot_ConvergenceLossRecord> _ConvergenceUnmet;
 
@@ -400,6 +421,7 @@ public:
     CK_PROPERTY(_UnresolvedAfterEscalation);
     CK_PROPERTY(_QuarantineForced);
     CK_PROPERTY(_PayloadLosses);
+    CK_PROPERTY(_InitializationConflicts);
     CK_PROPERTY(_UnresolvedArchetypes);
     CK_PROPERTY(_ConvergenceUnmet);
     CK_PROPERTY(_SaveTimestamp);

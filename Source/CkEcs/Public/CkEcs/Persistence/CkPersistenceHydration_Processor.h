@@ -83,6 +83,14 @@ namespace ck::persistence_apply
         const FInstancedStruct& InData,
         const TOptional<FInstancedStruct>& InOldData,
         double& InOutPendingSinceRealTimeSeconds) -> EApplyOutcome;
+
+    // Reject obsolete deliveries before calling the handler; an accepted handler may already have mutated its entity.
+    CKECS_API auto
+    ApplyQueued(
+        FCk_Handle& InEntity,
+        const FInstancedStruct& InData,
+        uint64 InLoadEpoch,
+        double& InOutPendingSinceRealTimeSeconds) -> EApplyOutcome;
 }
 
 // --------------------------------------------------------------------------------------------------------------------

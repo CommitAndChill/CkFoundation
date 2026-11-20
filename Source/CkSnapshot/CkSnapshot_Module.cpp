@@ -5,6 +5,7 @@
 #include "CkCore/Validation/CkIsValid.h"
 
 #include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
+#include "CkEcs/Persistence/CkPersistenceInitialization.h"
 
 #include <Engine/GameInstance.h>
 #include <Engine/World.h>
@@ -15,6 +16,15 @@
 
 void FCkSnapshotModule::StartupModule()
 {
+    ck::persistence::SetResolverBootstrap([](UWorld& InWorld, FCk_Handle& InTransient)
+    {
+        if (const auto* Instance = InWorld.GetGameInstance())
+        {
+            if (auto* Snapshot = Instance->GetSubsystem<UCk_Snapshot_Subsystem_UE>())
+            { Snapshot->TryInstall_InitializationResolver(InWorld, InTransient); }
+        }
+    });
+
     // A world that comes up mid-load has to be held before ANYTHING in it ticks, and the loader cannot do that
     // itself: its own next opportunity is a full world tick later, which is the frame every level actor's
     // BeginPlay and every entity-script construction runs in. CkEcs asks this question at OnWorldBeginPlay; the
@@ -37,6 +47,7 @@ void FCkSnapshotModule::StartupModule()
 
 void FCkSnapshotModule::ShutdownModule()
 {
+    ck::persistence::SetResolverBootstrap({});
     UCk_EcsWorld_Subsystem_UE::Clear_LoadHoldSeedProvider();
 }
 

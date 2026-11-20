@@ -41,7 +41,8 @@ namespace ck
         FFragment_PendingHydration::
         Enqueue(
             UObject* InOuter,
-            FInstancedStruct InEntry)
+            FInstancedStruct InEntry,
+            uint64 InLoadEpoch)
         -> void
     {
         if (NOT _Payloads.IsValid())
@@ -55,21 +56,18 @@ namespace ck
         { return; }
 
         _Payloads->Add(MoveTemp(InEntry));
+        _LoadEpochs.Add(InLoadEpoch);
     }
 
-    auto
-        FFragment_PendingHydration::
-        Get_Entries()
-        -> TArray<FInstancedStruct>&
+    auto FFragment_PendingHydration::Get_LoadEpoch(int32 InIndex) const -> uint64
     {
-        CK_ENSURE_IF_NOT(_Payloads.IsValid(),
-            TEXT("Pending-hydration fragment has no payload holder"))
-        {
-            static auto Empty = TArray<FInstancedStruct>{};
-            return Empty;
-        }
+        return _LoadEpochs[InIndex];
+    }
 
-        return _Payloads->Get_Entries();
+    auto FFragment_PendingHydration::RemoveAt(int32 InIndex) -> void
+    {
+        _Payloads->Get_Entries().RemoveAt(InIndex);
+        _LoadEpochs.RemoveAt(InIndex);
     }
 
     auto

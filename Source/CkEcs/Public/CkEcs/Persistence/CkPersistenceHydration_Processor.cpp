@@ -5,6 +5,7 @@
 #include "CkCore/Validation/CkIsValid.h" // ck::IsValid — DoGet_PayloadTypeName
 
 #include "CkEcs/Persistence/CkPersistenceHandlerRegistry.h"
+#include "CkEcs/Persistence/CkPersistenceInitialization.h"
 #include "CkEcs/Scheduler/CkProcessorRegistration.h"
 
 #include <HAL/PlatformTime.h> // FPlatformTime::Seconds — the apply timeout is a WALL-clock watchdog
@@ -136,6 +137,41 @@ namespace ck::persistence_apply
         ck_persistence_hydration_processor::DoRecord_Outcome(InEntity, InData, Outcome);
         return Outcome;
     }
+
+    auto
+        ApplyQueued(
+            FCk_Handle& InEntity,
+            const FInstancedStruct& InData,
+            uint64 InLoadEpoch,
+            double& InOutPendingSinceRealTimeSeconds)
+        -> EApplyOutcome
+    {
+        using EDisposition = persistence::EInitializationDisposition;
+        using EFailure = persistence::EInitializationFailure;
+        const auto* Type = InData.GetScriptStruct();
+        const auto Status = persistence::Query(InEntity, Type);
+        if (Status.Get_Disposition() == EDisposition::Undeclared)
+        { return ApplyOne(InEntity, InData, {}, InOutPendingSinceRealTimeSeconds); }
+
+        if (InLoadEpoch != Status.Get_Epoch() ||
+            (Status.Get_Disposition() != EDisposition::BaselineExpected &&
+             Status.Get_Disposition() != EDisposition::BaselineCommitted))
+        {
+            ck_persistence_hydration_processor::DoRecord_Outcome(InEntity, InData, EApplyOutcome::DroppedRejected);
+            return EApplyOutcome::DroppedRejected;
+        }
+
+        const auto Outcome = ApplyOne(InEntity, InData, {}, InOutPendingSinceRealTimeSeconds);
+        switch (Outcome)
+        {
+            case EApplyOutcome::Applied: persistence::TryAccept(InEntity, Type, InLoadEpoch); break;
+            case EApplyOutcome::DroppedRejected: persistence::TryDiscard(InEntity, Type, InLoadEpoch, EFailure::Rejected); break;
+            case EApplyOutcome::DroppedTimeout: persistence::TryDiscard(InEntity, Type, InLoadEpoch, EFailure::TimedOut); break;
+            case EApplyOutcome::DroppedNoHandler: persistence::TryDiscard(InEntity, Type, InLoadEpoch, EFailure::Dropped); break;
+            case EApplyOutcome::StillPending: break;
+        }
+        return Outcome;
+    }
 }
 
 namespace ck
@@ -181,13 +217,13 @@ namespace ck
         for (auto Index = Entries.Num() - 1; Index >= 0; --Index)
         {
             // No per-entry coalescing on the load path (unlike the net FastArray) — the Old side is always unset.
-            const auto Outcome = ck::persistence_apply::ApplyOne(
-                InHandle, Entries[Index], TOptional<FInstancedStruct>{}, InPending._PendingSinceRealTimeSeconds);
+            const auto Outcome = persistence_apply::ApplyQueued(InHandle, Entries[Index], InPending.Get_LoadEpoch(Index),
+                InPending._PendingSinceRealTimeSeconds);
 
             if (Outcome == ck::persistence_apply::EApplyOutcome::StillPending)
             { AnyStillPending = true; }
             else
-            { Entries.RemoveAt(Index); } // Applied or terminally dropped
+            { InPending.RemoveAt(Index); }
         }
 
         InPending._IsDispatchInFlight = false;

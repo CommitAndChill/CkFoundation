@@ -154,6 +154,7 @@ namespace ck
 
     private:
         TStrongObjectPtr<UCk_PendingHydrationPayloads_UE> _Payloads;
+        TArray<uint64> _LoadEpochs;
 
     public:
         // WALL-clock stamp (FPlatformTime::Seconds) of the first NotReady; 0.0 while nothing is pending. Wall
@@ -176,8 +177,9 @@ namespace ck
         bool _AbandonRequested = false;
 
     public:
-        auto Enqueue(UObject* InOuter, FInstancedStruct InEntry) -> void;
-        auto Get_Entries() -> TArray<FInstancedStruct>&;
+        auto Enqueue(UObject* InOuter, FInstancedStruct InEntry, uint64 InLoadEpoch = 0) -> void;
+        auto Get_LoadEpoch(int32 InIndex) const -> uint64;
+        auto RemoveAt(int32 InIndex) -> void;
         auto Get_Entries() const -> const TArray<FInstancedStruct>&;
     };
 

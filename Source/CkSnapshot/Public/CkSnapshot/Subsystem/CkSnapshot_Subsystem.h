@@ -7,6 +7,7 @@
 #include "CkActorRelay/CkActorRelay_Fragment_Data.h" // FCk_Handle_PendingActorRelay — the client's release carrier
 
 #include "CkEcs/Handle/CkHandle.h"
+#include "CkEcs/Persistence/CkPersistenceInitialization.h"
 #include "CkEcs/EntityScript/CkEntityScript_Fragment_Data.h"
 #include "CkEcs/Persistence/CkPersistenceHydration.h" // FCk_Delegate_Hydration_OnHydrated
 #include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h" // ECk_EcsWorld_LoadHold — the hold this subsystem owns
@@ -267,6 +268,7 @@ public:
     // is true in every phase, including this one, which is what a level-triggered seeder must ask. The framework
     // cannot close it by refusing spawns here without also refusing the rebuild its own rows depend on.
     // None means do not seed.
+    auto TryInstall_InitializationResolver(UWorld& InWorld, FCk_Handle& InTransient) -> void;
     auto DoGet_ShouldHoldWorldAtBoot(UWorld& InWorld) -> ECk_EcsWorld_LoadHold;
 
     // True while THIS mapped entity's restored state is still the load's to write: a load is in flight, the load
@@ -395,6 +397,26 @@ private:
     // the live entity, so a rescan re-finds every entry it added.
     auto DoRehydrate_SaveKeyResolver() -> int32;
     auto DoDeserialize_V3Blob(const TArray<uint8>& InBytes) const -> FInstancedStruct; // saved-id map-backed handle remap
+    using FInitializationType = TWeakObjectPtr<const UScriptStruct>;
+    using FInitializationIdentity = ck::persistence::FInitializationIdentity;
+    auto DoPrepare_InitializationManifest() -> void;
+    auto DoClear_InitializationManifest() -> void;
+    auto DoBind_InitializationRow(uint32 InRow, const FCk_Handle& InEntity) -> void;
+    auto DoResolve_Initialization(FCk_Handle& InEntity, const UScriptStruct* InType,
+        const FInitializationIdentity& InIdentity) -> void;
+    auto DoIs_InitializationPlayer(const FCk_Handle& InEntity, const FString& InPlayerId) const -> bool;
+    auto DoGet_InitializationOccurrence(const FCk_Handle& InEntity, const FCk_Handle& InOwner, const FString& InLabel) const -> int32;
+    auto DoIs_InitializationIdentityPresent(const FCk_Handle& InEntity, const FInitializationIdentity& InIdentity) const -> bool;
+    auto DoFind_InitializationPlayerRow(const FCk_Handle& InEntity) const -> TOptional<uint32>;
+    auto DoFind_InitializationIdentity(const FCk_Handle& InEntity, FInitializationIdentity& InOutIdentity) const -> bool;
+    auto DoGet_InitializationRows(const FCk_Handle& InEntity, const FInitializationIdentity& InIdentity,
+        TArray<uint32>& OutCandidates) const -> bool;
+    auto DoConfirm_Initialization(FCk_Handle InEntity, const UScriptStruct* InType,
+        const FInitializationIdentity& InIdentity) -> void;
+    auto DoResolve_InitializationChildren(const FCk_Handle& InOwner) -> void;
+    auto DoFinalize_Initialization() -> void;
+    auto DoRelease_Initialization(ck::persistence::EInitializationFailure InPendingFailure) -> void;
+    auto DoGet_InitializationTypePath(const FString& InPath) const -> const FString&;
     auto DoRebuild_Tick() -> bool;                       // resolve/spawn each entry into _SavedIdMap; true == complete
     auto DoBind_PendingHydrationPromises(const FCk_Handle& InMappedHandle) -> void;
     UFUNCTION()
@@ -564,6 +586,21 @@ private:
 
     // v3 rebuild+hydrate state (deserialized at Request_Load, consumed across the frame-spanning machine)
     FCk_Snapshot_V3_Tables _V3Tables;
+    uint64 _InitializationEpoch = 0;
+    FCk_Handle _InitializationTransient;
+    bool _InitializationReleased = false;
+    bool _InitializationFinalized = false;
+    TMap<FString, FString> _InitializationCanonicalPaths;
+    TMap<uint32, TMap<FString, int32>> _InitializationPayloads;
+    TMap<FGuid, TArray<uint32>> _InitializationKeyRows;
+    TMap<FString, uint32> _InitializationPlayerRows;
+    TMap<uint32, TMap<FString, TArray<uint32>>> _InitializationChildRows;
+    TMap<uint32, int32> _InitializationChildOrder;
+    TMap<FCk_Handle, TArray<uint32>> _InitializationRowsByEntity;
+    TMap<FCk_Handle, uint32> _InitializationLoaderRows;
+    TSet<FCk_Handle> _InitializationFresh;
+    TMap<FCk_Handle, TMap<FInitializationType, FInitializationIdentity>> _InitializationRequests;
+    TMultiMap<FCk_Handle, FCk_Handle> _InitializationWaitingOnOwner;
     FCk_Snapshot_HeaderV3  _V3Header;
     TMap<uint32, FCk_Handle> _SavedIdMap;               // saved-id -> live handle (built during Rebuilding)
     TSet<FCk_Handle> _MappedLiveEntities;               // every _SavedIdMap value — a live entity one row already claimed

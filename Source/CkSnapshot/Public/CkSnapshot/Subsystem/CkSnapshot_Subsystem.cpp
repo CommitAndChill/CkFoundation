@@ -164,6 +164,27 @@ namespace ck_snapshot_subsystem
 
 auto
     UCk_Snapshot_Subsystem_UE::
+    DoIs_InitializationPlayer(const FCk_Handle& InEntity, const FString& InPlayerId) const
+    -> bool
+{
+    return ck_snapshot_subsystem::DoResolve_PlayerEntity(GetWorld(), InPlayerId) == InEntity;
+}
+
+auto
+    UCk_Snapshot_Subsystem_UE::
+    DoFind_InitializationPlayerRow(const FCk_Handle& InEntity) const
+    -> TOptional<uint32>
+{
+    for (const auto& Pair : _InitializationPlayerRows)
+    {
+        if (DoIs_InitializationPlayer(InEntity, Pair.Key))
+        { return Pair.Value; }
+    }
+    return {};
+}
+
+auto
+    UCk_Snapshot_Subsystem_UE::
     DoGet_SnapshotSource() const
     -> FCk_Handle
 {
@@ -257,6 +278,8 @@ auto
         FTSTicker::GetCoreTicker().RemoveTicker(_LoadTickerHandle);
         _LoadTickerHandle.Reset();
     }
+
+    DoRelease_Initialization(ck::persistence::EInitializationFailure::Cancelled);
 
     // Tearing down mid-load must not leave anything the load put in place standing: a held world never ticks
     // again, a frozen world never runs again, and a held loading screen never comes down. Each is a permanent
@@ -661,6 +684,7 @@ void
             static_cast<int32>(GetTypeHash(FGuid::NewGuid()) & kLoadEpoch_SaltMask));
     }
 
+    DoPrepare_InitializationManifest();
     ++_LoadCount;
     _LoadEpoch = Compose_LoadEpoch(_LoadEpochSalt, _LoadCount);
 
@@ -981,6 +1005,8 @@ auto
     auto Context = ck::FSnapshotContext{&_SavedIdMap, LoadRegistryHandle};
 
     Out.Serialize(Proxy);
+    if (Proxy.IsError() || NOT Out.IsValid())
+    { return {}; }
     ck::snapshot::RemapHandles(Out.GetScriptStruct(), Out.GetMutableMemory(), Proxy, Context);
     return Out;
 }
@@ -1006,6 +1032,14 @@ auto
     // stamps its key ticks later, so an EngineOwned entry resolving against a stale map would orphan its whole
     // channel-owned subtree.
     DoRehydrate_SaveKeyResolver();
+    // Only owners with an actually waiting child can acquire a late key between rebuild ticks.
+    TArray<FCk_Handle> WaitingOwners;
+    _InitializationWaitingOnOwner.GetKeys(WaitingOwners);
+    for (const auto& Owner : WaitingOwners)
+    {
+        if (ck::IsValid(Owner) && Owner.Has<FFragment_SaveKey>())
+        { DoResolve_InitializationChildren(Owner); }
+    }
 
     auto AnyUnresolved = false;
 
@@ -1030,12 +1064,14 @@ auto
                 if (Entry.Get_SaveKey().IsValid())
                 {
                     auto Found = FCk_Handle{};
-                    if (TryResolve_SaveKey(Entry.Get_SaveKey(), Found))
+                    if (TryResolve_SaveKey(Entry.Get_SaveKey(), Found) && NOT _InitializationFresh.Contains(Found))
                     { Resolved = Found; }
                 }
                 else
                 {
-                    Resolved = ck_snapshot_subsystem::DoResolve_PlayerEntity(World, Entry.Get_PlayerId());
+                    const auto Player = ck_snapshot_subsystem::DoResolve_PlayerEntity(World, Entry.Get_PlayerId());
+                    if (NOT _InitializationFresh.Contains(Player))
+                    { Resolved = Player; }
                 }
                 break;
             }
@@ -1053,7 +1089,7 @@ auto
                     {
                         if (ck::Is_NOT_Valid(Child) || NOT Child.Has<ck::FTag_ConstructSpawned>())
                         { continue; }
-                        if (_MappedLiveEntities.Contains(Child))
+                        if (_MappedLiveEntities.Contains(Child) || _InitializationFresh.Contains(Child))
                         { continue; }
                         if (NOT UCk_Utils_GameplayLabel_UE::Has(Child) || UCk_Utils_GameplayLabel_UE::Get_IsUnnamedLabel(Child))
                         { continue; }
@@ -1081,7 +1117,8 @@ auto
                     if (NOT _SpawnedRuntimeIds.Contains(SavedId) && Entry.Get_SaveKey().IsValid())
                     {
                         auto Found = FCk_Handle{};
-                        if (TryResolve_SaveKey(Entry.Get_SaveKey(), Found) && ck::IsValid(Found))
+                        if (TryResolve_SaveKey(Entry.Get_SaveKey(), Found) && ck::IsValid(Found) &&
+                            NOT _InitializationFresh.Contains(Found))
                         {
                             if (_MappedLiveEntities.Contains(Found))
                             {
@@ -1159,6 +1196,7 @@ auto
                                 NoSpawnOwner, NoSpawnInstigator, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
                             if (Actor != nullptr)
                             {
+                                _PendingBridgeActors.Add(SavedId, Actor);
                                 ck_snapshot_subsystem::DoApply_ActorSaveFields(Actor, Entry.Get_ActorSaveFieldBytes());
 
                                 // The finish transform IS the one the deferred spawn already applied, so it is the
@@ -1173,8 +1211,7 @@ auto
                                     SavedId, Entry.Get_ActorClassPath());
                                 DoRecord_Skip(Entry, ECk_Snapshot_SkipReason::SpawnFailed);
                             }
-                            else
-                            { _PendingBridgeActors.Add(SavedId, Actor); }
+
                         }
                     }
 
@@ -1185,6 +1222,7 @@ auto
                         if (ck::IsValid(Entity))
                         {
                             Resolved = Entity;
+                            _InitializationLoaderRows.Add(Entity, SavedId);
                             _PendingBridgeActors.Remove(SavedId);
                         }
                     }
@@ -1248,6 +1286,7 @@ auto
                         Resolved = Pending.Get_EntityUnderConstruction();
                         if (ck::IsValid(Resolved))
                         {
+                            _InitializationLoaderRows.Add(Resolved, SavedId);
                             _RuntimeEntityScriptsAwaitingConstruction.Add(Resolved);
 
                             auto OnConstructed = FCk_Delegate_EntityScript_Constructed{};
@@ -1383,7 +1422,9 @@ auto
                         break;
                     }
 
-                    const auto BuiltItem = UCk_Utils_EntityReplicationDriver_UE::Request_BuildAndReplicate_Multiple(BuildOwner, ConstructionInfos);
+                    const auto BuiltItem = UCk_Utils_EntityReplicationDriver_UE::Request_TryBuildAndReplicate(
+                        BuildOwner, ConstructionInfos, [this, SavedId](FCk_Handle InEntity)
+                        { _InitializationLoaderRows.Add(InEntity, SavedId); });
 
                     // Claim the once-guard + map ONLY on a valid build. An invalid handle (host gate / rep-driver
                     // ensure) must not leave the entry permanently orphaned with no diagnostic.
@@ -1424,6 +1465,7 @@ auto
                 TryPublish_SaveKey(Entry.Get_SaveKey(), Resolved);
             }
 
+            DoBind_InitializationRow(SavedId, Resolved);
             _SavedIdMap.Add(SavedId, Resolved);
             _MappedLiveEntities.Add(Resolved);
             DoBind_PendingHydrationPromises(Resolved);
@@ -1734,6 +1776,7 @@ auto
     _HydrationEnqueued = true;
 
     DoRestore_SavedOwnership();
+    DoFinalize_Initialization();
     DoApply_SavedTransforms();
 
     // Game-side rebind processors key off FTag_Hydration_WasHydratedThisLoad to re-resolve handles their persisted
@@ -1784,20 +1827,20 @@ auto
             continue;
         }
 
-        // A failed deserialize is lost state, not a no-op — counted in the load report even where the ensure is out.
         auto Data = DoDeserialize_V3Blob(Payload.Get_PayloadBytes());
-        const auto HasHydrationData = Data.IsValid();
-        CK_ENSURE_IF_NOT(HasHydrationData,
-            TEXT("v3 load: hydration payload for type [{}] (owner saved-id [{}]) failed to deserialize — dropped "
-                 "(empty bytes, or the type is absent since the save)"),
-            Payload.Get_TypePath(), Payload.Get_OwnerSavedId())
+        const auto& TypePath = DoGet_InitializationTypePath(Payload.Get_TypePath());
+        if (NOT Data.IsValid() || Data.GetScriptStruct()->GetPathName() != TypePath)
         {
+            ck::snapshot::Error(TEXT("v3 load: corrupt or mismatched payload type [{}] (owner saved-id [{}]) — dropped"),
+                Payload.Get_TypePath(), OwnerSavedId);
+            if (const auto* Type = FindObject<UScriptStruct>(nullptr, *TypePath))
+            { ck::persistence::TryDiscard(*Owner, Type, _InitializationEpoch, ck::persistence::EInitializationFailure::Dropped); }
             ++PayloadsDropped;
             continue;
         }
 
         auto Entity = *Owner;
-        Entity.AddOrGet<ck::FFragment_PendingHydration>().Enqueue(GetWorld(), MoveTemp(Data));
+        Entity.AddOrGet<ck::FFragment_PendingHydration>().Enqueue(GetWorld(), MoveTemp(Data), _InitializationEpoch);
         if (NOT Entity.Has<ck::FTag_Hydration_PendingApply>())
         { Entity.Add<ck::FTag_Hydration_PendingApply>(); }
         ++EnqueuedCount;
@@ -2163,6 +2206,9 @@ auto
         ck::snapshot::Display(TEXT("DIAG: v3 hydrate — quarantine lifted for [{}] entities (every payload applied)"),
             ReleasedCount);
     }
+
+    DoRelease_Initialization(InReason == EQuarantineLift::ForcedAtLoadFinish ? ck::persistence::EInitializationFailure::Cancelled :
+        Forced ? ck::persistence::EInitializationFailure::TimedOut : ck::persistence::EInitializationFailure::None);
 
     // Pass 2. Every subscriber now observes a set that is entirely released, and — on a forced lift — a report
     // that already names what was lost. Re-validated per entity because a listener may destroy entities that
@@ -3267,9 +3313,13 @@ auto
         {
             if (ck::Is_NOT_Valid(Child) || NOT Child.Has<ck::FTag_ConstructSpawned>())
             { continue; }
+            // A child created in Construct may have been captured and adopted via its own
+            // EngineOwned key. Its row exists even when this owner's saved label set is empty.
+            if (_MappedLiveEntities.Contains(Child))
+            { continue; }
             // Save-transient children are payload-persisted derived state (attributes, SM graph, ...) — never
             // captured as rows, so "absent from the save" is their NORMAL state, not a revoked grant.
-            if (Child.Has<ck::FTag_Snapshot_SaveTransient>())
+            if (_InitializationFresh.Contains(Child) || Child.Has<ck::FTag_Snapshot_SaveTransient>())
             { continue; }
             // Reconstruct-only children are intentionally absent from the save. Their feature recreates them from
             // authored defaults after the load boundary, so absence is not a revoked grant and must not trigger
@@ -3643,6 +3693,7 @@ auto
 
     // The unconditional escape, covering every route into here, the abort paths included.
     DoLift_HydrationQuarantine(EQuarantineLift::ForcedAtLoadFinish, _LastLoadReport);
+    DoRelease_Initialization(ck::persistence::EInitializationFailure::Cancelled);
 
     // Read the apply tally ONCE, here, and sweep whatever is still queued. Anything the dispatcher does after
     // this point is logged rather than counted: the report describes the load, not the queue's whole life.
