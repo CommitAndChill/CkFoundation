@@ -13,6 +13,7 @@ namespace ck::clipboard
 
 // --------------------------------------------------------------------------------------------------------------------
 
+#if WITH_DEV_AUTOMATION_TESTS
 // While alive, ck::clipboard::Copy writes here instead of the OS clipboard; the innermost scope wins.
 class CKCORE_API FCk_ClipboardCapture_Scope
 {
@@ -38,5 +39,6 @@ private:
     FString _Text;
     int32 _CopyCount = 0;
 };
+#endif
 
 // --------------------------------------------------------------------------------------------------------------------
