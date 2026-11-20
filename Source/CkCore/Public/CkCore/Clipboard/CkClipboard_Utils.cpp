@@ -12,6 +12,7 @@ namespace ck::clipboard
     Copy(
         const FString& InText) -> void
     {
+#if WITH_DEV_AUTOMATION_TESTS
         CK_ENSURE_IF_NOT(IsInGameThread(), TEXT("ck::clipboard::Copy called off the game thread; bypassing capture"))
         {
             FPlatformApplicationMisc::ClipboardCopy(*InText);
@@ -24,12 +25,15 @@ namespace ck::clipboard
             ++Capture->_CopyCount;
             return;
         }
+#endif
 
         FPlatformApplicationMisc::ClipboardCopy(*InText);
     }
 }
 
 // --------------------------------------------------------------------------------------------------------------------
+
+#if WITH_DEV_AUTOMATION_TESTS
 
 FCk_ClipboardCapture_Scope* FCk_ClipboardCapture_Scope::_Active = nullptr;
 
@@ -74,5 +78,7 @@ auto
 {
     return _CopyCount;
 }
+
+#endif
 
 // --------------------------------------------------------------------------------------------------------------------
