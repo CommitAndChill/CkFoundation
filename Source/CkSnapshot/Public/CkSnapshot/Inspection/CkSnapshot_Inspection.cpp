@@ -626,6 +626,79 @@ namespace ck::snapshot
         }
 
         auto
+            DoValidate_SharedRendezvousClaims(
+                FCk_SnapshotInspection_Document& InOutDocument,
+                const TArray<FCk_DuplicateGroup>& InGroups,
+                const TSet<uint32>& InDuplicateSavedIds)
+            -> TSet<FString>
+        {
+            const auto& Claims = InOutDocument.Get_Header().Get_SharedRendezvousClaims();
+            if (Claims.IsEmpty())
+            { return {}; }
+
+            auto GroupSizes = TMap<FString, int32>{};
+            for (const auto& Group : InGroups)
+            { GroupSizes.Add(Group._Key, Group._SavedIds.Num()); }
+
+            auto ClaimCounts = TMap<uint32, int32>{};
+            for (const auto& Claim : Claims)
+            { ++ClaimCounts.FindOrAdd(Claim.Get_SavedId()); }
+
+            auto PayloadOwners = TSet<uint32>{};
+            for (const auto& Summary : InOutDocument.Get_Payloads())
+            {
+                const auto OwnerId = Summary.Get_Entry().Get_OwnerSavedId();
+                if (ClaimCounts.Contains(OwnerId))
+                { PayloadOwners.Add(OwnerId); }
+            }
+
+            auto ValidMemberCounts = TMap<FString, int32>{};
+            auto RejectedKeys = TSet<FString>{};
+            for (const auto& Claim : Claims)
+            {
+                const auto SavedId = Claim.Get_SavedId();
+                const auto& Key = Claim.Get_SaveKey();
+                const auto KeyText = Key.ToString();
+                const auto Index = InOutDocument.TryGet_EntityIndexForSavedId(SavedId);
+                if (Key.IsValid() && GroupSizes.Contains(KeyText) && SavedId != k_NoSavedEntity &&
+                    Index != INDEX_NONE && NOT InDuplicateSavedIds.Contains(SavedId) &&
+                    ClaimCounts.FindChecked(SavedId) == 1 && NOT PayloadOwners.Contains(SavedId))
+                {
+                    const auto& Entry = InOutDocument.Get_Entities()[Index].Get_Entry();
+                    if (Entry.Get_Provenance() == ECk_Snapshot_V3_Provenance::EngineOwned && Entry.Get_SaveKey() == Key)
+                    {
+                        ++ValidMemberCounts.FindOrAdd(KeyText);
+                        continue;
+                    }
+                }
+
+                RejectedKeys.Add(KeyText);
+                DoAdd_Diagnostic(InOutDocument, ECk_SnapshotInspection_Severity::Error,
+                    ECk_SnapshotInspection_DiagnosticCode::InvalidSharedRendezvousClaim,
+                    ck::Format_UE(TEXT("Shared rendezvous claim for key [{}], saved id [{}] does not identify a "
+                        "unique payload-free EngineOwned member of a repeated key"), Key, SavedId), {SavedId});
+            }
+
+            auto AcceptedKeys = TSet<FString>{};
+            for (const auto& Group : InGroups)
+            {
+                const auto* Count = ValidMemberCounts.Find(Group._Key);
+                if (Count == nullptr || RejectedKeys.Contains(Group._Key))
+                { continue; }
+                if (*Count == Group._SavedIds.Num())
+                { AcceptedKeys.Add(Group._Key); }
+                else
+                {
+                    DoAdd_Diagnostic(InOutDocument, ECk_SnapshotInspection_Severity::Error,
+                        ECk_SnapshotInspection_DiagnosticCode::InvalidSharedRendezvousClaim,
+                        ck::Format_UE(TEXT("Shared rendezvous key [{}] claims [{}] of [{}] entity rows"),
+                            Group._Key, *Count, Group._SavedIds.Num()), Group._SavedIds);
+                }
+            }
+            return AcceptedKeys;
+        }
+
+        auto
             DoAnalyze_Entities(
                 FCk_SnapshotInspection_Document& InOutDocument)
             -> void
@@ -633,6 +706,7 @@ namespace ck::snapshot
             const auto& Entities = InOutDocument.Get_Entities();
 
             auto SeenSavedIds = TSet<uint32>{};
+            auto DuplicateSavedIds = TSet<uint32>{};
             for (const auto& Summary : Entities)
             {
                 const auto& Entry = Summary.Get_Entry();
@@ -640,6 +714,7 @@ namespace ck::snapshot
 
                 if (SeenSavedIds.Contains(SavedId))
                 {
+                    DuplicateSavedIds.Add(SavedId);
                     DoAdd_Diagnostic(InOutDocument, ECk_SnapshotInspection_Severity::Error,
                         ECk_SnapshotInspection_DiagnosticCode::DuplicateSavedId,
                         ck::Format_UE(TEXT("Saved id [{}] appears on more than one entity row"), SavedId),
@@ -819,8 +894,11 @@ namespace ck::snapshot
                     return true;
                 });
 
+            const auto SharedGroups = DoValidate_SharedRendezvousClaims(InOutDocument, SaveKeyGroups, DuplicateSavedIds);
             for (const auto& Group : SaveKeyGroups)
             {
+                if (SharedGroups.Contains(Group._Key))
+                { continue; }
                 DoAdd_Diagnostic(InOutDocument, ECk_SnapshotInspection_Severity::Error,
                     ECk_SnapshotInspection_DiagnosticCode::DuplicateSaveKey,
                     ck::Format_UE(TEXT("SaveKey [{}] is carried by [{}] entity rows"), Group._Key, Group._SavedIds.Num()),
@@ -1456,6 +1534,7 @@ namespace ck::snapshot
             case ECk_SnapshotInspection_DiagnosticCode::OwnerCycle:                  return TEXT("OwnerCycle");
             case ECk_SnapshotInspection_DiagnosticCode::DependentBeforeOwner:        return TEXT("DependentBeforeOwner");
             case ECk_SnapshotInspection_DiagnosticCode::DuplicateSaveKey:            return TEXT("DuplicateSaveKey");
+            case ECk_SnapshotInspection_DiagnosticCode::InvalidSharedRendezvousClaim: return TEXT("InvalidSharedRendezvousClaim");
             case ECk_SnapshotInspection_DiagnosticCode::DuplicateAdoptKey:           return TEXT("DuplicateAdoptKey");
             case ECk_SnapshotInspection_DiagnosticCode::ConstructSpawnedNoLabel:     return TEXT("ConstructSpawnedNoLabel");
             case ECk_SnapshotInspection_DiagnosticCode::RuntimeSpawnedNoRecipe:      return TEXT("RuntimeSpawnedNoRecipe");

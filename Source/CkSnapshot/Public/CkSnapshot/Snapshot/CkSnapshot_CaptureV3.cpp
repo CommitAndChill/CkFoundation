@@ -743,6 +743,8 @@ namespace ck::snapshot
         auto Tables = FCk_Snapshot_V3_Tables{};
         auto& Entities = Tables.Get_Entities();
         auto& Payloads = Tables.Get_Payloads();
+        auto SharedMemberCounts = TMap<FGuid, int32>{};
+        auto SharedClaims = TArray<FCk_Snapshot_SharedRendezvousClaim>{};
 
         // Produce (game thread, reads live ECS state) is split from serialize (fork-join over the produced
         // copies) so the serialize leg can fan out. Slot i of the payload table is pending payload i, so the
@@ -871,6 +873,12 @@ namespace ck::snapshot
             // save that built the world. Its row stays, since its subtree still needs the owner; its payloads do not.
             if (Handle.Has<FFragment_SaveKey>() && Handle.Get<FFragment_SaveKey>().Get_IsSharedRendezvousGroup())
             {
+                const auto& Saved = Entities.Last();
+                if (Saved.Get_Provenance() == ECk_Snapshot_V3_Provenance::EngineOwned && Saved.Get_SaveKey().IsValid())
+                {
+                    ++SharedMemberCounts.FindOrAdd(Saved.Get_SaveKey());
+                    SharedClaims.Emplace_GetRef().Set_SavedId(Saved.Get_SavedId()).Set_SaveKey(Saved.Get_SaveKey());
+                }
                 if (const auto Audit = DoAudit_DroppedPayload(Handle, SharedRendezvousWithPayloadAudit);
                     Audit && AuditDetailed)
                 {
@@ -985,6 +993,24 @@ namespace ck::snapshot
         if (ck::IsValid(OutTimings, ck::IsValid_Policy_NullptrOnly{}))
         { *OutTimings = Timings; }
 
+        // Narrow the claims to complete collisions. An ordinary row reusing a pool's key must still be reported.
+        if (SharedClaims.Num() > 1)
+        {
+            auto KeyCounts = TMap<FGuid, int32>{};
+            for (const auto& Saved : Entities)
+            {
+                if (SharedMemberCounts.Contains(Saved.Get_SaveKey()))
+                { ++KeyCounts.FindOrAdd(Saved.Get_SaveKey()); }
+            }
+            SharedClaims.RemoveAll([&](const FCk_Snapshot_SharedRendezvousClaim& InClaim)
+            {
+                const auto SharedCount = SharedMemberCounts.FindChecked(InClaim.Get_SaveKey());
+                return SharedCount < 2 || KeyCounts.FindChecked(InClaim.Get_SaveKey()) != SharedCount;
+            });
+        }
+        else
+        { SharedClaims.Reset(); }
+        InOutHeader.Set_SharedRendezvousClaims(MoveTemp(SharedClaims));
         InOutHeader.Set_FormatVersion(FCk_Snapshot_HeaderV3::CurrentFormatVersion);
         InOutHeader.Set_EngineVersion(FEngineVersion::Current().ToString());
 

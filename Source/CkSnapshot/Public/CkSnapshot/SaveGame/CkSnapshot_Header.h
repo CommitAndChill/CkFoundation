@@ -310,6 +310,27 @@ struct TStructOpsTypeTraits<FCk_Snapshot_V3_Tables> : public TStructOpsTypeTrait
     enum { WithSerializer = true };
 };
 
+// Capture evidence for the offline inspector. A pooled member keeps its own saved row for references.
+USTRUCT()
+struct CKSNAPSHOT_API FCk_Snapshot_SharedRendezvousClaim
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(FCk_Snapshot_SharedRendezvousClaim);
+
+private:
+    UPROPERTY()
+    uint32 _SavedId = 0xFFFFFFFFu;
+
+    UPROPERTY()
+    FGuid _SaveKey;
+
+public:
+    CK_PROPERTY(_SavedId);
+    CK_PROPERTY(_SaveKey);
+};
+
 USTRUCT(BlueprintType)
 struct CKSNAPSHOT_API FCk_Snapshot_HeaderV3
 {
@@ -385,6 +406,11 @@ private:
     UPROPERTY()
     TArray<FGuid> _SuppressedSaveKeys;
 
+    // Optional tagged evidence for repeated keys explicitly shared by every saved member of a pool.
+    // Older saves have no claims, so the inspector continues to report their repeated keys.
+    UPROPERTY()
+    TArray<FCk_Snapshot_SharedRendezvousClaim> _SharedRendezvousClaims;
+
     UPROPERTY()
     int32 _EntityCount = 0;
 
@@ -424,6 +450,17 @@ public:
     CK_PROPERTY(_TimestampUTC);
     CK_PROPERTY(_WorldAssetPath);
     CK_PROPERTY(_SuppressedSaveKeys);
+    // Inspector evidence is native-only. CK_PROPERTY would register these accessors on the
+    // script-visible header even though the claim struct has no AngelScript type.
+    auto Get_SharedRendezvousClaims() const -> const TArray<FCk_Snapshot_SharedRendezvousClaim>&
+    { return _SharedRendezvousClaims; }
+
+    auto Set_SharedRendezvousClaims(TArray<FCk_Snapshot_SharedRendezvousClaim> InClaims) -> ThisType&
+    {
+        _SharedRendezvousClaims = MoveTemp(InClaims);
+        return *this;
+    }
+
     CK_PROPERTY(_EntityCount);
     CK_PROPERTY(_EngineOwnedCount);
     CK_PROPERTY(_ConstructSpawnedCount);

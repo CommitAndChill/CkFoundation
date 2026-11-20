@@ -97,6 +97,8 @@ enum class ECk_SnapshotInspection_DiagnosticCode : uint8
     ScriptClassUnavailable,
     ActorClassUnavailable,
     ArchetypeUnavailable,
+
+    InvalidSharedRendezvousClaim,
 };
 
 enum class ECk_SnapshotInspection_ValueKind : uint8
