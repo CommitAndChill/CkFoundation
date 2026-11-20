@@ -66,6 +66,9 @@ namespace ck::registry_table
     // explicitly post-shutdown while still allowing first-touch init.
     static std::atomic<bool>                            GRegistryTable_StateShutdown{false};
     static std::atomic<FRegistryTable_State*>           GRegistryTable_StatePtr{nullptr};
+#if !UE_BUILD_SHIPPING
+    static int32 GRegistryTable_AllocationCapacityForTest = kRegistryTable_MaxSlots;
+#endif
 
     // Game-thread only — Allocate/Free are serialized there, so there is no double-init race.
     static auto Get_RegistryTableState() -> FRegistryTable_State*
@@ -142,6 +145,36 @@ namespace ck::registry_table
     }
 
 #if !UE_BUILD_SHIPPING
+    FScopedAllocationCapacityForTest::
+    FScopedAllocationCapacityForTest(int32 InAdditionalCapacity)
+    {
+        CK_ENSURE_IF_NOT(IsInGameThread(), TEXT("Registry capacity fixture requires the game thread"))
+        { return; }
+        CK_ENSURE_IF_NOT(InAdditionalCapacity >= 0, TEXT("Registry capacity fixture requires nonnegative capacity"))
+        { return; }
+
+        auto* State = Get_RegistryTableState();
+        CK_ENSURE_IF_NOT(State != nullptr, TEXT("Registry capacity fixture requires a live table"))
+        { return; }
+
+        _PreviousCapacity = GRegistryTable_AllocationCapacityForTest;
+        const auto ActiveCount = State->Slots.Num() - State->FreeList.Num();
+        GRegistryTable_AllocationCapacityForTest = FMath::Min(_PreviousCapacity,
+            ActiveCount + FMath::Min(InAdditionalCapacity, kRegistryTable_MaxSlots - ActiveCount));
+        _Applied = true;
+    }
+
+    FScopedAllocationCapacityForTest::
+    ~FScopedAllocationCapacityForTest()
+    {
+        if (NOT _Applied)
+        { return; }
+
+        CK_ENSURE_IF_NOT(IsInGameThread(), TEXT("Registry capacity fixture must end on the game thread"))
+        { return; }
+        GRegistryTable_AllocationCapacityForTest = _PreviousCapacity;
+    }
+
     auto Debug_SimulateTableDestruction_DoNotUseInProduction() -> void
     {
         ShutdownTable();
@@ -178,6 +211,13 @@ namespace ck::registry_table
 
     auto Allocate(EnttRegistryType* InRegistry) -> FCk_RegistryHandle
     {
+        auto Result = EAllocationResult::InvalidState;
+        return TryAllocate(InRegistry, Result);
+    }
+
+    auto TryAllocate(EnttRegistryType* InRegistry, EAllocationResult& OutResult) -> FCk_RegistryHandle
+    {
+        OutResult = EAllocationResult::InvalidState;
         CK_ENSURE_IF_NOT(IsInGameThread(),
             TEXT("registry_table::Allocate called off the game thread — slot-table mutation is not thread-safe"))
         { return FCk_RegistryHandle::Unset(); }
@@ -206,6 +246,20 @@ namespace ck::registry_table
         }
 #endif
 
+        const auto ActiveCount = State->Slots.Num() - State->FreeList.Num();
+#if !UE_BUILD_SHIPPING
+        const auto Capacity = GRegistryTable_AllocationCapacityForTest;
+#else
+        constexpr auto Capacity = kRegistryTable_MaxSlots;
+#endif
+        // Operational exhaustion must reject in Shipping too: growing beyond the reserved
+        // hard cap would relocate Slots while workers can retain pointers into it.
+        if (ActiveCount >= Capacity)
+        {
+            OutResult = EAllocationResult::CapacityExceeded;
+            return FCk_RegistryHandle::Unset();
+        }
+
         int32 Index;
         if (State->FreeList.Num() > 0)
         {
@@ -213,15 +267,6 @@ namespace ck::registry_table
         }
         else
         {
-            // Hard cap: growing past the reserve relocates Slots under concurrent worker reads.
-            CK_ENSURE_IF_NOT(State->Slots.Num() < kRegistryTable_MaxSlots,
-                TEXT("registry_table::Allocate: slot table at hard cap of {} simultaneous registries. "
-                     "The soft-warning (Project Settings -> ECS -> Registry Slot Table) should have "
-                     "surfaced this earlier — either there's a leak (subsystem failing to free a slot "
-                     "in Deinitialize), or the cap genuinely needs raising in kRegistryTable_MaxSlots "
-                     "in CkRegistry_SlotTable.cpp."),
-                kRegistryTable_MaxSlots)
-            { return FCk_RegistryHandle::Unset(); }
             // Emplace, not Add: FRegistryTable_Slot holds a non-movable std::atomic, and the
             // init-time Reserve means no movability is ever required.
             Index = State->Slots.Emplace();
@@ -252,6 +297,7 @@ namespace ck::registry_table
         FCk_RegistryHandle Handle;
         Handle.SlotIndex  = Index;
         Handle.Generation = Slot.Generation;
+        OutResult = EAllocationResult::Success;
         return Handle;
     }
 

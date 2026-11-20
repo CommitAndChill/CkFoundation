@@ -685,6 +685,15 @@ When the restore genuinely needs something Setup produces (a resolved render tar
 
 `CkEcs/World/CkEcsWorld.h` — RAII owner of an entt registry plus its `ck::registry_table` slot; `Get_Registry()` returns a non-owning `FCk_Registry` view bound to that slot. Used by editor-only engine subsystems that need a private ECS world (`UCk_EditorAssetLoader_SubSystem_UE`, `UCk_EditorToolbar_*`). The game-time `UCk_EcsWorld_Subsystem_UE` / `UCk_EditorEcsWorld_Subsystem_UE` do NOT use it — they own their registry directly. Its destructor frees the table slot BEFORE destroying the entt registry, so any outstanding handle fails safe (resolves to nullptr) instead of UAFing.
 
+Fallible composition uses `FEcsWorld::TryCreate(ECreateResult&)`, returning a `TUniquePtr<FEcsWorld>`
+only after successful registry allocation and transient-context initialization. `CapacityExceeded`
+is an ordinary failure in every build configuration; `InvalidState` identifies a rejected allocator
+invariant when checks are enabled. No world is published on failure. The existing constructor remains
+available and logs failure while leaving an empty registry view. `registry_table::TryAllocate` exposes
+the same result for direct registry owners; `Allocate` remains its handle-only compatibility wrapper.
+`FScopedAllocationCapacityForTest` lowers admission capacity for a synchronous game-thread test scope
+without replacing the table or invalidating pre-existing handles; never tick or pump within its scope.
+
 ---
 
 ## Registry

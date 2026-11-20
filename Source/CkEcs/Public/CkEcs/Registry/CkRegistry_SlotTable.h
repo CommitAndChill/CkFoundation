@@ -20,8 +20,18 @@ namespace ck::registry_table
     // configurable soft-warning (_RegistrySlot_WarnThreshold) is the canary; this is the backstop.
     inline constexpr int32 kRegistryTable_MaxSlots = 16384;
 
-    // GAME-THREAD ONLY. The slot is reusable after Free. Returns Unset post-ShutdownTable or at
-    // the per-process slot cap; ensures if InRegistry is null.
+    enum class EAllocationResult : uint8
+    {
+        Success,
+        CapacityExceeded,
+        InvalidState
+    };
+
+    // GAME-THREAD ONLY. Capacity exhaustion is an ordinary result, including in Shipping.
+    // Invariant violations ensure and return InvalidState when checks are enabled.
+    CKECS_API auto TryAllocate(EnttRegistryType* InRegistry, EAllocationResult& OutResult) -> FCk_RegistryHandle;
+
+    // Compatibility entry point. Returns Unset on failure; callers needing the reason use TryAllocate.
     CKECS_API auto Allocate(EnttRegistryType* InRegistry) -> FCk_RegistryHandle;
 
     // GAME-THREAD ONLY. Bumps the slot's generation so old handles stop resolving and nulls the
@@ -65,6 +75,21 @@ namespace ck::registry_table
     CKECS_API auto ShutdownTable() -> void;
 
 #if !UE_BUILD_SHIPPING
+    // Synchronous game-thread tests only: temporarily limit NEW admissions without replacing the
+    // table or changing existing slots. Keep created worlds inside this scope; never pump/tick it.
+    class CKECS_API FScopedAllocationCapacityForTest
+    {
+    public:
+        explicit FScopedAllocationCapacityForTest(int32 InAdditionalCapacity);
+        ~FScopedAllocationCapacityForTest();
+        FScopedAllocationCapacityForTest(const FScopedAllocationCapacityForTest&) = delete;
+        auto operator=(const FScopedAllocationCapacityForTest&) -> FScopedAllocationCapacityForTest& = delete;
+
+    private:
+        int32 _PreviousCapacity = kRegistryTable_MaxSlots;
+        bool _Applied = false;
+    };
+
     // Test hooks: drive generation wrap and the sentinel-dead path without hand-rolling 4 billion
     // alloc/free cycles or unloading a DLL.
     CKECS_API auto Debug_SimulateTableDestruction_DoNotUseInProduction() -> void;

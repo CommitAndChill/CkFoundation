@@ -19,10 +19,16 @@ namespace ck
     public:
         using RegistryType = FCk_Registry;
         using HandleType = FCk_Handle;
+        using ECreateResult = ck::registry_table::EAllocationResult;
 
     public:
+        // Compatibility constructor: logs allocation failure and leaves an empty registry view.
+        // Fallible consumers must use TryCreate and handle its explicit result.
         FEcsWorld();
         ~FEcsWorld();
+
+        // Capacity failure publishes no world and never initializes an invalid registry view.
+        static auto TryCreate(ECreateResult& OutResult) -> TUniquePtr<FEcsWorld>;
 
         // Owns a registry_table slot: a copy would alias it (double free), a move would leak it.
         FEcsWorld(const FEcsWorld&) = delete;
@@ -31,6 +37,13 @@ namespace ck
         auto operator=(FEcsWorld&&) -> FEcsWorld& = delete;
 
     private:
+        enum class EDeferredInitialize : uint8
+        {
+            Defer
+        };
+        explicit FEcsWorld(EDeferredInitialize);
+        auto DoInitialize() -> ECreateResult;
+
         TUniquePtr<ck::registry_table::EnttRegistryType> _OwnedRegistry;
         RegistryType _Registry;
 
