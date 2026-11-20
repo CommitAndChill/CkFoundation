@@ -601,6 +601,8 @@ namespace ck
             // Discard rather than just remove — the deferred-alive previous state must not leak
             // when the SM stopped mid-transition.
             UCk_Utils_StateMachine_UE::Request_TryDiscardPendingTransition(InHandle);
+            // The discarded transition may have been the last replayed one a parked status waits behind.
+            ck::statemachine::TryMirror_ParkedRunStatus(InHandle);
             return;
         }
 
@@ -829,13 +831,7 @@ namespace ck
 
         // Apply a parked run-status mirror once the replay pipeline drains — preserves the authority's
         // transitions-then-status ordering (see FFragment_Sm_DeferredRunStatusMirror).
-        if (InHandle.Has<FFragment_Sm_DeferredRunStatusMirror>()
-            && NOT UCk_Utils_StateMachine_UE::Get_HasReplayTransitionsInFlight(InHandle))
-        {
-            const auto ParkedStatus = InHandle.Get<FFragment_Sm_DeferredRunStatusMirror>().Get_Status();
-            InHandle.Remove<FFragment_Sm_DeferredRunStatusMirror>();
-            ck::statemachine::MirrorRunStatus(InHandle, ParkedStatus);
-        }
+        ck::statemachine::TryMirror_ParkedRunStatus(InHandle);
     }
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -915,6 +911,8 @@ namespace ck
         // One event per tick: TExclude<FFragment_Sm_PendingTransition> keeps the next entry from
         // draining until the current transition lands, giving the exit/enter cascade time to flush
         // and matching the server-side per-tick pace.
+        // Every return below that consumes the event without scheduling a commit applies a status parked
+        // behind it (TryMirror_ParkedRunStatus): the commit, which would otherwise apply it, never runs.
         const auto Event = Queue[0];
         Queue.RemoveAt(0);
 
@@ -928,6 +926,7 @@ namespace ck
             ck::sm::Warning(TEXT("Replay check: SM [{}] at {} dropped an event addressed to {} ([{}] -> [{}], seq [{}])"),
                 InHandle, OwnAddress.ToString(), EventAddress.ToString(),
                 Event.Get_PreviousStateClass(), Event.Get_NewStateClass(), Event.Get_Seq());
+            ck::statemachine::TryMirror_ParkedRunStatus(InHandle);
             return;
         }
 
@@ -956,6 +955,7 @@ namespace ck
                 ck::sm::Warning(TEXT("Replay check: SM [{}] at {} dropped event [{}] -> [{}] (seq [{}]): it stands in [{}] and nothing is missing after seq [{}]"),
                     InHandle, EventAddress.ToString(), PreviousStateClass, Event.Get_NewStateClass(), Event.Get_Seq(),
                     InSm.Get_CurrentStateClass(), LastApplied);
+                ck::statemachine::TryMirror_ParkedRunStatus(InHandle);
                 return;
             }
 
@@ -967,6 +967,7 @@ namespace ck
             {
                 auto& ReplayState = InHandle.AddOrGet<FFragment_Sm_ClientReplayState>();
                 ReplayState.Set_ClientLastAppliedSeq(FMath::Max(ReplayState.Get_ClientLastAppliedSeq(), Event.Get_Seq()));
+                ck::statemachine::TryMirror_ParkedRunStatus(InHandle);
                 return;
             }
 

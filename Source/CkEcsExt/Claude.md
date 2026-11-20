@@ -168,6 +168,11 @@ one frame; ISM and ISKM proxies of a late node read its transform in TG_PrePhysi
 a skinned mesh that finalizes its own pose in TG_PostUpdateWork (its tick or its animation completion lands there)
 can finalize after the high-priority late pass, which then reads last frame's pose for it; the camera manager updates before TG_PostUpdateWork, so a camera driven by a late node sees the early pose;
 a component attached under an animated bone and anchored through `CreateAndAttachToUnrealComponent` is not late;
+one level of late anchoring is the supported scope: the late pass samples every late anchor before the late actor push
+(`FProcessor_SceneNode_LateFollowUnrealAnchor` runs before `FProcessor_Transform_SyncToActor_Late`) and its subtree
+walk skips children with their own Unreal anchor, so a node that follows a socket on actor B's skinned mesh, where B
+is itself moved by a late anchor, samples B at its earlier transform and trails it by one frame, as it did before the
+late pass existed;
 `FProcessor_Transform_SyncFromMeshSocket` (the Transform module's own socket bridge) has the same one-frame lag and is
 not covered by this pass. Replication sends the same values at the same cadence as before.
 

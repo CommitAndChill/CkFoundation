@@ -208,6 +208,20 @@ namespace ck::statemachine
         InEntity.Try_Remove<ck::FFragment_Sm_DeferredRunStatusMirror>();
         MirrorRunStatus(InEntity, InNewStatus);
     }
+
+    auto
+        TryMirror_ParkedRunStatus(
+            FCk_Handle& InEntity)
+        -> void
+    {
+        if (NOT InEntity.Has<ck::FFragment_Sm_DeferredRunStatusMirror>()
+            || UCk_Utils_StateMachine_UE::Get_HasReplayTransitionsInFlight(InEntity))
+        { return; }
+
+        const auto ParkedStatus = InEntity.Get<ck::FFragment_Sm_DeferredRunStatusMirror>().Get_Status();
+        InEntity.Remove<ck::FFragment_Sm_DeferredRunStatusMirror>();
+        MirrorRunStatus(InEntity, ParkedStatus);
+    }
 }
 
 // --------------------------------------------------------------------------------------------------------------------

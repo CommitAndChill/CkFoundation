@@ -516,9 +516,16 @@ pump pass, the same frame when nothing holds it. **Nothing replicates: the class
 each machine orders the requests it saw (on a client, a replicated script in the order its replication arrived).
 Mechanism: `UCk_Utils_EntityScript_UE::DoAdd`, the one funnel every spawn reaches, reads the policy from the class
 default object (never the archetype, which an editor preview passes as an instance), takes the group's next value from
-`ck::FCtx_EntityScript_OrderingSequence` (registry ctx, per world and per group, monotonic, never reset), stamps
-`ck::FFragment_EntityScript_OrderingSequence` on the script entity (transient) and queues the request as
-`FFragment_EntityScript_RequestSpawnEntity_InOrder`, a type the unordered spawn view never sees. The finish and BeginPlay
+`ck::FCtx_EntityScript_OrderingSequence` (registry ctx, per world and per group, monotonic, never reset) and queues the
+request as `FFragment_EntityScript_RequestSpawnEntity_InOrder`, a type the unordered spawn view never sees, carrying that
+sequence. The spawn step publishes it to the script entity as `ck::FFragment_EntityScript_OrderingSequence` (transient)
+only once the script object exists, right after `FFragment_EntityScript` and before `Construct`: a spawn that fails
+before then (its script object could not be created, an invalid archetype, a refused admission) leaves an entity it
+does not destroy exactly as it found it, so a retry on that entity takes a fresh sequence for every step. Stamping the
+entity at request time left a failed spawn's sequence behind: the retry's stamp tripped the duplicate-fragment ensure
+and kept the stale value, so its `Construct` ran in the new request's order but `OnConstructed` and `BeginPlay` in the
+stale one, and an unordered retry was still routed through the ordered steps (pinned by
+`Ck.EntityScript.OrderedSpawnFailure.*`). The finish and BeginPlay
 processors check `Has<FFragment_EntityScript_OrderingSequence>` once and park an ordered script under
 `FTag_EntityScript_FinishConstruction_InOrder` / `FTag_EntityScript_BeginPlay_InOrder`. A parked script keeps its park
 tag until its turn, and every "is it mid-step" check reads the park tags beside the step tags (`DoFinishConstruction`'s

@@ -38,8 +38,9 @@ namespace ck
     // --------------------------------------------------------------------------------------------------------------------
 
     // An ordered script's place in its ordering group: the group (the empty tag is the world's default group) and the
-    // sequence its spawn was given when it was requested on this machine. Written once, by
-    // UCk_Utils_EntityScript_UE::DoAdd, on the script entity. Transient — never snapshotted.
+    // sequence its spawn was given when it was requested on this machine. Taken by UCk_Utils_EntityScript_UE::DoAdd and
+    // carried by the ordered request; written once on the script entity, by the spawn step, once the script object
+    // exists (a spawn that fails before then leaves none). Transient — never snapshotted.
     struct FFragment_EntityScript_OrderingSequence
     {
     public:
@@ -86,8 +87,8 @@ namespace ck
     using FFragment_EntityScript_RequestSpawnEntity = FCk_Request_EntityScript_SpawnEntity;
 
     // An ordered script's spawn request: a distinct type, so FProcessor_EntityScript_SpawnEntity_HandleRequests never
-    // sees it and FProcessor_EntityScript_SpawnEntity_HandleRequests_InOrder runs it in sequence order. It carries a
-    // copy of the script entity's FFragment_EntityScript_OrderingSequence.
+    // sees it and FProcessor_EntityScript_SpawnEntity_HandleRequests_InOrder runs it in sequence order. It carries the
+    // FFragment_EntityScript_OrderingSequence the spawn step publishes to the script entity.
     struct CKECS_API FFragment_EntityScript_RequestSpawnEntity_InOrder : public FCk_Request_EntityScript_SpawnEntity
     {
     public:

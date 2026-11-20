@@ -517,7 +517,8 @@ auto
         const auto Ordering = ck::FFragment_EntityScript_OrderingSequence{*OrderingGroup, NextSequence};
         ++NextSequence;
 
-        InScriptEntity.Add<ck::FFragment_EntityScript_OrderingSequence>(Ordering);
+        // The sequence rides the request; the spawn step publishes it to the script entity once the script object
+        // exists, so a spawn that fails before then leaves no stale sequence for a retry on this entity to collide with.
         RequestEntity.Add<ck::FFragment_EntityScript_RequestSpawnEntity_InOrder>(Request, Ordering);
     }
     else

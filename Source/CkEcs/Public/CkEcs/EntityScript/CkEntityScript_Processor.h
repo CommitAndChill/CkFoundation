@@ -61,10 +61,12 @@ namespace ck
             HandleType InHandle,
             const T_RequestFragment& InRequestFragment) -> void;
 
+        // InOrdering is set for an ordered request; it is published to the script entity once the script object exists.
         static auto
         DoHandleRequest(
             HandleType InHandle,
-            const FCk_Request_EntityScript_SpawnEntity& InRequest) -> void;
+            const FCk_Request_EntityScript_SpawnEntity& InRequest,
+            const TOptional<FFragment_EntityScript_OrderingSequence>& InOrdering) -> void;
 
         static auto
         DoCancel_NewEntity(

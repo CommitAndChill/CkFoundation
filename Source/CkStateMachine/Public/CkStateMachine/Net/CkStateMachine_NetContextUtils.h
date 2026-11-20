@@ -31,9 +31,17 @@ namespace ck::statemachine
 
     // Ordering-safe mirror for receive paths (rep OnChange, stash drain, relay RPC). A non-Running
     // mirror landing while replayed transitions are queued is parked on
-    // FFragment_Sm_DeferredRunStatusMirror and applied by the commit tail once the queue drains.
+    // FFragment_Sm_DeferredRunStatusMirror and applied by TryMirror_ParkedRunStatus once the queue drains.
     CKSTATEMACHINE_API auto
     MirrorRunStatus_OrDeferWhileReplaying(
         FCk_Handle& InEntity,
         ECk_SmRunStatus InNewStatus) -> void;
+
+    // Applies a status parked by MirrorRunStatus_OrDeferWhileReplaying once nothing replayed is left in flight
+    // (UCk_Utils_StateMachine_UE::Get_HasReplayTransitionsInFlight); a no-op otherwise. Called by the commit and by
+    // every replay path that consumes an event or a pending transition without committing it, so whichever ends the
+    // last replayed event applies the status, after it: the authority's transitions-then-status ordering.
+    CKSTATEMACHINE_API auto
+    TryMirror_ParkedRunStatus(
+        FCk_Handle& InEntity) -> void;
 }

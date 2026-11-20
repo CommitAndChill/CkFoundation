@@ -24,6 +24,8 @@
 
 #include <HAL/IConsoleManager.h>
 
+#include <type_traits>
+
 // --------------------------------------------------------------------------------------------------------------------
 
 CK_REGISTER_PROCESSOR(ck::FProcessor_EntityScript_SpawnEntity_HandleRequests);
@@ -59,7 +61,8 @@ namespace ck_entity_script_spawn_trace
         const TCHAR* InDisposition,
         const FCk_Handle& InRequestEntity,
         const FCk_Request_EntityScript_SpawnEntity&
-            InRequest)
+            InRequest,
+        const TOptional<ck::FFragment_EntityScript_OrderingSequence>& InOrdering)
         -> void
     {
         if (CVar_LogSpawnRequestVisits
@@ -67,11 +70,10 @@ namespace ck_entity_script_spawn_trace
             <= 0)
         { return; }
 
-        // An ordered script's entity carries its group and sequence (the empty group is the default group).
-        if (const auto& NewEntity = InRequest.Get_NewEntity();
-            ck::IsValid(NewEntity) && NewEntity.Has<ck::FFragment_EntityScript_OrderingSequence>())
+        // An ordered script's request carries its group and sequence (the empty group is the default group).
+        if (InOrdering.IsSet())
         {
-            const auto& Ordering = NewEntity.Get<ck::FFragment_EntityScript_OrderingSequence>();
+            const auto& Ordering = *InOrdering;
 
             ck::ecs::Display(
                 TEXT(
@@ -151,6 +153,16 @@ namespace ck
             const T_RequestFragment& InRequestFragment)
         -> void
     {
+        // An ordered request's place in its group. It rides the request, not the script entity, until the script object
+        // exists (DoHandleRequest publishes it there), so a spawn that fails before then leaves the entity as it was.
+        const auto Ordering = [&]() -> TOptional<FFragment_EntityScript_OrderingSequence>
+        {
+            if constexpr (std::is_same_v<T_RequestFragment, FFragment_EntityScript_RequestSpawnEntity_InOrder>)
+            { return InRequestFragment.Get_Ordering(); }
+            else
+            { return {}; }
+        }();
+
         // World teardown leaves the transient owner alive while destroying both the request and its new entity.
         // This processor deliberately visits pending-kill requests to complete them, so all three lifetimes must
         // still be live before construction. Check before deferring for an owner's construction pipeline.
@@ -167,7 +179,8 @@ namespace ck
             ck_entity_script_spawn_trace::LogVisit(
                 TEXT("cancelled"),
                 InHandle,
-                InRequestFragment);
+                InRequestFragment,
+                Ordering);
 
             ck::ecs::Verbose(TEXT("Cancelling EntityScript spawn of [{}] — owner [{}], request or new entity "
                 "is destroyed or pending-destroy"),
@@ -194,15 +207,17 @@ namespace ck
             ck_entity_script_spawn_trace::LogVisit(
                 TEXT("deferred"),
                 InHandle,
-                InRequestFragment);
+                InRequestFragment,
+                Ordering);
             return;
         }
 
         ck_entity_script_spawn_trace::LogVisit(
             TEXT("execute"),
             InHandle,
-            InRequestFragment);
-        DoHandleRequest(InHandle, InRequestFragment);
+            InRequestFragment,
+            Ordering);
+        DoHandleRequest(InHandle, InRequestFragment, Ordering);
         UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(InHandle);
         InHandle.Remove<T_RequestFragment>();
     }
@@ -222,7 +237,8 @@ namespace ck
         FProcessor_EntityScript_SpawnEntity_HandleRequests::
         DoHandleRequest(
             HandleType InHandle,
-            const FCk_Request_EntityScript_SpawnEntity& InRequest)
+            const FCk_Request_EntityScript_SpawnEntity& InRequest,
+            const TOptional<FFragment_EntityScript_OrderingSequence>& InOrdering)
         -> void
     {
         QUICK_SCOPE_CYCLE_COUNTER(FCk_Request_EntityScript_SpawnEntity)
@@ -375,6 +391,12 @@ namespace ck
 
         NewEntityScript->_AssociatedEntity = NewEntity;
         NewEntity.Add<FFragment_EntityScript>(NewEntityScript);
+
+        // Published only now that the script exists: every return above leaves an entity it does not destroy without
+        // a sequence, so a retry on it takes a fresh one for every ordered step (Construct reads the request's,
+        // OnConstructed and BeginPlay this fragment).
+        if (InOrdering.IsSet())
+        { NewEntity.Add<FFragment_EntityScript_OrderingSequence>(*InOrdering); }
 
         CK_CALLSTACK_RECORD_MSG(ck::FFragment_EntityScript, NewEntity,
             TEXT("EntityScript created: {}"), EntityScriptClassArchetype);
