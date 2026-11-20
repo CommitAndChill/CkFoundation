@@ -3,7 +3,7 @@
 #include "CkCore/Algorithms/CkAlgorithms.h"
 #include "CkCore/Ensure/CkEnsure.h"
 
-#include <Windows/WindowsPlatformApplicationMisc.h> // required for clipboard copy
+#include "CkCore/Clipboard/CkClipboard_Utils.h"
 #include <Runtime/Launch/Resources/Version.h>
 
 #include <Misc/MessageDialog.h>
@@ -337,7 +337,7 @@ auto
             .ButtonStyle(FAppStyle::Get(), "SimpleButton")
             .OnClicked_Lambda([InClipboardText]()
             {
-                FPlatformApplicationMisc::ClipboardCopy(*InClipboardText.ToString());
+                ck::clipboard::Copy(InClipboardText.ToString());
                 return FReply::Handled();
             })
             .ToolTipText(NSLOCTEXT("SChoiceDialog", "CopyMessageTooltip", "Copy the text in this message to the clipboard (CTRL+C)"))

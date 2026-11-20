@@ -9,7 +9,7 @@
 
 #include "CkCore/Macros/CkMacros.h"
 
-#include "HAL/PlatformApplicationMisc.h"
+#include "CkCore/Clipboard/CkClipboard_Utils.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -408,7 +408,7 @@ auto
     CopyToClipboard(const FString& Text) const
     -> bool
 {
-    FPlatformApplicationMisc::ClipboardCopy(*Text);
+    ck::clipboard::Copy(Text);
     return true;
 }
 
