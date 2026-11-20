@@ -12,7 +12,6 @@
 
 namespace
 {
-    using Failure = ECk_HexGridBlocker_Failure;
     using Utils = UCk_Utils_HexGridBlocker_UE;
     using Lifetime = UCk_Utils_EntityLifetime_UE;
     using Record = ck::FHexBlockerRecord;
@@ -37,36 +36,36 @@ namespace ck::hex_grid
 namespace
 {
     auto Compose(FCk_Handle Owner, const FCk_HexGridBlocker_Spec& Spec, bool Create,
-        FCk_Handle_HexGridBlocker& OutBlocker) -> Failure
+        FCk_Handle_HexGridBlocker& OutBlocker) -> ECk_HexGridBlocker_Failure
     {
         OutBlocker = {};
         const auto Board = Spec.Get_Grid();
-        if (!IsInGameThread()) { return Failure::Unavailable; }
-        if (!ck::hex_rules::IsLive(Board) || !UCk_Utils_HexGrid_UE::Has(Board)) { return Failure::InvalidGrid; }
+        if (!IsInGameThread()) { return ECk_HexGridBlocker_Failure::Unavailable; }
+        if (!ck::hex_rules::IsLive(Board) || !UCk_Utils_HexGrid_UE::Has(Board)) { return ECk_HexGridBlocker_Failure::InvalidGrid; }
         if (!ck::hex_rules::IsLive(Owner) || Owner.Get_RegistryView().Get_RegistryHandle() != Board.Get_RegistryView().Get_RegistryHandle())
-        { return Failure::InvalidOwner; }
-        if (!Create && Utils::Has(Owner)) { return Failure::AlreadyComposed; }
-        if (!UCk_Utils_Net_UE::Get_HasAuthority(Board)) { return Failure::NotAuthority; }
-        if (!ck::hex_rules::CanWrite(Board) || !Lifetime::Get_CanCreateEntity(Owner)) { return Failure::Unavailable; }
+        { return ECk_HexGridBlocker_Failure::InvalidOwner; }
+        if (!Create && Utils::Has(Owner)) { return ECk_HexGridBlocker_Failure::AlreadyComposed; }
+        if (!UCk_Utils_Net_UE::Get_HasAuthority(Board)) { return ECk_HexGridBlocker_Failure::NotAuthority; }
+        if (!ck::hex_rules::CanWrite(Board) || !Lifetime::Get_CanCreateEntity(Owner)) { return ECk_HexGridBlocker_Failure::Unavailable; }
         const auto Name = Spec.Get_Name();
-        if (Name.IsValid() && ck::IsValid(Utils::Get_BlockerWithTag(Board, Name))) { return Failure::DuplicateName; }
+        if (Name.IsValid() && ck::IsValid(Utils::Get_BlockerWithTag(Board, Name))) { return ECk_HexGridBlocker_Failure::DuplicateName; }
         if (!Create && Name.IsValid() && UCk_Utils_GameplayLabel_UE::Has(Owner)
-            && UCk_Utils_GameplayLabel_UE::Get_Label(Owner) != Name) { return Failure::InvalidOwner; }
-        if (Spec.Get_Cells().IsEmpty()) { return Failure::EmptyCells; }
+            && UCk_Utils_GameplayLabel_UE::Get_Label(Owner) != Name) { return ECk_HexGridBlocker_Failure::InvalidOwner; }
+        if (Spec.Get_Cells().IsEmpty()) { return ECk_HexGridBlocker_Failure::EmptyCells; }
         TSet<FCk_HexCoord> Seen;
         TArray<FCk_Handle_HexCell> Cells;
         for (const auto& Coordinate : Spec.Get_Cells())
         {
-            if (Seen.Contains(Coordinate)) { return Failure::DuplicateCell; }
+            if (Seen.Contains(Coordinate)) { return ECk_HexGridBlocker_Failure::DuplicateCell; }
             FCk_Handle_HexCell Cell;
             ECk_HexBoardFailure Reason;
             if (!UCk_Utils_HexGrid_UE::TryGet_CellAt(Board, Coordinate, Cell, Reason) || !ck::hex_rules::IsLive(Cell))
-            { return Failure::OutsideDomain; }
+            { return ECk_HexGridBlocker_Failure::OutsideDomain; }
             Cells.Add(Cell);
             Seen.Add(Coordinate);
         }
         auto Entity = Create ? Lifetime::Request_CreateEntity(Owner) : Owner;
-        if (!ck::hex_rules::IsLive(Entity)) { return Failure::CompositionFailed; }
+        if (!ck::hex_rules::IsLive(Entity)) { return ECk_HexGridBlocker_Failure::CompositionFailed; }
         // No external callback between validation and enqueue. Queue initial activation with
         // the same ownership as a subsequent public toggle.
         OutBlocker = ck::hex_grid::InstallBlocker(Entity, Board, FGuid::NewGuid(), Name, Spec.Get_Cells(), MoveTemp(Cells), Create);
@@ -77,7 +76,7 @@ namespace
             Host.AddOrGet<ck::FFragment_HexGrid_RuleRequests>()._Commands.Add(
                 ck::FHexRuleCommand{OutBlocker, FCk_Request_HexGridBlocker_SetActive{true}});
         }
-        return Failure::None;
+        return ECk_HexGridBlocker_Failure::None;
     }
 }
 
@@ -91,7 +90,7 @@ auto
     -> bool
 {
     OutFailure = Compose(InHandle, InSpec, false, OutBlocker);
-    return OutFailure == Failure::None;
+    return OutFailure == ECk_HexGridBlocker_Failure::None;
 }
 
 auto
@@ -104,7 +103,7 @@ auto
     -> bool
 {
     OutFailure = Compose(InOwner, InSpec, true, OutBlocker);
-    return OutFailure == Failure::None;
+    return OutFailure == ECk_HexGridBlocker_Failure::None;
 }
 
 auto
