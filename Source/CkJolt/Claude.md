@@ -314,6 +314,33 @@ resolve their soft mesh through a rooted batch, consumer id `JoltBody.Setup`), `
   constraint entity for destroy; plain EndPlay handles the cascade case (constraint child dies
   with body A). Requests: SetEnabled (a disabled link is a heal-able rope cut),
   Distance_SetRange, Hinge_SetMotor.
+  **Connected-body collision** (`_ConnectedBodiesCollide`, default `Enable`, so every existing
+  constraint behaves as before): `Disable` = the two joined bodies never generate contacts with each
+  other while the constraint lives (a ragdoll joint: neighbours that overlap at the pivot would
+  otherwise depenetrate forever); each still collides with everything else, and it is per
+  constraint, not per chain (in 0-1-2 with both joints Disable, 0 and 2 still collide). Ignored for
+  a world anchor; a SetEnabled(false) constraint keeps it. Mechanism: ONE
+  `ck::jolt::FCk_JoltConstraint_CollisionFilter` (a `JPH::GroupFilter`, Constraint/
+  CkJoltConstraint_CollisionFilter.h) per world, published by the subsystem as the registry context
+  `FCk_JoltConstraint_CollisionFilter_Context`. Setup (after `AddConstraint`) puts both bodies in it:
+  a joined body's collision group becomes {this filter, its original group id, its own body id as
+  sub-group}; the filter holds the disabled pairs, COUNTED (two such joints between one pair both
+  have to go). The constraint's teardown (LivenessReap or EndPlay, before the bodies are freed)
+  takes its pair out; JoltBody EndPlay forgets whatever a dying body still had; a body left with no
+  pair gets its original group back and is woken (a sleeping body never re-tests its pairs).
+  ⚠ **The first-filter rule.** `JPH::CollisionGroup::CanCollide` asks ONLY the first non-null filter
+  of a pair (`CollisionGroup.h:71-80`). So when this filter is asked about a joined body and a body
+  carrying ANOTHER filter (a CkSpatialQuery probe), it returns that filter's verdict, called with that
+  filter's own group first: the call Jolt made before the body joined. A body that already carries
+  another system's filter never joins: Setup ensures and the pair keeps colliding (overwriting the
+  group would silence the other system). A filter that defers the same way is asked once, then the
+  pair collides (thread-local re-entry guard). Thread contract: the pair set and the groups change
+  only on the game thread with no step in flight (Setup waits a pending async step; the teardowns
+  already do); `CanCollide` runs only inside `PhysicsSystem::Update`. Snapshot: Jolt never saves a
+  group filter (`CollisionGroup.h:82-86`) and CkJolt saves no Jolt state at all; a load tears the
+  constraints and bodies down through EndPlay and rebuilds them through Setup, which re-joins the
+  pairs. Pinned by `Ck.Jolt.Constraint.CollisionFilter.*` (CkTests unit) and the
+  `CkAutoTest_CkJolt_Constraint_DisabledCollision_*` autotests.
   **Read surface for the two bodies** (P8-D55): `Get_BodyA` / `Get_BodyB` return them as
   `FCk_Handle_JoltBody`, and `Get_IsBodyBWorldAnchor` tells "anchored to the world by design" apart
   from "body B's entity died". They exist because `FFragment_JoltConstraint::_BodyA/_BodyB`
@@ -328,7 +355,8 @@ resolve their soft mesh through a rooted batch, consumer id `JoltBody.Setup`), `
   world or an `_AnchorBody` (e.g. a kinematic head — the "hair" pattern is many short Springy
   strands on a moving anchor). Returns `FCk_JoltRope_Result` (segment bodies + links; cutting =
   destroy a link entity). Keep `_SegmentRadius < _SegmentLength / 2` — neighboring segments share
-  the collision profile and are NOT filtered against each other.
+  the collision profile and are NOT filtered against each other (the rope builder does not set
+  `_ConnectedBodiesCollide`).
 
 ### Debug draw + stats (Phase 5)
 

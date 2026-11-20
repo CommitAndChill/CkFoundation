@@ -151,6 +151,15 @@ private:
                       EditCondition = "_ConstraintType == ECk_JoltConstraint_Type::Hinge"))
     float _MaxFrictionTorque = 0.0f;
 
+    // Whether body A and body B generate contacts with each other. Disable = the two joined bodies never collide
+    // while the constraint lives (a ragdoll joint: neighbours that overlap at the pivot would otherwise push each
+    // other apart forever); each still collides with everything else. Per constraint, not per chain: in a chain
+    // 0-1-2 with Disable on both joints, 0 and 2 still collide. Ignored for a world anchor. A body that already
+    // carries another system's collision group filter cannot join (ensure; the pair keeps colliding).
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    ECk_EnableDisable _ConnectedBodiesCollide = ECk_EnableDisable::Enable;
+
 public:
     CK_PROPERTY_GET(_ConstraintType);
     CK_PROPERTY(_OtherBody);
@@ -166,6 +175,7 @@ public:
     CK_PROPERTY(_LimitsMinDegrees);
     CK_PROPERTY(_LimitsMaxDegrees);
     CK_PROPERTY(_MaxFrictionTorque);
+    CK_PROPERTY(_ConnectedBodiesCollide);
 
 public:
     CK_DEFINE_CONSTRUCTORS(FCk_JoltConstraint_Spec, _ConstraintType);

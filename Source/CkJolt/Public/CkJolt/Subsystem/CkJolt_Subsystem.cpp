@@ -17,6 +17,7 @@
 #include "CkJolt/CkJolt_Stats.h"
 #include "CkJolt/CkJolt_Utils.h"
 #include "CkJolt/CollisionLayers/CkJoltCollisionLayerTable.h"
+#include "CkJolt/Constraint/CkJoltConstraint_CollisionFilter.h"
 #include "CkJolt/Settings/CkJolt_ProjectSettings.h"
 #include "CkJolt/Subsystem/CkJolt_DebugDrawTarget.h"
 #include "CkJolt/Subsystem/CkJolt_DebugRenderer.h"
@@ -717,6 +718,8 @@ auto
     EcsRegistry.SetContext<TWeakPtr<JPH::PhysicsSystem>>(_PhysicsSystem);
     EcsRegistry.SetContext<ck::jolt::FCk_Jolt_LayerContext>(
         ck::jolt::FCk_Jolt_LayerContext{_LayerTable.Get(), _LayerTable->Get_ProbeLayer()});
+    // The collision group filter of bodies joined by a constraint with ConnectedBodiesCollide = Disable.
+    EcsRegistry.SetContext<ck::jolt::FCk_JoltConstraint_CollisionFilter_Context>();
 
     _AsyncPhysicsUpdate = ck_jolt_subsystem::ResolveCVarOverride(
         TEXT("jolt.EnableAsyncPhysicsUpdate"),

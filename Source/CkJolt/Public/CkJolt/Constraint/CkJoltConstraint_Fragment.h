@@ -13,6 +13,7 @@
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Core/Reference.h>
+#include <Jolt/Physics/Body/BodyID.h>
 #include <Jolt/Physics/Constraints/TwoBodyConstraint.h>
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -58,6 +59,11 @@ namespace ck
         // world by design" from "body B's entity died" (which the liveness reaper must act on).
         bool _BodyBIsWorldAnchor = false;
         bool _ConstraintAdded = false;
+        // Set when Setup put the two bodies' pair in the world's collision filter (ConnectedBodiesCollide = Disable);
+        // the teardown that removes the constraint takes the pair out again. The ids are the bodies' at Setup.
+        bool _ConnectedBodiesCollisionDisabled = false;
+        JPH::BodyID _BodyIdA;
+        JPH::BodyID _BodyIdB;
 
     public:
         CK_PROPERTY_GET(_BodyA);

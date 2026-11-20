@@ -9,6 +9,7 @@
 
 #include "CkJolt/Body/CkJoltBody_Fragment.h"
 #include "CkJolt/CkJolt_Log.h"
+#include "CkJolt/Constraint/CkJoltConstraint_CollisionFilter.h"
 #include "CkJolt/CkJolt_Utils.h"
 
 #include <Jolt/Physics/PhysicsSystem.h>
@@ -110,6 +111,41 @@ namespace ck_jolt_constraint_processor
 
         return FResolvedBody{EResolveOutcome::Ready, BodyCurrent.Get_BodyId()};
     }
+
+    auto
+        TryResolve_CollisionFilter(
+            const FCk_Handle& InTransientEntity)
+        -> ck::jolt::FCk_JoltConstraint_CollisionFilter*
+    {
+        const auto* Context = InTransientEntity.Get_RegistryView().TryGetContext<ck::jolt::FCk_JoltConstraint_CollisionFilter_Context>();
+        if (Context == nullptr)
+        { return nullptr; }
+
+        return Context->Filter.GetPtr();
+    }
+
+    // Takes the constraint's pair out of the world's collision filter. Callers hold no async step in flight (the
+    // teardown processors wait it first), as every filter mutation requires.
+    auto
+        Request_RestoreConnectedBodiesCollision(
+            const FCk_Handle& InTransientEntity,
+            JPH::PhysicsSystem* InPhysicsSystem,
+            bool& InOutCollisionDisabled,
+            JPH::BodyID InBodyIdA,
+            JPH::BodyID InBodyIdB)
+        -> void
+    {
+        if (NOT InOutCollisionDisabled)
+        { return; }
+
+        InOutCollisionDisabled = false;
+
+        auto* Filter = TryResolve_CollisionFilter(InTransientEntity);
+        if (Filter == nullptr || InPhysicsSystem == nullptr)
+        { return; }
+
+        Filter->Request_EnablePair(*InPhysicsSystem, InBodyIdA, InBodyIdB);
+    }
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -125,6 +161,8 @@ namespace ck
         _PhysicsSystem = ck_jolt_constraint_processor::TryResolve_PhysicsSystem(_TransientEntity);
         if (ck::Is_NOT_Valid(_PhysicsSystem.Pin()))
         { return; }
+
+        _JoltWorld = ck_jolt_constraint_processor::TryResolve_JoltWorld(_TransientEntity);
 
         TProcessor::DoTick(InDeltaT);
     }
@@ -257,6 +295,33 @@ namespace ck
 
         InJoltConstraint._Constraint = Constraint;
         InJoltConstraint._ConstraintAdded = true;
+
+        if (InParams.Get_ConnectedBodiesCollide() == ECk_EnableDisable::Enable || InJoltConstraint.Get_BodyBIsWorldAnchor())
+        { return; }
+
+        auto* CollisionFilter = TryResolve_CollisionFilter(_TransientEntity);
+        CK_ENSURE_IF_NOT(CollisionFilter != nullptr,
+            TEXT("JoltConstraint on Entity [{}]: ConnectedBodiesCollide is Disable but the world publishes no constraint "
+                 "collision filter - the two bodies keep colliding."), InHandle)
+        { return; }
+
+        // ASYNC GUARD: the filter's pairs and the bodies' collision groups are read by the step's workers. Free when this
+        // runs before the step is dispatched (no future pending).
+        if (_JoltWorld != nullptr && _JoltWorld->Get_AsyncFuture().IsValid())
+        { _JoltWorld->WaitForAsyncStep(); }
+
+        const auto JoinResult = CollisionFilter->Request_DisablePair(*PhysicsSystem, ResolvedA._BodyId, ResolvedB._BodyId);
+        CK_ENSURE_IF_NOT(JoinResult == jolt::ECk_JoltConstraint_CollisionFilter_JoinResult::Joined,
+            TEXT("JoltConstraint on Entity [{}]: ConnectedBodiesCollide is Disable but its bodies could not join the constraint "
+                 "collision filter ([{}]: a body already carries another system's collision group filter, or is gone) - the "
+                 "two bodies keep colliding."),
+            InHandle, JoinResult == jolt::ECk_JoltConstraint_CollisionFilter_JoinResult::RefusedForeignFilter
+                ? TEXT("foreign filter") : TEXT("missing body"))
+        { return; }
+
+        InJoltConstraint._ConnectedBodiesCollisionDisabled = true;
+        InJoltConstraint._BodyIdA = ResolvedA._BodyId;
+        InJoltConstraint._BodyIdB = ResolvedB._BodyId;
     }
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -450,6 +515,11 @@ namespace ck
         if (ck::IsValid(PhysicsSystem) && InJoltConstraint.Get_ConstraintAdded())
         { PhysicsSystem->RemoveConstraint(InJoltConstraint._Constraint.GetPtr()); }
 
+        // Before the bodies are freed (this runs before JoltBody EndPlay): the surviving body collides with its old partner
+        // again, and leaves the filter when it has no pair left.
+        Request_RestoreConnectedBodiesCollision(_TransientEntity, PhysicsSystem.Get(),
+            InJoltConstraint._ConnectedBodiesCollisionDisabled, InJoltConstraint._BodyIdA, InJoltConstraint._BodyIdB);
+
         InJoltConstraint._Constraint = nullptr;
         InJoltConstraint._ConstraintAdded = false;
 
@@ -498,6 +568,9 @@ namespace ck
 
         if (InJoltConstraint.Get_ConstraintAdded())
         { PhysicsSystem->RemoveConstraint(InJoltConstraint._Constraint.GetPtr()); }
+
+        ck_jolt_constraint_processor::Request_RestoreConnectedBodiesCollision(_TransientEntity, PhysicsSystem.Get(),
+            InJoltConstraint._ConnectedBodiesCollisionDisabled, InJoltConstraint._BodyIdA, InJoltConstraint._BodyIdB);
 
         InJoltConstraint._Constraint = nullptr;
         InJoltConstraint._ConstraintAdded = false;

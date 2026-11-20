@@ -53,6 +53,7 @@ namespace ck
 
     private:
         TWeakPtr<JPH::PhysicsSystem> _PhysicsSystem;
+        FJoltWorld* _JoltWorld = nullptr;
     };
 
     // --------------------------------------------------------------------------------------------------------------------

@@ -22,6 +22,7 @@
 #include "CkJolt/CkJoltShapeFactory.h"
 #include "CkJolt/CollisionLayers/CkJoltCollisionLayerTable.h"
 #include "CkJolt/CollisionLayers/CkJoltCollisionLayer_Utils.h"
+#include "CkJolt/Constraint/CkJoltConstraint_CollisionFilter.h"
 #include "CkJolt/StaticWorld/CkJoltMeshShape_Utils.h"
 #include "CkJolt/StaticWorld/CkJoltBakeExtraction.h"
 
@@ -1416,6 +1417,12 @@ namespace ck
         { return; }
 
         auto& BodyInterface = PhysicsSystem->GetBodyInterface();
+
+        // A joint that disabled this body's collision with its partner normally took the pair out already (constraints
+        // are reaped before their bodies); whatever is left goes now, before the id can be reused.
+        if (const auto* CollisionFilterContext = InHandle.Get_RegistryView().TryGetContext<jolt::FCk_JoltConstraint_CollisionFilter_Context>();
+            CollisionFilterContext != nullptr && CollisionFilterContext->Filter != nullptr)
+        { CollisionFilterContext->Filter->Request_ForgetBody(*PhysicsSystem, BodyId); }
 
         // RemoveBody only detaches from the broadphase; DestroyBody frees the SLOT and must run for every body,
         // whether it was ever added or not.
