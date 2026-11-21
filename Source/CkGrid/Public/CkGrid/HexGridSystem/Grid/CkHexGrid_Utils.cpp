@@ -162,8 +162,8 @@ namespace ck_hex_grid_composition
             Transform = FTransformUtils::Cast(InOwner);
             if (InFactory == EFactory::Add && ck::Is_NOT_Valid(Transform))
             { return EFailure::InvalidHandle; }
-            // The SceneNode pivot occupies the next layer; layer 9 is the last schedulable layer.
-            if (InOwner.Has<ck::FTag_SceneNode_Layer9>())
+            // The SceneNode pivot occupies the next layer; there is none below the last.
+            if (ck::IsValid(Transform) && NOT UCk_Utils_SceneNode_UE::Get_CanCreateChild(Transform))
             { return EFailure::CapacityExceeded; }
             if (ck::Is_NOT_Valid(Transform) && InOwner.Has_Any<ck::FFragment_Transform_Previous,
                 ck::FFragment_Transform_Requests, ck::FFragment_Transform_RootComponent,
@@ -297,7 +297,7 @@ namespace ck_hex_grid_composition
         };
         if (AddsTransform)
         { Transform = FTransformUtils::Add(Board, WorldTransform, ECk_Replication::DoesNotReplicate); }
-        if (ck::Is_NOT_Valid(Transform) || Board.Has<ck::FTag_SceneNode_Layer9>() ||
+        if (ck::Is_NOT_Valid(Transform) || NOT UCk_Utils_SceneNode_UE::Get_CanCreateChild(Transform) ||
             FLifetime::Get_IsPendingDestroy(Board, ECk_EntityLifetime_DestructionPhase::BeginDestroy))
         { return EFailure::CompositionFailed; }
 

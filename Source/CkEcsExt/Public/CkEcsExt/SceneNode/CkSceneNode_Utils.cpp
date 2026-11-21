@@ -13,21 +13,197 @@
 
 #include "CkProfile/Stats/CkCpuWork.h"
 
+#include "CkCore/Algorithms/CkAlgorithms.h"
+
+#include "Algo/Reverse.h"
+
 #include "Components/SceneComponent.h"
 #include "Components/MeshComponent.h"
 #include "Components/SkinnedMeshComponent.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
-static auto
-Get_SceneNodeAnchorLabel(
-    const FCk_Handle& InHandle) -> FString
+namespace ck_scene_node_utils
 {
-    const auto DebugName = UCk_Utils_Handle_UE::Get_DebugName(InHandle);
-    if (NOT DebugName.IsNone())
-    { return DebugName.ToString(); }
+    auto
+        Get_SceneNodeAnchorLabel(
+            const FCk_Handle& InHandle)
+        -> FString
+    {
+        const auto DebugName = UCk_Utils_Handle_UE::Get_DebugName(InHandle);
+        if (NOT DebugName.IsNone())
+        { return DebugName.ToString(); }
 
-    return ck::Format_UE(TEXT("#{}"), InHandle.Get_Entity().Get_EntityNumber());
+        return ck::Format_UE(TEXT("#{}"), InHandle.Get_Entity().Get_EntityNumber());
+    }
+
+    // ----------------------------------------------------------------------------------------------------------------
+
+    // What one layer's tag does to a handle. The table below is the only place a runtime layer index meets a tag type.
+    struct FLayerTag
+    {
+        bool (*_Has)(const FCk_Handle&);
+        void (*_Add)(FCk_Handle&);
+        void (*_Remove)(FCk_Handle&);
+    };
+
+    template <int32 T_LayerIndex>
+    struct TLayerTag
+    {
+        using TagType = ck::TTag_SceneNode_Layer<T_LayerIndex>;
+
+        static auto Has(const FCk_Handle& InHandle) -> bool { return InHandle.Has<TagType>(); }
+        static auto Add(FCk_Handle& InHandle) -> void { InHandle.Add<TagType>(); }
+        static auto Remove(FCk_Handle& InHandle) -> void { InHandle.Remove<TagType>(); }
+    };
+
+    template <typename T_LayerIndices>
+    struct TLayerTags;
+
+    template <int32... T_LayerIndices>
+    struct TLayerTags<std::integer_sequence<int32, T_LayerIndices...>>
+    {
+        static constexpr FLayerTag Rows[] =
+        {
+            FLayerTag{
+                &TLayerTag<T_LayerIndices>::Has,
+                &TLayerTag<T_LayerIndices>::Add,
+                &TLayerTag<T_LayerIndices>::Remove}...
+        };
+    };
+
+    // Indexed by layer.
+    auto
+        Get_LayerTags()
+        -> TConstArrayView<FLayerTag>
+    {
+        return MakeArrayView(TLayerTags<ck::FSceneNodeLayerIndices>::Rows);
+    }
+
+    // ----------------------------------------------------------------------------------------------------------------
+
+    // The depth a node attached under InAttachTo takes: one below a layered parent, 0 under anything else.
+    auto
+        Get_ChildDepth(
+            const FCk_Handle& InAttachTo)
+        -> int32
+    {
+        const auto ParentDepth = UCk_Utils_SceneNode_UE::Get_Depth(InAttachTo);
+        return ParentDepth.IsSet() ? ParentDepth.GetValue() + 1 : 0;
+    }
+
+    // The node furthest below a node along scene-node links, and how many links away it is.
+    struct FSubtreeReach
+    {
+        FCk_Handle_Transform _DeepestNode;
+        int32 _Height = 0;
+    };
+
+    // InNode itself at height 0 when it has no scene-node child, or is INVALID (a node still to be created). Of
+    // equally deep nodes, the first. It stops looking InLinkBudget links down: a subtree as tall as every layer fits
+    // nowhere, and a link cycle cannot hang the query.
+    auto
+        Get_SubtreeReach(
+            const FCk_Handle_Transform& InNode,
+            int32 InLinkBudget = ck::MaxSceneNodeLayers)
+        -> FSubtreeReach
+    {
+        auto Reach = FSubtreeReach{InNode, 0};
+
+        if (ck::Is_NOT_Valid(InNode) || InLinkBudget <= 0)
+        { return Reach; }
+
+        UCk_Utils_SceneNode_UE::ForEach_SceneNode(InNode, [&](FCk_Handle_SceneNode InChild)
+        {
+            const auto ChildReach = Get_SubtreeReach(UCk_Utils_Transform_UE::Cast(InChild), InLinkBudget - 1);
+
+            if (ChildReach._Height + 1 > Reach._Height)
+            { Reach = FSubtreeReach{ChildReach._DeepestNode, ChildReach._Height + 1}; }
+        });
+
+        return Reach;
+    }
+
+    // Where an attach would put a node, and how deep its subtree would then reach.
+    struct FAttachFit
+    {
+        int32 _NodeDepth = 0;
+        FSubtreeReach _Reach;
+
+        auto Get_DeepestDepth() const -> int32 { return _NodeDepth + _Reach._Height; }
+        auto Get_Fits() const -> bool { return Get_DeepestDepth() < ck::MaxSceneNodeLayers; }
+    };
+
+    // InNode INVALID asks for one node still to be created.
+    auto
+        Get_AttachFit(
+            const FCk_Handle_Transform& InNode,
+            const FCk_Handle_Transform& InAttachTo)
+        -> FAttachFit
+    {
+        return FAttachFit{Get_ChildDepth(InAttachTo), Get_SubtreeReach(InNode)};
+    }
+
+    // The labels from InLinksUp scene-node parents above InNode down to InNode (fewer when the chain is shorter).
+    auto
+        Get_ChainDownTo(
+            const FCk_Handle_Transform& InNode,
+            int32 InLinksUp)
+        -> TArray<FString>
+    {
+        auto Chain = TArray<FString>{};
+
+        auto Node = InNode;
+        for (auto Link = 0; Link <= InLinksUp && ck::IsValid(Node); ++Link)
+        {
+            Chain.Add(Get_SceneNodeAnchorLabel(Node));
+
+            if (NOT Node.Has<ck::SceneNodeParent>())
+            { break; }
+
+            Node = ck::USceneNodeParent_Utils::Get_StoredEntity_AsTypeSafe<FCk_Handle_Transform>(Node);
+        }
+
+        Algo::Reverse(Chain);
+        return Chain;
+    }
+
+    // The one overflow decision behind every attach path: the depth InNode takes under InAttachTo, or unset with
+    // the refusal logged. An error on every refusal instead of an ensure is a maintainer-approved exception to
+    // DEVELOPMENT.md non-negotiable 3: the attach is refused, not continued; callers that expect the cap ask the quiet
+    // queries; and a Ck ensure reports a site only once per process outside automation.
+    auto
+        TryGet_AttachDepth_LogIfRefused(
+            const FCk_Handle_Transform& InNode,
+            const FCk_Handle_Transform& InAttachTo)
+        -> TOptional<int32>
+    {
+        const auto Fit = Get_AttachFit(InNode, InAttachTo);
+
+        if (Fit.Get_Fits())
+        { return Fit._NodeDepth; }
+
+        const auto NodeLabel = ck::IsValid(InNode)
+            ? Get_SceneNodeAnchorLabel(InNode)
+            : FString{TEXT("(new scene node)")};
+
+        // A layered node has Get_Depth() + 1 links to its plain root, so MaxSceneNodeLayers reaches any root.
+        auto Chain = Get_ChainDownTo(InAttachTo, ck::MaxSceneNodeLayers);
+        Chain.Append(ck::IsValid(InNode)
+            ? Get_ChainDownTo(Fit._Reach._DeepestNode, Fit._Reach._Height)
+            : TArray<FString>{NodeLabel});
+
+        ck::ecs_extension::Error(
+            TEXT("SceneNode depth overflow: attaching [{}] under [{}] would put a node at depth [{}], and depths run "
+                 "from 0 to [{}]. The attach is refused and nothing changed. Chain: [{}]"),
+            NodeLabel,
+            Get_SceneNodeAnchorLabel(InAttachTo),
+            Fit.Get_DeepestDepth(),
+            ck::MaxSceneNodeLayers - 1,
+            FString::Join(Chain, TEXT(" > ")));
+
+        return {};
+    }
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -153,7 +329,7 @@ void
     struct FCounts
     {
         int32 Total = 0;
-        int32 Layers[3] = {};
+        int32 Layers[ck::MaxSceneNodeLayers] = {};
         int32 UnrealComponent = 0;
         int32 UnrealMeshSocket = 0;
         int32 RootComponent = 0;
@@ -185,10 +361,10 @@ void
     };
 
     const auto CensusNode = [&](const FCk_Entity InEntity,
-                                const ck::SceneNodeParent& InParent,
-                                const int32 InLayer)
+                                const ck::SceneNodeParent& InParent)
     {
         const auto Node = FCk_Handle{InEntity, Registry.Get_RegistryHandle()};
+        const auto Layer = Get_Depth(Node).Get(INDEX_NONE);
         const auto Parent = FCk_Handle{InParent.Get_Entity().Get_Entity(), Registry.Get_RegistryHandle()};
         const auto NodeName = GetName(Node);
         const auto ParentName = GetName(Parent);
@@ -206,7 +382,8 @@ void
         { AnchorKind = TEXT("MeshSocket"); }
 
         ++Counts.Total;
-        ++Counts.Layers[InLayer];
+        if (Layer != INDEX_NONE)
+        { ++Counts.Layers[Layer]; }
         if (IsExternallyDriven)
         { ++Counts.ExternallyDriven; }
         if (Node.Has<ck::FFragment_SceneNode_PropagationState>())
@@ -241,23 +418,19 @@ void
         }
 
         ++CompositeBuckets.FindOrAdd(FString::Printf(TEXT("L%d|%s|%s|%s|external=%d"),
-            InLayer, *NodeName, *ParentName, *AnchorKind, IsExternallyDriven ? 1 : 0));
-        ++NodeMarginals.FindOrAdd(FString::Printf(TEXT("L%d|%s"), InLayer, *NodeName));
-        ++ParentMarginals.FindOrAdd(FString::Printf(TEXT("L%d|%s"), InLayer, *ParentName));
+            Layer, *NodeName, *ParentName, *AnchorKind, IsExternallyDriven ? 1 : 0));
+        ++NodeMarginals.FindOrAdd(FString::Printf(TEXT("L%d|%s"), Layer, *NodeName));
+        ++ParentMarginals.FindOrAdd(FString::Printf(TEXT("L%d|%s"), Layer, *ParentName));
     };
 
-    Registry.View<ck::FTag_SceneNode_Layer0, ck::FFragment_SceneNode, ck::SceneNodeParent,
+    Registry.View<ck::FTag_SceneNode_Layered, ck::FFragment_SceneNode, ck::SceneNodeParent,
                   ck::FFragment_Transform, ck::TExclude<ck::FTag_DestroyEntity_Initiate>>().ForEach(
         [&](const FCk_Entity Entity, const auto&, const ck::SceneNodeParent& Parent, const auto&)
-        { CensusNode(Entity, Parent, 0); });
-    Registry.View<ck::FTag_SceneNode_Layer1, ck::FFragment_SceneNode, ck::SceneNodeParent,
-                  ck::FFragment_Transform, ck::TExclude<ck::FTag_DestroyEntity_Initiate>>().ForEach(
-        [&](const FCk_Entity Entity, const auto&, const ck::SceneNodeParent& Parent, const auto&)
-        { CensusNode(Entity, Parent, 1); });
-    Registry.View<ck::FTag_SceneNode_Layer2, ck::FFragment_SceneNode, ck::SceneNodeParent,
-                  ck::FFragment_Transform, ck::TExclude<ck::FTag_DestroyEntity_Initiate>>().ForEach(
-        [&](const FCk_Entity Entity, const auto&, const ck::SceneNodeParent& Parent, const auto&)
-        { CensusNode(Entity, Parent, 2); });
+        { CensusNode(Entity, Parent); });
+
+    auto LayerCounts = FString{};
+    for (auto LayerIndex = 0; LayerIndex < ck::MaxSceneNodeLayers; ++LayerIndex)
+    { LayerCounts += FString::Printf(TEXT(" L%d=%d"), LayerIndex, Counts.Layers[LayerIndex]); }
 
     const auto LogTop = [TopN, &InLabel](const TCHAR* InKind, const TMap<FString, int32>& InBuckets)
     {
@@ -289,8 +462,8 @@ void
     };
 
     UE_LOG(CkEcsExt, Display,
-        TEXT("[SceneNodeCensus] label=\"%s\" total=%d L0=%d L1=%d L2=%d anchors={UnrealComponent=%d UnrealMeshSocket=%d RootComponent=%d MeshSocket=%d Bare=%d} externallyDriven=%d propagation={state=%d queued=%d} topN=%d"),
-        *InLabel, Counts.Total, Counts.Layers[0], Counts.Layers[1], Counts.Layers[2],
+        TEXT("[SceneNodeCensus] label=\"%s\" total=%d%s anchors={UnrealComponent=%d UnrealMeshSocket=%d RootComponent=%d MeshSocket=%d Bare=%d} externallyDriven=%d propagation={state=%d queued=%d} topN=%d"),
+        *InLabel, Counts.Total, *LayerCounts,
         Counts.UnrealComponent, Counts.UnrealMeshSocket, Counts.RootComponent, Counts.MeshSocket, Counts.Bare,
         Counts.ExternallyDriven, Counts.PropagationState, Counts.PropagationQueued, TopN);
     UE_LOG(CkEcsExt, Display,
@@ -332,8 +505,11 @@ auto
         FTransform InLocalTransform)
     -> FCk_Handle_SceneNode
 {
-    auto SceneNodeEntity = UCk_Utils_EntityLifetime_UE::Request_CreateEntity(InOwner);
-    UCk_Utils_Handle_UE::Set_DebugName(SceneNodeEntity, *ck::Format_UE(TEXT("SceneNode({})"), Get_SceneNodeAnchorLabel(InOwner)));
+    auto SceneNodeEntity = DoTryCreate_NodeEntity(InOwner,
+        ck::Format_UE(TEXT("SceneNode({})"), ck_scene_node_utils::Get_SceneNodeAnchorLabel(InOwner)));
+
+    if (ck::Is_NOT_Valid(SceneNodeEntity))
+    { return {}; }
 
     const auto& OwnerTransform = UCk_Utils_Transform_UE::Get_EntityCurrentTransform(InOwner);
 
@@ -354,8 +530,11 @@ auto
         TEXT("Unable to attach SceneNode to [{}]: the Unreal SceneComponent is INVALID"), InAttachTo)
     { return {}; }
 
-    auto SceneNodeEntity = UCk_Utils_EntityLifetime_UE::Request_CreateEntity(InAttachTo);
-    UCk_Utils_Handle_UE::Set_DebugName(SceneNodeEntity, *ck::Format_UE(TEXT("SceneNode({} > {})"), Get_SceneNodeAnchorLabel(InAttachTo), GetNameSafe(InSceneComponent)));
+    auto SceneNodeEntity = DoTryCreate_NodeEntity(InAttachTo, ck::Format_UE(TEXT("SceneNode({} > {})"),
+        ck_scene_node_utils::Get_SceneNodeAnchorLabel(InAttachTo), GetNameSafe(InSceneComponent)));
+
+    if (ck::Is_NOT_Valid(SceneNodeEntity))
+    { return {}; }
 
     // Read-only follower: a plain Transform seeded at the composed world plus the SceneNode-owned anchor
     // fragment — NOT FFragment_Transform_RootComponent, so SyncFromActor / SyncToActor never engage.
@@ -384,8 +563,11 @@ auto
         InSocketName, InMeshComponent)
     { return {}; }
 
-    auto SceneNodeEntity = UCk_Utils_EntityLifetime_UE::Request_CreateEntity(InAttachTo);
-    UCk_Utils_Handle_UE::Set_DebugName(SceneNodeEntity, *ck::Format_UE(TEXT("SceneNode({} > {}:{})"), Get_SceneNodeAnchorLabel(InAttachTo), GetNameSafe(InMeshComponent), InSocketName));
+    auto SceneNodeEntity = DoTryCreate_NodeEntity(InAttachTo, ck::Format_UE(TEXT("SceneNode({} > {}:{})"),
+        ck_scene_node_utils::Get_SceneNodeAnchorLabel(InAttachTo), GetNameSafe(InMeshComponent), InSocketName));
+
+    if (ck::Is_NOT_Valid(SceneNodeEntity))
+    { return {}; }
 
     // Read-only follower (see CreateAndAttachToUnrealComponent for the fragment rationale).
     auto SceneNodeWithTransform = UCk_Utils_Transform_UE::Add(SceneNodeEntity, InLocalTransform * InMeshComponent->GetSocketTransform(InSocketName), ECk_Replication::DoesNotReplicate);
@@ -414,13 +596,20 @@ auto
         TEXT("InAttachTo [{}] is INVALID. Unable to proceed with adding the SceneNode feature to [{}]"), InAttachTo, InHandle)
     { return {}; }
 
-    const auto ParentLayerIndex = Get_LayerIndex(InAttachTo);
-    const auto MyLayerIndex = ParentLayerIndex.IsSet() ? ParentLayerIndex.GetValue() + 1 : 0;
-
-    if (NOT AssignLayerByIndex(InHandle, MyLayerIndex))
+    CK_ENSURE_IF_NOT(NOT Has(InHandle),
+        TEXT("SceneNode Add refused: [{}] already is a scene node (under [{}]). Request_Detach it first, then Add it "
+             "under [{}]"),
+        InHandle, Get_Parent(Cast(InHandle)), InAttachTo)
     { return {}; }
 
-    PropagateLayerToChildren(InHandle, MyLayerIndex);
+    // Decided before the first write, so a refusal leaves every node's layer and parent as it was.
+    const auto MyLayerIndex = ck_scene_node_utils::TryGet_AttachDepth_LogIfRefused(InHandle, InAttachTo);
+
+    if (NOT MyLayerIndex.IsSet())
+    { return {}; }
+
+    AssignLayerByIndex(InHandle, MyLayerIndex.GetValue());
+    PropagateLayerToChildren(InHandle, MyLayerIndex.GetValue() + 1);
 
     InHandle.Add<ck::FFragment_SceneNode>(InLocalTransform);
 
@@ -551,6 +740,9 @@ auto
     RemoveExistingLayerTag(NodeAsTransform);
     NodeAsTransform.Try_Remove<ck::FTag_Transform_ExternallyDriven>();
 
+    // The node is a plain root now, so its children sit at depth 0 below it; the walk can only move them shallower.
+    PropagateLayerToChildren(NodeAsTransform, 0);
+
     UCk_Utils_Transform_UE::OnSceneNode_Detached(NodeAsTransform);
 
     // Immediate mutation — nothing is enqueued, so completion is synchronous on this stack.
@@ -596,31 +788,85 @@ auto
 
 auto
     UCk_Utils_SceneNode_UE::
-    Get_LayerIndex(
+    Get_Depth(
+        const FCk_Handle& InHandle,
+        ECk_SucceededFailed& OutResult)
+    -> int32
+{
+    const auto Depth = Get_Depth(InHandle);
+    OutResult = Depth.IsSet() ? ECk_SucceededFailed::Succeeded : ECk_SucceededFailed::Failed;
+    return Depth.Get(0);
+}
+
+auto
+    UCk_Utils_SceneNode_UE::
+    Get_Depth(
         const FCk_Handle& InHandle)
     -> TOptional<int32>
 {
-    if (InHandle.Has<ck::FTag_SceneNode_Layer0>())
-    { return 0; }
-    if (InHandle.Has<ck::FTag_SceneNode_Layer1>())
-    { return 1; }
-    if (InHandle.Has<ck::FTag_SceneNode_Layer2>())
-    { return 2; }
-    if (InHandle.Has<ck::FTag_SceneNode_Layer3>())
-    { return 3; }
-    if (InHandle.Has<ck::FTag_SceneNode_Layer4>())
-    { return 4; }
-    if (InHandle.Has<ck::FTag_SceneNode_Layer5>())
-    { return 5; }
-    if (InHandle.Has<ck::FTag_SceneNode_Layer6>())
-    { return 6; }
-    if (InHandle.Has<ck::FTag_SceneNode_Layer7>())
-    { return 7; }
-    if (InHandle.Has<ck::FTag_SceneNode_Layer8>())
-    { return 8; }
-    if (InHandle.Has<ck::FTag_SceneNode_Layer9>())
-    { return 9; }
-    return {};
+    if (ck::Is_NOT_Valid(InHandle) || NOT InHandle.Has<ck::FTag_SceneNode_Layered>())
+    { return {}; }
+
+    const auto LayerIndex = ck::algo::FindIndex(ck_scene_node_utils::Get_LayerTags(),
+        [&](const ck_scene_node_utils::FLayerTag& InLayerTag) { return InLayerTag._Has(InHandle); });
+
+    if (LayerIndex == INDEX_NONE)
+    { return {}; }
+
+    return LayerIndex;
+}
+
+auto
+    UCk_Utils_SceneNode_UE::
+    Get_MaxDepth()
+    -> int32
+{
+    return ck::MaxSceneNodeLayers;
+}
+
+auto
+    UCk_Utils_SceneNode_UE::
+    Get_CanCreateChild(
+        const FCk_Handle_Transform& InAttachTo)
+    -> bool
+{
+    if (ck::Is_NOT_Valid(InAttachTo))
+    { return false; }
+
+    return ck_scene_node_utils::Get_AttachFit({}, InAttachTo).Get_Fits();
+}
+
+auto
+    UCk_Utils_SceneNode_UE::
+    Get_CanAttach(
+        const FCk_Handle_Transform& InNode,
+        const FCk_Handle_Transform& InAttachTo)
+    -> bool
+{
+    if (ck::Is_NOT_Valid(InNode) || ck::Is_NOT_Valid(InAttachTo))
+    { return false; }
+
+    return ck_scene_node_utils::Get_AttachFit(InNode, InAttachTo).Get_Fits();
+}
+
+auto
+    UCk_Utils_SceneNode_UE::
+    DoTryCreate_NodeEntity(
+        FCk_Handle_Transform& InAttachTo,
+        const FString& InDebugName)
+    -> FCk_Handle
+{
+    CK_ENSURE_IF_NOT(ck::IsValid(InAttachTo),
+        TEXT("InAttachTo [{}] is INVALID. Unable to create a SceneNode [{}] under it"), InAttachTo, InDebugName)
+    { return {}; }
+
+    if (NOT ck_scene_node_utils::TryGet_AttachDepth_LogIfRefused({}, InAttachTo).IsSet())
+    { return {}; }
+
+    auto NodeEntity = UCk_Utils_EntityLifetime_UE::Request_CreateEntity(InAttachTo);
+    UCk_Utils_Handle_UE::Set_DebugName(NodeEntity, *InDebugName);
+
+    return NodeEntity;
 }
 
 auto
@@ -631,16 +877,11 @@ auto
 {
     InHandle.Try_Remove<ck::FTag_SceneNode_RelativeTransformUpdated>();
 
-    InHandle.Try_Remove<ck::FTag_SceneNode_Layer0>();
-    InHandle.Try_Remove<ck::FTag_SceneNode_Layer1>();
-    InHandle.Try_Remove<ck::FTag_SceneNode_Layer2>();
-    InHandle.Try_Remove<ck::FTag_SceneNode_Layer3>();
-    InHandle.Try_Remove<ck::FTag_SceneNode_Layer4>();
-    InHandle.Try_Remove<ck::FTag_SceneNode_Layer5>();
-    InHandle.Try_Remove<ck::FTag_SceneNode_Layer6>();
-    InHandle.Try_Remove<ck::FTag_SceneNode_Layer7>();
-    InHandle.Try_Remove<ck::FTag_SceneNode_Layer8>();
-    InHandle.Try_Remove<ck::FTag_SceneNode_Layer9>();
+    if (const auto Depth = Get_Depth(InHandle);
+        Depth.IsSet())
+    { ck_scene_node_utils::Get_LayerTags()[Depth.GetValue()]._Remove(InHandle); }
+
+    InHandle.Try_Remove<ck::FTag_SceneNode_Layered>();
 }
 
 auto
@@ -648,56 +889,43 @@ auto
     AssignLayerByIndex(
         FCk_Handle_Transform& InHandle,
         int32 InLayerIndex)
-    -> bool
+    -> void
 {
-    InHandle.AddOrGet<ck::FTag_SceneNode_RelativeTransformUpdated>();
+    const auto LayerTags = ck_scene_node_utils::Get_LayerTags();
 
-    switch (InLayerIndex)
-    {
-        case 0: InHandle.Add<ck::FTag_SceneNode_Layer0>(); return true;
-        case 1: InHandle.Add<ck::FTag_SceneNode_Layer1>(); return true;
-        case 2: InHandle.Add<ck::FTag_SceneNode_Layer2>(); return true;
-        case 3: InHandle.Add<ck::FTag_SceneNode_Layer3>(); return true;
-        case 4: InHandle.Add<ck::FTag_SceneNode_Layer4>(); return true;
-        case 5: InHandle.Add<ck::FTag_SceneNode_Layer5>(); return true;
-        case 6: InHandle.Add<ck::FTag_SceneNode_Layer6>(); return true;
-        case 7: InHandle.Add<ck::FTag_SceneNode_Layer7>(); return true;
-        case 8: InHandle.Add<ck::FTag_SceneNode_Layer8>(); return true;
-        case 9: InHandle.Add<ck::FTag_SceneNode_Layer9>(); return true;
-        default:
-        {
-            CK_TRIGGER_ENSURE(TEXT("Layer index [{}] exceeds maximum supported SceneNode layers"), InLayerIndex);
-            return false;
-        }
-    }
+    // Every caller decided the depth through the attach check, or moved the node towards the root.
+    CK_ENSURE_IF_NOT(LayerTags.IsValidIndex(InLayerIndex),
+        TEXT("SceneNode [{}] was assigned layer [{}] outside [0, {}) without a depth check"),
+        InHandle, InLayerIndex, ck::MaxSceneNodeLayers)
+    { return; }
+
+    LayerTags[InLayerIndex]._Add(InHandle);
+    InHandle.AddOrGet<ck::FTag_SceneNode_Layered>();
+    InHandle.AddOrGet<ck::FTag_SceneNode_RelativeTransformUpdated>();
 }
 
 auto
     UCk_Utils_SceneNode_UE::
     PropagateLayerToChildren(
         FCk_Handle_Transform& InParent,
-        int32 InParentLayerIndex)
+        int32 InChildLayerIndex)
     -> void
 {
-    const auto ChildLayerIndex = InParentLayerIndex + 1;
-
-    ForEach_SceneNode(InParent, [ChildLayerIndex](FCk_Handle_SceneNode InChild)
+    ForEach_SceneNode(InParent, [InChildLayerIndex](FCk_Handle_SceneNode InChild)
     {
-        if (const auto& CurrentLayerIndex = Get_LayerIndex(InChild);
-            CurrentLayerIndex.IsSet() && CurrentLayerIndex.GetValue() == ChildLayerIndex)
+        if (const auto CurrentLayerIndex = Get_Depth(InChild);
+            CurrentLayerIndex.IsSet() && CurrentLayerIndex.GetValue() == InChildLayerIndex)
         { return; }
 
         auto ChildTransform = UCk_Utils_Transform_UE::Cast(InChild);
 
         RemoveExistingLayerTag(ChildTransform);
-
-        if (NOT AssignLayerByIndex(ChildTransform, ChildLayerIndex))
-        { return; }
+        AssignLayerByIndex(ChildTransform, InChildLayerIndex);
 
         ChildTransform.AddOrGet<ck::FFragment_SceneNode_PropagationState>();
         ck::FUtils_SceneNodePropagation::Queue(ChildTransform);
 
-        PropagateLayerToChildren(ChildTransform, ChildLayerIndex);
+        PropagateLayerToChildren(ChildTransform, InChildLayerIndex + 1);
     });
 }
 

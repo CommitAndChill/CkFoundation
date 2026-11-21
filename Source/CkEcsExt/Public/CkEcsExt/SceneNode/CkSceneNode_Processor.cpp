@@ -22,25 +22,6 @@ CK_REGISTER_PROCESSOR(ck::FProcessor_SceneNode_FollowUnrealAnchor);
 CK_REGISTER_PROCESSOR(ck::FProcessor_SceneNode_LateFollowUnrealAnchor);
 CK_REGISTER_PROCESSOR(ck::FProcessor_SceneNode_QueueLateChildren);
 CK_REGISTER_PROCESSOR(ck::FProcessor_SceneNode_QueueRootChildren);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_Update<ck::FTag_SceneNode_Layer0>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_QueueChildren<ck::FTag_SceneNode_Layer0>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_Update<ck::FTag_SceneNode_Layer1>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_QueueChildren<ck::FTag_SceneNode_Layer1>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_Update<ck::FTag_SceneNode_Layer2>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_QueueChildren<ck::FTag_SceneNode_Layer2>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_Update<ck::FTag_SceneNode_Layer3>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_QueueChildren<ck::FTag_SceneNode_Layer3>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_Update<ck::FTag_SceneNode_Layer4>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_QueueChildren<ck::FTag_SceneNode_Layer4>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_Update<ck::FTag_SceneNode_Layer5>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_QueueChildren<ck::FTag_SceneNode_Layer5>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_Update<ck::FTag_SceneNode_Layer6>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_QueueChildren<ck::FTag_SceneNode_Layer6>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_Update<ck::FTag_SceneNode_Layer7>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_QueueChildren<ck::FTag_SceneNode_Layer7>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_Update<ck::FTag_SceneNode_Layer8>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_QueueChildren<ck::FTag_SceneNode_Layer8>);
-CK_REGISTER_PROCESSOR(ck::TProcessor_SceneNode_Update<ck::FTag_SceneNode_Layer9>);
 
 namespace ck_scene_node_processor
 {
@@ -343,16 +324,16 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
-    template <typename T_Layer>
-    TProcessor_SceneNode_Update<T_Layer>::
+    template <int32 T_LayerIndex>
+    TProcessor_SceneNode_Update<T_LayerIndex>::
         TProcessor_SceneNode_Update(
         const typename Super::RegistryType& InRegistry)
         : Super(InRegistry)
     { }
 
-    template <typename T_Layer>
+    template <int32 T_LayerIndex>
     auto
-        TProcessor_SceneNode_Update<T_Layer>::
+        TProcessor_SceneNode_Update<T_LayerIndex>::
         ForEachEntity(
             typename Super::TimeType InDeltaT,
             typename Super::HandleType InHandle,
@@ -406,9 +387,9 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
-    template <typename T_Layer>
+    template <int32 T_LayerIndex>
     auto
-        TProcessor_SceneNode_QueueChildren<T_Layer>::
+        TProcessor_SceneNode_QueueChildren<T_LayerIndex>::
         ForEachEntity(
             typename Super::TimeType InDeltaT,
             typename Super::HandleType InHandle,
@@ -416,7 +397,7 @@ namespace ck
             const FFragment_RecordOfSceneNodes& InChildren)
         -> void
     {
-        if constexpr (std::is_same_v<T_Layer, FTag_SceneNode_Layer0>)
+        if constexpr (T_LayerIndex == 0)
         {
             if (cpu_work::Get_Enabled())
             { cpu_work::Add(ECk_CpuWorkCounter::SceneL0QueueParents, 1); }
@@ -424,28 +405,42 @@ namespace ck
 
         FUtils_SceneNodePropagation::PublishChildrenIfChanged(InHandle, InTransform.Get_Transform());
     }
+}
 
-    // --------------------------------------------------------------------------------------------------------------------
+// --------------------------------------------------------------------------------------------------------------------
 
-    template TProcessor_SceneNode_Update<FTag_SceneNode_Layer0>;
-    template TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer0>;
-    template TProcessor_SceneNode_Update<FTag_SceneNode_Layer1>;
-    template TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer1>;
-    template TProcessor_SceneNode_Update<FTag_SceneNode_Layer2>;
-    template TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer2>;
-    template TProcessor_SceneNode_Update<FTag_SceneNode_Layer3>;
-    template TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer3>;
-    template TProcessor_SceneNode_Update<FTag_SceneNode_Layer4>;
-    template TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer4>;
-    template TProcessor_SceneNode_Update<FTag_SceneNode_Layer5>;
-    template TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer5>;
-    template TProcessor_SceneNode_Update<FTag_SceneNode_Layer6>;
-    template TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer6>;
-    template TProcessor_SceneNode_Update<FTag_SceneNode_Layer7>;
-    template TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer7>;
-    template TProcessor_SceneNode_Update<FTag_SceneNode_Layer8>;
-    template TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer8>;
-    template TProcessor_SceneNode_Update<FTag_SceneNode_Layer9>;
+namespace ck_scene_node_processor
+{
+    template <int32 T_LayerIndex>
+    using TLayerProcessors = std::conditional_t<
+        T_LayerIndex == ck::MaxSceneNodeLayers - 1,
+        entt::type_list<
+            ck::TProcessor_SceneNode_Update<T_LayerIndex>>,
+        entt::type_list<
+            ck::TProcessor_SceneNode_Update<T_LayerIndex>,
+            ck::TProcessor_SceneNode_QueueChildren<T_LayerIndex>>>;
+
+    // One FAutoProcessorRegistrar per listed processor, as base classes: they register in list order when the
+    // object is constructed and deregister in reverse when it is destroyed, as a row of CK_REGISTER_PROCESSOR
+    // statics would.
+    template <typename T_Processors>
+    struct TProcessorRegistrars;
+
+    template <typename... T_Processors>
+    struct TProcessorRegistrars<entt::type_list<T_Processors...>>
+        : public ck::FAutoProcessorRegistrar<T_Processors>...
+    { };
+
+    template <typename T_LayerIndices>
+    struct TLayerProcessorRegistrars;
+
+    template <int32... T_LayerIndices>
+    struct TLayerProcessorRegistrars<std::integer_sequence<int32, T_LayerIndices...>>
+        : public TProcessorRegistrars<entt::type_list_cat_t<TLayerProcessors<T_LayerIndices>...>>
+    { };
+
+    // After the layer processors' member definitions above, which the registrars instantiate.
+    static TLayerProcessorRegistrars<ck::FSceneNodeLayerIndices> GCkAutoRegister_SceneNodeLayers;
 }
 
 // --------------------------------------------------------------------------------------------------------------------

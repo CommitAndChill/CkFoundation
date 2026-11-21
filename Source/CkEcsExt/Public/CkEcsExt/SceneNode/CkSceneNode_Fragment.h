@@ -7,6 +7,9 @@
 
 #include "CkRecord/Record/CkRecord_Utils.h"
 
+#include <type_traits>
+#include <utility>
+
 // --------------------------------------------------------------------------------------------------------------------
 
 class UCk_Utils_SceneNode_UE;
@@ -24,16 +27,31 @@ namespace ck
     // re-sampled in FGroup_Transform_LatePose, after the frame's animation is final, on top of the early sample.
     CK_DEFINE_ECS_TAG(FTag_SceneNode_LateAnchor);
 
-    CK_DEFINE_ECS_TAG(FTag_SceneNode_Layer0);
-    CK_DEFINE_ECS_TAG(FTag_SceneNode_Layer1);
-    CK_DEFINE_ECS_TAG(FTag_SceneNode_Layer2);
-    CK_DEFINE_ECS_TAG(FTag_SceneNode_Layer3);
-    CK_DEFINE_ECS_TAG(FTag_SceneNode_Layer4);
-    CK_DEFINE_ECS_TAG(FTag_SceneNode_Layer5);
-    CK_DEFINE_ECS_TAG(FTag_SceneNode_Layer6);
-    CK_DEFINE_ECS_TAG(FTag_SceneNode_Layer7);
-    CK_DEFINE_ECS_TAG(FTag_SceneNode_Layer8);
-    CK_DEFINE_ECS_TAG(FTag_SceneNode_Layer9);
+    // How many scene-node layers exist: a node's depth (its layer) runs from 0 to MaxSceneNodeLayers - 1. It sizes
+    // the layer tags, the per-layer Update and QueueChildren processors and their RunAfter chain. An attach that
+    // would put any node deeper is refused whole (CkEcsExt/Claude.md § "SceneNode depth").
+    inline constexpr int32 MaxSceneNodeLayers = 16;
+
+    // Every layer index, in order. Code that needs one thing per layer specializes on this
+    // (std::integer_sequence<int32, T_LayerIndices...>) and expands the pack once.
+    using FSceneNodeLayerIndices = std::make_integer_sequence<int32, MaxSceneNodeLayers>;
+
+    // The layer a parent-driven node composes in: TProcessor_SceneNode_Update<N> runs after layer N-1 has published
+    // its children, so a node composes against a parent already composed this pass.
+    template <int32 T_LayerIndex>
+    struct TTag_SceneNode_Layer : public TTag<TTag_SceneNode_Layer<T_LayerIndex>>
+    {
+        static_assert(T_LayerIndex >= 0 && T_LayerIndex < MaxSceneNodeLayers,
+            "SceneNode layer index outside [0, MaxSceneNodeLayers)");
+
+        static constexpr int32 LayerIndex = T_LayerIndex;
+    };
+
+    static_assert(std::is_empty_v<TTag_SceneNode_Layer<0>>, "Tags must not carry any data");
+
+    // Carried by every node that holds a layer tag, beside it, so a view can take or exclude every layered node with
+    // one type (FProcessor_SceneNode_QueueRootChildren, the census).
+    CK_DEFINE_ECS_TAG(FTag_SceneNode_Layered);
 
     // --------------------------------------------------------------------------------------------------------------------
 

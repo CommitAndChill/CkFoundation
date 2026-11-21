@@ -23,6 +23,13 @@ public:
     CK_DEFINE_CPP_CASTCHECKED_TYPESAFE(FCk_Handle_SceneNode);
 
 public:
+    // Every attach below (Add, Create, CreateAndAttachToUnreal*) puts the node one layer below InAttachTo (depth 0 when
+    // InAttachTo is not itself a layered scene node) and, for Add, moves InHandle's existing scene-node subtree with it.
+    // An attach that would put any node of that subtree at a depth >= Get_MaxDepth() is refused whole, before anything
+    // changes: it logs an error naming the root-to-leaf chain every time, returns an INVALID handle, and leaves every
+    // node's layer and parent as they were (Create* creates no entity; Add leaves InHandle not a scene node). Ask
+    // Get_CanCreateChild / Get_CanAttach first to fail without the error; ask Get_CanAttach before a re-parent's detach.
+    // Add on a handle that already is a scene node is a caller error (an ensure, nothing changes): Request_Detach first.
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Utils|SceneNode",
               DisplayName="[Ck][SceneNode] Add Feature")
@@ -75,6 +82,51 @@ public:
     static bool
     Has(
         const FCk_Handle& InHandle);
+
+    // The node's depth: 0 under a parent that is not itself a layered scene node, its parent's depth + 1 otherwise,
+    // always < Get_MaxDepth(). Failed (unset in C++) when InHandle holds no layer: not a scene node, or detached.
+    // Depth is per machine: two machines that compose different chains above a node can disagree.
+    UFUNCTION(BlueprintCallable,
+              Category = "Ck|Utils|SceneNode",
+              DisplayName="[Ck][SceneNode] Get Depth",
+              meta = (ExpandEnumAsExecs = "OutResult"))
+    static int32
+    Get_Depth(
+        const FCk_Handle& InHandle,
+        ECk_SucceededFailed& OutResult);
+    static auto
+    Get_Depth(
+        const FCk_Handle& InHandle) -> TOptional<int32>;
+
+    // How many depths exist (ck::MaxSceneNodeLayers): a node's depth runs from 0 to Get_MaxDepth() - 1.
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|SceneNode",
+              DisplayName="[Ck][SceneNode] Get Max Depth")
+    static int32
+    Get_MaxDepth();
+
+    // True when ONE new node created under InAttachTo would fit: InAttachTo is valid and either not a layered scene
+    // node (a plain transform's child lands at depth 0) or its depth + 1 < Get_MaxDepth(). False for an INVALID
+    // InAttachTo, which Create refuses too. A quiet query: no log, no ensure. It answers for creating a single node
+    // only; an existing node brings its subtree, which Get_CanAttach counts.
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|SceneNode",
+              DisplayName="[Ck][SceneNode] Can Create Child")
+    static bool
+    Get_CanCreateChild(
+        const FCk_Handle_Transform& InAttachTo);
+
+    // True when Add(InNode, InAttachTo, ...) would fit: InNode one layer below InAttachTo and its whole existing
+    // scene-node subtree below it (the check Add itself makes: the node's depth plus its subtree's height stays below
+    // Get_MaxDepth()). False when either handle is INVALID, which Add refuses too. A quiet query: no log, no ensure. A re-parent is Request_Detach then Add, and a refused Add
+    // leaves the node detached, so a caller that must not lose the attachment asks this BEFORE the detach.
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|SceneNode",
+              DisplayName="[Ck][SceneNode] Can Attach")
+    static bool
+    Get_CanAttach(
+        const FCk_Handle_Transform& InNode,
+        const FCk_Handle_Transform& InAttachTo);
 
     // Development-only, one-shot runtime attribution for SceneNode frontier investigations. The census only
     // reads the current registry and logs bounded aggregate/provenance rows; it never retains a registry view,
@@ -160,7 +212,8 @@ public:
 
     // Severs the scene-node's parent link, keeping the current world transform. After detach,
     // TProcessor_SceneNode_Update no longer iterates this entity, so the Transform fragment stays where it
-    // was and can be authoritatively set by downstream callers.
+    // was and can be authoritatively set by downstream callers. The node becomes a plain root, so its scene-node
+    // subtree is re-layered from depth 0 below it.
     // Immediate mutator: the links are removed inline and nothing is enqueued, so the completion
     // delegate fires synchronously on the caller's stack.
     UFUNCTION(BlueprintCallable,
@@ -188,14 +241,19 @@ public:
         const TFunction<void(FCk_Handle_SceneNode)>& InFunc) -> void;
 
 private:
+    // The entity a Create* builds its node on, named InDebugName. INVALID, with the overflow error logged and no
+    // entity created, when one more node does not fit under InAttachTo.
+    static auto
+    DoTryCreate_NodeEntity(
+        FCk_Handle_Transform& InAttachTo,
+        const FString& InDebugName) -> FCk_Handle;
+
+    // Gives every scene-node child of InParent the layer InChildLayerIndex and its descendants the layers below.
+    // Only for a subtree that fits (the attach check, or a move towards the root).
     static auto
     PropagateLayerToChildren(
         FCk_Handle_Transform& InParent,
-        int32 InParentLayerIndex) -> void;
-
-    static auto
-    Get_LayerIndex(
-        const FCk_Handle& InHandle) -> TOptional<int32>;
+        int32 InChildLayerIndex) -> void;
 
     static auto
     RemoveExistingLayerTag(
@@ -204,7 +262,7 @@ private:
     static auto
     AssignLayerByIndex(
         FCk_Handle_Transform& InHandle,
-        int32 InLayerIndex) -> bool;
+        int32 InLayerIndex) -> void;
 };
 
 // --------------------------------------------------------------------------------------------------------------------

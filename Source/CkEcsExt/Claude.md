@@ -69,16 +69,50 @@ auto FoundHandle = UCk_Utils_Ecs_Base_UE::Get_EntityOrRecordEntry_WithFragmentAn
 
 ### SceneNode layer ordering
 
-Every `TProcessor_SceneNode_Update<FTag_SceneNode_LayerN>` declares a `RunAfter` list holding
-`FProcessor_SceneNode_FollowUnrealAnchor`, plus `FProcessor_Transform_HandleRequests` for layer 0 and
-`TProcessor_SceneNode_Update<Layer N-1>` for the rest. Both dependencies are load-bearing:
+Each layer N has a `TProcessor_SceneNode_Update<N>` (parallel) and, for every layer but the last, a
+`TProcessor_SceneNode_QueueChildren<N>` (serial) that runs after it and queues the
+children of the nodes it moved. Layer 0's Update runs after `FProcessor_SceneNode_HandleRequests` and
+`FProcessor_SceneNode_QueueRootChildren` (which itself runs after `FProcessor_SceneNode_FollowUnrealAnchor` and
+`FProcessor_Transform_HandleRequests`); layer N's Update runs after `TProcessor_SceneNode_QueueChildren<N-1>` (the
+`RunAfter` alias on the Update template). Both dependencies are load-bearing:
 
-- Without `Transform_HandleRequests` in layer 0's list, layer 0 can run in parallel with request handling
-  and miss the `FTag_Transform_Updated` that handling just added to the root (e.g. a tween writing world
-  onto the root), so the gate check fails and nothing propagates.
+- Without the root publish (and through it `Transform_HandleRequests`) ahead of layer 0, layer 0 can run in parallel
+  with request handling and miss the `FTag_Transform_Updated` that handling just added to the root (e.g. a tween
+  writing world onto the root), so the gate check fails and nothing propagates.
 - Without the layer-to-layer chain, descendants run before the tag their parent DEFERRED becomes visible.
 
 Either gap stops motion from propagating past the first scene-node link, silently.
+
+### SceneNode depth
+
+`ck::MaxSceneNodeLayers` (`CkSceneNode_Fragment.h`, 16) is the one constant behind the layers: it sizes the
+`TTag_SceneNode_Layer<N>` tags and the per-layer processors, which `CkSceneNode_Processor.cpp` registers from it in
+ascending order (`Ck.SceneNode.Depth.EveryLayerIsRegisteredInOrder` checks the registry and the RunAfter chain).
+A node's depth (`UCk_Utils_SceneNode_UE::Get_Depth`, unset when the handle holds no layer) runs from 0 to
+`Get_MaxDepth() - 1`: 0 under a parent that is not itself a layered scene node, the parent's depth + 1 otherwise.
+`Request_Detach` makes the node a plain root and re-layers its subtree from 0. Depth is per machine. Every layered node
+also carries `FTag_SceneNode_Layered`, so `FProcessor_SceneNode_QueueRootChildren` excludes all of them with one type.
+
+Two quiet queries (no log, no ensure) answer before an attach: `Get_CanCreateChild(InAttachTo)` for creating one node
+(a plain transform parent answers true), and `Get_CanAttach(InNode, InAttachTo)` for an `Add` of a node with its whole
+subtree. A re-parent is `Request_Detach` then `Add`, so a caller that must not lose the attachment asks
+`Get_CanAttach` before the detach.
+
+The overflow contract: an attach fits when the depth the node takes plus the height of its scene-node subtree is below
+`Get_MaxDepth()`. `Add`, `Create` and `CreateAndAttachToUnreal*` decide it before any write; when it does not fit, the
+attach is refused whole: it logs an error every time (`SceneNode depth overflow: ... Chain: [root > ... > leaf]`),
+returns an invalid handle, and changes nothing. The error instead of an ensure is a maintainer-approved exception to
+DEVELOPMENT.md non-negotiable 3: the attach is refused, not continued; callers that expect the cap ask the quiet
+queries; and a Ck ensure reports a site only once per process outside automation. `Create*` creates no entity; `Add`
+leaves its handle not a scene node and every descendant with its layer and parent, so a re-parent (`Request_Detach`
+then `Add`) refused this way leaves the subtree detached and still composing under its root. `Add` on a handle that
+already is a scene node is a caller error (an ensure; detach first). The late pass
+(`FProcessor_SceneNode_LateFollowUnrealAnchor`) walks a subtree depth-first and needs no layers, so it has no cap of
+its own.
+
+Each layer costs two processors every frame whether or not any node sits on it (an empty-view check in the main pass,
+a dirty check per local-settle replay). `Ck_AutoTest_SceneNode_LayerCostPerf` reads that cost as the scheduler's own
+per-frame time over a fixed scene; compare two builds of the constant with it, same scene, same machine.
 
 ### SceneNode Unreal anchors
 

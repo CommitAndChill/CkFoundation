@@ -5,7 +5,7 @@ Spatial and hierarchical systems for ECS entities. Provides world transforms, sc
 ## Key Concepts
 
 - **Transform** — Core 3D position/rotation/scale on an ECS entity. Can sync from an Unreal actor's root component or skeletal mesh socket. Supports granular replication (location, rotation, scale separately).
-- **SceneNode** — A child entity with a local (relative) transform attached to a parent Transform. Supports up to 10 layer tags for grouping. Parent moves, children follow.
+- **SceneNode** — A child entity with a local (relative) transform attached to a parent Transform. Nests up to `ck::MaxSceneNodeLayers` (16) deep; an attach that would go deeper is refused. Parent moves, children follow.
 - **EntityHolder** — Generic pattern for storing a reference to another entity. Template utilities (`TUtils_EntityHolder<T>`) and macros (`CK_DEFINE_ENTITY_HOLDER`) for quick composition.
 - **Transform Interpolation** — Configurable smoothing for replicated transforms (strategy, smooth distance, timing).
 

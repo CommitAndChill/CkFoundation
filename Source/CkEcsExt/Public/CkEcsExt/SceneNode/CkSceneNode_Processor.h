@@ -9,6 +9,8 @@
 
 #include "CkEcsExt/Transform/CkTransform_Processor.h"
 
+#include <type_traits>
+
 // --------------------------------------------------------------------------------------------------------------------
 
 namespace ck
@@ -188,16 +190,7 @@ namespace ck
             ck::TReadOnly<FFragment_Transform>,
             ck::TReadOnly<FFragment_RecordOfSceneNodes>,
             FTag_Transform_Updated,
-            TExclude<FTag_SceneNode_Layer0>,
-            TExclude<FTag_SceneNode_Layer1>,
-            TExclude<FTag_SceneNode_Layer2>,
-            TExclude<FTag_SceneNode_Layer3>,
-            TExclude<FTag_SceneNode_Layer4>,
-            TExclude<FTag_SceneNode_Layer5>,
-            TExclude<FTag_SceneNode_Layer6>,
-            TExclude<FTag_SceneNode_Layer7>,
-            TExclude<FTag_SceneNode_Layer8>,
-            TExclude<FTag_SceneNode_Layer9>,
+            TExclude<FTag_SceneNode_Layered>,
             CK_IGNORE_PENDING_KILL>
     {
     public:
@@ -221,84 +214,21 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
-    template <typename T_Layer>
+    // One Update per layer and one QueueChildren per layer but the last (no node sits below the last layer), all
+    // registered in CkSceneNode_Processor.cpp from MaxSceneNodeLayers.
+    template <int32 T_LayerIndex>
     class TProcessor_SceneNode_Update;
 
-    template <typename T_Layer>
+    template <int32 T_LayerIndex>
     class TProcessor_SceneNode_QueueChildren;
-
-    // Per-layer RunAfter list. Dropping either dependency — Transform_HandleRequests for layer 0, or the
-    // layer N-1 chain for the rest — stops motion propagating past the first scene-node link.
-    // Full rationale: CkEcsExt/CLAUDE.md § "SceneNode layer ordering".
-    template <typename T_Layer>
-    struct TSceneNode_Update_RunAfter
-    {
-        using type = TDepList<
-            FProcessor_SceneNode_HandleRequests,
-            FProcessor_SceneNode_QueueRootChildren>;
-    };
-
-    template <>
-    struct TSceneNode_Update_RunAfter<FTag_SceneNode_Layer1>
-    {
-        using type = TDepList<TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer0>>;
-    };
-
-    template <>
-    struct TSceneNode_Update_RunAfter<FTag_SceneNode_Layer2>
-    {
-        using type = TDepList<TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer1>>;
-    };
-
-    template <>
-    struct TSceneNode_Update_RunAfter<FTag_SceneNode_Layer3>
-    {
-        using type = TDepList<TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer2>>;
-    };
-
-    template <>
-    struct TSceneNode_Update_RunAfter<FTag_SceneNode_Layer4>
-    {
-        using type = TDepList<TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer3>>;
-    };
-
-    template <>
-    struct TSceneNode_Update_RunAfter<FTag_SceneNode_Layer5>
-    {
-        using type = TDepList<TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer4>>;
-    };
-
-    template <>
-    struct TSceneNode_Update_RunAfter<FTag_SceneNode_Layer6>
-    {
-        using type = TDepList<TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer5>>;
-    };
-
-    template <>
-    struct TSceneNode_Update_RunAfter<FTag_SceneNode_Layer7>
-    {
-        using type = TDepList<TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer6>>;
-    };
-
-    template <>
-    struct TSceneNode_Update_RunAfter<FTag_SceneNode_Layer8>
-    {
-        using type = TDepList<TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer7>>;
-    };
-
-    template <>
-    struct TSceneNode_Update_RunAfter<FTag_SceneNode_Layer9>
-    {
-        using type = TDepList<TProcessor_SceneNode_QueueChildren<FTag_SceneNode_Layer8>>;
-    };
 
     // The canonical depth chain runs in FGroup_Transform, then may be replayed in the same order by the
     // scheduler's local settle barrier after derived transform producers.
-    template <typename T_Layer>
+    template <int32 T_LayerIndex>
     class CKECSEXT_API TProcessor_SceneNode_Update : public TParallelProcessor<
-            TProcessor_SceneNode_Update<T_Layer>,
+            TProcessor_SceneNode_Update<T_LayerIndex>,
             FCk_Handle_SceneNode,
-            T_Layer,
+            TTag_SceneNode_Layer<T_LayerIndex>,
             TReadOnly<SceneNodeParent>,
             TReadOnly<FFragment_SceneNode>,
             TReadWrite<FFragment_Transform>,
@@ -308,7 +238,8 @@ namespace ck
             TExclude<FFragment_SceneNode_UnrealAnchor>,
             CK_IGNORE_PENDING_KILL>
     {
-        using Super = TParallelProcessor<TProcessor_SceneNode_Update<T_Layer>, FCk_Handle_SceneNode, T_Layer,
+        using Super = TParallelProcessor<TProcessor_SceneNode_Update<T_LayerIndex>, FCk_Handle_SceneNode,
+            TTag_SceneNode_Layer<T_LayerIndex>,
             TReadOnly<SceneNodeParent>, TReadOnly<FFragment_SceneNode>,
             TReadWrite<FFragment_Transform>, TReadWrite<FFragment_Transform_Previous>,
             TReadOnly<FFragment_SceneNode_PropagationState>, FTag_SceneNode_PropagationQueued,
@@ -317,7 +248,15 @@ namespace ck
 
     public:
         using Group = FGroup_Transform;
-        using RunAfter = typename TSceneNode_Update_RunAfter<T_Layer>::type;
+
+        // Layer 0 runs after the request drains and the root publish; layer N after layer N-1 has published its
+        // children. Dropping either dependency stops motion propagating past the first scene-node link
+        // (CkEcsExt/Claude.md § "SceneNode layer ordering").
+        using RunAfter = std::conditional_t<
+            T_LayerIndex == 0,
+            TDepList<FProcessor_SceneNode_HandleRequests, FProcessor_SceneNode_QueueRootChildren>,
+            TDepList<TProcessor_SceneNode_QueueChildren<(T_LayerIndex > 0 ? T_LayerIndex - 1 : 0)>>>;
+
         using MarkedDirtyBy = FTag_SceneNode_PropagationQueued;
         using LocalSettleAfter = FGroup_Transform_Derived;
 
@@ -339,24 +278,28 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
-    template <typename T_Layer>
+    template <int32 T_LayerIndex>
     class CKECSEXT_API TProcessor_SceneNode_QueueChildren : public ck_exp::TProcessor<
-            TProcessor_SceneNode_QueueChildren<T_Layer>,
+            TProcessor_SceneNode_QueueChildren<T_LayerIndex>,
             FCk_Handle_Transform,
-            T_Layer,
+            TTag_SceneNode_Layer<T_LayerIndex>,
             ck::TReadOnly<FFragment_Transform>,
             ck::TReadOnly<FFragment_RecordOfSceneNodes>,
             FTag_Transform_Updated,
             CK_IGNORE_PENDING_KILL>
     {
+        static_assert(T_LayerIndex < MaxSceneNodeLayers - 1,
+            "The last scene-node layer has no children to queue: it has no QueueChildren processor");
+
         using Super = ck_exp::TProcessor<
-            TProcessor_SceneNode_QueueChildren<T_Layer>, FCk_Handle_Transform, T_Layer,
+            TProcessor_SceneNode_QueueChildren<T_LayerIndex>, FCk_Handle_Transform,
+            TTag_SceneNode_Layer<T_LayerIndex>,
             ck::TReadOnly<FFragment_Transform>, ck::TReadOnly<FFragment_RecordOfSceneNodes>,
             FTag_Transform_Updated, CK_IGNORE_PENDING_KILL>;
 
     public:
         using Group = FGroup_Transform;
-        using RunAfter = TDepList<TProcessor_SceneNode_Update<T_Layer>>;
+        using RunAfter = TDepList<TProcessor_SceneNode_Update<T_LayerIndex>>;
         using LocalSettleAfter = FGroup_Transform_Derived;
 
     public:
