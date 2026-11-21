@@ -36,6 +36,7 @@ public class CkEditorToolbar : CkModuleRules
             "CommonUI",
 
             "CkCore",
+            "CkEditorTools",
             "CkEcs",
             "CkLog",
             "CkResourceLoader",
