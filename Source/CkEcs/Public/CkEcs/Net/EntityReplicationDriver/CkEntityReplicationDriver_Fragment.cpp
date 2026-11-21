@@ -127,6 +127,12 @@ auto
     OnRep_ReplicationData()
     -> void
 {
+    if (_ReplicationDataKind != ECk_EntityReplicationDriver_DataKind::None)
+    {
+        DoReparent_ToOwningEntityDriver();
+        return;
+    }
+
     if ([[maybe_unused]] const auto ShouldSkipIfAllObjectsAreNotYetResolved =
         AnyOf(_ReplicationData.Get_ReplicatedObjectsData().Get_Objects(), ck::algo::Is_NOT_Valid{}))
     { return; }
@@ -135,12 +141,16 @@ auto
 
     const auto& OwningEntityDriver = _ReplicationData.Get_OwningEntityDriver();
 
-    CK_ENSURE_IF_NOT(ck::IsValid(OwningEntityDriver),
-        TEXT("OwningEntityDriver is NOT valid. Somehow the ReplicationDriver was NOT added to the OwningEntity but WAS "
-            "added to the child Entity.{}"), ck::Context(this))
-    { return; }
+    if (ck::Is_NOT_Valid(OwningEntityDriver))
+    {
+        DoReport_UnresolvedOwningEntityDriver();
+        return;
+    }
 
-    const auto OwningEntity = OwningEntityDriver->Get_AssociatedEntity();
+    const auto IsSelfReferencing = OwningEntityDriver == this;
+    const auto OwningEntity = IsSelfReferencing
+        ? UCk_Utils_EcsWorld_Subsystem_UE::Get_TransientEntity(GetWorld())
+        : OwningEntityDriver->Get_AssociatedEntity();
 
     if (ck::Is_NOT_Valid(OwningEntity))
     {
@@ -170,6 +180,8 @@ auto
 
     // --------------------------------------------------------------------------------------------------------------------
 
+    DoCommit_Construction(ECk_EntityReplicationDriver_DataKind::Entity);
+
     _AssociatedEntity._ReplicationDriver = this;
 
     UCk_Utils_EntityLifetime_UE::Request_SetupEntityWithLifetimeOwner(_AssociatedEntity, OwningEntity);
@@ -193,9 +205,9 @@ auto
     DoAdd_SyncedDependentReplicationDriver();
 
     // A Replicated Entity built from inside the OwningEntity's ConstructionScript is a dependent of it
-    if (_ReplicationData.Get_IsOwningEntityDriverDependentOnThis())
+    if (_ReplicationData.Get_IsOwningEntityDriverDependentOnThis() && NOT IsSelfReferencing)
     {
-        OwningEntityDriver->DoAdd_SyncedDependentReplicationDriver();
+        DoAdd_SyncedDependentOf(OwningEntityDriver);
     }
 }
 
@@ -203,6 +215,12 @@ auto
     UCk_Fragment_EntityReplicationDriver_Rep::
     OnRep_ReplicationData_EntityScript() -> void
 {
+    if (_ReplicationDataKind != ECk_EntityReplicationDriver_DataKind::None)
+    {
+        DoReparent_ToOwningEntityDriver();
+        return;
+    }
+
     if ([[maybe_unused]] const auto ShouldSkipIfAllObjectsAreNotYetResolved =
         AnyOf(_ReplicationData_EntityScript.Get_ReplicatedObjectsData().Get_Objects(), ck::algo::Is_NOT_Valid{}))
     {
@@ -210,7 +228,8 @@ auto
     }
     const auto EntityScriptClass = _ReplicationData_EntityScript.Get_EntityScriptClass();
     const auto SpawnParams = _ReplicationData_EntityScript.Get_SpawnParams();
-    const auto IsSelfReferencing = _ReplicationData_EntityScript.Get_OwningEntityDriver() == this;
+    const auto& OwningEntityDriver = _ReplicationData_EntityScript.Get_OwningEntityDriver();
+    const auto IsSelfReferencing = OwningEntityDriver == this;
 
     auto* EntityScriptDefault = UCk_Utils_Object_UE::Get_ClassDefaultObject<UCk_EntityScript_UE>(EntityScriptClass);
     const auto IsActorBound = ck::IsValid(EntityScriptDefault) && EntityScriptDefault->Get_IsActorBound();
@@ -219,11 +238,6 @@ auto
 
     if (IsActorBound)
     {
-        // This notify can arrive more than once. The lifetime owner is set synchronously below the first
-        // time through, so it is the marker that construction was already started for this driver.
-        if (_AssociatedEntity.Has<ck::FFragment_LifetimeOwner>())
-        { return; }
-
         auto* BoundActor = _ReplicationData_EntityScript.Get_BoundActor().Get();
 
         // Not resolved on this client yet. The RepNotify fires again when the reference maps, the same
@@ -245,7 +259,13 @@ auto
 
     if (NOT IsSelfReferencing)
     {
-        const auto OwningEntity = _ReplicationData_EntityScript.Get_OwningEntityDriver()->Get_AssociatedEntity();
+        if (ck::Is_NOT_Valid(OwningEntityDriver))
+        {
+            DoReport_UnresolvedOwningEntityDriver();
+            return;
+        }
+
+        const auto OwningEntity = OwningEntityDriver->Get_AssociatedEntity();
 
         if (ck::Is_NOT_Valid(OwningEntity))
         {
@@ -253,15 +273,17 @@ auto
             // can never be set up and the queue below is never drained. See the ctor no-world warning.
             ck::ecs::Warning(TEXT("Replicated child entity-script driver [{}] cannot construct: owner driver [{}] has no "
                 "valid associated entity and will never recover. Child parked in a queue that is never drained."),
-                this, _ReplicationData_EntityScript.Get_OwningEntityDriver());
-            _ReplicationData_EntityScript.Get_OwningEntityDriver()->_PendingChildEntityConstructions.Emplace(this);
+                this, OwningEntityDriver);
+            OwningEntityDriver->_PendingChildEntityConstructions.Emplace(this);
             return;
         }
 
+        DoCommit_Construction(ECk_EntityReplicationDriver_DataKind::EntityScript);
         UCk_Utils_EntityLifetime_UE::Request_SetupEntityWithLifetimeOwner(_AssociatedEntity, OwningEntity);
     }
     else
     {
+        DoCommit_Construction(ECk_EntityReplicationDriver_DataKind::EntityScript);
         const auto TransientEntity = UCk_Utils_EcsWorld_Subsystem_UE::Get_TransientEntity(GetWorld());
         UCk_Utils_EntityLifetime_UE::Request_SetupEntityWithLifetimeOwner(_AssociatedEntity, TransientEntity);
     }
@@ -290,11 +312,6 @@ auto
         // --------------------------------------------------------------------------------------------------------------------
         // Make sure to call this on "self" since the # of dependent rep driver include "self" as well
         ThisAsWeakPtr->DoAdd_SyncedDependentReplicationDriver();
-        // A Replicated Entity built from inside the OwningEntity's ConstructionScript is a dependent of it
-        if (ThisAsWeakPtr->_ReplicationData_EntityScript.Get_IsOwningEntityDriverDependentOnThis())
-        {
-            ThisAsWeakPtr->_ReplicationData_EntityScript.Get_OwningEntityDriver()->DoAdd_SyncedDependentReplicationDriver();
-        }
 
         if (UCk_Utils_Net_UE::Get_Replication(InHandle) == ECk_Replication::Replicates)
         {
@@ -303,6 +320,18 @@ auto
                 InHandle.Add<ck::FTag_EntityReplicationDriver_FireOnDependentReplicationComplete>();
             }
         }
+
+        // A Replicated Entity built from inside the OwningEntity's ConstructionScript is a dependent of it
+        if (NOT ThisAsWeakPtr->_ReplicationData_EntityScript.Get_IsOwningEntityDriverDependentOnThis())
+        { return; }
+
+        const auto& CurrentOwningEntityDriver = ThisAsWeakPtr->_ReplicationData_EntityScript.Get_OwningEntityDriver();
+
+        // Its destroy can reach this client before the rewrite that clears the flag: no count is left to sync
+        if (ck::Is_NOT_Valid(CurrentOwningEntityDriver))
+        { return; }
+
+        ThisAsWeakPtr->DoAdd_SyncedDependentOf(CurrentOwningEntityDriver);
     };
 
     const auto ReplicaConnectionSettings = FCk_Net_ConnectionSettings
@@ -332,9 +361,11 @@ auto
     OnRep_ReplicationData_Ability()
     -> void
 {
-    // TODO: This is a temporary fix. We need to find a better way to handle this
-    if (_AssociatedEntity.Has<ck::FFragment_LifetimeOwner>())
-    { return; }
+    if (_ReplicationDataKind != ECk_EntityReplicationDriver_DataKind::None)
+    {
+        DoReparent_ToOwningEntityDriver();
+        return;
+    }
 
     // wait for the data to be fully replicated
     if (ck::Is_NOT_Valid(_ReplicationData_Ability.Get_AbilityScriptClass()))
@@ -346,7 +377,17 @@ auto
 
     // --------------------------------------------------------------------------------------------------------------------
 
-    const auto OwningEntity = _ReplicationData_Ability.Get_OwningEntityDriver()->Get_AssociatedEntity();
+    const auto& OwningEntityDriver = _ReplicationData_Ability.Get_OwningEntityDriver();
+
+    if (ck::Is_NOT_Valid(OwningEntityDriver))
+    {
+        DoReport_UnresolvedOwningEntityDriver();
+        return;
+    }
+
+    const auto OwningEntity = OwningEntityDriver == this
+        ? UCk_Utils_EcsWorld_Subsystem_UE::Get_TransientEntity(GetWorld())
+        : OwningEntityDriver->Get_AssociatedEntity();
 
     if (ck::Is_NOT_Valid(OwningEntity))
     {
@@ -354,16 +395,18 @@ auto
         // be set up and the queue below is never drained. See the ctor no-world warning.
         ck::ecs::Warning(TEXT("Replicated child ability driver [{}] cannot construct: owner driver [{}] has no valid "
             "associated entity and will never recover. Child parked in a queue that is never drained."),
-            this, _ReplicationData_Ability.Get_OwningEntityDriver());
-        _ReplicationData_Ability.Get_OwningEntityDriver()->_PendingChildAbilityEntityConstructions.Emplace(this);
+            this, OwningEntityDriver);
+        OwningEntityDriver->_PendingChildAbilityEntityConstructions.Emplace(this);
         return;
     }
 
     ck::ecs::Verbose(TEXT("Adding Ability [{}] to [{}] with Owning Entity [{}] on Client [{}].{}"),
-        _ReplicationData_Ability.Get_AbilityScriptClass(), Get_AssociatedEntity(), _ReplicationData_Ability.Get_OwningEntityDriver()->Get_AssociatedEntity(),
+        _ReplicationData_Ability.Get_AbilityScriptClass(), Get_AssociatedEntity(), OwningEntity,
         GetWorld()->GetFirstLocalPlayerFromController(), this);
 
     // --------------------------------------------------------------------------------------------------------------------
+
+    DoCommit_Construction(ECk_EntityReplicationDriver_DataKind::Ability);
 
     _AssociatedEntity._ReplicationDriver = this;
 
@@ -424,11 +467,221 @@ auto
 
 auto
     UCk_Fragment_EntityReplicationDriver_Rep::
+    DoRemove_SyncedDependentReplicationDriver()
+    -> void
+{
+    CK_ENSURE_IF_NOT(_NumSyncedDependentReplicationDrivers > 0,
+        TEXT("Removing a Synced Dependent Replication Driver from Associated Entity [{}] which has none. This is likely "
+            "due to faulty logic."), Get_AssociatedEntity())
+    { return; }
+
+    --_NumSyncedDependentReplicationDrivers;
+}
+
+auto
+    UCk_Fragment_EntityReplicationDriver_Rep::
+    DoAdd_SyncedDependentOf(
+        UCk_Fragment_EntityReplicationDriver_Rep* InOwningEntityDriver)
+    -> void
+{
+    InOwningEntityDriver->DoAdd_SyncedDependentReplicationDriver();
+    _SyncedOwningEntityDriver = InOwningEntityDriver;
+}
+
+auto
+    UCk_Fragment_EntityReplicationDriver_Rep::
+    DoCommit_Construction(
+        ECk_EntityReplicationDriver_DataKind InDataKind)
+    -> void
+{
+    _ReplicationDataKind = InDataKind;
+    _AssociatedEntity.Add<ck::FFragment_EntityReplicationDriver_Replica>(TWeakObjectPtr<ThisType>{this});
+}
+
+auto
+    UCk_Fragment_EntityReplicationDriver_Rep::
+    DoReport_UnresolvedOwningEntityDriver()
+    -> void
+{
+    // A plain wait: Iris notifies again when an unresolved object reference maps, and an owner hosted on another
+    // root may arrive after this driver.
+    if (_HasReportedUnresolvedOwningEntityDriver)
+    { return; }
+
+    _HasReportedUnresolvedOwningEntityDriver = true;
+    ck::ecs::Log(TEXT("Replicated driver [{}] is waiting for its OwningEntityDriver to resolve before constructing "
+        "Entity [{}]."), this, _AssociatedEntity);
+}
+
+auto
+    UCk_Fragment_EntityReplicationDriver_Rep::
+    DoGet_IsDependentOfOwningEntityDriver() const
+    -> bool
+{
+    switch (_ReplicationDataKind)
+    {
+        case ECk_EntityReplicationDriver_DataKind::Entity:
+        { return _ReplicationData.Get_IsOwningEntityDriverDependentOnThis(); }
+        case ECk_EntityReplicationDriver_DataKind::EntityScript:
+        { return _ReplicationData_EntityScript.Get_IsOwningEntityDriverDependentOnThis(); }
+        case ECk_EntityReplicationDriver_DataKind::None:
+        case ECk_EntityReplicationDriver_DataKind::Ability:
+        { return false; }
+    }
+
+    return false;
+}
+
+auto
+    UCk_Fragment_EntityReplicationDriver_Rep::
+    DoReconcile_SyncedOwningEntityDriver()
+    -> void
+{
+    if (_SyncedOwningEntityDriver.IsExplicitlyNull())
+    { return; }
+
+    auto* SyncedOwningEntityDriver = _SyncedOwningEntityDriver.Get();
+
+    if (ck::IsValid(SyncedOwningEntityDriver)
+        && DoGet_IsDependentOfOwningEntityDriver()
+        && Get_OwningEntityDriver() == SyncedOwningEntityDriver)
+    { return; }
+
+    // The server lowered that owner's expected count when it published the change, coalesced or not
+    if (ck::IsValid(SyncedOwningEntityDriver))
+    { SyncedOwningEntityDriver->DoRemove_SyncedDependentReplicationDriver(); }
+
+    _SyncedOwningEntityDriver.Reset();
+}
+
+auto
+    UCk_Fragment_EntityReplicationDriver_Rep::
+    DoReparent_ToOwningEntityDriver()
+    -> void
+{
+    DoReconcile_SyncedOwningEntityDriver();
+
+    auto* OwningEntityDriver = Get_OwningEntityDriver();
+
+    // Null on a client is unresolved, never the world: the entity keeps its current owner
+    if (ck::Is_NOT_Valid(OwningEntityDriver))
+    { return; }
+
+    if (ck::Is_NOT_Valid(_AssociatedEntity))
+    { return; }
+
+    CK_ENSURE_IF_NOT(_AssociatedEntity.Has<ck::FFragment_LifetimeOwner>(),
+        TEXT("Replicated Entity [{}] was constructed by its ReplicationDriver but has NO LifetimeOwner. Unable to "
+            "follow the published owner.{}"), _AssociatedEntity, ck::Context(this))
+    { return; }
+
+    const auto NewLifetimeOwner = OwningEntityDriver == this
+        ? UCk_Utils_EntityLifetime_UE::Get_TransientEntity(_AssociatedEntity)
+        : OwningEntityDriver->Get_AssociatedEntity();
+
+    if (ck::Is_NOT_Valid(NewLifetimeOwner) || NewLifetimeOwner.Has<ck::FTag_DestroyEntity_Initiate>())
+    { return; }
+
+    if (NewLifetimeOwner == UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(_AssociatedEntity, ECk_PendingKill_Policy::IncludePendingKill))
+    { return; }
+
+    UCk_Utils_EntityLifetime_UE::Request_TransferLifetimeOwner(_AssociatedEntity, NewLifetimeOwner);
+}
+
+auto
+    UCk_Fragment_EntityReplicationDriver_Rep::
+    Get_OwningEntityDriver() const
+    -> UCk_Fragment_EntityReplicationDriver_Rep*
+{
+    switch (_ReplicationDataKind)
+    {
+        case ECk_EntityReplicationDriver_DataKind::None:
+        { return {}; }
+        case ECk_EntityReplicationDriver_DataKind::Entity:
+        { return _ReplicationData.Get_OwningEntityDriver().Get(); }
+        case ECk_EntityReplicationDriver_DataKind::EntityScript:
+        { return _ReplicationData_EntityScript.Get_OwningEntityDriver().Get(); }
+        case ECk_EntityReplicationDriver_DataKind::Ability:
+        { return _ReplicationData_Ability.Get_OwningEntityDriver().Get(); }
+    }
+
+    return {};
+}
+
+auto
+    UCk_Fragment_EntityReplicationDriver_Rep::
+    Request_PublishOwningEntityDriver(
+        UCk_Fragment_EntityReplicationDriver_Rep* InOwningEntityDriver)
+    -> void
+{
+    if (_ReplicationDataKind == ECk_EntityReplicationDriver_DataKind::None)
+    { return; }
+
+    CK_ENSURE_IF_NOT(ck::IsValid(InOwningEntityDriver),
+        TEXT("Cannot publish an invalid OwningEntityDriver for Associated Entity [{}].{}"), Get_AssociatedEntity(), ck::Context(this))
+    { return; }
+
+    auto* PreviousOwningEntityDriver = Get_OwningEntityDriver();
+
+    if (PreviousOwningEntityDriver == InOwningEntityDriver)
+    { return; }
+
+    // Counted by the owner's establishment walk only once that owner published; by the EntityScript bump always
+    auto IsCountedByPreviousOwningEntityDriver = false;
+
+    switch (_ReplicationDataKind)
+    {
+        case ECk_EntityReplicationDriver_DataKind::None:
+        { return; }
+        case ECk_EntityReplicationDriver_DataKind::Entity:
+        {
+            IsCountedByPreviousOwningEntityDriver = _ReplicationData.Get_IsOwningEntityDriverDependentOnThis()
+                && ck::IsValid(PreviousOwningEntityDriver)
+                && PreviousOwningEntityDriver->_ReplicationDataKind != ECk_EntityReplicationDriver_DataKind::None;
+            _ReplicationData.Set_OwningEntityDriver(InOwningEntityDriver).Set_IsOwningEntityDriverDependentOnThis(false);
+            MARK_PROPERTY_DIRTY_FROM_NAME(ThisType, _ReplicationData, this);
+            break;
+        }
+        case ECk_EntityReplicationDriver_DataKind::EntityScript:
+        {
+            IsCountedByPreviousOwningEntityDriver = _ReplicationData_EntityScript.Get_IsOwningEntityDriverDependentOnThis();
+            _ReplicationData_EntityScript.Set_OwningEntityDriver(InOwningEntityDriver).Set_IsOwningEntityDriverDependentOnThis(false);
+            MARK_PROPERTY_DIRTY_FROM_NAME(ThisType, _ReplicationData_EntityScript, this);
+            break;
+        }
+        case ECk_EntityReplicationDriver_DataKind::Ability:
+        {
+            _ReplicationData_Ability.Set_OwningEntityDriver(InOwningEntityDriver);
+            MARK_PROPERTY_DIRTY_FROM_NAME(ThisType, _ReplicationData_Ability, this);
+            break;
+        }
+    }
+
+    if (NOT IsCountedByPreviousOwningEntityDriver)
+    { return; }
+
+    if (ck::Is_NOT_Valid(PreviousOwningEntityDriver))
+    { return; }
+
+    const auto PreviousExpected = PreviousOwningEntityDriver->Get_ExpectedNumberOfDependentReplicationDrivers();
+
+    CK_ENSURE_IF_NOT(PreviousExpected > 0,
+        TEXT("Associated Entity [{}] was counted by [{}], whose expected number of Dependent Replication Drivers is "
+            "already [{}]. This is likely due to faulty logic."),
+        Get_AssociatedEntity(), PreviousOwningEntityDriver->Get_AssociatedEntity(), PreviousExpected)
+    { return; }
+
+    PreviousOwningEntityDriver->Set_ExpectedNumberOfDependentReplicationDrivers(PreviousExpected - 1);
+}
+
+auto
+    UCk_Fragment_EntityReplicationDriver_Rep::
     Set_ReplicationData(
         const FCk_EntityReplicationDriver_ReplicationData& InReplicationData)
     -> void
 {
     _ReplicationData = InReplicationData;
+    _ReplicationDataKind = ECk_EntityReplicationDriver_DataKind::Entity;
     MARK_PROPERTY_DIRTY_FROM_NAME(ThisType, _ReplicationData, this);
 }
 
@@ -439,6 +692,7 @@ auto
     -> void
 {
     _ReplicationData_EntityScript = InReplicationData;
+    _ReplicationDataKind = ECk_EntityReplicationDriver_DataKind::EntityScript;
     MARK_PROPERTY_DIRTY_FROM_NAME(ThisType, _ReplicationData_EntityScript, this);
 }
 
@@ -449,6 +703,7 @@ auto
     -> void
 {
     _ReplicationData_Ability = InReplicationData;
+    _ReplicationDataKind = ECk_EntityReplicationDriver_DataKind::Ability;
     MARK_PROPERTY_DIRTY_FROM_NAME(ThisType, _ReplicationData_Ability, this);
 }
 

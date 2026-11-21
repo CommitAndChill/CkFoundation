@@ -88,6 +88,16 @@ namespace ck
 
 // --------------------------------------------------------------------------------------------------------------------
 
+enum class ECk_EntityReplicationDriver_DataKind : uint8
+{
+    None,
+    Entity,
+    EntityScript,
+    Ability
+};
+
+// --------------------------------------------------------------------------------------------------------------------
+
 // EntityScript replication pipeline (server spawn -> driver -> client OnRep -> FinishConstruction):
 // see the "EntityScript replication pipeline" section of CkEcs/CLAUDE.md.
 
@@ -162,9 +172,50 @@ private:
     auto
     DoAdd_SyncedDependentReplicationDriver() -> void;
 
+    auto
+    DoRemove_SyncedDependentReplicationDriver() -> void;
+
+    auto
+    DoAdd_SyncedDependentOf(
+        UCk_Fragment_EntityReplicationDriver_Rep* InOwningEntityDriver) -> void;
+
+    auto
+    DoCommit_Construction(
+        ECk_EntityReplicationDriver_DataKind InDataKind) -> void;
+
+    auto
+    DoReparent_ToOwningEntityDriver() -> void;
+
+    auto
+    DoReconcile_SyncedOwningEntityDriver() -> void;
+
+    auto
+    DoReport_UnresolvedOwningEntityDriver() -> void;
+
+    auto
+    DoGet_IsDependentOfOwningEntityDriver() const -> bool;
+
 private:
     UPROPERTY(Transient)
     int32 _NumSyncedDependentReplicationDrivers = 0;
+
+    // Host: the variant Set_ReplicationData* published. Client: the variant the entity was constructed from;
+    // None until then.
+    ECk_EntityReplicationDriver_DataKind _ReplicationDataKind = ECk_EntityReplicationDriver_DataKind::None;
+
+    UPROPERTY(Transient)
+    TWeakObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep> _SyncedOwningEntityDriver;
+
+    bool _HasReportedUnresolvedOwningEntityDriver = false;
+
+public:
+    // This driver itself means the world; null means unpublished or, on a client, not resolved yet
+    auto
+    Get_OwningEntityDriver() const -> UCk_Fragment_EntityReplicationDriver_Rep*;
+
+    auto
+    Request_PublishOwningEntityDriver(
+        UCk_Fragment_EntityReplicationDriver_Rep* InOwningEntityDriver) -> void;
 
 public:
     auto
@@ -246,6 +297,27 @@ auto
     MARK_PROPERTY_DIRTY_FROM_NAME(ThisType, _Fragments, this);
 
     return _Fragments._Items.Num() - 1;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace ck
+{
+    // On a client, the entity this driver constructed: the driver's destroy is what destroys it, which is why a
+    // client's lifetime cascade leaves it alive
+    struct FFragment_EntityReplicationDriver_Replica
+    {
+    public:
+        CK_GENERATED_BODY(FFragment_EntityReplicationDriver_Replica);
+
+    private:
+        TWeakObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep> _Driver;
+
+    public:
+        CK_PROPERTY_GET(_Driver);
+
+        CK_DEFINE_CONSTRUCTORS(FFragment_EntityReplicationDriver_Replica, _Driver);
+    };
 }
 
 // --------------------------------------------------------------------------------------------------------------------

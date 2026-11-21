@@ -5,9 +5,40 @@
 #include "CkCore/Algorithms/CkAlgorithms.h"
 
 #include "CkEcs/CkEcsLog.h"
+#include "CkEcs/EntityLifetime/CkEntityLifetime_Utils.h"
 #include "CkEcs/Fragments/ReplicatedObjects/CkReplicatedObjects_Fragment.h"
 #include "CkEcs/Fragments/ReplicatedObjects/CkReplicatedObjects_Utils.h"
+#include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_Utils.h"
 #include "CkEcs/Scheduler/CkProcessorRegistration.h"
+
+// --------------------------------------------------------------------------------------------------------------------
+
+namespace ck_entity_lifetime_processor
+{
+    // Moved while the owner is still valid: past Teardown, every default-policy walk of the dependent's chain
+    // ensures. A dependent already in EndPlay reaches Teardown in this same pass and is destroyed with the owner.
+    auto
+        DoRehome_SparedDependents(
+            const FCk_Handle& InOwner)
+        -> void
+    {
+        for (auto Dependent : InOwner.Get<ck::FFragment_EntityLifetime_SparedDependents>().Get_Dependents())
+        {
+            if (ck::Is_NOT_Valid(Dependent))
+            { continue; }
+
+            if (Dependent.Has<ck::FTag_DestroyEntity_EndPlay>())
+            { continue; }
+
+            if (NOT Dependent.Has<ck::FFragment_LifetimeOwner>() ||
+                Dependent.Get<ck::FFragment_LifetimeOwner>().Get_Entity() != InOwner)
+            { continue; }
+
+            UCk_Utils_EntityLifetime_UE::Request_TransferLifetimeOwner(Dependent,
+                ck::entity_replication_driver::Get_LifetimeOwnerForOrphanedReplica(Dependent));
+        }
+    }
+}
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -56,6 +87,10 @@ namespace ck
             -> void
     {
         ecs::VeryVerbose(TEXT("[DESTRUCTION] Entity [{}] set to 'Teardown'"), InHandle);
+
+        if (InHandle.Has<FFragment_EntityLifetime_SparedDependents>())
+        { ck_entity_lifetime_processor::DoRehome_SparedDependents(InHandle); }
+
         InHandle.Add<FTag_DestroyEntity_Teardown>();
     }
 

@@ -12,6 +12,7 @@
 #include "CkEcs/EntityScript/CkEntityScript_Fragment.h" // FFragment_EntityScript + FTag_EntityScript_HasBegunPlay (ConstructSpawned stamp)
 #include "CkEcs/Handle/CkHandle_Utils.h"
 #include "CkEcs/Net/CkNet_Fragment.h"
+#include "CkEcs/Net/EntityReplicationDriver/CkEntityReplicationDriver_Utils.h"
 #include "CkEcs/Persistence/CkPersistenceHydration.h" // entries queued on a dying entity are a counted loss
 #include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
 #include "CkEcs/Tag/CkTag_EditorOnly.h"
@@ -103,6 +104,27 @@ namespace ck_entity_lifetime_utils
         // lifetime — and because the hydration dispatcher is its second caller (an apply that destroys its own
         // entity reaches it re-entrantly, and it defers until the dispatch is off the stack).
         ck::DoAbandon_PendingHydration(InHandle);
+    }
+
+    // The server destroys every replicated entity through its own driver; cascading into one would kill an entity
+    // the server moved under another owner before this owner's destroy arrived
+    auto
+        DoExtract_ReplicasWithLiveDriver(
+            TArray<FCk_Handle>& InOutDependents)
+        -> TArray<FCk_Handle>
+    {
+        auto Replicas = TArray<FCk_Handle>{};
+
+        InOutDependents.RemoveAll([&](const FCk_Handle& InDependent)
+        {
+            if (NOT ck::entity_replication_driver::Get_IsReplicaWithLiveDriver(InDependent))
+            { return false; }
+
+            Replicas.Emplace(InDependent);
+            return true;
+        });
+
+        return Replicas;
     }
 }
 
@@ -206,6 +228,11 @@ auto
     auto LifetimeDependents = Get_LifetimeDependents(InHandle);
     {
         QUICK_SCOPE_CYCLE_COUNTER(EntityLifetime_RequestDestroyDependents)
+
+        if (const auto SparedDependents = ck_entity_lifetime_utils::DoExtract_ReplicasWithLiveDriver(LifetimeDependents);
+            NOT SparedDependents.IsEmpty())
+        { InHandle.AddOrGet<ck::FFragment_EntityLifetime_SparedDependents>()._Dependents.Append(SparedDependents); }
+
         Request_DestroyEntities(LifetimeDependents);
     }
 
@@ -813,6 +840,8 @@ auto
 
     if (InNewLifetimeOwner.Has_Any<ck::FTag_DestroyEntity_Teardown>())
     { InEntity.AddOrGet<ck::FTag_DestroyEntity_Teardown>(); }
+
+    UCk_Utils_EntityReplicationDriver_UE::Request_PublishLifetimeOwner(InEntity, CurrentLifetimeOwnerEntity, InNewLifetimeOwner);
 }
 
 // --------------------------------------------------------------------------------------------------------------------

@@ -486,18 +486,18 @@ namespace ck
             return;
         }
 
-        auto ReplicatedOwner = InRequest.Get_Owner();
-        const auto IsSelfOwned = ReplicatedOwner == InHandle;
-
-        ck::ecs::VeryVerbose(TEXT("[REP_DEBUG] ReplicateProcessor — Handle=[{}] Owner=[{}] IsSelfOwned=[{}]"),
-            InHandle, ReplicatedOwner, IsSelfOwned);
-
         // Defer (retry next frame, KEEP the dirty marker) until the ReplicationDriver exists.
         if (NOT InHandle.Has<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>())
         {
             ck::ecs::VeryVerbose(TEXT("[REP_DEBUG] ReplicateProcessor — Handle [{}] does NOT have ReplicationDriver yet, deferring"), InHandle);
             return;
         }
+
+        auto ReplicatedOwner = UCk_Utils_EntityReplicationDriver_UE::Get_PublishedOwningEntity(InHandle);
+        const auto IsSelfOwned = ReplicatedOwner == InHandle;
+
+        ck::ecs::VeryVerbose(TEXT("[REP_DEBUG] ReplicateProcessor — Handle=[{}] Owner=[{}] IsSelfOwned=[{}]"),
+            InHandle, ReplicatedOwner, IsSelfOwned);
 
         // NOTE: Copy on purpose otherwise the data doesn't make its way over correctly
         const auto SpawnParamsCopy = InRequest.Get_SpawnParams();
@@ -534,7 +534,8 @@ namespace ck
 
             if (ck::IsValid(Request.Get_Script()))
             {
-                UCk_Utils_EntityScript_UE::Request_ReplicateEntityScript(InHandle, Request.Get_Owner(), Request.Get_Script().Get(),
+                UCk_Utils_EntityScript_UE::Request_ReplicateEntityScript(InHandle,
+                    UCk_Utils_EntityReplicationDriver_UE::Get_PublishedOwningEntity(InHandle), Request.Get_Script().Get(),
                     Request.Get_SpawnParams(), Request.Get_ContextOwnerOverride());
             }
         }

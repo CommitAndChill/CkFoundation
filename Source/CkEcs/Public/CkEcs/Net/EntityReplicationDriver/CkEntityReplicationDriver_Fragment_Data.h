@@ -141,7 +141,7 @@ private:
 public:
     CK_PROPERTY_GET(_EntityScriptClass);
     CK_PROPERTY_GET(_SpawnParams);
-    CK_PROPERTY_GET(_OwningEntityDriver);
+    CK_PROPERTY(_OwningEntityDriver);
     CK_PROPERTY_GET(_ReplicatedObjectsData);
     CK_PROPERTY(_IsOwningEntityDriverDependentOnThis);
     CK_PROPERTY(_ContextOwnerOverride);

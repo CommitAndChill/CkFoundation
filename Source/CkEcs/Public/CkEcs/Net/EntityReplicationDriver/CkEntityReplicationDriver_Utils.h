@@ -89,6 +89,23 @@ public:
         const TOptional<FCk_Handle>& InReplicatedContextOwnerOverride = {}) -> void;
 
 public:
+    // The driver of the nearest driver-bearing entity on InHandle's current lifetime chain, excluding InHandle: a
+    // driverless owner cannot be named on the wire. InHandle's own driver means the world.
+    static auto
+    Get_PublishedOwningEntityDriver(
+        const FCk_Handle& InHandle) -> UCk_Fragment_EntityReplicationDriver_Rep*;
+
+    static auto
+    Get_PublishedOwningEntity(
+        const FCk_Handle& InHandle) -> FCk_Handle;
+
+    static auto
+    Request_PublishLifetimeOwner(
+        FCk_Handle& InEntity,
+        const FCk_Handle& InPreviousLifetimeOwner,
+        const FCk_Handle& InNewLifetimeOwner) -> void;
+
+public:
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|ReplicationDriver",
               DisplayName="[Ck][ReplicationDriver] Has Feature")
@@ -159,6 +176,14 @@ namespace ck::entity_replication_driver
     Construct_FromInfo(
         const FCk_EntityReplicationDriver_Spec& InInfo,
         FCk_Handle& InEntity) -> void;
+
+    CKECS_API auto
+    Get_IsReplicaWithLiveDriver(
+        const FCk_Handle& InEntity) -> bool;
+
+    CKECS_API auto
+    Get_LifetimeOwnerForOrphanedReplica(
+        const FCk_Handle& InReplica) -> FCk_Handle;
 }
 
 // --------------------------------------------------------------------------------------------------------------------

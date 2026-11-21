@@ -24,6 +24,7 @@
 #endif
 
 #include <Engine/PackageMapClient.h>
+#include <GameFramework/Actor.h>
 #include <Engine/NetDriver.h>
 #include <numeric>
 
@@ -55,6 +56,59 @@ namespace ck_entity_replication_driver_utils
         }
 
         return InConstructionInfos;
+    }
+
+    auto
+        Get_IsInDestruction(
+            const FCk_Handle& InHandle)
+        -> bool
+    {
+        return InHandle.Has_Any<ck::FTag_DestroyEntity_Initiate, ck::FTag_DestroyEntity_Await, ck::FTag_DestroyEntity_Finalize>();
+    }
+
+    auto
+        Get_IsOwningEntityDriverDependentOn(
+            UCk_Fragment_EntityReplicationDriver_Rep* InOwningEntityDriver,
+            UCk_Fragment_EntityReplicationDriver_Rep* InDriver)
+        -> bool
+    {
+        return ck::IsValid(InOwningEntityDriver)
+            && InOwningEntityDriver != InDriver
+            && InOwningEntityDriver->Get_AssociatedEntity().Has<ck::FTag_EntityJustCreated>();
+    }
+
+    auto
+        DoPublish_LifetimeOwner(
+            const FCk_Handle& InEntity,
+            TSet<FCk_Entity>& InOutVisited)
+        -> void
+    {
+        auto AlreadyVisited = false;
+        InOutVisited.Add(InEntity.Get_Entity(), &AlreadyVisited);
+
+        CK_ENSURE_IF_NOT(NOT AlreadyVisited,
+            TEXT("Cyclic LifetimeDependents detected at Entity [{}] while publishing lifetime owners. The lifetime-ownership "
+                "graph must be a tree. Truncating to avoid infinite recursion."), InEntity)
+        { return; }
+
+        if (NOT UCk_Utils_EntityReplicationDriver_UE::Has(InEntity))
+        {
+            for (const auto& Dependent : UCk_Utils_EntityLifetime_UE::Get_LifetimeDependents(InEntity))
+            { DoPublish_LifetimeOwner(Dependent, InOutVisited); }
+
+            return;
+        }
+
+        if (Get_IsInDestruction(InEntity))
+        { return; }
+
+        const auto& Driver = InEntity.Get<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>();
+
+        CK_ENSURE_IF_NOT(ck::IsValid(Driver),
+            TEXT("Entity [{}] has an invalid ReplicationDriver. Unable to publish its lifetime owner."), InEntity)
+        { return; }
+
+        Driver->Request_PublishOwningEntityDriver(UCk_Utils_EntityReplicationDriver_UE::Get_PublishedOwningEntityDriver(InEntity));
     }
 }
 
@@ -318,7 +372,9 @@ auto
         {
             const auto& RepDriver = NewEntity.Get<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>();
             const auto& ReplicatedObjects = UCk_Utils_ReplicatedObjects_UE::Get_ReplicatedObjects(NewEntity);
-            const auto& IsOwningEntityDriverDependentOnThis = InHandle.Has<ck::FTag_EntityJustCreated>();
+            auto* OwningEntityDriver = Get_PublishedOwningEntityDriver(NewEntity);
+            const auto IsOwningEntityDriverDependentOnThis =
+                ck_entity_replication_driver_utils::Get_IsOwningEntityDriverDependentOn(OwningEntityDriver, RepDriver);
 
             const auto& DependentRepDriversAddedDuringConstruction = RepDriver->Get_ExpectedNumberOfDependentReplicationDrivers();
 
@@ -331,7 +387,7 @@ auto
                     ConstructionInfos,
                     FCk_EntityReplicationDriver_ReplicateObjects_Data{FCk_ReplicatedObjects::ToWeak(ReplicatedObjects.Get_ReplicatedObjects())}
                 }
-                .Set_OwningEntityDriver(InHandle.Get<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>())
+                .Set_OwningEntityDriver(OwningEntityDriver)
                 .Set_IsOwningEntityDriverDependentOnThis(IsOwningEntityDriverDependentOnThis)
             );
             ck::UUtils_Signal_OnReplicationComplete::Broadcast(NewEntity, ck::MakePayload(NewEntity));
@@ -393,7 +449,9 @@ auto
         {
             const auto& RepDriver = InExistingEntity.Get<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>();
             const auto& ReplicatedObjects = UCk_Utils_ReplicatedObjects_UE::Get_ReplicatedObjects(InExistingEntity);
-            const auto& IsOwningEntityDriverDependentOnThis = InReplicatedOwner.Has<ck::FTag_EntityJustCreated>();
+            auto* OwningEntityDriver = Get_PublishedOwningEntityDriver(InExistingEntity);
+            const auto IsOwningEntityDriverDependentOnThis =
+                ck_entity_replication_driver_utils::Get_IsOwningEntityDriverDependentOn(OwningEntityDriver, RepDriver);
 
             const auto& DependentRepDriversAddedDuringConstruction = RepDriver->Get_ExpectedNumberOfDependentReplicationDrivers();
 
@@ -408,7 +466,7 @@ auto
                     ConstructionInfos,
                     FCk_EntityReplicationDriver_ReplicateObjects_Data{FCk_ReplicatedObjects::ToWeak(ReplicatedObjects.Get_ReplicatedObjects())}
                 }
-                .Set_OwningEntityDriver(InReplicatedOwner.Get<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>())
+                .Set_OwningEntityDriver(OwningEntityDriver)
                 .Set_IsOwningEntityDriverDependentOnThis(IsOwningEntityDriverDependentOnThis)
             );
             ck::UUtils_Signal_OnReplicationComplete::Broadcast(InExistingEntity, ck::MakePayload(InExistingEntity));
@@ -463,7 +521,12 @@ auto
         {
             const auto& RepDriver = InHandleToReplicate.Get<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>();
             const auto& ReplicatedObjects = UCk_Utils_ReplicatedObjects_UE::Get_ReplicatedObjects(InHandleToReplicate);
-            const auto& IsOwningEntityDriverDependentOnThis = InReplicatedOwner.Has<ck::FTag_EntityJustCreated>();
+            auto* OwningEntityDriver = Get_PublishedOwningEntityDriver(InHandleToReplicate);
+
+            // Unlike the other variants, a world-published EntityScript counts itself twice when it is still
+            // JustCreated: Request_ReplicateEntityScript added the matching one to its expected count.
+            const auto IsOwningEntityDriverDependentOnThis = ck::IsValid(OwningEntityDriver)
+                && OwningEntityDriver->Get_AssociatedEntity().Has<ck::FTag_EntityJustCreated>();
 
             const auto& DependentRepDriversAddedDuringConstruction = RepDriver->Get_ExpectedNumberOfDependentReplicationDrivers();
 
@@ -477,7 +540,7 @@ auto
                 {
                     InEntityScript,
                     InSpawnParams,
-                    InReplicatedOwner.Get<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>(),
+                    OwningEntityDriver,
                     FCk_EntityReplicationDriver_ReplicateObjects_Data{FCk_ReplicatedObjects::ToWeak(ReplicatedObjects.Get_ReplicatedObjects())}
                 }
                 .Set_IsOwningEntityDriverDependentOnThis(IsOwningEntityDriverDependentOnThis)
@@ -492,6 +555,72 @@ auto
             CK_INVALID_ENUM(NetMode);
             break;
     }
+}
+
+auto
+    UCk_Utils_EntityReplicationDriver_UE::
+    Get_PublishedOwningEntityDriver(
+        const FCk_Handle& InHandle)
+    -> UCk_Fragment_EntityReplicationDriver_Rep*
+{
+    CK_ENSURE_IF_NOT(Has(InHandle),
+        TEXT("Handle [{}] does NOT have a ReplicationDriver, so there is no owner to publish for it."), InHandle)
+    { return {}; }
+
+    auto* OwnDriver = InHandle.Get<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>().Get();
+
+    if (NOT InHandle.Has<ck::FFragment_LifetimeOwner>())
+    { return OwnDriver; }
+
+    const auto NearestReplicatedAncestor = UCk_Utils_EntityLifetime_UE::Get_EntityInOwnershipChain_If(
+        UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InHandle, ECk_PendingKill_Policy::IncludePendingKill),
+        [](const FCk_Handle& InAncestor) { return UCk_Utils_EntityReplicationDriver_UE::Has(InAncestor); },
+        ECk_PendingKill_Policy::IncludePendingKill);
+
+    if (ck::Is_NOT_Valid(NearestReplicatedAncestor, ck::IsValid_Policy_IncludePendingKill{}))
+    { return OwnDriver; }
+
+    return NearestReplicatedAncestor.Get<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>().Get();
+}
+
+auto
+    UCk_Utils_EntityReplicationDriver_UE::
+    Get_PublishedOwningEntity(
+        const FCk_Handle& InHandle)
+    -> FCk_Handle
+{
+    auto* OwningEntityDriver = Get_PublishedOwningEntityDriver(InHandle);
+
+    CK_ENSURE_IF_NOT(ck::IsValid(OwningEntityDriver),
+        TEXT("Handle [{}] has no valid published OwningEntityDriver."), InHandle)
+    { return {}; }
+
+    if (OwningEntityDriver == InHandle.Get<TObjectPtr<UCk_Fragment_EntityReplicationDriver_Rep>>())
+    { return InHandle; }
+
+    return OwningEntityDriver->Get_AssociatedEntity();
+}
+
+auto
+    UCk_Utils_EntityReplicationDriver_UE::
+    Request_PublishLifetimeOwner(
+        FCk_Handle& InEntity,
+        const FCk_Handle& InPreviousLifetimeOwner,
+        const FCk_Handle& InNewLifetimeOwner)
+    -> void
+{
+    if (ck_entity_replication_driver_utils::Get_IsInDestruction(InEntity) ||
+        ck_entity_replication_driver_utils::Get_IsInDestruction(InNewLifetimeOwner))
+    { return; }
+
+    if (NOT UCk_Utils_Net_UE::Get_IsEntityNetMode_Host(InEntity))
+    { return; }
+
+    ck::ecs::VeryVerbose(TEXT("Publishing the lifetime owner of [{}] after its transfer from [{}] to [{}]"),
+        InEntity, InPreviousLifetimeOwner, InNewLifetimeOwner);
+
+    auto Visited = TSet<FCk_Entity>{};
+    ck_entity_replication_driver_utils::DoPublish_LifetimeOwner(InEntity, Visited);
 }
 
 auto
@@ -701,6 +830,56 @@ auto
     }
 
     InInfo.Get_ConstructionScript()->GetDefaultObject<UCk_Entity_ConstructionScript_PDA>()->Construct(InEntity);
+}
+
+auto
+    ck::entity_replication_driver::
+    Get_IsReplicaWithLiveDriver(
+        const FCk_Handle& InEntity)
+    -> bool
+{
+    if (NOT InEntity.Has<FFragment_EntityReplicationDriver_Replica>())
+    { return false; }
+
+    auto* Driver = InEntity.Get<FFragment_EntityReplicationDriver_Replica>().Get_Driver().Get();
+
+    if (ck::Is_NOT_Valid(Driver) || Driver->Get_AssociatedEntity() != InEntity)
+    { return false; }
+
+    // A client-local EndPlay of the host actor (streaming out, tear-off) leaves its child drivers alive with no
+    // destroy coming, and each replica strong-roots its own driver: sparing one then would leak it.
+    auto* HostActor = Driver->GetTypedOuter<AActor>();
+
+    return ck::IsValid(HostActor) && NOT HostActor->IsActorBeingDestroyed() && HostActor->HasActorBegunPlay();
+}
+
+auto
+    ck::entity_replication_driver::
+    Get_LifetimeOwnerForOrphanedReplica(
+        const FCk_Handle& InReplica)
+    -> FCk_Handle
+{
+    const auto TransientEntity = UCk_Utils_EntityLifetime_UE::Get_TransientEntity(InReplica.Get_RegistryView());
+
+    if (NOT InReplica.Has<FFragment_EntityReplicationDriver_Replica>())
+    { return TransientEntity; }
+
+    auto* Driver = InReplica.Get<FFragment_EntityReplicationDriver_Replica>().Get_Driver().Get();
+
+    if (ck::Is_NOT_Valid(Driver))
+    { return TransientEntity; }
+
+    auto* OwningEntityDriver = Driver->Get_OwningEntityDriver();
+
+    if (ck::Is_NOT_Valid(OwningEntityDriver) || OwningEntityDriver == Driver)
+    { return TransientEntity; }
+
+    const auto& OwningEntity = OwningEntityDriver->Get_AssociatedEntity();
+
+    if (ck::Is_NOT_Valid(OwningEntity) || OwningEntity.Has<FTag_DestroyEntity_Initiate>())
+    { return TransientEntity; }
+
+    return OwningEntity;
 }
 
 // --------------------------------------------------------------------------------------------------------------------

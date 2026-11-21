@@ -83,6 +83,22 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
+    // Client replicas this entity's destroy cascade left to their own drivers; re-homed at this entity's Teardown
+    struct FFragment_EntityLifetime_SparedDependents
+    {
+        CK_GENERATED_BODY(FFragment_EntityLifetime_SparedDependents);
+
+        friend class UCk_Utils_EntityLifetime_UE;
+
+    private:
+        TArray<FCk_Handle> _Dependents;
+
+    public:
+        CK_PROPERTY_GET(_Dependents);
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
     CK_DEFINE_SIGNAL_AND_UTILS_WITH_DELEGATE(CKECS_API, OnEntityBeginDestroy, FCk_Delegate_OnBeginDestroy, FCk_Handle);
 }
 
