@@ -663,6 +663,31 @@ Stamped (via `UCk_Utils_EditorSelectionOwner_UE::Request_SetupEntityWithEditorSe
 
 `FTag_EditorOnlyEntity` is consumed by editor-only processor view filters (the `CK_IF_EDITOR_ONLY_ENTITY` shorthand) and by `TIgnoreInEditor<>` dispatch in `TProcessor::DoTick` (the runtime view EXCLUDES the tag, the editor view REQUIRES it). It is stamped on the editor subsystem's transient entity in `CkEcsEditor_Subsystem.cpp`.
 
+### A client's destroy cascade spares replicas
+
+On a client, `Request_DestroyEntity` does not cascade into a lifetime dependent that is a replica with a live
+driver (`ck::entity_replication_driver::Get_IsReplicaWithLiveDriver`): it carries
+`ck::FFragment_EntityReplicationDriver_Replica` (stamped when its driver commits construction), that driver is
+neither garbage nor unreachable and still names it, and the driver's host actor (`GetTypedOuter<AActor>()`) is
+valid, not being destroyed, and has begun play. The server destroys every replicated entity through its own driver,
+and that destroy (`PreDestroyFromReplication` / `BeginDestroy`) is what destroys the replica, so the cascade must not
+kill an entity the server moved under another owner before this owner's destroy arrived. The host-actor terms exist
+because a client-local `EndPlay` of that actor (streaming out, tear-off) leaves the child drivers alive with no destroy
+coming, and each replica strong-roots its own driver, so a spared replica would leak. A driver whose host actor has
+not begun play yet (its first notify runs before the actor's `PostNetInit` in the same Iris batch) is not spared,
+which is the pre-change behaviour. Every other dependent cascades as before; the replica marker is only stamped by a
+client OnRep, so a host or standalone cascade is unchanged.
+
+Spared dependents are recorded on the dying owner (`ck::FFragment_EntityLifetime_SparedDependents`). In the owner's
+Teardown phase (`FProcessor_EntityLifetime_DestructionPhase_Teardown`, before the Teardown tag is added, while the
+owner is still a valid entity), each recorded dependent that still names it as owner and has not reached EndPlay is
+moved with the ordinary `Request_TransferLifetimeOwner` to its published owner if this client has it and is not
+destroying it, otherwise to the transient entity. A dependent already in EndPlay reaches Teardown in the same pass and
+is destroyed with the owner. So no spared replica is ever left under an owner that is past Teardown.
+
+`Request_TransferLifetimeOwner` publishes the move to clients when it runs on the host: see "Published lifetime owner"
+under Networking.
+
 ### Destroy-entity replicated-object cleanup
 
 `FProcessor_EntityLifetime_DestroyEntity` requires BOTH `FTag_Replicated` and `UCk_Utils_ReplicatedObjects_UE::Has`. The tag alone is not enough: a restored husk (e.g. an orphan SM-graph entity cascade-destroyed when its restored sub-SM is reconciled) can carry the tag without `FFragment_ReplicatedObjects_Params`, and a husk with nothing to clean up would trip the `Get<...>` ensure.
@@ -783,7 +808,36 @@ Replication fragments and the Iris driver live in `Net/`. `CkNet_Fragment_Data.h
 
 Flag: `ECk_Replication` — set per-EntityScript's `_Replication` property. Defaults to `Replicates`.
 
-Use `ECk_Processor_NetModePolicy` (see `CkProcessor_NetModePolicy.h`) to gate a processor to server-only, client-only, or both.
+Gate a processor by net mode with the `NetModeRequirement` trait, read in `Scheduler/CkProcessorTraits.inl.h`:
+`static constexpr auto NetModeRequirement = ECk_ProcessorNetModeRequirement::AuthorityOnly;` (`All`, `CosmeticOnly`,
+`AuthorityOnly`, `ClientOnly`; the enum is in `Processor/CkProcessor_NetModePolicy.h`).
+
+### Published lifetime owner
+
+The wire can only name an entity that has a replication driver, so the owner a client builds a replicated entity
+under is `UCk_Utils_EntityReplicationDriver_UE::Get_PublishedOwningEntityDriver`: the driver of the nearest
+driver-bearing entity on its CURRENT lifetime chain, excluding itself, or its own driver for "world" (the client uses
+the transient entity). All three establishment paths (`Request_TryBuildAndReplicate`, `Request_TryReplicateExisting`,
+`Request_Replicate`) write it, and the EntityScript replicate processor resolves it when it writes, not when the
+entity was spawned. A client's lifetime owner is therefore the nearest REPLICATED ancestor and can differ from the
+server's exact owner (an item under the player, not under the driverless inventory entity); code that needs the exact
+parent on a client must read the feature's own replicated data.
+
+On the host, `Request_TransferLifetimeOwner` ends by calling `Request_PublishLifetimeOwner` (skipped when the entity or
+the new owner is being destroyed). It rewrites `_OwningEntityDriver` on the moved entity's driver, or on each first
+driver-bearing descendant when it has none, and when `_IsOwningEntityDriverDependentOnThis` was set it clears it and
+lowers the previous owner's expected dependent count only where the child was counted there: always for an
+EntityScript (the bump taken while that owner was JustCreated), and for a Generic child only once the previous owner
+had published its own data (its establishment walk). A client OnRep after construction (the driver's explicit
+constructed state, `_ReplicationDataKind`) first reconciles its synced count, decrementing the owner it incremented
+if the flag is now clear or the published owner changed (including an A -> B -> A change coalesced on the wire), and
+then follows the published owner with `Request_TransferLifetimeOwner`; a null or not-yet-present owner is
+unresolved, never the world, and the entity keeps its owner. If the lowered expected count reaches a client before
+the child's rewrite, the previous owner's replication-complete can fire one dependent early.
+
+A null owner at a driver's FIRST notify is an ordinary arrival order (the owner can be hosted on another root): the
+driver waits without constructing and relies on Iris notifying again when the reference maps. The first wait logs
+once at `Log`; there is no stall watchdog for it yet.
 
 ### Replicated fragment containers — deferred dispatch
 
