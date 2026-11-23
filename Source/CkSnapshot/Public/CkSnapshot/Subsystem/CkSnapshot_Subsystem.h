@@ -69,6 +69,11 @@ public:
         FName InSlotName,
         const FCk_Delegate_OnLoadComplete& InDelegate);
 
+    // Start the saved map as a listen server even if the current world has no clients.
+    UFUNCTION(BlueprintCallable, Category = "Ck|Snapshot", meta = (AutoCreateRefTerm = "InDelegate"))
+    void Request_LoadAsListenServer(FName InSlotName, const FString& InTransportOptions,
+        const FCk_Delegate_OnLoadComplete& InDelegate);
+
     // As Request_Save, plus a menu-facing sidecar (title / screenshot / game fields) written to the
     // same slot. Prefer this from any UI that lists slots — a plain Request_Save leaves the slot
     // with no sidecar, and it will list as untitled and thumbnail-less.
@@ -355,6 +360,8 @@ public:
 
 private:
     auto DoTryPublish_SaveKey(FGuid InKey, FCk_Handle InHandle, bool InDiagnoseCollision) -> bool;
+    void DoRequest_Load(FName InSlotName, const FString& InListenOptions,
+        const FCk_Delegate_OnLoadComplete& InDelegate);
     auto DoGet_SnapshotSource() const -> FCk_Handle;
 
     // Shared body of Request_Save / Request_Save_WithMetadata. InMetadata is written to the sidecar
@@ -648,6 +655,7 @@ private:
 
     TWeakObjectPtr<UWorld> _PreTravelWorld;  // captured before OpenLevel; AwaitingWorld waits for a different world
     FString _TravelMapName;                  // resolved from the pre-travel world (RemovePIEPrefix)
+    FString _LoadListenOptions;
 
     // The world the game-time freeze is applied to RIGHT NOW (unset == none), and that world's dilation before
     // it. Per world rather than per load, because the freeze does not survive travel — see DoApply_TimeFreeze.

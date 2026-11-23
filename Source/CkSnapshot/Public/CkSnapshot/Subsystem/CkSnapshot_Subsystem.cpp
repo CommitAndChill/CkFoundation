@@ -76,6 +76,14 @@ namespace ck_snapshot_subsystem
     constexpr auto UserIndex = 0;
     constexpr auto k_NoEntity = 0xFFFFFFFFu; // mirrors ck::snapshot's k_NoEntity sentinel
 
+    auto BuildLoadTravelOptions(const FString& InListenOptions, bool InServerTravel, int32 InEpoch) -> FString
+    {
+        const auto EpochOption = FString::Printf(TEXT("CkLoad=%d"), InEpoch);
+        if (NOT InListenOptions.IsEmpty())
+        { return InListenOptions + TEXT("?") + EpochOption; }
+        return InServerTravel ? TEXT("listen?") + EpochOption : EpochOption;
+    }
+
     // The post-condition the freeze has to actually achieve, not the value it asks for. SetTimeDilation clamps
     // its argument into [MinGlobalTimeDilation, MaxGlobalTimeDilation], so asking for the floor always
     // "succeeds" and returns whatever that floor happens to be — and the floor is EditAnywhere per level, saved
@@ -571,6 +579,28 @@ void
         FName InSlotName,
         const FCk_Delegate_OnLoadComplete& InDelegate)
 {
+    DoRequest_Load(InSlotName, FString{}, InDelegate);
+}
+
+void
+    UCk_Snapshot_Subsystem_UE::
+    Request_LoadAsListenServer(
+        FName InSlotName,
+        const FString& InTransportOptions,
+        const FCk_Delegate_OnLoadComplete& InDelegate)
+{
+    const FString ListenOptions = InTransportOptions.IsEmpty()
+        ? FString{TEXT("listen")} : TEXT("listen?") + InTransportOptions;
+    DoRequest_Load(InSlotName, ListenOptions, InDelegate);
+}
+
+void
+    UCk_Snapshot_Subsystem_UE::
+    DoRequest_Load(
+        FName InSlotName,
+        const FString& InListenOptions,
+        const FCk_Delegate_OnLoadComplete& InDelegate)
+{
     const auto World = GetWorld();
 
     // InHeader is the header READ FOR THIS SLOT, or null when the failure happened before one could be read.
@@ -669,6 +699,7 @@ void
     _IsReadyToResume     = false;
     _LoadPhase           = ELoadPhase::TearingDown;
     _PendingLoadDelegate = InDelegate;
+    _LoadListenOptions   = InListenOptions;
     _LoadFrameCount      = 0;
     _PreTravelWorld      = nullptr;
     _TravelMapName.Reset();
@@ -859,18 +890,18 @@ auto
     // load owns it — on this instance and, through ProcessClientTravel's round-trip of the same FURL, on every
     // client that follows. It is CkLoad and never "load": UWorld::SetupLevel skips assigning URL when the
     // incoming one carries an option by that exact name, which would silently make it unreadable at begin play.
-    const auto LoadEpochOption = FString::Printf(TEXT("CkLoad=%d"), _LoadEpoch);
-
     // Seamless ServerTravel is connection-preserving but heavier — with no remote clients, OpenLevel is correct.
     auto* NetDriver = World->GetNetDriver();
     const auto HasConnectedClients =
         ck::IsValid(NetDriver) && NetDriver->ClientConnections.Num() > 0;
 
-    if (World->GetNetMode() == ENetMode::NM_Standalone || NOT HasConnectedClients)
+    const bool UseServerTravel = World->GetNetMode() != ENetMode::NM_Standalone && HasConnectedClients;
+    const auto TravelOptions = ck_snapshot_subsystem::BuildLoadTravelOptions(_LoadListenOptions, UseServerTravel, _LoadEpoch);
+    if (NOT UseServerTravel)
     {
         ck::snapshot::Display(TEXT("DIAG: Request_Load travel — OpenLevel (no connected clients) to map [{}] (pre-travel world [{}], epoch [{}])"),
             _TravelMapName, World->GetName(), _LoadEpoch);
-        UGameplayStatics::OpenLevel(World, FName{*_TravelMapName}, AbsoluteTravel, LoadEpochOption);
+        UGameplayStatics::OpenLevel(World, FName{*_TravelMapName}, AbsoluteTravel, TravelOptions);
         return;
     }
 
@@ -888,8 +919,25 @@ auto
     ck::snapshot::Display(TEXT("DIAG: Request_Load travel — seamless ServerTravel (netmode [{}], [{}] client connection(s)) to map [{}] (pre-travel world [{}])"),
         static_cast<int32>(World->GetNetMode()), NetDriver->ClientConnections.Num(), _TravelMapName, World->GetName());
 
-    World->ServerTravel(_TravelMapName + TEXT("?listen?") + LoadEpochOption, AbsoluteTravel);
+    World->ServerTravel(_TravelMapName + TEXT("?") + TravelOptions, AbsoluteTravel);
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCkSnapshotHostedTravelOptions, "Ck.Snapshot.HostedLoadTravelOptions",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCkSnapshotHostedTravelOptions::RunTest(const FString&)
+{
+    using ck_snapshot_subsystem::BuildLoadTravelOptions;
+    TestEqual(TEXT("Solo load"), BuildLoadTravelOptions({}, false, 7), FString{TEXT("CkLoad=7")});
+    TestEqual(TEXT("Existing connected clients"), BuildLoadTravelOptions({}, true, 8), FString{TEXT("listen?CkLoad=8")});
+    const FString P2P = TEXT("listen?CkOnlineP2P");
+    const FString Expected = TEXT("listen?CkOnlineP2P?CkLoad=9");
+    TestEqual(TEXT("Lobby host with no Unreal clients"), BuildLoadTravelOptions(P2P, false, 9), Expected);
+    TestEqual(TEXT("Lobby host with connected clients"), BuildLoadTravelOptions(P2P, true, 9), Expected);
+    return true;
+}
+#endif
 
 // --------------------------------------------------------------------------------------------------------------------
 
