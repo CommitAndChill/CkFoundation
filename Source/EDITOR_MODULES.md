@@ -23,6 +23,11 @@ Shared icon/color/font style for all CkFoundation editor UIs. Reference the styl
 
 The main CkFoundation editor toolbar (registered with UE's menu extension system). Buttons for: run code generator, open data viewer, trigger Insights capture. Extend by adding a toolbar entry via `CkEditorToolbar`'s extension point — don't add Ck-specific tools to UE's main menu directly.
 
+### `CkEditorTheme`
+**Depends on:** `CkCore`, `CkLog`, `CkSettings`. **Type:** `Editor`, `PostEngineInit`.
+
+The Ck Light editor theme and its Mode setting (Manual / Dark / Light / Follow Windows), under Editor Preferences > Ck > Editor Theme. Manual, the default, leaves the theme to Appearance. Stages `Resources/Themes/Ck Light.json` into the user theme folder (regenerate it with `Tools/CkEditorTheme/make_theme.py`) and, while a light theme is active, patches engine style sets, icons and graph colours that only read well on dark. Light graph nodes need the engine ink keys (`Graph.Node.PinLabelColor`); without them nodes stay dark. `Ck.EditorTheme.Capture` scripts window screenshots for visual checks.
+
 ---
 
 ## Editor modules paired with runtime modules
