@@ -62,6 +62,7 @@ namespace ck::angelscriptgenerator::self_heal
         // for an added field. Added on the ATTEMPT, so a failed quarantine cannot loop either
         // (mid-session has no MaxCycles cap).
         TSet<FString> sQuarantinedEspCanonicals;
+        TSet<FString> sDiscardedEspRecoveryStubs;
 
         // Cold-start deferral: mutations applied inside OnReloadHadErrors land
         // BEFORE Hazelight's hot-reload thread baselines .as mtimes, so no later
@@ -149,6 +150,39 @@ namespace ck::angelscriptgenerator::self_heal
             auto Normalized = InFilePath;
             FPaths::NormalizeFilename(Normalized);
             return Normalized.Contains(TEXT("/Script/Generated/"));
+        }
+
+        auto Is_EntitySpawnParamsStubPath(
+            const FString& InFilePath) -> bool
+        {
+            const auto FileName = FPaths::GetCleanFilename(InFilePath);
+            if (NOT FileName.StartsWith(TEXT("_StubRecovery_")) || NOT FileName.EndsWith(TEXT("_EntitySpawnParams.as")))
+            { return false; }
+
+            auto Normalized = InFilePath;
+            FPaths::NormalizeFilename(Normalized);
+            return Normalized.Contains(TEXT("/Script/Generated/"));
+        }
+
+        // Only a stub kept beside a PRESENT canonical can have outlived its source. With the canonical absent
+        // the stub is the whole bootstrap, and one cascade error in it must not throw that away. A stub's
+        // fields may also name a dynamic handle the JSON registry lacks; that heals through
+        // KickGenerator_DynamicHandle, and the stub itself is sound. Read-only.
+        auto Is_BrokenEspRecoveryStubError(
+            const FCk_AsParsedError& InError) -> bool
+        {
+            if (NOT Is_EntitySpawnParamsStubPath(InError.FilePath))
+            { return false; }
+
+            const auto NamesMissingDynamicHandle =
+                   InError.Kind == ECk_AsParsedError_Kind::IdentifierNotADataType
+                && InError.MissingIdentifier.StartsWith(TEXT("FCk_Handle_"));
+            if (NamesMissingDynamicHandle)
+            { return false; }
+
+            const auto CanonicalPath = FPaths::GetPath(InError.FilePath) /
+                FPaths::GetCleanFilename(InError.FilePath).Replace(TEXT("_StubRecovery_"), TEXT(""));
+            return IFileManager::Get().FileExists(*CanonicalPath);
         }
 
         // ---- DynamicHandle strategy ------------------------------------------------
@@ -388,6 +422,48 @@ namespace ck::angelscriptgenerator::self_heal
             return false;
         }
 
+        // One attempt per stub per phase: if this compile's own synthesis rebuilds a stub that fails the same
+        // way, deleting it again would only loop.
+        auto Apply_DiscardStaleEspRecoveryStub(
+            const FCk_AsParsedError& InError) -> bool
+        {
+            const auto& StubPath = InError.FilePath;
+
+            if (NOT Is_EntitySpawnParamsStubPath(StubPath))
+            {
+                Warning(TEXT("[SelfHeal] Refusing discard - '{}' is not an EntitySpawnParams recovery stub."), StubPath);
+                return false;
+            }
+
+            if (sDiscardedEspRecoveryStubs.Contains(StubPath))
+            {
+                Log(TEXT("[SelfHeal] Recovery stub '{}' already discarded this session - not retrying."), StubPath);
+                return false;
+            }
+            sDiscardedEspRecoveryStubs.Add(StubPath);
+
+            if (NOT IFileManager::Get().FileExists(*StubPath))
+            {
+                Log(TEXT("[SelfHeal] Recovery stub '{}' is already gone - nothing to discard."), StubPath);
+                return false;
+            }
+
+            auto StubContents = FString{};
+            FFileHelper::LoadFileToString(StubContents, *StubPath);
+
+            if (NOT IFileManager::Get().Delete(*StubPath, /*RequireExists=*/false, /*EvenReadOnly=*/false, /*Quiet=*/true))
+            {
+                Warning(TEXT("[SelfHeal] Failed to discard recovery stub '{}'."), StubPath);
+                return false;
+            }
+            FCkAsStubSynthesizer::Forget_SessionFullShapes(StubContents);
+
+            Log(TEXT("[SelfHeal] Recovery stub '{}' fails to compile ({}:{}) - it outlived the source it was derived ")
+                TEXT("from. Discarded; current source re-synthesizes what is still missing."),
+                StubPath, InError.Line, InError.Column);
+            return true;
+        }
+
         // InCandidates / InScanRoots / InScanCache are hoisted to ONCE PER DRAIN
         // by the drain handlers — they are invariant across a drain. Non-ESP
         // strategies ignore them.
@@ -545,6 +621,11 @@ namespace ck::angelscriptgenerator::self_heal
                     return Apply_QuarantineStaleEspCanonical(InError, InQuarantineCanonical, InScanRoots, InScanCache);
                 }
 
+                case ECk_RecoveryStrategy::Discard_StaleEspRecoveryStub:
+                {
+                    return Apply_DiscardStaleEspRecoveryStub(InError);
+                }
+
                 case ECk_RecoveryStrategy::Author_FixupRequired_AdjacentStringLiteral:
                 {
                     // No auto-fix — modifying user source is out of contract.
@@ -688,6 +769,10 @@ namespace ck::angelscriptgenerator::self_heal
 
                     return FString::Printf(TEXT("quarantine stale canonical %s (%s)"),
                         *InAction.Error.FilePath, *DeadSymbol);
+                }
+                case ECk_RecoveryStrategy::Discard_StaleEspRecoveryStub:
+                {
+                    return FString::Printf(TEXT("discard broken recovery stub %s"), *InAction.Error.FilePath);
                 }
                 case ECk_RecoveryStrategy::Author_FixupRequired_AdjacentStringLiteral:
                 {
@@ -996,9 +1081,10 @@ namespace ck::angelscriptgenerator::self_heal
                         *InAction.Error.MissingIdentifier);
                 }
                 case ECk_RecoveryStrategy::Quarantine_StaleEspCanonical:
+                case ECk_RecoveryStrategy::Discard_StaleEspRecoveryStub:
                 {
-                    // Untracked on purpose: a cap of 3 would permit three deletes
-                    // of one canonical. sQuarantinedEspCanonicals gates it instead.
+                    // Untracked on purpose: a cap of 3 would permit three deletes of one file.
+                    // sQuarantinedEspCanonicals / sDiscardedEspRecoveryStubs gate them instead.
                     return FString{};
                 }
                 case ECk_RecoveryStrategy::Author_FixupRequired_AdjacentStringLiteral:
@@ -1276,6 +1362,18 @@ namespace ck::angelscriptgenerator::self_heal
                 FTickerDelegate::CreateStatic(&OnTicker_DrainActions),
                 sTickerDelaySeconds);
         }
+
+        // A discarded stub is the same sibling file the drain's synthesis appends to; deleting it after
+        // that synthesis would throw the fresh stubs away with it.
+        auto Order_StubDiscardsFirst(
+            TArray<FCk_RecoveryAction>& InOutActions) -> void
+        {
+            InOutActions.StableSort([](const FCk_RecoveryAction& InA, const FCk_RecoveryAction& InB)
+            {
+                return InA.Strategy == ECk_RecoveryStrategy::Discard_StaleEspRecoveryStub
+                    && InB.Strategy != ECk_RecoveryStrategy::Discard_StaleEspRecoveryStub;
+            });
+        }
     }
 
     // ----------------------------------------------------------------------------------------------------------------
@@ -1377,6 +1475,10 @@ namespace ck::angelscriptgenerator::self_heal
         if (OutQuarantineCanonical != nullptr)
         { OutQuarantineCanonical->Reset(); }
 
+        // Located in our own output, before any branch below can act on what the stub's text names.
+        if (ck_angelscript_generator_dispatcher::Is_BrokenEspRecoveryStubError(InError))
+        { return ECk_RecoveryStrategy::Discard_StaleEspRecoveryStub; }
+
         switch (InError.Kind)
         {
             case ECk_AsParsedError_Kind::NoMatchingSignatures:
@@ -1475,8 +1577,20 @@ namespace ck::angelscriptgenerator::self_heal
         auto ProbeScanCache  = FCk_AsSourceScanCache{};
         auto ProbeInputsBuilt = false;
 
+        // DeduplicateRoots keys on what an error names, but a discard is per stub file: every error inside
+        // one stub is one action.
+        auto DiscardedStubs = TSet<FString>{};
+
         for (const auto& Root : InDedupedRoots)
         {
+            if (ck_angelscript_generator_dispatcher::Is_BrokenEspRecoveryStubError(Root))
+            {
+                auto AlreadyPlanned = false;
+                DiscardedStubs.Add(Root.FilePath, &AlreadyPlanned);
+                if (AlreadyPlanned)
+                { continue; }
+            }
+
             if (NOT ProbeInputsBuilt
                 && Root.Kind == ECk_AsParsedError_Kind::NotAMemberOfStruct
                 && NOT FCkAsStubSynthesizer::Derive_ClassNameFromStructName(Root.LookupScope).IsEmpty())
@@ -1491,6 +1605,8 @@ namespace ck::angelscriptgenerator::self_heal
             Action.Error    = Root;
             Plan.Add(MoveTemp(Action));
         }
+
+        ck_angelscript_generator_dispatcher::Order_StubDiscardsFirst(Plan);
         return Plan;
     }
 
@@ -1510,6 +1626,7 @@ namespace ck::angelscriptgenerator::self_heal
         ck_angelscript_generator_dispatcher::sPerSignatureRecoveryCount.Reset();
         ck_angelscript_generator_dispatcher::sBlacklistedSignatures.Reset();
         ck_angelscript_generator_dispatcher::sQuarantinedEspCanonicals.Reset();
+        ck_angelscript_generator_dispatcher::sDiscardedEspRecoveryStubs.Reset();
         // sModalTickHandle left as-is; OnModalLoopTick self-cleans on empty queue.
     }
 
@@ -1571,6 +1688,7 @@ namespace ck::angelscriptgenerator::self_heal
         ck_angelscript_generator_dispatcher::sPerSignatureRecoveryCount.Reset();
         ck_angelscript_generator_dispatcher::sBlacklistedSignatures.Reset();
         ck_angelscript_generator_dispatcher::sQuarantinedEspCanonicals.Reset();
+        ck_angelscript_generator_dispatcher::sDiscardedEspRecoveryStubs.Reset();
     }
 
     // ----------------------------------------------------------------------------------------------------------------
@@ -1613,6 +1731,7 @@ namespace ck::angelscriptgenerator::self_heal
 
         const auto Plan = BuildActionPlan(Roots);
         ck_angelscript_generator_dispatcher::sPendingActions.Append(Plan);
+        ck_angelscript_generator_dispatcher::Order_StubDiscardsFirst(ck_angelscript_generator_dispatcher::sPendingActions);
 
         if (BootstrapMode)
         {

@@ -116,6 +116,9 @@ namespace ck::angelscriptgenerator::self_heal
         // tests simulate the next-process boundary (headless cook retry).
         static auto Reset_SessionState_ForTests() -> void;
 
+        // The dispatcher discarded the sibling holding these full shapes; this process no longer wrote them.
+        static auto Forget_SessionFullShapes(const FString& InDiscardedStubContents) -> void;
+
         static auto Get_MarkerComment    () -> FString;
         static auto Get_StubFileHeader   () -> FString;
         static auto Derive_StubSiblingPath(const FString& InCanonicalFilePath) -> FString;

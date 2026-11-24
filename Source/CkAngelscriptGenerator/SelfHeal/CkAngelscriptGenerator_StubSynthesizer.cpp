@@ -1030,6 +1030,29 @@ namespace ck::angelscriptgenerator::self_heal
     {
         ck_angelscript_generator_stub_synthesizer::sFullShapeClassesThisSession.Reset();
     }
+
+    // ----------------------------------------------------------------------------------------------------------------
+
+    auto
+        FCkAsStubSynthesizer::
+        Forget_SessionFullShapes(
+            const FString& InDiscardedStubContents)
+        -> void
+    {
+        auto Lines = TArray<FString>{};
+        InDiscardedStubContents.ParseIntoArrayLines(Lines, /*InCullEmpty=*/true);
+
+        static const auto FullShapePrefix = FString{TEXT("// End synthesized full-shape stub for ")};
+        for (const auto& RawLine : Lines)
+        {
+            const auto Line = RawLine.TrimStartAndEnd();
+            if (Line.StartsWith(FullShapePrefix))
+            {
+                ck_angelscript_generator_stub_synthesizer::sFullShapeClassesThisSession.Remove(
+                    Line.RightChop(FullShapePrefix.Len()).TrimStartAndEnd());
+            }
+        }
+    }
 }
 
 // --------------------------------------------------------------------------------------------------------------------

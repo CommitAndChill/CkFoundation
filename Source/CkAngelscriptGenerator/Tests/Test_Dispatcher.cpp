@@ -284,10 +284,13 @@ bool FCkTest_Dispatcher_Classify_StaleEspCanonical::RunTest(const FString&)
     // A sibling recovery stub carries the canonical suffix but is our OWN output.
     // Pinned for THIS kind too: the guard lives in the shared path predicate, so
     // moving it into either Classify arm alone must fail here.
-    TestEqual(TEXT("deleted type in _StubRecovery_ sibling -> Unrecognized"),
+    // Its canonical must be absent (a present one turns this into a discard), so the path is one no
+    // checkout on this machine can supply.
+    TestEqual(TEXT("deleted type in _StubRecovery_ sibling (canonical absent) -> Unrecognized"),
         static_cast<int32>(FCkAsRecoveryDispatcher::Classify(
             Make_IdentifierNotADataType(TEXT("EBb_NamedNpc"), TEXT(""),
-                TEXT("D:/Repos/BusterBlock/Script/Generated/_StubRecovery_BusterBlock_EntitySpawnParams.as")))),
+                *(FPaths::ConvertRelativePathToFull(FPaths::ProjectIntermediateDir())
+                    / TEXT("CkDispatcherTest_NoCanonical/Script/Generated/_StubRecovery_BusterBlock_EntitySpawnParams.as"))))),
         static_cast<int32>(ECk_RecoveryStrategy::Unrecognized));
 
     // The location check is a FALLBACK after the handle / SpawnParams checks.
@@ -347,10 +350,11 @@ bool FCkTest_Dispatcher_Classify_StaleEspCanonical_DeletedField::RunTest(const F
 
     // A sibling recovery stub carries the canonical suffix but is our OWN output —
     // quarantining it would derive a doubly-prefixed sibling from a stub.
-    TestEqual(TEXT("deleted field in _StubRecovery_ sibling -> Unrecognized"),
+    TestEqual(TEXT("deleted field in _StubRecovery_ sibling (canonical absent) -> Unrecognized"),
         static_cast<int32>(FCkAsRecoveryDispatcher::Classify(
             Make_NotAMemberOfStruct(TEXT("DeadField"), TEXT("FBb_Fragment_Foo_ParamsData"),
-                TEXT("D:/Repos/BusterBlock/Script/Generated/_StubRecovery_BusterBlock_EntitySpawnParams.as")))),
+                *(FPaths::ConvertRelativePathToFull(FPaths::ProjectIntermediateDir())
+                    / TEXT("CkDispatcherTest_NoCanonical/Script/Generated/_StubRecovery_BusterBlock_EntitySpawnParams.as"))))),
         static_cast<int32>(ECk_RecoveryStrategy::Unrecognized));
 
     return true;
@@ -542,6 +546,170 @@ bool FCkTest_Dispatcher_BuildActionPlan::RunTest(const FString&)
     TestEqual(TEXT("[0] error preserved"), Plan[0].Error.TargetNamespace, FString{TEXT("UBb_Foo_EntityScript")});
     TestEqual(TEXT("[1] error preserved"), Plan[1].Error.MissingIdentifier, FString{TEXT("FCk_Handle_X")});
 
+    return true;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+// A stub kept beside a present canonical can outlive the source it was derived from (another
+// branch's failed run), and then fails to compile by itself. LOCATION decides, ahead of every
+// kind-specific branch, but only while the canonical is on disk: without it the stub is the whole
+// bootstrap. The fixture is a throwaway tree, because that evidence lives on disk.
+// --------------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_Dispatcher_Classify_StaleEspRecoveryStub,
+    "CkAngelscriptGenerator.UnitTests.Dispatcher.Classify_StaleEspRecoveryStub",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCkTest_Dispatcher_Classify_StaleEspRecoveryStub::RunTest(const FString&)
+{
+    const auto TempRoot = FPaths::ConvertRelativePathToFull(
+        FPaths::ProjectIntermediateDir() / TEXT("CkDispatcherTest_RecoveryStub"));
+    IFileManager::Get().DeleteDirectory(*TempRoot, /*RequireExists=*/false, /*Tree=*/true);
+
+    const auto Generated = TempRoot / TEXT("Script/Generated");
+    const auto Canonical = Generated / TEXT("Probe_EntitySpawnParams.as");
+    const auto Stub      = Generated / TEXT("_StubRecovery_Probe_EntitySpawnParams.as");
+
+    const auto Write = [](const FString& InPath)
+    {
+        IFileManager::Get().MakeDirectory(*FPaths::GetPath(InPath), /*Tree=*/true);
+        FFileHelper::SaveStringToFile(FString{TEXT("// probe\n")}, *InPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+    };
+    const auto ClassifyAt = [](const TCHAR* InMissingIdentifier, const FString& InFilePath) -> int32
+    {
+        return static_cast<int32>(FCkAsRecoveryDispatcher::Classify(
+            Make_IdentifierNotADataType(InMissingIdentifier, TEXT(""), *InFilePath)));
+    };
+
+    Write(Stub);
+
+    TestEqual(TEXT("missing type inside an ESP stub, canonical ABSENT -> Unrecognized (the stub is the bootstrap)"),
+        ClassifyAt(TEXT("EBb_OtherBranchOnly"), Stub),
+        static_cast<int32>(ECk_RecoveryStrategy::Unrecognized));
+
+    TestEqual(TEXT("F<X>_SpawnParams inside an ESP stub, canonical ABSENT -> SynthesizeStub as before"),
+        ClassifyAt(TEXT("FBb_Npc_EntityScript_SpawnParams"), Stub),
+        static_cast<int32>(ECk_RecoveryStrategy::SynthesizeStub_EntitySpawnParams));
+
+    Write(Canonical);
+
+    TestEqual(TEXT("missing type inside an ESP stub, canonical present -> Discard"),
+        ClassifyAt(TEXT("EBb_OtherBranchOnly"), Stub),
+        static_cast<int32>(ECk_RecoveryStrategy::Discard_StaleEspRecoveryStub));
+
+    TestEqual(TEXT("missing type inside an ESP stub (backslashes), canonical present -> Discard"),
+        ClassifyAt(TEXT("EBb_OtherBranchOnly"), Stub.Replace(TEXT("/"), TEXT("\\"))),
+        static_cast<int32>(ECk_RecoveryStrategy::Discard_StaleEspRecoveryStub));
+
+    TestEqual(TEXT("F<X>_SpawnParams inside an ESP stub, canonical present -> Discard (decided before the SynthesizeStub branch)"),
+        ClassifyAt(TEXT("FBb_Npc_EntityScript_SpawnParams"), Stub),
+        static_cast<int32>(ECk_RecoveryStrategy::Discard_StaleEspRecoveryStub));
+
+    TestEqual(TEXT("deleted field inside an ESP stub, canonical present -> Discard"),
+        static_cast<int32>(FCkAsRecoveryDispatcher::Classify(
+            Make_NotAMemberOfStruct(TEXT("DeadField"), TEXT("FBb_Fragment_Foo_ParamsData"), *Stub))),
+        static_cast<int32>(ECk_RecoveryStrategy::Discard_StaleEspRecoveryStub));
+
+    // A stub field may name a dynamic handle the JSON registry lacks; the stub is sound.
+    TestEqual(TEXT("missing FCk_Handle_ inside an ESP stub -> still DynamicHandle"),
+        ClassifyAt(TEXT("FCk_Handle_CombatReceiver"), Stub),
+        static_cast<int32>(ECk_RecoveryStrategy::KickGenerator_DynamicHandle));
+
+    TestEqual(TEXT("same missing type inside the canonical -> still Quarantine"),
+        ClassifyAt(TEXT("EBb_OtherBranchOnly"), Canonical),
+        static_cast<int32>(ECk_RecoveryStrategy::Quarantine_StaleEspCanonical));
+
+    TestEqual(TEXT("same missing type in author source -> still Unrecognized"),
+        ClassifyAt(TEXT("EBb_OtherBranchOnly"), TempRoot / TEXT("Script/Npc/Probe_EntityScript.as")),
+        static_cast<int32>(ECk_RecoveryStrategy::Unrecognized));
+
+    const auto AssetsStub = Generated / TEXT("_StubRecovery_ProbeAssets.as");
+    Write(Generated / TEXT("ProbeAssets.as"));
+    Write(AssetsStub);
+    TestEqual(TEXT("same missing type in an AssetRegistry stub, its canonical present -> unchanged (Unrecognized)"),
+        ClassifyAt(TEXT("EBb_OtherBranchOnly"), AssetsStub),
+        static_cast<int32>(ECk_RecoveryStrategy::Unrecognized));
+
+    const auto OutsideGenerated = TempRoot / TEXT("Script/Npc/_StubRecovery_Probe_EntitySpawnParams.as");
+    Write(TempRoot / TEXT("Script/Npc/Probe_EntitySpawnParams.as"));
+    Write(OutsideGenerated);
+    TestEqual(TEXT("ESP-stub-shaped name outside Script/Generated -> Unrecognized"),
+        ClassifyAt(TEXT("EBb_OtherBranchOnly"), OutsideGenerated),
+        static_cast<int32>(ECk_RecoveryStrategy::Unrecognized));
+
+    IFileManager::Get().DeleteDirectory(*TempRoot, /*RequireExists=*/false, /*Tree=*/true);
+    return true;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+// The discard and the drain's synthesis target the same sibling file. Discards go first so the fresh
+// stubs land in a clean file, and every error inside one stub is one discard.
+// --------------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_Dispatcher_BuildActionPlan_StubDiscard,
+    "CkAngelscriptGenerator.UnitTests.Dispatcher.BuildActionPlan_StubDiscard",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCkTest_Dispatcher_BuildActionPlan_StubDiscard::RunTest(const FString&)
+{
+    const auto TempRoot = FPaths::ConvertRelativePathToFull(
+        FPaths::ProjectIntermediateDir() / TEXT("CkDispatcherTest_StubDiscardPlan"));
+    IFileManager::Get().DeleteDirectory(*TempRoot, /*RequireExists=*/false, /*Tree=*/true);
+
+    const auto Write = [](const FString& InPath)
+    {
+        IFileManager::Get().MakeDirectory(*FPaths::GetPath(InPath), /*Tree=*/true);
+        FFileHelper::SaveStringToFile(FString{TEXT("// probe\n")}, *InPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+    };
+
+    const auto StubA       = TempRoot / TEXT("Script/Generated/_StubRecovery_ProbeA_EntitySpawnParams.as");
+    const auto StubB       = TempRoot / TEXT("Plugins/Foo/Script/Generated/_StubRecovery_Foo_EntitySpawnParams.as");
+    const auto StubNoCanon = TempRoot / TEXT("Plugins/Bar/Script/Generated/_StubRecovery_Bar_EntitySpawnParams.as");
+    Write(StubA);
+    Write(TempRoot / TEXT("Script/Generated/ProbeA_EntitySpawnParams.as"));
+    Write(StubB);
+    Write(TempRoot / TEXT("Plugins/Foo/Script/Generated/Foo_EntitySpawnParams.as"));
+    Write(StubNoCanon);
+
+    auto SecondErrorInStubA = Make_IdentifierNotADataType(TEXT("EBb_OtherBranchOnlyB"), TEXT(""), *StubA);
+    SecondErrorInStubA.Line = 77;
+
+    const auto Errors = TArray<FCk_AsParsedError>{
+        Make_NoMatchingSignatures(TEXT("UBb_BrandNew_EntityScript"), TEXT("Params"), TEXT("int32")),
+        Make_IdentifierNotADataType(TEXT("EBb_OtherBranchOnlyA"), TEXT(""), *StubA),
+        Make_IdentifierNotADataType(TEXT("FBb_AlsoNew_EntityScript_SpawnParams")),
+        Make_IdentifierNotADataType(TEXT("EBb_CascadeInBootstrap"), TEXT(""), *StubNoCanon),
+        SecondErrorInStubA,
+        Make_IdentifierNotADataType(TEXT("EBb_OtherBranchOnlyC"), TEXT(""), *StubB),
+    };
+
+    const auto Roots = FCkAsErrorParser::DeduplicateRoots(Errors);
+    TestEqual(TEXT("DeduplicateRoots keeps distinct identifiers (the per-stub collapse is the plan's)"), Roots.Num(), 6);
+
+    const auto Plan = FCkAsRecoveryDispatcher::BuildActionPlan(Roots);
+
+    TestEqual(TEXT("two discards + two syntheses + one bootstrap-stub error -> five actions"), Plan.Num(), 5);
+    if (Plan.Num() != 5)
+    {
+        IFileManager::Get().DeleteDirectory(*TempRoot, /*RequireExists=*/false, /*Tree=*/true);
+        return false;
+    }
+
+    TestEqual(TEXT("[0] discard"), static_cast<int32>(Plan[0].Strategy), static_cast<int32>(ECk_RecoveryStrategy::Discard_StaleEspRecoveryStub));
+    TestEqual(TEXT("[0] first stub"), Plan[0].Error.FilePath, StubA);
+    TestEqual(TEXT("[1] discard"), static_cast<int32>(Plan[1].Strategy), static_cast<int32>(ECk_RecoveryStrategy::Discard_StaleEspRecoveryStub));
+    TestEqual(TEXT("[1] second stub"), Plan[1].Error.FilePath, StubB);
+
+    TestEqual(TEXT("[2] synthesis keeps its relative order"), static_cast<int32>(Plan[2].Strategy), static_cast<int32>(ECk_RecoveryStrategy::SynthesizeStub_EntitySpawnParams));
+    TestEqual(TEXT("[2] is the Params miss"), Plan[2].Error.TargetNamespace, FString{TEXT("UBb_BrandNew_EntityScript")});
+    TestEqual(TEXT("[3] synthesis"), static_cast<int32>(Plan[3].Strategy), static_cast<int32>(ECk_RecoveryStrategy::SynthesizeStub_EntitySpawnParams));
+    TestEqual(TEXT("[3] is the direct construction"), Plan[3].Error.MissingIdentifier, FString{TEXT("FBb_AlsoNew_EntityScript_SpawnParams")});
+    TestEqual(TEXT("[4] bootstrap stub (no canonical) is left alone"), static_cast<int32>(Plan[4].Strategy), static_cast<int32>(ECk_RecoveryStrategy::Unrecognized));
+    TestEqual(TEXT("[4] is the bootstrap stub"), Plan[4].Error.FilePath, StubNoCanon);
+
+    IFileManager::Get().DeleteDirectory(*TempRoot, /*RequireExists=*/false, /*Tree=*/true);
     return true;
 }
 

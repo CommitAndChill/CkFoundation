@@ -1793,4 +1793,77 @@ bool FCkTest_StubSynthesizer_Is_StubSupersededByCanonical::RunTest(const FString
     return true;
 }
 
+// --------------------------------------------------------------------------------------------------------------------
+// The dispatcher can discard the sibling a full shape was written to in this same process. After
+// Forget_SessionFullShapes the process no longer claims that shape, and the next inject for the class
+// writes it again instead of no-oping.
+// --------------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_StubSynthesizer_Inject_SourceDerived_AfterSiblingDiscarded,
+    "CkAngelscriptGenerator.UnitTests.StubSynthesizer.Inject_SourceDerived_AfterSiblingDiscarded",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCkTest_StubSynthesizer_Inject_SourceDerived_AfterSiblingDiscarded::RunTest(const FString&)
+{
+    FCkAsStubSynthesizer::Reset_SessionState_ForTests();
+
+    const auto TempRoot = FPaths::ConvertRelativePathToFull(
+        FPaths::ProjectIntermediateDir() / TEXT("CkStubSynthTest_AfterDiscard"));
+    IFileManager::Get().DeleteDirectory(*TempRoot, /*RequireExists=*/false, /*Tree=*/true);
+
+    const auto ScriptRoot   = TempRoot / TEXT("Script");
+    const auto ClassFile    = ScriptRoot / TEXT("Classes/TestDiscard_Fresh.as");
+    const auto ExpectedStub = ScriptRoot / TEXT("Generated/_StubRecovery_FakeProj_EntitySpawnParams.as");
+
+    IFileManager::Get().MakeDirectory(*FPaths::GetPath(ClassFile), /*Tree=*/true);
+    FFileHelper::SaveStringToFile(FString{TEXT("{}")}, *(TempRoot / TEXT("FakeProj.uproject")));
+    FFileHelper::SaveStringToFile(FString{TEXT(
+        "class UTestDiscard_Fresh : UCk_GenericEntityScript_UE\n"
+        "{\n"
+        "    UPROPERTY(ExposeOnSpawn)\n"
+        "    int32 Count;\n"
+        "}\n")}, *ClassFile, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+
+    auto Error = FCk_AsParsedError{};
+    Error.Kind              = ECk_AsParsedError_Kind::IdentifierNotADataType;
+    Error.MissingIdentifier = TEXT("FTestDiscard_Fresh_SpawnParams");
+    Error.FilePath          = *ClassFile;
+
+    const auto First = FCkAsStubSynthesizer::Inject_EntityScriptParamsStub_SourceDerived(
+        TEXT("UTestDiscard_Fresh"), Error, {}, {ScriptRoot});
+    TestTrue(TEXT("first inject wrote the sibling"), First.Success && IFileManager::Get().FileExists(*ExpectedStub));
+
+    const auto SignatureMiss = Make_ParsedError(TEXT("UTestDiscard_Fresh"), TEXT("Params"), TEXT("int32"), *ClassFile);
+
+    TestTrue(TEXT("before forgetting, a same-process signature miss no-ops against the full shape"),
+        FCkAsStubSynthesizer::Inject_EntityScriptParamsStub_SourceDerived(
+            TEXT("UTestDiscard_Fresh"), SignatureMiss, {}, {ScriptRoot}).Success);
+
+    auto Discarded = FString{};
+    FFileHelper::LoadFileToString(Discarded, *ExpectedStub);
+    FCkAsStubSynthesizer::Forget_SessionFullShapes(Discarded);
+
+    const auto AfterForget = FCkAsStubSynthesizer::Inject_EntityScriptParamsStub_SourceDerived(
+        TEXT("UTestDiscard_Fresh"), SignatureMiss, {}, {ScriptRoot});
+    TestTrue(TEXT("after forgetting, the process no longer claims the on-disk shape (defers like a new process)"),
+        NOT AfterForget.Success && AfterForget.FailReason == ECk_StubInjectFailReason::FullShapeOnDiskStillMismatched);
+
+    IFileManager::Get().Delete(*ExpectedStub);
+
+    const auto Second = FCkAsStubSynthesizer::Inject_EntityScriptParamsStub_SourceDerived(
+        TEXT("UTestDiscard_Fresh"), SignatureMiss, {}, {ScriptRoot});
+    TestTrue(TEXT("inject after the discard succeeds"), Second.Success);
+
+    auto Stub = FString{};
+    TestTrue(TEXT("sibling rewritten after the discard"), FFileHelper::LoadFileToString(Stub, *ExpectedStub));
+    TestTrue(TEXT("rewritten sibling starts with the recovery header"), Stub.StartsWith(FCkAsStubSynthesizer::Get_StubFileHeader()));
+    TestEqual(TEXT("struct defined exactly once"),
+        Count_Occurrences(Stub, TEXT("struct FTestDiscard_Fresh_SpawnParams")), 1);
+
+    IFileManager::Get().DeleteDirectory(*TempRoot, /*RequireExists=*/false, /*Tree=*/true);
+    FCkAsStubSynthesizer::Reset_SessionState_ForTests();
+    return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
