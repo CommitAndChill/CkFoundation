@@ -15,36 +15,27 @@ struct FSlateBrush;
 
 namespace ck::editor_theme
 {
-    // Legacy PNG icons are a light glyph with a baked dark outline: on Dark the outline disappears, on Light the
-    // foreground-tinted body and the outline merge into a dark blob. Keeps only the outline as a dark glyph, which
-    // reads as a line icon. Unset for anything that is not such an icon (colorful, no outline, no light body).
-    // InBGRA is 8-bit BGRA, InWidth * InHeight pixels.
+    // Legacy PNG icon (light glyph, baked dark outline) to an outline-only dark glyph; unset for any other art. BGRA8.
     CKEDITORTHEME_API auto Get_OutlineOnlyIcon(
         const TArray64<uint8>& InBGRA,
         int32 InWidth,
         int32 InHeight) -> TOptional<TArray64<uint8>>;
 
-    // Legacy PNG panels and borders (Common/GroupBorder, TableViewHeader, ...) bake a dark gray fill. Maps the gray
-    // ramp onto the Light surfaces (#1B -> #F0, #60 -> #D1), alpha kept. Unset for anything that is not a dark gray
-    // surface (glyphs, colored art) or, with InRequireOpaque, mostly translucent (shadows). Node bodies are
-    // translucent by design, so they are converted without that check.
+    // Dark-gray legacy panel/border fill remapped onto the Light surfaces; unset for other art, and for mostly
+    // translucent art with InRequireOpaque (node bodies are translucent by design, so they skip that check).
     CKEDITORTHEME_API auto Get_LightSurface(
         const TArray64<uint8>& InBGRA,
         int32 InWidth,
         int32 InHeight,
         bool InRequireOpaque = true) -> TOptional<TArray64<uint8>>;
 
-    // The node title spill (Graph/RegularNode_color_spill) fades into the node body and bakes dark shading into its
-    // RGB: depth on a dark body, a dark smudge and a washed-out end on a light one. Produces a flat header instead:
-    // opaque from each row's peak to the right edge (the rounded left edge kept), shaded #D8 top to #B8 bottom.
+    // Node title spill to a flat header shaded #D8 to #B8: the original bakes dark shading that smudges on a light body.
     CKEDITORTHEME_API auto Get_SolidTitleSpill(
         const TArray64<uint8>& InBGRA,
         int32 InWidth,
         int32 InHeight) -> TOptional<TArray64<uint8>>;
 
-    // The variable node spill (Graph/VarNode_color_spill) is a soft glow: its strong top rows carry the SET/GET title,
-    // which is white and vanishes on a light body. The top half's visible rows (peak alpha >= 16) become a solid strip
-    // at #C8; the faint lower glow is kept as drawn.
+    // Variable node spill: the visible top half becomes a solid #C8 strip so the white SET/GET title stays readable.
     CKEDITORTHEME_API auto Get_SolidVarSpill(
         const TArray64<uint8>& InBGRA,
         int32 InWidth,
@@ -53,10 +44,8 @@ namespace ck::editor_theme
 
 // --------------------------------------------------------------------------------------------------------------------
 
-// Light points legacy PNG brushes at generated textures (FSlateBrush::SetResourceObject), Dark clears them so each
-// brush draws its original file again. In place, so live widgets follow without a rebuild. Brushes are gathered from
-// every registered style set (including the brushes inside widget styles) on each apply and never held, because
-// style sets other than Core/Editor can be destroyed and rebuilt; textures are cached per file.
+// Light points legacy brushes at generated textures, Dark clears them, in place. Brushes are re-gathered from every
+// style set on each apply and never held, because non-Core style sets can be destroyed and rebuilt.
 class CKEDITORTHEME_API FCk_EditorTheme_IconPatch
 {
 public:
@@ -72,8 +61,7 @@ public:
     {
         // Slate pre-shutdown: nothing draws any more.
         Free,
-        // Module unload with Slate alive: brush copies outside the registry may still point at a texture, so the
-        // textures are rooted and leaked rather than freed under them.
+        // Slate still alive: brush copies outside the registry may point at a texture, so textures are rooted and leaked.
         KeepAlive
     };
 

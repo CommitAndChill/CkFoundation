@@ -200,6 +200,7 @@ auto
             }
         }
 
+        // Emphasis text is literal white with a black drop shadow, used as headings on panels.
         if (TypeName == FTextBlockStyle::TypeName
             && (Entry.Key == FName{TEXT("NormalText.Important")} || Entry.Key == FName{TEXT("LargeText")}))
         {
@@ -299,6 +300,7 @@ auto
             continue;
         }
 
+        // Dropdown rows (ComboBox.Row and copies) draw literal White text on the menu and hover with the accent.
         if (TypeName == FTableRowStyle::TypeName)
         {
             auto& Row = static_cast<FTableRowStyle&>(Style);
@@ -318,6 +320,7 @@ auto
         }
         else if (TypeName == FDockTabStyle::TypeName)
         {
+            // Dock tab titles are literal White, and the hovered fill is Panel baked to its Dark value when the style was built.
             auto& Tab = static_cast<FDockTabStyle&>(Style);
 
             for (auto* Foreground : {&Tab.NormalForegroundColor, &Tab.HoveredForegroundColor,
