@@ -270,14 +270,15 @@ but **deps must never point to a higher band**. Editor/UncookedOnly modules are 
 | CkWatermark | Core,Ecs,Jolt,Log,Memory,Settings,UICore (UI→UICore 2026-08-14) |
 | CkWorldSpaceWidget | Core,Ecs,EcsExt,Log,Settings,ThirdParty,UICore (extracted from CkUI 2026-08-08; hosts `UCk_WidgetComponent_UE`; UI→UICore 2026-08-14) |
 
-### T5 — editor modules (27 UncookedOnly + 8 Editor, counted 2026-10-14; runtime code must NEVER depend on these)
+### T5 — editor modules (27 UncookedOnly + 9 Editor, counted 2026-11-24; runtime code must NEVER depend on these)
 
 Full reference: [EDITOR_MODULES.md](EDITOR_MODULES.md). 25 are `Ck<Feature>Editor` twins. The
 standalone ones: `CkEditorGraph` (graph/schema base), `CkEditorStyle` (shared style, PreDefault),
 `CkEditorToolbar`, `CkK2Nodes` (BP node customizations), `CkDataViewer` (entity state overlay),
 `CkInsightsAnalyzer` (UI-free Insights trace analysis, reports, and commandlet; Slate UI lives in
 CkGameplayDebugger's `CkInsightsDebugger`), `CkAssetExporter` (asset data → JSON). Editor-type:
-`CkAngelscriptGenerator` (PreDefault; emits `Script/Generated/`), `CkPieLayoutEditor`, `CkUsfEditor`.
+`CkAngelscriptGenerator` (PreDefault; emits `Script/Generated/`), `CkPieLayoutEditor`, `CkUsfEditor`,
+`CkEditorTheme` (PostEngineInit: applies the editor theme after `UEditorStyleSettings` has applied the saved one).
 
 ### Table notes
 
