@@ -21,6 +21,12 @@ public:
     CK_GENERATED_BODY(ACk_CueRelay_UE);
 
 public:
+    // The server derives the cue owner from this relay's owning PlayerState.
+    UFUNCTION(Server, Reliable)
+    void Server_RequestExecuteCue_AsOwningPlayer(
+        FGameplayTag InCueName,
+        const FInstancedStruct& InSpawnParams);
+
     UFUNCTION(Server, Unreliable)
     void Server_RequestExecuteCue(
         FCk_Handle InOwnerEntity,

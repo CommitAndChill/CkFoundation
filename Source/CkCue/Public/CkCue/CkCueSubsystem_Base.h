@@ -71,6 +71,13 @@ public:
         ECk_Cue_ReliabilityPolicy InReliability = ECk_Cue_ReliabilityPolicy::Unreliable,
         ECk_Cue_MulticastPolicy InMulticastPolicy = ECk_Cue_MulticastPolicy::ServerAndAllClients);
 
+    // Reliable server command. No caller-supplied owner; requires a cue opt-in.
+    // Listen-server/standalone calls derive the locally controlled player's pawn.
+    UFUNCTION(BlueprintCallable, Category = "Ck|Cue")
+    void Request_ExecuteCue_AsOwningPlayer(
+        FGameplayTag InCueName,
+        FInstancedStruct InSpawnParams);
+
     UFUNCTION(BlueprintCallable)
     FCk_Handle_PendingEntityScript Request_ExecuteCue(
         const FCk_Handle& InOwnerEntity,

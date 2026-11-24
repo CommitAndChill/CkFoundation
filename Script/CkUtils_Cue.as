@@ -38,6 +38,16 @@ namespace utils_cue
 
 namespace utils_cue_generic
 {
+    void Request_ExecuteCue_AsOwningPlayer(
+        FGameplayTag InCueName,
+        FAngelscriptAnyStructParameter InSpawnParams)
+    {
+        auto Executor = Subsystem::GetWorldSubsystem(UCk_GenericCueExecutor_Subsystem_UE);
+        if (ck::EnsureIfNot(ck::IsValid(Executor), "No generic cue executor found"))
+        { return; }
+        Executor.Request_ExecuteCue_AsOwningPlayer(InCueName, InSpawnParams.InstancedStruct);
+    }
+
     FCk_Handle_PendingEntityScript
     Request_ExecuteCue_Transient(
         FGameplayTag InCueName,

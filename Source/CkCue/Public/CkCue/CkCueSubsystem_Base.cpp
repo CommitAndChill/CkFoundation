@@ -7,6 +7,8 @@
 #include "CkCore/Math/Arithmetic/CkArithmetic_Utils.h"
 #include "CkCore/Debug/CkDebug_Utils.h"
 #include "CkCore/IO/CkIO_Utils.h"
+#include "CkCore/Reflection/CkReflection_Utils.h"
+#include "CkCore/Validation/CkUntracedStructSafety.h"
 
 #include "CkCue/CkCue_Fragment.h"
 #include "CkCue/CkCue_Log.h"
@@ -14,11 +16,15 @@
 #include "CkEcs/EntityConstructionScript/CkEntity_ConstructionScript.h"
 
 #include "CkEcs/EntityScript/CkEntityScript_Utils.h"
+#include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 #include "CkEcs/Subsystem/CkEcsWorld_Subsystem.h"
 
 #include <AssetRegistry/AssetRegistryModule.h>
 #include <Net/UnrealNetwork.h>
 #include <Net/Core/PushModel/PushModel.h>
+#include <GameFramework/Pawn.h>
+#include <GameFramework/PlayerController.h>
+#include <GameFramework/PlayerState.h>
 
 #if WITH_EDITOR
 #include <Editor.h>
@@ -98,12 +104,16 @@ static FAutoConsoleCommand ConsoleCommand_RediscoverCues(
 
 namespace ck_cue_subsystem_base
 {
+    auto Get_CueSubsystemFromClass(TSubclassOf<UCk_CueSubsystem_Base_UE> InCueSubsystemClass) -> UCk_CueSubsystem_Base_UE*;
+    auto ValidateRetainedSpawnParams(const FGameplayTag& InCueName, const FInstancedStruct& InSpawnParams) -> bool;
+
     auto
-        ExecuteCueEntityScript(
+        ExecuteCueEntityScript_Internal(
             FCk_Handle InOwnerEntity,
             const FGameplayTag& InCueName,
             TSubclassOf<UCk_CueBase_EntityScript> InCueClass,
-            const FInstancedStruct& InSpawnParams)
+            const FInstancedStruct& InSpawnParams,
+            bool InAuthenticatedPlayerOwner)
         -> FCk_Handle_PendingEntityScript
     {
         CK_ENSURE_IF_NOT(ck::IsValid(InCueClass),
@@ -111,6 +121,12 @@ namespace ck_cue_subsystem_base
         { return {}; }
 
         auto CueDefaultObject = InCueClass->GetDefaultObject<UCk_CueBase_EntityScript>();
+
+        if (CueDefaultObject->Get_RequireAuthenticatedPlayerOwner() != InAuthenticatedPlayerOwner)
+        {
+            ck::cue::Warning(TEXT("Rejected cue [{}]: authenticated player ingress policy mismatch"), InCueName);
+            return {};
+        }
 
         if (ck::Is_NOT_Valid(InOwnerEntity))
         {
@@ -147,6 +163,92 @@ namespace ck_cue_subsystem_base
         auto PendingEntityScript = UCk_Utils_EntityScript_UE::Request_SpawnEntity(InOwnerEntity, InCueClass, InSpawnParams, {});
 
         return PendingEntityScript;
+    }
+
+    auto
+        ExecuteCueEntityScript(
+            FCk_Handle InOwnerEntity,
+            const FGameplayTag& InCueName,
+            TSubclassOf<UCk_CueBase_EntityScript> InCueClass,
+            const FInstancedStruct& InSpawnParams)
+        -> FCk_Handle_PendingEntityScript
+    {
+        return ExecuteCueEntityScript_Internal(InOwnerEntity, InCueName, InCueClass, InSpawnParams, false);
+    }
+
+    auto
+        ExecuteCueForPlayer(
+            UCk_CueExecutor_Subsystem_Base_UE* InExecutor,
+            APlayerState* InPlayerState,
+            const FGameplayTag& InCueName,
+            const FInstancedStruct& InSpawnParams)
+        -> FCk_Handle_PendingEntityScript
+    {
+        if (ck::Is_NOT_Valid(InExecutor) || ck::Is_NOT_Valid(InPlayerState) || NOT InCueName.IsValid())
+        { return {}; }
+
+        if (InSpawnParams.IsValid())
+        {
+            const auto* ParamsType = InSpawnParams.GetScriptStruct();
+            if (ParamsType == nullptr || InSpawnParams.GetMemory() == nullptr ||
+                NOT ck::Analyze_UntracedStructSafety(ParamsType).IsGcIndependent())
+            {
+                ck::cue::Warning(TEXT("Rejected player cue [{}]: unsafe retained command payload"), InCueName);
+                return {};
+            }
+        }
+
+        auto Pawn = InPlayerState->GetPawn();
+        if (ck::Is_NOT_Valid(Pawn) || Pawn->GetWorld() != InExecutor->GetWorld() ||
+            NOT Pawn->HasAuthority() || ck::Is_NOT_Valid(Pawn->GetController()) ||
+            Pawn->GetPlayerState() != InPlayerState)
+        {
+            ck::cue::Warning(TEXT("Rejected player cue [{}]: player has no current authoritative pawn"), InCueName);
+            return {};
+        }
+        const auto* Controller = Cast<APlayerController>(Pawn->GetController());
+        if (ck::Is_NOT_Valid(Controller) || Controller->PlayerState != InPlayerState)
+        {
+            ck::cue::Warning(TEXT("Rejected player cue [{}]: pawn is no longer possessed by the relay player"), InCueName);
+            return {};
+        }
+
+        const auto Owner = UCk_Utils_EntityBridge_UE::TryGet_Entity(Pawn);
+        if (ck::Is_NOT_Valid(Owner))
+        {
+            ck::cue::Warning(TEXT("Rejected player cue [{}]: current pawn has no ready entity"), InCueName);
+            return {};
+        }
+
+        auto CueSubsystem = Get_CueSubsystemFromClass(InExecutor->Get_CueSubsystemClass());
+        if (ck::Is_NOT_Valid(CueSubsystem))
+        { return {}; }
+
+        const auto* CueClass = CueSubsystem->Get_DiscoveredCues().Find(InCueName);
+        if (CueClass == nullptr || ck::Is_NOT_Valid(*CueClass))
+        {
+            ck::cue::Warning(TEXT("Rejected unknown player cue [{}]"), InCueName);
+            return {};
+        }
+
+        auto* Defaults = (*CueClass)->GetDefaultObject<UCk_CueBase_EntityScript>();
+        if (InSpawnParams.IsValid())
+        {
+            for (TFieldIterator<FProperty> It(InSpawnParams.GetScriptStruct()); It; ++It)
+            {
+                const auto* Source = *It;
+                const auto Name = UCk_Utils_Reflection_UE::Get_SanitizedUserDefinedPropertyName(Source);
+                const auto* Target = UCk_Utils_Reflection_UE::Get_PropertyBySanitizedName(Defaults, Name);
+                if (Target == nullptr || NOT Target->HasAnyPropertyFlags(CPF_ExposeOnSpawn) ||
+                    NOT Source->SameType(Target))
+                {
+                    ck::cue::Warning(TEXT("Rejected player cue [{}]: field [{}] is not a matching exposed command parameter"), InCueName, Name);
+                    return {};
+                }
+            }
+        }
+
+        return ExecuteCueEntityScript_Internal(Owner, InCueName, *CueClass, InSpawnParams, true);
     }
 
     auto

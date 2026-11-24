@@ -12,12 +12,15 @@
 #include "CkEcs/EntityScript/CkEntityScript_Utils.h"
 #include "CkEcs/EntityBridge/CkEntityBridge_Utils.h"
 
+#include <GameFramework/PlayerController.h>
+
 // --------------------------------------------------------------------------------------------------------------------
 
 namespace ck_cue_subsystem_base
 {
     auto Get_CueSubsystemFromClass(TSubclassOf<UCk_CueSubsystem_Base_UE> InCueSubsystemClass) -> UCk_CueSubsystem_Base_UE*;
     auto ExecuteCueEntityScript(FCk_Handle InOwnerEntity, const FGameplayTag& InCueName, TSubclassOf<UCk_CueBase_EntityScript> InCueClass, const FInstancedStruct& InSpawnParams) -> FCk_Handle_PendingEntityScript;
+    auto ExecuteCueForPlayer(UCk_CueExecutor_Subsystem_Base_UE* InExecutor, APlayerState* InPlayerState, const FGameplayTag& InCueName, const FInstancedStruct& InSpawnParams) -> FCk_Handle_PendingEntityScript;
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -134,6 +137,36 @@ namespace ck_cue_subsystem_base
         return ExecuteCueEntityScript(InOwnerEntity, InCueName, CueClass, InSpawnParams);
     }
 }
+
+auto
+    UCk_CueExecutor_Subsystem_Base_UE::
+    Request_ExecuteCue_AsOwningPlayer(
+        FGameplayTag InCueName,
+        FInstancedStruct InSpawnParams)
+    -> void
+{
+    if (NOT ck_cue_subsystem_base::ValidateRetainedSpawnParams(InCueName, InSpawnParams))
+    { return; }
+
+    auto LocalPC = GetWorld()->GetFirstPlayerController();
+    if (ck::Is_NOT_Valid(LocalPC) || NOT LocalPC->IsLocalController())
+    {
+        ck::cue::Warning(TEXT("Rejected player cue [{}]: no local player controller"), InCueName);
+        return;
+    }
+
+    if (GetWorld()->IsNetMode(NM_Client))
+    {
+        DoAcquireCueRelay_ForClient_Async(
+            [CueName = InCueName, SpawnParams = MoveTemp(InSpawnParams)](ACk_CueRelay_UE* InRelay)
+            { InRelay->Server_RequestExecuteCue_AsOwningPlayer(CueName, SpawnParams); });
+        return;
+    }
+
+    ck_cue_subsystem_base::ExecuteCueForPlayer(this, LocalPC->PlayerState, InCueName, InSpawnParams);
+}
+
+// --------------------------------------------------------------------------------------------------------------------
 
 auto
     UCk_CueExecutor_Subsystem_Base_UE::
