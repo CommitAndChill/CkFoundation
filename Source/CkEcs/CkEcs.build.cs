@@ -54,6 +54,9 @@ public class CkEcs : CkModuleRules
 
         if (Target.bBuildEditor)
         {
+            // Native serializer regressions construct Iris receive contexts without a net driver.
+            PrivateIncludePaths.Add(Path.Combine(GetModuleDirectory("IrisCore"), "Private"));
+
             PrivateDependencyModuleNames.AddRange(
                 new string[]
                 {

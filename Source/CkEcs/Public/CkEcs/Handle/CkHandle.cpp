@@ -824,6 +824,21 @@ namespace UE::Net
             const FNetDequantizeArgs& Args)
         -> void
     {
+        // A reused InstancedStruct retains its previous handle. Only an explicit null
+        // reference clears it; unresolved non-null drivers keep the existing pending behavior.
+        const auto NullReference = QuantizedType{};
+        auto NullReferenceArgs = FNetIsEqualArgs{};
+        NullReferenceArgs.NetSerializerConfig = _WeakObjectNetSerializer->DefaultConfig;
+        NullReferenceArgs.Source0 = Args.Source;
+        NullReferenceArgs.Source1 = reinterpret_cast<NetSerializerValuePointer>(&NullReference);
+        NullReferenceArgs.bStateIsQuantized = true;
+
+        if (_WeakObjectNetSerializer->IsEqual(Context, NullReferenceArgs))
+        {
+            *reinterpret_cast<FCk_Handle*>(Args.Target) = FCk_Handle{};
+            return;
+        }
+
         auto NewArgs = FNetDequantizeArgs{};
 
         NewArgs.NetSerializerConfig = _WeakObjectNetSerializer->DefaultConfig;
