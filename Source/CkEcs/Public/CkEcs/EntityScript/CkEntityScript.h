@@ -93,6 +93,13 @@ public:
         const FInstancedStruct& InClientSpawnParams,
         const UCk_EntityScript_UE* InConstructedScript) const -> bool;
 
+    // The first spawn param that does not match, with the client's and the constructed script's values; empty when all match.
+    [[nodiscard]]
+    auto
+    Get_SpawnParamsMismatchDescription(
+        const FInstancedStruct& InClientSpawnParams,
+        const UCk_EntityScript_UE* InConstructedScript) const -> FString;
+
     [[nodiscard]]
     virtual auto
     Get_EffectiveReplication() const -> ECk_Replication;

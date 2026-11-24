@@ -37,6 +37,14 @@ struct CKCORE_API FCk_StructFieldOverride
     FCk_PropertyDefaultValueLiteral _Literal;
 };
 
+// First differing leaf of two property values — "SpawnTransform.Rotation" — with both values exported.
+struct CKCORE_API FCk_PropertyValueDifference
+{
+    FString _Path;
+    FString _ValueA;
+    FString _ValueB;
+};
+
 // --------------------------------------------------------------------------------------------------------------------
 
 UCLASS(BlueprintType)
@@ -129,6 +137,17 @@ public:
     static auto
     Has_UObjectPointerField(
         const UScriptStruct* InStruct) -> bool;
+
+    // Equality that survives a network round trip: float/double within InTolerance; FVector, FQuat (sign-insensitive),
+    // FRotator and FTransform through their tolerant Equals; other structs without a native Identical and arrays
+    // element-wise; everything else exactly, through Identical. OutDifference receives the first differing leaf.
+    static auto
+    Get_ArePropertyValuesNearlyEqual(
+        const FProperty* InProperty,
+        const void* InValueA,
+        const void* InValueB,
+        double InTolerance,
+        FCk_PropertyValueDifference* OutDifference = nullptr) -> bool;
 };
 
 // --------------------------------------------------------------------------------------------------------------------

@@ -87,6 +87,55 @@ namespace ck
 
     auto
         FFragment_PendingReplication::
+        Get_HasPending(
+            UClass* InEntityScriptClass) const
+        -> bool
+    {
+        const auto* Pending = _PendingByClass.Find(InEntityScriptClass);
+        return Pending != nullptr && Pending->Num() > 0;
+    }
+
+    auto
+        FFragment_PendingReplication::
+        Try_MarkMismatchReported(
+            UClass* InEntityScriptClass)
+        -> bool
+    {
+        auto WasAlreadyReported = false;
+        _MismatchReportedClasses.Add(InEntityScriptClass, &WasAlreadyReported);
+        return NOT WasAlreadyReported;
+    }
+
+    auto
+        FFragment_PendingReplication::
+        Get_MismatchDescription(
+            UClass* InEntityScriptClass,
+            const UCk_EntityScript_UE* InCDO,
+            const FCk_Handle& InConstructedEntity) const
+        -> FString
+    {
+        const auto* Pending = _PendingByClass.Find(InEntityScriptClass);
+        if (Pending == nullptr || ck::Is_NOT_Valid(InCDO))
+        { return {}; }
+
+        const auto* ConstructedScript = static_cast<const UCk_EntityScript_UE*>(nullptr);
+        if (InConstructedEntity.Has<FFragment_EntityScript>())
+        {
+            ConstructedScript = InConstructedEntity.Get<FFragment_EntityScript>().Get_Script().Get();
+        }
+
+        auto Description = FString{};
+        for (const auto& Entry : *Pending)
+        {
+            Description += ck::Format_UE(TEXT("\n  pending [{}]: {}"), Entry._Entity,
+                InCDO->Get_SpawnParamsMismatchDescription(Entry._SpawnParams, ConstructedScript));
+        }
+
+        return Description;
+    }
+
+    auto
+        FFragment_PendingReplication::
         CleanupRemaining()
         -> void
     {

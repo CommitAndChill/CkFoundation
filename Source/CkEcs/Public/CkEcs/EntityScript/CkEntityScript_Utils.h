@@ -202,6 +202,15 @@ public:
         UPARAM(ref) FCk_Handle_PendingEntityScript& InPendingEntityScript,
         const FCk_Delegate_EntityScript_Constructed& InDelegate);
 
+    // Inside an OnConstructed callback: the pending handle Request_SpawnEntity returned for this entity. On a client
+    // that is the pending entity the replicated one matched, a different entity; elsewhere it is the entity itself.
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|EntityScript",
+              DisplayName = "[Ck][EntityScript] Get Pending Handle For Constructed")
+    static FCk_Handle_PendingEntityScript
+    Get_PendingHandle_ForConstructed(
+        const FCk_Handle_EntityScript& InConstructed);
+
     UFUNCTION(BlueprintPure,
               DisplayName = "[Ck][EntityScript] Get Is Valid (Pending Entity Script)",
               Category = "Ck|Utils|EntityScript",

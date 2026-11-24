@@ -109,6 +109,63 @@ auto
     return true;
 }
 
+namespace ck_entity_script_detail
+{
+    // Replication carries spawn params at its own precision (Iris rebuilds a unit quaternion's W from X/Y/Z), so a value
+    // a client derives from replicated inputs and the authority's value after its own trip differ in the last bits.
+    // UE's own Equals tolerance sits far above that and far below any distance two spawns are told apart by.
+    constexpr auto SpawnParamsMatchTolerance = UE_KINDA_SMALL_NUMBER;
+
+    auto
+    Get_AreSpawnParamsMatching(
+        const FInstancedStruct& InClientSpawnParams,
+        const UCk_EntityScript_UE* InConstructedScript,
+        FCk_PropertyValueDifference* OutDifference)
+        -> bool
+    {
+        if (ck::Is_NOT_Valid(InClientSpawnParams)
+            || ck::Is_NOT_Valid(InConstructedScript))
+        { return true; }
+
+        const auto* SpawnParamsStruct = InClientSpawnParams.GetScriptStruct();
+        if (ck::Is_NOT_Valid(SpawnParamsStruct))
+        { return true; }
+
+        const auto* SpawnParamsData = InClientSpawnParams.GetMemory();
+
+        for (TFieldIterator<FProperty> PropIt(SpawnParamsStruct, EFieldIteratorFlags::IncludeSuper); PropIt; ++PropIt)
+        {
+            const auto* SpawnParamsProp = *PropIt;
+
+            const auto& PropertyName =
+                UCk_Utils_Reflection_UE::Get_SanitizedUserDefinedPropertyName(SpawnParamsProp);
+
+            const auto* ScriptProp = UCk_Utils_Reflection_UE::Get_PropertyBySanitizedName(
+                const_cast<UCk_EntityScript_UE*>(InConstructedScript), PropertyName);
+
+            if (ck::Is_NOT_Valid(ScriptProp))
+            { continue; }
+
+            const auto* SpawnParamAddr =
+                SpawnParamsProp->ContainerPtrToValuePtr<uint8>(SpawnParamsData);
+
+            const auto* ScriptPropAddr =
+                ScriptProp->ContainerPtrToValuePtr<uint8>(InConstructedScript);
+
+            if (NOT UCk_Utils_Reflection_UE::Get_ArePropertyValuesNearlyEqual(
+                    SpawnParamsProp, SpawnParamAddr, ScriptPropAddr, SpawnParamsMatchTolerance, OutDifference))
+            {
+                if (OutDifference != nullptr)
+                { OutDifference->_Path = PropertyName + OutDifference->_Path.RightChop(SpawnParamsProp->GetName().Len()); }
+
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
 auto
     UCk_EntityScript_UE::
     Get_AreSpawnParamsMatching(
@@ -116,40 +173,21 @@ auto
         const UCk_EntityScript_UE* InConstructedScript) const
     -> bool
 {
-    if (ck::Is_NOT_Valid(InClientSpawnParams)
-        || ck::Is_NOT_Valid(InConstructedScript))
-    { return true; }
+    return ck_entity_script_detail::Get_AreSpawnParamsMatching(InClientSpawnParams, InConstructedScript, nullptr);
+}
 
-    const auto* SpawnParamsStruct = InClientSpawnParams.GetScriptStruct();
-    if (ck::Is_NOT_Valid(SpawnParamsStruct))
-    { return true; }
+auto
+    UCk_EntityScript_UE::
+    Get_SpawnParamsMismatchDescription(
+        const FInstancedStruct& InClientSpawnParams,
+        const UCk_EntityScript_UE* InConstructedScript) const
+    -> FString
+{
+    auto Difference = FCk_PropertyValueDifference{};
+    if (ck_entity_script_detail::Get_AreSpawnParamsMatching(InClientSpawnParams, InConstructedScript, &Difference))
+    { return {}; }
 
-    const auto* SpawnParamsData = InClientSpawnParams.GetMemory();
-
-    for (TFieldIterator<FProperty> PropIt(SpawnParamsStruct, EFieldIteratorFlags::IncludeSuper); PropIt; ++PropIt)
-    {
-        const auto* SpawnParamsProp = *PropIt;
-
-        const auto& PropertyName =
-            UCk_Utils_Reflection_UE::Get_SanitizedUserDefinedPropertyName(SpawnParamsProp);
-
-        const auto* ScriptProp = UCk_Utils_Reflection_UE::Get_PropertyBySanitizedName(
-            const_cast<UCk_EntityScript_UE*>(InConstructedScript), PropertyName);
-
-        if (ck::Is_NOT_Valid(ScriptProp))
-        { continue; }
-
-        const auto* SpawnParamAddr =
-            SpawnParamsProp->ContainerPtrToValuePtr<uint8>(SpawnParamsData);
-
-        const auto* ScriptPropAddr =
-            ScriptProp->ContainerPtrToValuePtr<uint8>(InConstructedScript);
-
-        if (NOT SpawnParamsProp->Identical(SpawnParamAddr, ScriptPropAddr))
-        { return false; }
-    }
-
-    return true;
+    return ck::Format_UE(TEXT("[{}] client [{}] vs constructed [{}]"), Difference._Path, Difference._ValueA, Difference._ValueB);
 }
 
 auto

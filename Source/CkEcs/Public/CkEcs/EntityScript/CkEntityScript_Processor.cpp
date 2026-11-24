@@ -38,6 +38,37 @@ CK_REGISTER_PROCESSOR(ck::FProcessor_EntityScript_EndPlay);
 
 // --------------------------------------------------------------------------------------------------------------------
 
+namespace ck_entity_script_pending_replication
+{
+    // Hands the replicated entity to the pending entity the client's spawner holds, then retires the pending entity.
+    auto
+    TryResolve_PendingEntity(
+        FCk_Handle_EntityScript& InHandle,
+        const ck::FFragment_EntityScript& InEntityScript,
+        FCk_Handle& InLifetimeOwner)
+        -> bool
+    {
+        if (ck::Is_NOT_Valid(InLifetimeOwner) || NOT InLifetimeOwner.Has<ck::FFragment_PendingReplication>())
+        { return false; }
+
+        auto* ScriptClass = InEntityScript.Get_Script()->GetClass();
+        auto PendingEntity = InLifetimeOwner.Get<ck::FFragment_PendingReplication>().ConsumeFirst(
+            ScriptClass, ScriptClass->GetDefaultObject<UCk_EntityScript_UE>(), InHandle);
+
+        if (ck::Is_NOT_Valid(PendingEntity))
+        { return false; }
+
+        InHandle.Add<ck::FFragment_EntityScript_MatchedPendingEntity>(PendingEntity);
+        ck::UUtils_Signal_OnConstructed::Broadcast(PendingEntity, ck::MakePayload(InHandle));
+        InHandle.Try_Remove<ck::FFragment_EntityScript_MatchedPendingEntity>();
+
+        UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(PendingEntity);
+        return true;
+    }
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
 namespace ck_entity_script_spawn_trace
 {
     static TAutoConsoleVariable<int32>
@@ -559,23 +590,8 @@ namespace ck
         if (UCk_Utils_EntityBridge_UE::Has(InHandle))
         { return; }
 
-        auto WasConsumed = false;
         auto LifetimeOwner = UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InHandle);
-
-        if (ck::IsValid(LifetimeOwner) && LifetimeOwner.Has<FFragment_PendingReplication>())
-        {
-            auto& PendingFragment = LifetimeOwner.AddOrGet<FFragment_PendingReplication>();
-            auto* Cdo = InEntityScript.Get_Script()->GetClass()->GetDefaultObject<UCk_EntityScript_UE>();
-            auto PendingEntity = PendingFragment.ConsumeFirst(
-                InEntityScript.Get_Script()->GetClass(), Cdo, InHandle);
-
-            if (ck::IsValid(PendingEntity))
-            {
-                UUtils_Signal_OnConstructed::Broadcast(PendingEntity, ck::MakePayload(InHandle));
-                UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(PendingEntity);
-                WasConsumed = true;
-            }
-        }
+        const auto WasConsumed = ck_entity_script_pending_replication::TryResolve_PendingEntity(InHandle, InEntityScript, LifetimeOwner);
 
         if (NOT WasConsumed
             && InEntityScript.Get_Script()->Get_EffectiveReplication() == ECk_Replication::Replicates
@@ -613,22 +629,11 @@ namespace ck
     {
         auto LifetimeOwner = UCk_Utils_EntityLifetime_UE::Get_LifetimeOwner(InHandle);
 
-        if (ck::IsValid(LifetimeOwner) && LifetimeOwner.Has<FFragment_PendingReplication>())
+        if (ck_entity_script_pending_replication::TryResolve_PendingEntity(InHandle, InEntityScript, LifetimeOwner))
         {
-            auto& PendingFragment = LifetimeOwner.AddOrGet<FFragment_PendingReplication>();
-            auto* Cdo = InEntityScript.Get_Script()->GetClass()->GetDefaultObject<UCk_EntityScript_UE>();
-            auto PendingEntity = PendingFragment.ConsumeFirst(
-                InEntityScript.Get_Script()->GetClass(), Cdo, InHandle);
-
-            if (ck::IsValid(PendingEntity))
-            {
-                UUtils_Signal_OnConstructed::Broadcast(PendingEntity, ck::MakePayload(InHandle));
-                UCk_Utils_EntityLifetime_UE::Request_DestroyEntity(PendingEntity);
-
-                InHandle.Remove<FTag_EntityScript_PendingReplicationRetry>();
-                InHandle.Remove<FFragment_EntityScript_PendingReplicationRetryTimestamp>();
-                return;
-            }
+            InHandle.Remove<FTag_EntityScript_PendingReplicationRetry>();
+            InHandle.Remove<FFragment_EntityScript_PendingReplicationRetryTimestamp>();
+            return;
         }
 
         const auto World = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InHandle);
@@ -639,18 +644,37 @@ namespace ck
         const auto CurrentTime = UCk_Utils_Time_UE::Get_WorldTime(TimeParams).Get_WorldTime().Get_Time();
         const auto ElapsedSeconds = (CurrentTime - InTimestamp.Get_TaggedAt()).Get_Seconds();
 
-        if (ElapsedSeconds >= PendingReplicationRetryTimeoutSeconds)
-        {
-            ck::ecs::Warning(
-                TEXT("PendingReplicationRetry timed out after [{}]s for entity [{}] with script [{}]. "
-                     "No matching PendingEntity was found on the client."),
-                ElapsedSeconds,
-                InHandle,
-                InEntityScript.Get_Script()->GetClass()->GetName());
+        if (ElapsedSeconds < PendingReplicationRetryTimeoutSeconds)
+        { return; }
 
-            InHandle.Remove<FTag_EntityScript_PendingReplicationRetry>();
-            InHandle.Remove<FFragment_EntityScript_PendingReplicationRetryTimestamp>();
+        InHandle.Remove<FTag_EntityScript_PendingReplicationRetry>();
+        InHandle.Remove<FFragment_EntityScript_PendingReplicationRetryTimestamp>();
+
+        auto* ScriptClass = InEntityScript.Get_Script()->GetClass();
+
+        // Pending spawns of this class that never matched are spawners whose Promise_OnConstructed will not resolve.
+        if (ck::IsValid(LifetimeOwner)
+            and LifetimeOwner.Has<FFragment_PendingReplication>()
+            and LifetimeOwner.Get<FFragment_PendingReplication>().Get_HasPending(ScriptClass))
+        {
+            auto& PendingFragment = LifetimeOwner.Get<FFragment_PendingReplication>();
+
+            // A Warning until spawner-injected spawn params reach clients (BusterBlock multiplayer follow-up 38), then an ensure.
+            if (PendingFragment.Try_MarkMismatchReported(ScriptClass))
+            {
+                ck::ecs::Warning(
+                    TEXT("Replicated EntityScript [{}] of class [{}] matched none of its lifetime owner [{}]'s pending spawns of "
+                         "that class within [{}]s; their OnConstructed promises stay unresolved. Reported once per owner and "
+                         "class. First differing spawn param per pending spawn:{}"),
+                    InHandle, ScriptClass->GetName(), LifetimeOwner, ElapsedSeconds,
+                    PendingFragment.Get_MismatchDescription(ScriptClass, ScriptClass->GetDefaultObject<UCk_EntityScript_UE>(), InHandle));
+            }
+
+            return;
         }
+
+        ck::ecs::Verbose(TEXT("PendingReplicationRetry for [{}] stopped looking for a pending spawn of class [{}] to resolve after [{}]s"),
+            InHandle, ScriptClass->GetName(), ElapsedSeconds);
     }
 
     // --------------------------------------------------------------------------------------------------------------------

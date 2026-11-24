@@ -49,6 +49,24 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
+    // On a replicated entity only while OnConstructed is re-broadcast to the client's pending entity it matched.
+    struct FFragment_EntityScript_MatchedPendingEntity
+    {
+    public:
+        CK_GENERATED_BODY(FFragment_EntityScript_MatchedPendingEntity);
+
+    private:
+        FCk_Handle _PendingEntity;
+
+    public:
+        CK_PROPERTY_GET(_PendingEntity);
+
+    public:
+        CK_DEFINE_CONSTRUCTORS(FFragment_EntityScript_MatchedPendingEntity, _PendingEntity);
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
     using FFragment_EntityScript_RequestSpawnEntity = FCk_Request_EntityScript_SpawnEntity;
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -140,6 +158,22 @@ namespace ck
         auto
         CleanupRemaining() -> void;
 
+        auto
+        Get_HasPending(
+            UClass* InEntityScriptClass) const -> bool;
+
+        // True the first time for a class; a failed match is reported once per owner and class.
+        auto
+        Try_MarkMismatchReported(
+            UClass* InEntityScriptClass) -> bool;
+
+        // One line per pending entry of the class: the pending entity and its first spawn param that differs from InConstructedEntity's.
+        auto
+        Get_MismatchDescription(
+            UClass* InEntityScriptClass,
+            const UCk_EntityScript_UE* InCDO,
+            const FCk_Handle& InConstructedEntity) const -> FString;
+
     private:
         struct FPendingEntry
         {
@@ -148,6 +182,7 @@ namespace ck
         };
 
         TMap<TObjectKey<UClass>, TArray<FPendingEntry>> _PendingByClass;
+        TSet<TObjectKey<UClass>> _MismatchReportedClasses;
     };
 }
 

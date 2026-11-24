@@ -794,3 +794,304 @@ auto
 }
 
 // --------------------------------------------------------------------------------------------------------------------
+
+namespace ck_reflection_detail
+{
+    auto
+    Get_ChildPath(
+        const FCk_PropertyValueDifference* InDifference,
+        const FString& InPath,
+        const FString& InChild)
+        -> FString
+    {
+        if (InDifference == nullptr)
+        { return {}; }
+
+        return InPath.IsEmpty() ? InChild : InPath + TEXT(".") + InChild;
+    }
+
+    auto
+    Set_Difference(
+        FCk_PropertyValueDifference* OutDifference,
+        const FString& InPath,
+        const FString& InValueA,
+        const FString& InValueB)
+        -> void
+    {
+        if (OutDifference == nullptr)
+        { return; }
+
+        *OutDifference = FCk_PropertyValueDifference{InPath, InValueA, InValueB};
+    }
+
+    template <typename T>
+    auto
+    Format_Vector(
+        const UE::Math::TVector<T>& InValue)
+        -> FString
+    {
+        return ck::Format_UE(TEXT("(X={} Y={} Z={})"), InValue.X, InValue.Y, InValue.Z);
+    }
+
+    template <typename T>
+    auto
+    Format_Quat(
+        const UE::Math::TQuat<T>& InValue)
+        -> FString
+    {
+        return ck::Format_UE(TEXT("(X={} Y={} Z={} W={})"), InValue.X, InValue.Y, InValue.Z, InValue.W);
+    }
+
+    template <typename T>
+    auto
+    Format_Rotator(
+        const UE::Math::TRotator<T>& InValue)
+        -> FString
+    {
+        return ck::Format_UE(TEXT("(P={} Y={} R={})"), InValue.Pitch, InValue.Yaw, InValue.Roll);
+    }
+
+    template <typename T>
+    auto
+    Get_AreTransformsNearlyEqual(
+        const UE::Math::TTransform<T>& InA,
+        const UE::Math::TTransform<T>& InB,
+        double InTolerance,
+        const FString& InPath,
+        FCk_PropertyValueDifference* OutDifference)
+        -> bool
+    {
+        if (NOT InA.RotationEquals(InB, static_cast<T>(InTolerance)))
+        {
+            if (OutDifference != nullptr)
+            {
+                Set_Difference(OutDifference, Get_ChildPath(OutDifference, InPath, TEXT("Rotation")),
+                    Format_Quat(InA.GetRotation()), Format_Quat(InB.GetRotation()));
+            }
+            return false;
+        }
+
+        if (NOT InA.TranslationEquals(InB, static_cast<T>(InTolerance)))
+        {
+            if (OutDifference != nullptr)
+            {
+                Set_Difference(OutDifference, Get_ChildPath(OutDifference, InPath, TEXT("Translation")),
+                    Format_Vector(InA.GetTranslation()), Format_Vector(InB.GetTranslation()));
+            }
+            return false;
+        }
+
+        if (NOT InA.Scale3DEquals(InB, static_cast<T>(InTolerance)))
+        {
+            if (OutDifference != nullptr)
+            {
+                Set_Difference(OutDifference, Get_ChildPath(OutDifference, InPath, TEXT("Scale3D")),
+                    Format_Vector(InA.GetScale3D()), Format_Vector(InB.GetScale3D()));
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+    template <typename T_Value, typename T_Formatter>
+    auto
+    Get_AreMathValuesNearlyEqual(
+        const void* InValueA,
+        const void* InValueB,
+        double InTolerance,
+        const FString& InPath,
+        FCk_PropertyValueDifference* OutDifference,
+        T_Formatter InFormatter)
+        -> bool
+    {
+        const auto& ValueA = *static_cast<const T_Value*>(InValueA);
+        const auto& ValueB = *static_cast<const T_Value*>(InValueB);
+
+        if (ValueA.Equals(ValueB, static_cast<typename T_Value::FReal>(InTolerance)))
+        { return true; }
+
+        if (OutDifference != nullptr)
+        { Set_Difference(OutDifference, InPath, InFormatter(ValueA), InFormatter(ValueB)); }
+
+        return false;
+    }
+
+    auto
+    Get_AreValuesNearlyEqual(
+        const FProperty* InProperty,
+        const void* InValueA,
+        const void* InValueB,
+        double InTolerance,
+        const FString& InPath,
+        FCk_PropertyValueDifference* OutDifference)
+        -> bool;
+
+    auto
+    Get_AreStructValuesNearlyEqual(
+        const UScriptStruct* InStruct,
+        const void* InValueA,
+        const void* InValueB,
+        double InTolerance,
+        const FString& InPath,
+        FCk_PropertyValueDifference* OutDifference)
+        -> bool
+    {
+        if (InStruct == TBaseStructure<FVector>::Get())
+        { return Get_AreMathValuesNearlyEqual<FVector>(InValueA, InValueB, InTolerance, InPath, OutDifference, &Format_Vector<double>); }
+        if (InStruct == TVariantStructure<FVector3f>::Get())
+        { return Get_AreMathValuesNearlyEqual<FVector3f>(InValueA, InValueB, InTolerance, InPath, OutDifference, &Format_Vector<float>); }
+        if (InStruct == TBaseStructure<FQuat>::Get())
+        { return Get_AreMathValuesNearlyEqual<FQuat>(InValueA, InValueB, InTolerance, InPath, OutDifference, &Format_Quat<double>); }
+        if (InStruct == TVariantStructure<FQuat4f>::Get())
+        { return Get_AreMathValuesNearlyEqual<FQuat4f>(InValueA, InValueB, InTolerance, InPath, OutDifference, &Format_Quat<float>); }
+        if (InStruct == TBaseStructure<FRotator>::Get())
+        { return Get_AreMathValuesNearlyEqual<FRotator>(InValueA, InValueB, InTolerance, InPath, OutDifference, &Format_Rotator<double>); }
+        if (InStruct == TVariantStructure<FRotator3f>::Get())
+        { return Get_AreMathValuesNearlyEqual<FRotator3f>(InValueA, InValueB, InTolerance, InPath, OutDifference, &Format_Rotator<float>); }
+        if (InStruct == TBaseStructure<FTransform>::Get())
+        {
+            return Get_AreTransformsNearlyEqual(*static_cast<const FTransform*>(InValueA),
+                *static_cast<const FTransform*>(InValueB), InTolerance, InPath, OutDifference);
+        }
+        if (InStruct == TVariantStructure<FTransform3f>::Get())
+        {
+            return Get_AreTransformsNearlyEqual(*static_cast<const FTransform3f*>(InValueA),
+                *static_cast<const FTransform3f*>(InValueB), InTolerance, InPath, OutDifference);
+        }
+
+        // A native Identical owns its type's equality (handles, tags, instanced structs): keep it exact.
+        if (EnumHasAnyFlags(static_cast<EStructFlags>(InStruct->StructFlags), STRUCT_IdenticalNative))
+        {
+            if (InStruct->CompareScriptStruct(InValueA, InValueB, PPF_None))
+            { return true; }
+
+            if (OutDifference != nullptr)
+            {
+                auto ValueA = FString{};
+                auto ValueB = FString{};
+                InStruct->ExportText(ValueA, InValueA, nullptr, nullptr, PPF_None, nullptr);
+                InStruct->ExportText(ValueB, InValueB, nullptr, nullptr, PPF_None, nullptr);
+                Set_Difference(OutDifference, InPath, ValueA, ValueB);
+            }
+            return false;
+        }
+
+        for (TFieldIterator<FProperty> It(InStruct); It; ++It)
+        {
+            const auto* Member = *It;
+            for (auto Index = 0; Index < Member->ArrayDim; ++Index)
+            {
+                const auto MemberName = Member->ArrayDim > 1
+                    ? ck::Format_UE(TEXT("{}[{}]"), Member->GetName(), Index)
+                    : Member->GetName();
+
+                if (NOT Get_AreValuesNearlyEqual(Member,
+                        Member->ContainerPtrToValuePtr<void>(InValueA, Index),
+                        Member->ContainerPtrToValuePtr<void>(InValueB, Index),
+                        InTolerance, Get_ChildPath(OutDifference, InPath, MemberName), OutDifference))
+                { return false; }
+            }
+        }
+
+        return true;
+    }
+
+    auto
+    Get_AreValuesNearlyEqual(
+        const FProperty* InProperty,
+        const void* InValueA,
+        const void* InValueB,
+        double InTolerance,
+        const FString& InPath,
+        FCk_PropertyValueDifference* OutDifference)
+        -> bool
+    {
+        if (const auto* FloatProperty = CastField<FFloatProperty>(InProperty))
+        {
+            const auto ValueA = FloatProperty->GetPropertyValue(InValueA);
+            const auto ValueB = FloatProperty->GetPropertyValue(InValueB);
+            if (FMath::IsNearlyEqual(ValueA, ValueB, static_cast<float>(InTolerance)))
+            { return true; }
+
+            Set_Difference(OutDifference, InPath, ck::Format_UE(TEXT("{}"), ValueA), ck::Format_UE(TEXT("{}"), ValueB));
+            return false;
+        }
+
+        if (const auto* DoubleProperty = CastField<FDoubleProperty>(InProperty))
+        {
+            const auto ValueA = DoubleProperty->GetPropertyValue(InValueA);
+            const auto ValueB = DoubleProperty->GetPropertyValue(InValueB);
+            if (FMath::IsNearlyEqual(ValueA, ValueB, InTolerance))
+            { return true; }
+
+            Set_Difference(OutDifference, InPath, ck::Format_UE(TEXT("{}"), ValueA), ck::Format_UE(TEXT("{}"), ValueB));
+            return false;
+        }
+
+        if (const auto* StructProperty = CastField<FStructProperty>(InProperty))
+        {
+            return Get_AreStructValuesNearlyEqual(StructProperty->Struct, InValueA, InValueB, InTolerance, InPath, OutDifference);
+        }
+
+        if (const auto* ArrayProperty = CastField<FArrayProperty>(InProperty))
+        {
+            auto ArrayA = FScriptArrayHelper{ArrayProperty, InValueA};
+            auto ArrayB = FScriptArrayHelper{ArrayProperty, InValueB};
+
+            if (ArrayA.Num() != ArrayB.Num())
+            {
+                Set_Difference(OutDifference, Get_ChildPath(OutDifference, InPath, TEXT("Num")),
+                    ck::Format_UE(TEXT("{}"), ArrayA.Num()), ck::Format_UE(TEXT("{}"), ArrayB.Num()));
+                return false;
+            }
+
+            for (auto Index = 0; Index < ArrayA.Num(); ++Index)
+            {
+                const auto ElementPath = OutDifference != nullptr ? ck::Format_UE(TEXT("{}[{}]"), InPath, Index) : FString{};
+                if (NOT Get_AreValuesNearlyEqual(ArrayProperty->Inner, ArrayA.GetRawPtr(Index), ArrayB.GetRawPtr(Index),
+                        InTolerance, ElementPath, OutDifference))
+                { return false; }
+            }
+
+            return true;
+        }
+
+        if (InProperty->Identical(InValueA, InValueB))
+        { return true; }
+
+        if (OutDifference != nullptr)
+        {
+            auto ValueA = FString{};
+            auto ValueB = FString{};
+            InProperty->ExportTextItem_Direct(ValueA, InValueA, nullptr, nullptr, PPF_None);
+            InProperty->ExportTextItem_Direct(ValueB, InValueB, nullptr, nullptr, PPF_None);
+            Set_Difference(OutDifference, InPath, ValueA, ValueB);
+        }
+
+        return false;
+    }
+}
+
+auto
+    UCk_Utils_Reflection_UE::
+    Get_ArePropertyValuesNearlyEqual(
+        const FProperty* InProperty,
+        const void* InValueA,
+        const void* InValueB,
+        double InTolerance,
+        FCk_PropertyValueDifference* OutDifference)
+    -> bool
+{
+    CK_ENSURE_IF_NOT(ck::IsValid(InProperty), TEXT("Comparing property values needs a valid property"))
+    { return false; }
+
+    CK_ENSURE_IF_NOT(InValueA != nullptr && InValueB != nullptr,
+        TEXT("Comparing values of property [{}] needs both values"), InProperty->GetName())
+    { return false; }
+
+    const auto Path = OutDifference != nullptr ? InProperty->GetName() : FString{};
+    return ck_reflection_detail::Get_AreValuesNearlyEqual(InProperty, InValueA, InValueB, InTolerance, Path, OutDifference);
+}
+
+// --------------------------------------------------------------------------------------------------------------------

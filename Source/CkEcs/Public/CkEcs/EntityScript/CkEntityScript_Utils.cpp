@@ -635,6 +635,21 @@ auto
 
 auto
     UCk_Utils_PendingEntityScript_UE::
+    Get_PendingHandle_ForConstructed(
+        const FCk_Handle_EntityScript& InConstructed)
+    -> FCk_Handle_PendingEntityScript
+{
+    CK_ENSURE_IF_NOT(ck::IsValid(InConstructed), TEXT("Get_PendingHandle_ForConstructed needs a valid constructed entity"))
+    { return {}; }
+
+    if (InConstructed.Has<ck::FFragment_EntityScript_MatchedPendingEntity>())
+    { return FCk_Handle_PendingEntityScript{InConstructed.Get<ck::FFragment_EntityScript_MatchedPendingEntity>().Get_PendingEntity()}; }
+
+    return FCk_Handle_PendingEntityScript{InConstructed};
+}
+
+auto
+    UCk_Utils_PendingEntityScript_UE::
     Get_IsValid(
         const FCk_Handle_PendingEntityScript& InHandle)
     -> bool
