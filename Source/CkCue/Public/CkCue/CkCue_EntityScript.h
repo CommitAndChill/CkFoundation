@@ -62,6 +62,11 @@ public:
     UCk_CueBase_EntityScript(const FObjectInitializer& InInitializer);
 
 protected:
+    // Opt-in commands execute only through the connection-owned player ingress.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cue Owner",
+        meta = (AllowPrivateAccess = true))
+    bool _RequireAuthenticatedPlayerOwner = false;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cue Owner",
     meta = (AllowPrivateAccess = true))
     ECk_Cue_OwnerValidationPolicy _OwnerValidationPolicy = ECk_Cue_OwnerValidationPolicy::SkipIfInvalid;
@@ -79,6 +84,7 @@ protected:
     FCk_Time _LifetimeDuration = FCk_Time{30.0f};
 
 public:
+    CK_PROPERTY_GET(_RequireAuthenticatedPlayerOwner);
     CK_PROPERTY_GET(_OwnerValidationPolicy);
     CK_PROPERTY_GET(_ConcurrencyPolicy);
     CK_PROPERTY_GET(_LifetimeBehavior);
