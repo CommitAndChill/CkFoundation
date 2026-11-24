@@ -33,6 +33,7 @@
 
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_Setup);
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_PushTransform);
+CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_PushLateTransform);
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_Tick);
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_HandleRequests);
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_EndPlay);
@@ -233,7 +234,7 @@ namespace ck
             TimeType InDeltaT,
             HandleType InHandle,
             const FFragment_Transform& InTransform,
-            const FFragment_RecordOfUnrealComponents&)
+            FFragment_RecordOfUnrealComponents& InComponents)
         -> void
     {
         // PostTransform runs after root-to-ECS synchronization and transform requests. At this point the
@@ -312,6 +313,8 @@ namespace ck
                 }
             });
 
+        InComponents._LastProjectedOwnerTransform = CurrentTransform;
+
         if (Enabled)
         {
             cpu_work::Add(ECk_CpuWorkCounter::ComponentEntries, Entries);
@@ -324,6 +327,26 @@ namespace ck
             cpu_work::Add(ECk_CpuWorkCounter::ComponentChanged, Changed);
             cpu_work::Add(ECk_CpuWorkCounter::ComponentStaticRebakes, StaticRebakes);
         }
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProcessor_UnrealComponent_PushLateTransform::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_Transform& InTransform,
+            FFragment_RecordOfUnrealComponents& InComponents)
+        -> void
+    {
+        const auto& CurrentTransform = InTransform.Get_Transform();
+        if (InComponents._LastProjectedOwnerTransform.IsSet() &&
+            InComponents._LastProjectedOwnerTransform.GetValue().Equals(CurrentTransform))
+        { return; }
+
+        FProcessor_UnrealComponent_PushTransform::ForEachEntity(
+            InDeltaT, InHandle, InTransform, InComponents);
     }
 
     // --------------------------------------------------------------------------------------------------------------------

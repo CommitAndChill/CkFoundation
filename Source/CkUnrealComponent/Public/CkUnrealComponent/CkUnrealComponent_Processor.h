@@ -7,6 +7,7 @@
 #include "CkEcs/Scheduler/CkProcessorGroups.h"
 
 #include "CkEcsExt/Transform/CkTransform_Fragment.h"
+#include "CkEcsExt/Transform/CkTransform_Processor.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -41,7 +42,7 @@ namespace ck
             FProcessor_UnrealComponent_PushTransform,
             FCk_Handle_Transform,
             ck::TReadOnly<FFragment_Transform>,
-            ck::TReadOnly<FFragment_RecordOfUnrealComponents>,
+            ck::TReadWrite<FFragment_RecordOfUnrealComponents>,
             FTag_Transform_Updated,
             CK_IGNORE_PENDING_KILL>
     {
@@ -58,7 +59,32 @@ namespace ck
             TimeType InDeltaT,
             HandleType InHandle,
             const FFragment_Transform& InTransform,
-            const FFragment_RecordOfUnrealComponents& InComponents) -> void;
+            FFragment_RecordOfUnrealComponents& InComponents) -> void;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // Deferred net apply can move a root in the tail pump, after normal projection.
+    // Project that pose before next frame's cleanup discards its update marker.
+    class CKUNREALCOMPONENT_API FProcessor_UnrealComponent_PushLateTransform : public ck_exp::TProcessor<
+            FProcessor_UnrealComponent_PushLateTransform,
+            FCk_Handle_Transform,
+            ck::TReadOnly<FFragment_Transform>,
+            ck::TReadWrite<FFragment_RecordOfUnrealComponents>,
+            FTag_Transform_Updated,
+            CK_IGNORE_PENDING_KILL>
+    {
+    public:
+        using RunAfter = TDepList<FGroup_Physics>;
+        using RunBefore = TDepList<FProcessor_Transform_Cleanup, FGroup_Transform_SyncFrom>;
+        using TProcessor::TProcessor;
+
+        static auto
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InHandle,
+            const FFragment_Transform& InTransform,
+            FFragment_RecordOfUnrealComponents& InComponents) -> void;
     };
 
     // --------------------------------------------------------------------------------------------------------------------
