@@ -7,6 +7,7 @@
 #include "CkCore/Format/CkFormat.h"
 #include "CkCore/MessageDialog/CkMessageDialog_Utils.h"
 #include "CkCore/Settings/CkCore_Settings.h"
+#include "CkCore/Theme/CkTheme_Utils.h"
 #include "CkCore/Ensure/CkEnsure_Utils.h"
 
 #include <CoreMinimal.h>
@@ -35,7 +36,7 @@ namespace ck::ensure
         float InLightToneAmount) -> FLinearColor
     {
         const auto& Theme = USlateThemeManager::Get();
-        if (Theme.GetColor(EStyleColor::Background).GetLuminance() <= 0.5f)
+        if (NOT ck::theme::Get_IsEditorThemeLight())
         { return InDark; }
 
         return FMath::Lerp(Theme.GetColor(EStyleColor::Secondary), Theme.GetColor(InLightTone), InLightToneAmount);

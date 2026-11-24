@@ -8,6 +8,7 @@
 #include "Styling/StyleColors.h"
 
 #include "CkCore/Macros/CkMacros.h"
+#include "CkCore/Theme/CkTheme_Utils.h"
 
 #include "Misc/App.h"
 
@@ -41,7 +42,7 @@ auto
 		case ECk_Style_PaletteMode::AlwaysDark:  return ECk_Style_Palette::Dark;
 		case ECk_Style_PaletteMode::AlwaysLight: return ECk_Style_Palette::Light;
 		default:
-			return InThemeBackground.GetLuminance() > 0.5f ? ECk_Style_Palette::Light : ECk_Style_Palette::Dark;
+			return ck::theme::Get_IsLightBackground(InThemeBackground) ? ECk_Style_Palette::Light : ECk_Style_Palette::Dark;
 	}
 }
 
