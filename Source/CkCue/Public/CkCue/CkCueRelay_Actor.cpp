@@ -13,6 +13,7 @@ namespace ck_cue_subsystem_base
 {
     auto Get_CueSubsystemFromClass(TSubclassOf<UCk_CueSubsystem_Base_UE> InCueSubsystemClass) -> UCk_CueSubsystem_Base_UE*;
     auto ExecuteCueEntityScript(FCk_Handle InOwnerEntity, const FGameplayTag& InCueName, TSubclassOf<UCk_CueBase_EntityScript> InCueClass, const FInstancedStruct& InSpawnParams) -> FCk_Handle_PendingEntityScript;
+    auto ExecuteCueForPlayer(UCk_CueExecutor_Subsystem_Base_UE* InExecutor, APlayerState* InPlayerState, const FGameplayTag& InCueName, const FInstancedStruct& InSpawnParams) -> FCk_Handle_PendingEntityScript;
 }
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -23,6 +24,19 @@ auto
     -> UCk_CueExecutor_Subsystem_Base_UE*
 {
     return Cast<UCk_CueExecutor_Subsystem_Base_UE>(Get_GroupSubsystem().Get());
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+auto
+    ACk_CueRelay_UE::
+    Server_RequestExecuteCue_AsOwningPlayer_Implementation(
+        FGameplayTag InCueName,
+        const FInstancedStruct& InSpawnParams)
+    -> void
+{
+    ck_cue_subsystem_base::ExecuteCueForPlayer(
+        DoGetCueExecutorSubsystem(), Cast<APlayerState>(GetOwner()), InCueName, InSpawnParams);
 }
 
 // --------------------------------------------------------------------------------------------------------------------
