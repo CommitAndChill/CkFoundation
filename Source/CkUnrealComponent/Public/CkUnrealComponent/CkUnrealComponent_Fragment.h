@@ -9,6 +9,8 @@
 #include "CkRecord/Record/CkRecord_Utils.h"
 
 #include "Components/ActorComponent.h"
+#include "Math/Transform.h"
+#include "Misc/Optional.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -84,10 +86,20 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
-    CK_DEFINE_RECORD_OF_ENTITIES_AND_UTILS_TRANSIENT(
-        RecordOfUnrealComponents_Utils,
-        FFragment_RecordOfUnrealComponents,
-        FCk_Handle_UnrealComponent);
+    struct FFragment_RecordOfUnrealComponents
+        : public TFragment_RecordOfEntities<FCk_Handle_UnrealComponent>
+    {
+        using TFragment_RecordOfEntities::TFragment_RecordOfEntities;
+
+        friend class FProcessor_UnrealComponent_PushTransform;
+        friend class FProcessor_UnrealComponent_PushLateTransform;
+
+    private:
+        // Session-only projection cache. The inherited record serializer handles entries only.
+        TOptional<FTransform> _LastProjectedOwnerTransform;
+    };
+
+    CK_DEFINE_RECORD_OF_ENTITIES_UTILS(RecordOfUnrealComponents_Utils, FFragment_RecordOfUnrealComponents);
 
     // --------------------------------------------------------------------------------------------------------------------
 
