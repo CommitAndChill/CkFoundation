@@ -23,17 +23,6 @@
 // --------------------------------------------------------------------------------------------------------------------
 
 // Dev tool: renders editor windows to PNG without driving the desktop, for checking theme changes.
-//   Ck.EditorTheme.Capture <step> <step> ...
-// Steps run in order, each open step followed by a settle delay:
-//   light | dark          set the Editor Theme mode; like a change in Preferences, the applied theme is saved
-//   prefs                 Editor Preferences > Appearance
-//   tab=<TabId>           invoke a global tab (e.g. tab=SessionFrontend)
-//   asset=<ObjectPath>    open the asset's editor
-//   browse=<Folder>       show a content folder (e.g. browse=/CkTests/Common) in the content browser
-//   graph=<BP>:<Graph>    open a blueprint graph by name, spaces ignored (graph=/Game/BP.BP:CreateInstances)
-//   wait=<Seconds>
-//   shot=<Label>          save every visible window to Saved/CkEditorTheme/Capture/<Label>_<Window>.png
-//   quit                  QUIT_EDITOR
 namespace ck_editor_theme_capture
 {
     constexpr auto SettleSeconds = 2.5;
@@ -237,7 +226,9 @@ namespace ck_editor_theme_capture
 
     FAutoConsoleCommand CaptureCommand(
         TEXT("Ck.EditorTheme.Capture"),
-        TEXT("Dev: run theme capture steps (light, dark, prefs, tab=<Id>, asset=<Path>, wait=<s>, shot=<Label>, quit)."),
+        TEXT("Dev: run capture steps in order. light | dark (saved like a Preferences change), prefs, tab=<TabId>, "
+             "asset=<ObjectPath>, browse=<Folder>, graph=<BP>:<Graph>, wait=<Seconds>, "
+             "shot=<Label> (Saved/CkEditorTheme/Capture/<Label>_<Window>.png), quit."),
         FConsoleCommandWithArgsDelegate::CreateStatic(&OnCommand));
 }
 
