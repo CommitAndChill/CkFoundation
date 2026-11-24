@@ -10,6 +10,7 @@
 #include "CkAngelscriptGenerator/CkAngelscriptGenerator_RegenOwnership.h"
 #include "CkAngelscriptGenerator/DynamicHandles/CkDynamicHandleSubsystem.h"
 #include "CkAngelscriptGenerator/SelfHeal/CkAngelscriptGenerator_Dispatcher.h"
+#include "CkAngelscriptGenerator/SelfHeal/CkAngelscriptGenerator_StubSynthesizer.h"
 #include "CkAngelscriptGenerator/Settings/CkAngelscriptGenerator_Settings.h"
 
 #include "CkCore/Macros/CkMacros.h"
@@ -88,8 +89,31 @@ namespace ck_angelscript_generator_module
         }
     }
 
+    // Startup runs before the first AS compile, so an EntitySpawnParams stub may still be the only
+    // declaration of classes its present canonical predates. Every other sweep follows a successful regen.
+    enum class ECk_StubSweepSite : uint8
+    {
+        Startup,
+        AfterRegen,
+    };
+
+    auto Get_IsStubAheadOfStaleCanonical(
+        const FString& InStubPath,
+        const FString& InCanonicalPath) -> bool
+    {
+        auto StubContents      = FString{};
+        auto CanonicalContents = FString{};
+        if (NOT FFileHelper::LoadFileToString(StubContents, *InStubPath)
+            || NOT FFileHelper::LoadFileToString(CanonicalContents, *InCanonicalPath))
+        { return false; }
+
+        return NOT ck::angelscriptgenerator::self_heal::FCkAsStubSynthesizer::Is_StubSupersededByCanonical(
+            StubContents, CanonicalContents);
+    }
+
     auto Delete_StubRecoveryFiles_ForPatterns(
-        TArrayView<const TCHAR* const> Patterns) -> int32
+        TArrayView<const TCHAR* const> Patterns,
+        ECk_StubSweepSite              InSite) -> int32
     {
         if (NOT FCkAngelscriptGenerator_RegenOwnership::Try_AcquireOrGet_IsOwner(
                 TEXT("Module.Delete_StubRecoveryFiles")))
@@ -128,6 +152,16 @@ namespace ck_angelscript_generator_module
                         continue;
                     }
 
+                    if (InSite == ECk_StubSweepSite::Startup
+                        && FCString::Strcmp(Pattern, sStubPattern_EntitySpawnParams) == 0
+                        && Get_IsStubAheadOfStaleCanonical(File, CanonicalPath))
+                    {
+                        ck::angelscriptgenerator::Log(
+                            TEXT("[Module] Retaining self-heal stub (its canonical is stale - it defines none of the ")
+                            TEXT("stub's SpawnParams structs, so the stub is the bootstrap for the next AS compile): {}"), File);
+                        continue;
+                    }
+
                     if (IFileManager::Get().Delete(*File, /*RequireExists=*/false, /*EvenReadOnly=*/false, /*Quiet=*/true))
                     {
                         ck::angelscriptgenerator::Log(
@@ -163,7 +197,7 @@ namespace ck_angelscript_generator_module
             sStubPattern_AssetRegistry,
             sStubPattern_DynamicHandle,
         };
-        return Delete_StubRecoveryFiles_ForPatterns(AllPatterns);
+        return Delete_StubRecoveryFiles_ForPatterns(AllPatterns, ECk_StubSweepSite::Startup);
     }
 
     auto Has_DynamicHandleStubRecoveryFile_OnDisk() -> bool
@@ -365,7 +399,7 @@ namespace ck_angelscript_generator_module
 
                             // Canonical written; only NOW may the AR sibling be cleaned.
                             const auto ArPatterns = TArray<const TCHAR*>{ sStubPattern_AssetRegistry };
-                            Delete_StubRecoveryFiles_ForPatterns(ArPatterns);
+                            Delete_StubRecoveryFiles_ForPatterns(ArPatterns, ECk_StubSweepSite::AfterRegen);
 
                             sg_AnyAssetRegistryRegenInFlight = false;
                             return false; // one-shot
@@ -505,7 +539,7 @@ namespace ck_angelscript_generator_module
                     // Canonical written; only NOW may the AR sibling be cleaned — never from the
                     // outer PostCompile lambda.
                     const auto ArPatterns = TArray<const TCHAR*>{ sStubPattern_AssetRegistry };
-                    Delete_StubRecoveryFiles_ForPatterns(ArPatterns);
+                    Delete_StubRecoveryFiles_ForPatterns(ArPatterns, ECk_StubSweepSite::AfterRegen);
 
                     sg_AnyAssetRegistryRegenInFlight = false;
                     return false; // one-shot
@@ -604,7 +638,8 @@ void FCkAngelscriptGeneratorModule::StartupModule()
                 ck_angelscript_generator_module::sStubPattern_EntitySpawnParams,
                 ck_angelscript_generator_module::sStubPattern_DynamicHandle,
             };
-            const auto DeletedCount = ck_angelscript_generator_module::Delete_StubRecoveryFiles_ForPatterns(PostCompilePatterns);
+            const auto DeletedCount = ck_angelscript_generator_module::Delete_StubRecoveryFiles_ForPatterns(
+                PostCompilePatterns, ck_angelscript_generator_module::ECk_StubSweepSite::AfterRegen);
             if (DeletedCount > 0)
             {
                 ck::angelscriptgenerator::Log(

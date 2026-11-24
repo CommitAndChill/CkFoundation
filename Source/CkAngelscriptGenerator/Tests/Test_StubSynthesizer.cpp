@@ -1700,4 +1700,97 @@ bool FCkTest_StubSynthesizer_Quarantine_SkipsClassesWithNoSource::RunTest(const 
     return true;
 }
 
+// --------------------------------------------------------------------------------------------------------------------
+// Headless self-heal is two processes, and the startup sweep runs between them. A canonical that is present
+// but predates the stub's classes must not cost pass 2 its stub, or every pass repeats pass 1.
+// --------------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_StubSynthesizer_Is_StubSupersededByCanonical,
+    "CkAngelscriptGenerator.UnitTests.StubSynthesizer.Is_StubSupersededByCanonical",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCkTest_StubSynthesizer_Is_StubSupersededByCanonical::RunTest(const FString&)
+{
+    const auto Build_FullShape = [](const TCHAR* InClassName) -> FString
+    {
+        auto Shape = FCk_AsClassShape{};
+        Shape.Found               = true;
+        Shape.ClassName           = InClassName;
+        Shape.FlattenedProperties = { FCk_AsExposedProperty{TEXT("int32"), TEXT("Count")} };
+
+        auto Error = FCk_AsParsedError{};
+        Error.Kind              = ECk_AsParsedError_Kind::BareCtorNoMatchingSignatures;
+        Error.MissingIdentifier = FCkAsStubSynthesizer::Derive_SpawnParamsStructName(InClassName);
+        Error.FilePath          = TEXT("D:/Test/Caller.as");
+
+        return FCkAsStubSynthesizer::Build_EntityScriptParamsStub_FullShape(Shape, Error);
+    };
+
+    const auto Build_ErrorText = [](const TCHAR* InClassName, bool InEmitStruct) -> FString
+    {
+        return FCkAsStubSynthesizer::Build_EntityScriptParamsStub(
+            Make_ParsedError(InClassName, TEXT("Params"), TEXT("int32")), InEmitStruct);
+    };
+
+    const auto Header = FCkAsStubSynthesizer::Get_StubFileHeader();
+
+    const auto StaleCanonical = FString{TEXT(
+        "struct FTestRet_Old_SpawnParams\n"
+        "{\n"
+        "}\n"
+        "namespace UTestRet_Old\n"
+        "{\n"
+        "    FTestRet_Old_SpawnParams Params() { return FTestRet_Old_SpawnParams(); }\n"
+        "}\n")};
+
+    const auto CanonicalWithNewA = StaleCanonical + TEXT(
+        "struct FTestRet_NewA_SpawnParams\n"
+        "{\n"
+        "}\n"
+        "namespace UTestRet_NewA\n"
+        "{\n"
+        "}\n");
+
+    const auto CanonicalWithBoth = CanonicalWithNewA + TEXT(
+        "struct FTestRet_NewB_SpawnParams\n"
+        "{\n"
+        "}\n"
+        "namespace UTestRet_NewB\n"
+        "{\n"
+        "}\n");
+
+    TestFalse(TEXT("stale canonical + full-shape stub of a new class -> kept"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(
+            Header + Build_FullShape(TEXT("UTestRet_NewA")), StaleCanonical));
+
+    const auto TwoNewClasses = Header + Build_FullShape(TEXT("UTestRet_NewA")) + Build_FullShape(TEXT("UTestRet_NewB"));
+
+    TestFalse(TEXT("several new classes, none in the canonical -> kept"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(TwoNewClasses, StaleCanonical));
+
+    TestTrue(TEXT("canonical defines the stub's struct -> superseded"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(
+            Header + Build_FullShape(TEXT("UTestRet_NewA")), CanonicalWithNewA));
+
+    TestTrue(TEXT("canonical defines every struct of a multi-class stub -> superseded"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(TwoNewClasses, CanonicalWithBoth));
+
+    TestTrue(TEXT("canonical defines one of two -> superseded (keeping it would duplicate a declaration)"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(TwoNewClasses, CanonicalWithNewA));
+
+    TestFalse(TEXT("error-text stub that emits its struct, absent from the canonical -> kept"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(
+            Header + Build_ErrorText(TEXT("UTestRet_NewA"), /*InEmitStruct=*/true), StaleCanonical));
+
+    TestTrue(TEXT("overload-only error-text stub (no struct) -> superseded"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(
+            Header + Build_ErrorText(TEXT("UTestRet_Old"), /*InEmitStruct=*/false), StaleCanonical));
+
+    TestTrue(TEXT("empty stub text -> superseded"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(FString{}, StaleCanonical));
+
+    return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

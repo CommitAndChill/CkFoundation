@@ -854,6 +854,25 @@ namespace ck::angelscriptgenerator::self_heal
 
     auto
         FCkAsStubSynthesizer::
+        Is_StubSupersededByCanonical(
+            const FString& InStubContents,
+            const FString& InCanonicalContents)
+        -> bool
+    {
+        const auto OwnedClasses = Enumerate_EntityScriptNamespaces(InStubContents);
+        if (OwnedClasses.IsEmpty())
+        { return true; }
+
+        return OwnedClasses.ContainsByPredicate([&](const FString& InClassName)
+        {
+            return Has_SpawnParamsStruct(InCanonicalContents, Derive_SpawnParamsStructName(InClassName));
+        });
+    }
+
+    // ----------------------------------------------------------------------------------------------------------------
+
+    auto
+        FCkAsStubSynthesizer::
         Quarantine_And_ResynthesizeFullShapes(
             const FString&           InCanonicalPath,
             const TArray<FString>&   InSeedClassNames,
