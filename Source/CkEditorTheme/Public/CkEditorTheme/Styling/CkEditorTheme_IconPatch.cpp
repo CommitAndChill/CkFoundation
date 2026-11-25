@@ -310,8 +310,8 @@ namespace ck::editor_theme
             for (auto X = 0; X < InWidth; ++X)
             { Peak = FMath::Max(Peak, InBGRA[(Row + X) * 4 + 3]); }
 
-            // The title sits in the top half; the lower half's faint glow is decoration and stays as drawn.
-            if (Y * 2 >= InHeight || Peak < VisibleRowPeak)
+            // Every visible row goes solid: a faint lower glow over the light body would leave the pill white below its top.
+            if (Peak < VisibleRowPeak)
             { continue; }
 
             // The glow's ends fade over the outer quarter of its strength; inside that the strip is solid.
@@ -366,7 +366,7 @@ auto
         };
 
         ck::editor_theme::Log(TEXT("Light textures: [{}] outlined icons, [{}] surfaces, [{}] graph node bodies ({} ms)"),
-            Count(_OutlineIcons), Count(_Surfaces), Count(_NodeArt),
+            UseOutlineIcons ? Count(_OutlineIcons) : 0, Count(_Surfaces), UseNodeArt ? Count(_NodeArt) : 0,
             FMath::RoundToInt((FPlatformTime::Seconds() - StartSeconds) * 1000.0));
     }
 

@@ -130,7 +130,7 @@ bool FCkEditorTheme_IconPatch_LightSurface::RunTest(const FString& Parameters)
     TestTrue(TEXT("A near-transparent feather row stays transparent"),
         SolidFeather.IsSet() && SolidFeather.GetValue()[7] == 0 && SolidFeather.GetValue()[15] == 0);
 
-    // Four rows of a variable-node glow: a strong title row, a weaker title-half row, then the faint lower half.
+    // Four rows of a variable-node glow: a strong title row, a weaker row, then the faint lower half.
     auto Glow = TArray64<uint8>{};
     for (const auto& Row : {TArray<uint8>{20, 156, 40, 0}, TArray<uint8>{6, 24, 8, 0},
                             TArray<uint8>{4, 30, 8, 0}, TArray<uint8>{2, 20, 4, 0}})
@@ -144,8 +144,9 @@ bool FCkEditorTheme_IconPatch_LightSurface::RunTest(const FString& Parameters)
         const auto& Pixels = Strip.GetValue();
         TestEqual(TEXT("The title row is solid at its peak"), Pixels[7], uint8{255});
         TestEqual(TEXT("The title row's ends stay transparent"), Pixels[15], uint8{0});
-        TestEqual(TEXT("A weaker row in the title half is solid too"), Pixels[16 + 7], uint8{255});
-        TestEqual(TEXT("The lower half's glow is kept as drawn"), Pixels[32 + 7], uint8{30});
+        TestEqual(TEXT("A weaker row is solid too"), Pixels[16 + 7], uint8{255});
+        TestEqual(TEXT("The lower half is solid, so the hue covers the whole pill"), Pixels[32 + 7], uint8{255});
+        TestEqual(TEXT("The last row is solid"), Pixels[48 + 7], uint8{255});
     }
 
     return true;
