@@ -3,6 +3,8 @@
 #include "CkCore/Macros/CkMacros.h"
 #include "CkCore/Theme/CkTheme_Utils.h"
 
+#include "Brushes/SlateColorBrush.h"
+
 #include "HAL/IConsoleManager.h"
 #include "Styling/SegmentedControlStyle.h"
 #include "Styling/SlateStyle.h"
@@ -132,7 +134,7 @@ auto
 
     auto& WidgetStyles = InStyleSet.*(&FStyleSetAccess::WidgetStyleValues);
     const auto& SlateColors = InStyleSet.*(&FStyleSetAccess::SlateColorValues);
-    const auto FieldsBefore = _Fields.Num() + _LinearFields.Num() + _NamedColors.Num();
+    const auto FieldsBefore = _Fields.Num() + _LinearFields.Num() + _BrushFields.Num() + _NamedColors.Num();
 
     const auto HasPinLabel = SlateColors.Contains(PinLabelColorKey);
     const auto LightGraphNodes = HasPinLabel || CVarForceLightGraphNodes.GetValueOnGameThread();
@@ -198,6 +200,19 @@ auto
                 }
                 continue;
             }
+        }
+
+        // Graph breadcrumbs are White at half alpha on the title bar, which is light in Light.
+        if (TypeName == FTextBlockStyle::TypeName && Entry.Key == FName{TEXT("GraphBreadcrumbButtonText")})
+        {
+            auto& Text = static_cast<FTextBlockStyle&>(Style);
+            if (Text.ColorAndOpacity.IsColorSpecified() && Text.ColorAndOpacity.GetSpecifiedColor().R >= 0.95f)
+            {
+                auto Ink = FLinearColor::FromSRGBColor(FColor{0x3A, 0x3A, 0x3A});
+                Ink.A = FMath::Max(Text.ColorAndOpacity.GetSpecifiedColor().A, 0.75f);
+                DoCapture_Field(Text.ColorAndOpacity, FSlateColor{Ink});
+            }
+            continue;
         }
 
         // Emphasis text is literal white with a black drop shadow, used as headings on panels.
@@ -344,7 +359,35 @@ auto
         Tile != nullptr && Tile->TintColor == FStyleColors::Recessed)
     { DoCapture_Field(Tile->TintColor, Get_ThumbnailTile()); }
 
-    return _Fields.Num() + _LinearFields.Num() + _NamedColors.Num() - FieldsBefore;
+    // The graph title bar is a black PNG at half alpha, which no tint can lighten.
+    if (auto* TitleBar = const_cast<FSlateBrush*>(InStyleSet.GetOptionalBrush(TEXT("Graph.TitleBackground"), nullptr, nullptr)))
+    { DoCapture_Brush(*TitleBar, FSlateColorBrush{FStyleColors::Title}); }
+
+    // Its back/forward arrows are white SVGs in untinted images (WorkflowTabManager), white on that light bar.
+    for (const auto* Key : {TEXT("GraphBreadcrumb.BrowseBack"), TEXT("GraphBreadcrumb.BrowseForward")})
+    {
+        if (auto* Arrow = const_cast<FSlateBrush*>(InStyleSet.GetOptionalBrush(Key, nullptr, nullptr));
+            Arrow != nullptr && Arrow->TintColor == FSlateColor{FLinearColor::White})
+        { DoCapture_Field(Arrow->TintColor, FStyleColors::Foreground); }
+    }
+
+    if (LightGraphNodes)
+    {
+        // Variable-node corner glyphs are white SVGs drawn untinted, on a body that is light with light nodes.
+        for (const auto* Key : {TEXT("Graph.Function.FunctionParameterIcon"), TEXT("Graph.Function.FunctionLocalVariableIcon")})
+        {
+            if (auto* Glyph = const_cast<FSlateBrush*>(InStyleSet.GetOptionalBrush(Key, nullptr, nullptr));
+                Glyph != nullptr && Glyph->TintColor == FSlateColor{FLinearColor::White})
+            { DoCapture_Field(Glyph->TintColor, FStyleColors::Foreground); }
+        }
+
+        // The development-only banner is faint yellow stripes under literal white text; on a light node only a solid
+        // amber band keeps that text readable.
+        if (auto* Banner = const_cast<FSlateBrush*>(InStyleSet.GetOptionalBrush(TEXT("Graph.Node.DevelopmentBanner"), nullptr, nullptr)))
+        { DoCapture_Brush(*Banner, FSlateColorBrush{FLinearColor::FromSRGBColor(FColor{0xB8, 0x86, 0x0B})}); }
+    }
+
+    return _Fields.Num() + _LinearFields.Num() + _BrushFields.Num() + _NamedColors.Num() - FieldsBefore;
 }
 
 auto
@@ -362,6 +405,9 @@ auto
     { *Captured._Field = IsLight ? Captured._LightValue : Captured._DarkValue; }
 
     for (const auto& Captured : _LinearFields)
+    { *Captured._Field = IsLight ? Captured._LightValue : Captured._DarkValue; }
+
+    for (const auto& Captured : _BrushFields)
     { *Captured._Field = IsLight ? Captured._LightValue : Captured._DarkValue; }
 
     using namespace ck_editor_theme_light_style_patch;
@@ -399,6 +445,19 @@ auto
     { return; }
 
     _LinearFields.Add({&InField, InField, InLightValue});
+}
+
+auto
+    FCk_EditorTheme_LightStylePatch::
+    DoCapture_Brush(
+        FSlateBrush& InBrush,
+        const FSlateBrush& InLightValue)
+    -> void
+{
+    if (_BrushFields.ContainsByPredicate([&](const TCapturedField<FSlateBrush>& InCaptured) { return InCaptured._Field == &InBrush; }))
+    { return; }
+
+    _BrushFields.Add({&InBrush, InBrush, InLightValue});
 }
 
 auto
