@@ -381,10 +381,13 @@ auto
             { DoCapture_Field(Glyph->TintColor, FStyleColors::Foreground); }
         }
 
-        // The development-only banner is faint yellow stripes under literal white text; on a light node only a solid
-        // amber band keeps that text readable.
+        // The development-only and disabled banners are faint stripes under literal white text; on a light node only a
+        // solid band keeps that text readable.
         if (auto* Banner = const_cast<FSlateBrush*>(InStyleSet.GetOptionalBrush(TEXT("Graph.Node.DevelopmentBanner"), nullptr, nullptr)))
         { DoCapture_Brush(*Banner, FSlateColorBrush{FLinearColor::FromSRGBColor(FColor{0xB8, 0x86, 0x0B})}); }
+
+        if (auto* Banner = const_cast<FSlateBrush*>(InStyleSet.GetOptionalBrush(TEXT("Graph.Node.DisabledBanner"), nullptr, nullptr)))
+        { DoCapture_Brush(*Banner, FSlateColorBrush{FLinearColor::FromSRGBColor(FColor{0x6E, 0x6E, 0x6E})}); }
     }
 
     return _Fields.Num() + _LinearFields.Num() + _BrushFields.Num() + _NamedColors.Num() - FieldsBefore;

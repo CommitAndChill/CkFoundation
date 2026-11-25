@@ -254,12 +254,13 @@ bool FCkEditorTheme_LightStylePatch_GraphChrome::RunTest(const FString& Paramete
     StyleSet.Set("Graph.Function.FunctionParameterIcon", new FSlateColorBrush(FLinearColor::White));
     StyleSet.Set("Graph.Function.FunctionLocalVariableIcon", new FSlateColorBrush(FLinearColor::White));
     StyleSet.Set("Graph.Node.DevelopmentBanner", new FSlateColorBrush(FLinearColor{1.0f, 1.0f, 0.0f, 0.3f}));
+    StyleSet.Set("Graph.Node.DisabledBanner", new FSlateColorBrush(FLinearColor{0.5f, 0.5f, 0.5f, 0.3f}));
     StyleSet.Set("GraphBreadcrumb.BrowseBack", new FSlateColorBrush(FLinearColor::White));
     StyleSet.Set("GraphBreadcrumb.BrowseForward", new FSlateColorBrush(FLinearColor::White));
 
     auto Patch = FCk_EditorTheme_LightStylePatch{};
-    TestEqual(TEXT("Pin label ink, title bar, breadcrumbs, two history arrows, two corner glyphs and the banner are captured"),
-        Patch.Request_Capture(StyleSet), 8);
+    TestEqual(TEXT("Pin label ink, title bar, breadcrumbs, two history arrows, two corner glyphs and both banners are captured"),
+        Patch.Request_Capture(StyleSet), 9);
 
     const auto* TitleBar = StyleSet.GetBrush("Graph.TitleBackground");
     const auto* Glyph = StyleSet.GetBrush("Graph.Function.FunctionParameterIcon");
@@ -272,6 +273,7 @@ bool FCkEditorTheme_LightStylePatch_GraphChrome::RunTest(const FString& Paramete
     TestTrue(TEXT("Light: the corner glyph takes the ink"), Glyph->TintColor == FStyleColors::Foreground);
     TestTrue(TEXT("Light: the history arrow takes the ink"), StyleSet.GetBrush("GraphBreadcrumb.BrowseBack")->TintColor == FStyleColors::Foreground);
     TestTrue(TEXT("Light: the banner is a solid band"), Banner->TintColor.GetSpecifiedColor().A == 1.0f);
+    TestTrue(TEXT("Light: the disabled banner is a solid band"), StyleSet.GetBrush("Graph.Node.DisabledBanner")->TintColor.GetSpecifiedColor().A == 1.0f);
 
     Patch.Request_Apply(ECk_EditorTheme_Brightness::Dark);
     TestTrue(TEXT("Dark: the title bar is restored"), FMath::IsNearlyEqual(TitleBar->TintColor.GetSpecifiedColor().A, 0.5f));
