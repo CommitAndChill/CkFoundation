@@ -21,7 +21,7 @@ public:
     // For a toolbar widget's text binding: the hue itself in a dark editor theme, darkened to stay legible in a light one
     UFUNCTION(BlueprintPure,
               Category = "Ck|Utils|EditorToolbar",
-              DisplayName = "[Ck] Get Theme Ink")
+              DisplayName = "[Ck][EditorToolbar] Get Theme Ink")
     static FSlateColor
     Get_ThemeInk(
         FLinearColor InDarkThemeHue);
