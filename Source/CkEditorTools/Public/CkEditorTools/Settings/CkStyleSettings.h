@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CkCore/Enums/CkEnums.h"
 #include "CkCore/Format/CkFormat.h"
 
 #include "CkSettings/UserSettings/CkUserSettings.h"
@@ -25,7 +26,7 @@ CK_DEFINE_CUSTOM_FORMATTER_ENUM(ECk_Style_PaletteMode);
 
 // The colour slots of the flat Dark properties on UCk_Style_UserSettings_UE, retuned for a light editor theme.
 USTRUCT()
-struct CKEDITORTOOLS_API FCk_Style_Palette
+struct CKEDITORTOOLS_API FCk_Style_PaletteColors
 {
 	GENERATED_BODY()
 
@@ -298,10 +299,10 @@ public:
 
 	// Off: the in-viewport overlays (input HUD, entity debug cards) stay on the Dark palette in a light editor.
 	UPROPERTY(Config, EditAnywhere, Category = "Palette")
-	bool bOverlaysFollowEditorTheme = true;
+	ECk_EnableDisable OverlaysFollowEditorTheme = ECk_EnableDisable::Enable;
 
 	UPROPERTY(Config, EditAnywhere, Category = "Palette|Light")
-	FCk_Style_Palette Light;
+	FCk_Style_PaletteColors Light;
 
 	// ----- Palette: Backgrounds — each tier slightly lighter than the last --
 	// Defaults follow CkGoapDebugger/Mockups/mockup_d_mission_control.html: inset → bg → panel2 → panel

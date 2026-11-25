@@ -105,7 +105,7 @@ bool
         const FString& Parameters)
 {
     const auto* ColorStruct = TBaseStructure<FLinearColor>::Get();
-    const auto* PaletteStruct = FCk_Style_Palette::StaticStruct();
+    const auto* PaletteStruct = FCk_Style_PaletteColors::StaticStruct();
     const auto* Settings = GetDefault<UCk_Style_UserSettings_UE>();
 
     auto IsColor = [ColorStruct](const FProperty* InProperty)
@@ -156,16 +156,16 @@ bool
         const FString& Parameters)
 {
     auto* Settings = GetMutableDefault<UCk_Style_UserSettings_UE>();
-    const auto Previous = Settings->bOverlaysFollowEditorTheme;
+    const auto Previous = Settings->OverlaysFollowEditorTheme;
     ON_SCOPE_EXIT
     {
-        Settings->bOverlaysFollowEditorTheme = Previous;
+        Settings->OverlaysFollowEditorTheme = Previous;
     };
 
-    Settings->bOverlaysFollowEditorTheme = true;
+    Settings->OverlaysFollowEditorTheme = ECk_EnableDisable::Enable;
     TestFalse(TEXT("Following overlays leave the palette unforced"), CkStyle::GetOverlayPalette().IsSet());
 
-    Settings->bOverlaysFollowEditorTheme = false;
+    Settings->OverlaysFollowEditorTheme = ECk_EnableDisable::Disable;
     const auto Forced = CkStyle::GetOverlayPalette();
     TestTrue(TEXT("Opted-out overlays force a palette"), Forced.IsSet() && *Forced == ECk_Style_Palette::Dark);
 

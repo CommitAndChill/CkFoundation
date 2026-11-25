@@ -93,7 +93,7 @@ auto
 	GetOverlayPalette()
 	-> TOptional<ECk_Style_Palette>
 {
-	if (ck_style::DoSettings()->bOverlaysFollowEditorTheme)
+	if (ck_style::DoSettings()->OverlaysFollowEditorTheme == ECk_EnableDisable::Enable)
 	{ return {}; }
 
 	return ECk_Style_Palette::Dark;
