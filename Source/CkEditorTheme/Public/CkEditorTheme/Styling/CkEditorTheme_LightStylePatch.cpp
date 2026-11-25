@@ -401,13 +401,13 @@ auto
             }
         }
 
-        // The development-only and disabled banners are faint stripes under literal white text; on a light node only a
-        // solid band keeps that text readable.
+        // The development-only and disabled banners are 30% stripes under literal white text, readable only over a dark
+        // body. Light keeps the stripes at full strength; IconPatch fills their gaps dark (Get_OpaqueStripes).
         if (auto* Banner = const_cast<FSlateBrush*>(InStyleSet.GetOptionalBrush(TEXT("Graph.Node.DevelopmentBanner"), nullptr, nullptr)))
-        { DoCapture_Brush(*Banner, FSlateColorBrush{FLinearColor::FromSRGBColor(FColor{0xB8, 0x86, 0x0B})}); }
+        { DoCapture_Field(Banner->TintColor, FSlateColor{FLinearColor::FromSRGBColor(FColor{0xB8, 0x86, 0x0B})}); }
 
         if (auto* Banner = const_cast<FSlateBrush*>(InStyleSet.GetOptionalBrush(TEXT("Graph.Node.DisabledBanner"), nullptr, nullptr)))
-        { DoCapture_Brush(*Banner, FSlateColorBrush{FLinearColor::FromSRGBColor(FColor{0x6E, 0x6E, 0x6E})}); }
+        { DoCapture_Field(Banner->TintColor, FSlateColor{FLinearColor::FromSRGBColor(FColor{0x6E, 0x6E, 0x6E})}); }
     }
 
     return _Fields.Num() + _LinearFields.Num() + _BrushFields.Num() + _NamedColors.Num() - FieldsBefore;

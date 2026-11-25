@@ -35,6 +35,13 @@ namespace ck::editor_theme
         int32 InWidth,
         int32 InHeight) -> TOptional<TArray64<uint8>>;
 
+    // Banner stripes (white on transparent) to opaque hazard tape: white stripes over #50 gaps, so the banner tint colours
+    // both and the gaps stay dark under the white banner text on a light node.
+    CKEDITORTHEME_API auto Get_OpaqueStripes(
+        const TArray64<uint8>& InBGRA,
+        int32 InWidth,
+        int32 InHeight) -> TOptional<TArray64<uint8>>;
+
     // Variable node colour fill: the body's pill shape, solid #C8, so the hue fills the pill and a white SET title reads.
     // Resampled to the target size with the corner caps kept and the middle stretched (a 9-slice baked into the texture).
     CKEDITORTHEME_API auto Get_VarPillFill(
