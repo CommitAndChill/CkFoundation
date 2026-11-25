@@ -289,44 +289,60 @@ namespace ck::editor_theme
     }
 
     auto
-        Get_SolidVarSpill(
-            const TArray64<uint8>& InBGRA,
+        Get_VarPillFill(
+            const TArray64<uint8>& InBodyBGRA,
             int32 InWidth,
-            int32 InHeight)
+            int32 InHeight,
+            int32 InTargetWidth,
+            int32 InTargetHeight,
+            int32 InCapX,
+            int32 InCapY)
         -> TOptional<TArray64<uint8>>
     {
         const auto PixelCount = static_cast<int64>(InWidth) * InHeight;
-        if (PixelCount <= 0 || InBGRA.Num() != PixelCount * 4)
+        if (PixelCount <= 0 || InBodyBGRA.Num() != PixelCount * 4
+            || InCapX * 2 >= InWidth || InCapY * 2 >= InHeight
+            || InTargetWidth < InCapX * 2 + 1 || InTargetHeight < InCapY * 2 + 1)
         { return {}; }
 
-        constexpr auto VisibleRowPeak = 16;
-        constexpr auto Shade = uint8{0xC8};
-        auto Solid = InBGRA;
+        auto Peak = uint8{};
+        for (auto Pixel = int64{}; Pixel < PixelCount; ++Pixel)
+        { Peak = FMath::Max(Peak, InBodyBGRA[Pixel * 4 + 3]); }
 
-        for (auto Y = 0; Y < InHeight; ++Y)
+        if (Peak == 0)
+        { return {}; }
+
+        // Caps map 1:1; the middle samples the source's middle.
+        const auto Source = [](int32 InTarget, int32 InTargetSize, int32 InSourceSize, int32 InCap)
         {
-            const auto Row = static_cast<int64>(Y) * InWidth;
-            auto Peak = uint8{};
-            for (auto X = 0; X < InWidth; ++X)
-            { Peak = FMath::Max(Peak, InBGRA[(Row + X) * 4 + 3]); }
+            if (InTarget < InCap)
+            { return InTarget; }
+            if (InTarget >= InTargetSize - InCap)
+            { return InSourceSize - (InTargetSize - InTarget); }
+            const auto Middle = InSourceSize - InCap * 2;
+            return InCap + (InTarget - InCap) * Middle / (InTargetSize - InCap * 2);
+        };
 
-            // Every visible row goes solid: a faint lower glow over the light body would leave the pill white below its top.
-            if (Peak < VisibleRowPeak)
-            { continue; }
-
-            // The glow's ends fade over the outer quarter of its strength; inside that the strip is solid.
-            const auto OpaqueFrom = Peak * 0.25f;
-            for (auto X = 0; X < InWidth; ++X)
+        // The body is translucent; its strongest alpha becomes opaque and the anti-aliased rim keeps its falloff.
+        constexpr auto Shade = uint8{0xC8};
+        auto Fill = TArray64<uint8>{};
+        Fill.SetNumUninitialized(static_cast<int64>(InTargetWidth) * InTargetHeight * 4);
+        for (auto Y = 0; Y < InTargetHeight; ++Y)
+        {
+            const auto SourceY = Source(Y, InTargetHeight, InHeight, InCapY);
+            for (auto X = 0; X < InTargetWidth; ++X)
             {
-                auto* Target = &Solid[(Row + X) * 4];
+                const auto SourceX = Source(X, InTargetWidth, InWidth, InCapX);
+                const auto Alpha = InBodyBGRA[(static_cast<int64>(SourceY) * InWidth + SourceX) * 4 + 3];
+                auto* Target = &Fill[(static_cast<int64>(Y) * InTargetWidth + X) * 4];
                 Target[0] = Shade;
                 Target[1] = Shade;
                 Target[2] = Shade;
-                Target[3] = static_cast<uint8>(FMath::Min(255, FMath::RoundToInt(255.0f * InBGRA[(Row + X) * 4 + 3] / OpaqueFrom)));
+                Target[3] = static_cast<uint8>(FMath::Min(255, FMath::RoundToInt(255.0f * Alpha / Peak)));
             }
         }
 
-        return Solid;
+        return Fill;
     }
 }
 
@@ -479,7 +495,11 @@ auto
 
     auto Width = int32{};
     auto Height = int32{};
-    const auto Decoded = Get_DecodedPng(ResourceName.ToString(), Width, Height);
+    // The variable spill takes the body's pill shape (FCk_EditorTheme_LightStylePatch gives it the body's 9-slice).
+    const auto SourceFile = InKind == ECk_PatchKind::NodeArt && Get_IsVarSpill(InBrush)
+        ? ResourceName.ToString().Replace(TEXT("VarNode_color_spill"), TEXT("VarNode_body"))
+        : ResourceName.ToString();
+    const auto Decoded = Get_DecodedPng(SourceFile, Width, Height);
     if (NOT Decoded.IsSet())
     { return nullptr; }
 
@@ -488,10 +508,19 @@ auto
         : InKind == ECk_PatchKind::NodeArt && Get_IsTitleSpill(InBrush)
         ? ck::editor_theme::Get_SolidTitleSpill(Decoded.GetValue(), Width, Height)
         : InKind == ECk_PatchKind::NodeArt && Get_IsVarSpill(InBrush)
-        ? ck::editor_theme::Get_SolidVarSpill(Decoded.GetValue(), Width, Height)
+        ? ck::editor_theme::Get_VarPillFill(Decoded.GetValue(), Width, Height,
+            FMath::RoundToInt(InBrush.GetImageSize().X), FMath::RoundToInt(InBrush.GetImageSize().Y),
+            FMath::RoundToInt(InBrush.GetMargin().Left * InBrush.GetImageSize().X),
+            FMath::RoundToInt(InBrush.GetMargin().Top * InBrush.GetImageSize().Y))
         : ck::editor_theme::Get_LightSurface(Decoded.GetValue(), Width, Height, InKind == ECk_PatchKind::Surface);
     if (NOT Converted.IsSet())
     { return nullptr; }
+
+    if (InKind == ECk_PatchKind::NodeArt && Get_IsVarSpill(InBrush))
+    {
+        Width = FMath::RoundToInt(InBrush.GetImageSize().X);
+        Height = FMath::RoundToInt(InBrush.GetImageSize().Y);
+    }
 
     auto* Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8, NAME_None, Converted.GetValue());
     if (Texture == nullptr)

@@ -35,11 +35,16 @@ namespace ck::editor_theme
         int32 InWidth,
         int32 InHeight) -> TOptional<TArray64<uint8>>;
 
-    // Variable node spill: the visible top half becomes a solid #C8 strip so the white SET/GET title stays readable.
-    CKEDITORTHEME_API auto Get_SolidVarSpill(
-        const TArray64<uint8>& InBGRA,
+    // Variable node colour fill: the body's pill shape, solid #C8, so the hue fills the pill and a white SET title reads.
+    // Resampled to the target size with the corner caps kept and the middle stretched (a 9-slice baked into the texture).
+    CKEDITORTHEME_API auto Get_VarPillFill(
+        const TArray64<uint8>& InBodyBGRA,
         int32 InWidth,
-        int32 InHeight) -> TOptional<TArray64<uint8>>;
+        int32 InHeight,
+        int32 InTargetWidth,
+        int32 InTargetHeight,
+        int32 InCapX,
+        int32 InCapY) -> TOptional<TArray64<uint8>>;
 }
 
 // --------------------------------------------------------------------------------------------------------------------

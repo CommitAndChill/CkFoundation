@@ -3,6 +3,7 @@
 #include "CkCore/Macros/CkMacros.h"
 #include "CkCore/Theme/CkTheme_Utils.h"
 
+#include "Brushes/SlateBoxBrush.h"
 #include "Brushes/SlateColorBrush.h"
 
 #include "HAL/IConsoleManager.h"
@@ -379,6 +380,25 @@ auto
             if (auto* Glyph = const_cast<FSlateBrush*>(InStyleSet.GetOptionalBrush(Key, nullptr, nullptr));
                 Glyph != nullptr && Glyph->TintColor == FSlateColor{FLinearColor::White})
             { DoCapture_Field(Glyph->TintColor, FStyleColors::Foreground); }
+        }
+
+        // The variable-node colour spill is a fixed 132x28 strip stretched across the pill, invisible only while it fades
+        // into a dark body; Light gives it the body's 9-slice so the hue fits the pill (IconPatch fills it from the body).
+        if (auto* Spill = const_cast<FSlateBrush*>(InStyleSet.GetOptionalBrush(TEXT("Graph.VarNode.ColorSpill"), nullptr, nullptr)))
+        {
+            if (const auto* Body = InStyleSet.GetOptionalBrush(TEXT("Graph.VarNode.Body"), nullptr, nullptr))
+            {
+                // The spill's slot is top-aligned and sized by ImageSize: keep the stock width (the pill's minimum width) and
+                // fill a pin row's pill height. The caps are the body's own, in VarNode_body.png (64x28) pixels.
+                const auto Size = FVector2f{static_cast<float>(Spill->GetImageSize().X), 36.0f};
+                const auto& BodyMargin = Body->GetMargin();
+                auto PillSpill = FSlateBoxBrush{Spill->GetResourceName(),
+                    FMargin{BodyMargin.Left * 64.0f / Size.X, BodyMargin.Top * 28.0f / Size.Y,
+                            BodyMargin.Right * 64.0f / Size.X, BodyMargin.Bottom * 28.0f / Size.Y},
+                    FLinearColor::White};
+                PillSpill.SetImageSize(Size);
+                DoCapture_Brush(*Spill, PillSpill);
+            }
         }
 
         // The development-only and disabled banners are faint stripes under literal white text; on a light node only a
