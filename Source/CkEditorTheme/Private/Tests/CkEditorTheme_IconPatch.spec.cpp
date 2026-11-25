@@ -130,24 +130,24 @@ bool FCkEditorTheme_IconPatch_LightSurface::RunTest(const FString& Parameters)
     TestTrue(TEXT("A near-transparent feather row stays transparent"),
         SolidFeather.IsSet() && SolidFeather.GetValue()[7] == 0 && SolidFeather.GetValue()[15] == 0);
 
-    // Four rows of a variable-node glow: a strong title row, a weaker row, then the faint lower half.
-    auto Glow = TArray64<uint8>{};
-    for (const auto& Row : {TArray<uint8>{20, 156, 40, 0}, TArray<uint8>{6, 24, 8, 0},
-                            TArray<uint8>{4, 30, 8, 0}, TArray<uint8>{2, 20, 4, 0}})
+    // A 4x3 variable-node body: a transparent / anti-aliased / interior / interior row, three times, caps of 1 pixel.
+    auto Body = TArray64<uint8>{};
+    for (auto Row = 0; Row < 3; ++Row)
     {
-        for (const auto Alpha : Row)
-        { Glow.Append({uint8{255}, uint8{255}, uint8{255}, Alpha}); }
+        for (const auto Alpha : {uint8{0}, uint8{52}, uint8{105}, uint8{105}})
+        { Body.Append({uint8{20}, uint8{20}, uint8{20}, Alpha}); }
     }
-    const auto Strip = ck::editor_theme::Get_SolidVarSpill(Glow, 4, 4);
-    if (TestTrue(TEXT("The variable glow is converted"), Strip.IsSet()))
+    const auto Pill = ck::editor_theme::Get_VarPillFill(Body, 4, 3, 8, 5, 1, 1);
+    if (TestTrue(TEXT("The variable pill fill is converted"), Pill.IsSet()))
     {
-        const auto& Pixels = Strip.GetValue();
-        TestEqual(TEXT("The title row is solid at its peak"), Pixels[7], uint8{255});
-        TestEqual(TEXT("The title row's ends stay transparent"), Pixels[15], uint8{0});
-        TestEqual(TEXT("A weaker row is solid too"), Pixels[16 + 7], uint8{255});
-        TestEqual(TEXT("The lower half is solid, so the hue covers the whole pill"), Pixels[32 + 7], uint8{255});
-        TestEqual(TEXT("The last row is solid"), Pixels[48 + 7], uint8{255});
+        const auto& Pixels = Pill.GetValue();
+        TestEqual(TEXT("Resampled to the target size"), Pixels.Num(), int64{8 * 5 * 4});
+        TestEqual(TEXT("The left cap maps 1:1, outside the pill stays transparent"), Pixels[3], uint8{0});
+        TestEqual(TEXT("The anti-aliased rim keeps its falloff"), Pixels[4 + 3], uint8{126});
+        TestEqual(TEXT("The right cap maps 1:1 and is opaque"), Pixels[7 * 4 + 3], uint8{255});
+        TestEqual(TEXT("The fill is the neutral shade the hue tints"), Pixels[7 * 4], uint8{0xC8});
     }
+    TestFalse(TEXT("Caps that do not fit are refused"), ck::editor_theme::Get_VarPillFill(Body, 4, 3, 8, 5, 2, 1).IsSet());
 
     return true;
 }
