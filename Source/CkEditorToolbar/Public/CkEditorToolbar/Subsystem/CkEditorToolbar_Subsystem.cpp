@@ -6,6 +6,7 @@
 
 #include "CkEditorToolbar/CkEditorToolbar_Log.h"
 #include "CkEditorToolbar/Settings/CkEditorToolbar_Settings.h"
+#include "CkEditorToolbar/Style/CkEditorToolbar_CaptionInk.h"
 
 #include "CkResourceLoader/CkResourceLoader_Processor.h"
 #include "CkResourceLoader/CkResourceLoader_Utils.h"
@@ -108,6 +109,8 @@ auto
             return ECk_UI_ForEachWidgetResult::Continue;
         });
 
+        UCk_EditorToolbar_CaptionInk_UE::Request_BindCaptions(CreatedUmgWidget, this, _CaptionInks);
+
         _CreatedWidgets.Add(WidgetClassName, CreatedUmgWidget);
 
         return SNew(SHorizontalBox)
@@ -142,6 +145,7 @@ auto
     }
 
     _CreatedWidgets.Empty();
+    _CaptionInks.Empty();
     _ToolbarSlateWidgets.Empty();
 }
 
