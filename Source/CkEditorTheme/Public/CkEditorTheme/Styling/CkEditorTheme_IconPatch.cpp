@@ -305,11 +305,9 @@ namespace ck::editor_theme
             || InTargetWidth < InCapX * 2 + 1 || InTargetHeight < InCapY * 2 + 1)
         { return {}; }
 
-        auto Peak = uint8{};
-        for (auto Pixel = int64{}; Pixel < PixelCount; ++Pixel)
-        { Peak = FMath::Max(Peak, InBodyBGRA[Pixel * 4 + 3]); }
-
-        if (Peak == 0)
+        // The body's outline ring is more opaque than its interior (209 vs 105 in VarNode_body.png): the interior is the reference.
+        const auto Interior = InBodyBGRA[(static_cast<int64>(InHeight / 2) * InWidth + InWidth / 2) * 4 + 3];
+        if (Interior == 0)
         { return {}; }
 
         // Caps map 1:1; the middle samples the source's middle.
@@ -323,7 +321,7 @@ namespace ck::editor_theme
             return InCap + (InTarget - InCap) * Middle / (InTargetSize - InCap * 2);
         };
 
-        // The body is translucent; its strongest alpha becomes opaque and the anti-aliased rim keeps its falloff.
+        // The interior and the ring become opaque; the anti-aliased edge keeps its falloff.
         constexpr auto Shade = uint8{0xC8};
         auto Fill = TArray64<uint8>{};
         Fill.SetNumUninitialized(static_cast<int64>(InTargetWidth) * InTargetHeight * 4);
@@ -338,7 +336,7 @@ namespace ck::editor_theme
                 Target[0] = Shade;
                 Target[1] = Shade;
                 Target[2] = Shade;
-                Target[3] = static_cast<uint8>(FMath::Min(255, FMath::RoundToInt(255.0f * Alpha / Peak)));
+                Target[3] = static_cast<uint8>(FMath::Min(255, FMath::RoundToInt(255.0f * Alpha / Interior)));
             }
         }
 
