@@ -155,6 +155,20 @@ bool FCkEditorTheme_IconPatch_LightSurface::RunTest(const FString& Parameters)
     }
     TestFalse(TEXT("Caps that do not fit are refused"), ck::editor_theme::Get_VarPillFill(Body, 4, 3, 8, 5, 2, 1).IsSet());
 
+    // A banner stripe row: stripe, anti-aliased edge, gap.
+    auto Stripes = TArray64<uint8>{};
+    for (const auto Alpha : {uint8{255}, uint8{0x7D}, uint8{0}})
+    { Stripes.Append({uint8{255}, uint8{255}, uint8{255}, Alpha}); }
+    const auto Tape = ck::editor_theme::Get_OpaqueStripes(Stripes, 3, 1);
+    if (TestTrue(TEXT("The banner stripes are converted"), Tape.IsSet()))
+    {
+        const auto& Pixels = Tape.GetValue();
+        TestEqual(TEXT("A stripe stays white for the tint"), Pixels[0], uint8{255});
+        TestEqual(TEXT("A gap is dark"), Pixels[2 * 4], uint8{0x50});
+        TestTrue(TEXT("The edge blends between them"), Pixels[4] > 0x50 && Pixels[4] < 255);
+        TestTrue(TEXT("Every pixel is opaque"), Pixels[3] == 255 && Pixels[7] == 255 && Pixels[11] == 255);
+    }
+
     return true;
 }
 

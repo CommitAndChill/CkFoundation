@@ -67,7 +67,17 @@ namespace ck_editor_theme_icon_patch
         return InBrush.GetResourceName().ToString().EndsWith(TEXT("/Graph/VarNode_color_spill.png"));
     }
 
-    // The node bodies (regular, collapsed, variable) and the title spill. Converted only for light graph nodes, i.e.
+    // The development-only and disabled node banners, told apart from other users of the stripes (UAF layering) by the
+    // opaque tint FCk_EditorTheme_LightStylePatch gives only them, before this patch runs.
+    auto Get_IsBannerStripes(
+        const FSlateBrush& InBrush)
+        -> bool
+    {
+        return InBrush.GetResourceName().ToString().EndsWith(TEXT("/Graph/GraphPanel_StripesBackground.png"))
+            && InBrush.TintColor.IsColorSpecified() && InBrush.TintColor.GetSpecifiedColor().A >= 1.0f;
+    }
+
+    // The node bodies (regular, collapsed, variable), the title spill and the banner stripes. Converted only for light graph nodes, i.e.
     // when pin labels can follow the theme (see FCk_EditorTheme_LightStylePatch::Get_LightGraphNodes).
     auto Get_IsNodeArt(
         const FSlateBrush& InBrush)
@@ -75,7 +85,7 @@ namespace ck_editor_theme_icon_patch
     {
         const auto Name = InBrush.GetResourceName().ToString();
         return Name.EndsWith(TEXT("/Graph/RegularNode_body.png")) || Name.EndsWith(TEXT("/Graph/VarNode_body.png"))
-            || Get_IsTitleSpill(InBrush) || Get_IsVarSpill(InBrush);
+            || Get_IsTitleSpill(InBrush) || Get_IsVarSpill(InBrush) || Get_IsBannerStripes(InBrush);
     }
 
     // Graph node art is handled as node art; shadows are dark on purpose.
@@ -286,6 +296,32 @@ namespace ck::editor_theme
         }
 
         return Solid;
+    }
+
+    auto
+        Get_OpaqueStripes(
+            const TArray64<uint8>& InBGRA,
+            int32 InWidth,
+            int32 InHeight)
+        -> TOptional<TArray64<uint8>>
+    {
+        const auto PixelCount = static_cast<int64>(InWidth) * InHeight;
+        if (PixelCount <= 0 || InBGRA.Num() != PixelCount * 4)
+        { return {}; }
+
+        constexpr auto Gap = 0x50;
+        auto Tape = TArray64<uint8>{};
+        Tape.SetNumUninitialized(InBGRA.Num());
+        for (auto Pixel = int64{}; Pixel < PixelCount; ++Pixel)
+        {
+            const auto Value = static_cast<uint8>(FMath::RoundToInt(FMath::Lerp(static_cast<float>(Gap), 255.0f, InBGRA[Pixel * 4 + 3] / 255.0f)));
+            Tape[Pixel * 4] = Value;
+            Tape[Pixel * 4 + 1] = Value;
+            Tape[Pixel * 4 + 2] = Value;
+            Tape[Pixel * 4 + 3] = 255;
+        }
+
+        return Tape;
     }
 
     auto
@@ -505,6 +541,8 @@ auto
         ? ck::editor_theme::Get_OutlineOnlyIcon(Decoded.GetValue(), Width, Height)
         : InKind == ECk_PatchKind::NodeArt && Get_IsTitleSpill(InBrush)
         ? ck::editor_theme::Get_SolidTitleSpill(Decoded.GetValue(), Width, Height)
+        : InKind == ECk_PatchKind::NodeArt && Get_IsBannerStripes(InBrush)
+        ? ck::editor_theme::Get_OpaqueStripes(Decoded.GetValue(), Width, Height)
         : InKind == ECk_PatchKind::NodeArt && Get_IsVarSpill(InBrush)
         ? ck::editor_theme::Get_VarPillFill(Decoded.GetValue(), Width, Height,
             FMath::RoundToInt(InBrush.GetImageSize().X), FMath::RoundToInt(InBrush.GetImageSize().Y),
