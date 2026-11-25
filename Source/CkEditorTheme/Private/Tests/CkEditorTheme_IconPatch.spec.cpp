@@ -130,22 +130,28 @@ bool FCkEditorTheme_IconPatch_LightSurface::RunTest(const FString& Parameters)
     TestTrue(TEXT("A near-transparent feather row stays transparent"),
         SolidFeather.IsSet() && SolidFeather.GetValue()[7] == 0 && SolidFeather.GetValue()[15] == 0);
 
-    // A 4x3 variable-node body: a transparent / anti-aliased / interior / interior row, three times, caps of 1 pixel.
+    // A 4x3 variable-node body shaped like VarNode_body.png: an outline ring (209) more opaque than the interior (105),
+    // an anti-aliased edge pixel (52) left of the middle row, caps of 1 pixel.
     auto Body = TArray64<uint8>{};
-    for (auto Row = 0; Row < 3; ++Row)
+    for (const auto& Row : {TArray<uint8>{0, 209, 209, 209}, TArray<uint8>{52, 209, 105, 105}, TArray<uint8>{0, 209, 209, 209}})
     {
-        for (const auto Alpha : {uint8{0}, uint8{52}, uint8{105}, uint8{105}})
+        for (const auto Alpha : Row)
         { Body.Append({uint8{20}, uint8{20}, uint8{20}, Alpha}); }
     }
     const auto Pill = ck::editor_theme::Get_VarPillFill(Body, 4, 3, 8, 5, 1, 1);
     if (TestTrue(TEXT("The variable pill fill is converted"), Pill.IsSet()))
     {
         const auto& Pixels = Pill.GetValue();
+        const auto AlphaAt = [&Pixels](int32 InX, int32 InY) { return Pixels[(static_cast<int64>(InY) * 8 + InX) * 4 + 3]; };
         TestEqual(TEXT("Resampled to the target size"), Pixels.Num(), int64{8 * 5 * 4});
-        TestEqual(TEXT("The left cap maps 1:1, outside the pill stays transparent"), Pixels[3], uint8{0});
-        TestEqual(TEXT("The anti-aliased rim keeps its falloff"), Pixels[4 + 3], uint8{126});
-        TestEqual(TEXT("The right cap maps 1:1 and is opaque"), Pixels[7 * 4 + 3], uint8{255});
-        TestEqual(TEXT("The fill is the neutral shade the hue tints"), Pixels[7 * 4], uint8{0xC8});
+        TestEqual(TEXT("The top-left cap maps 1:1, outside the pill stays transparent"), AlphaAt(0, 0), uint8{0});
+        TestEqual(TEXT("The interior is opaque, not the ring-relative half"), AlphaAt(7, 2), uint8{255});
+        TestEqual(TEXT("The stretched middle samples the interior"), AlphaAt(4, 2), uint8{255});
+        TestEqual(TEXT("The ring clamps to opaque"), AlphaAt(1, 2), uint8{255});
+        TestEqual(TEXT("The anti-aliased edge keeps its falloff against the interior"), AlphaAt(0, 2), uint8{126});
+        TestEqual(TEXT("The bottom cap maps 1:1 from the last source row"), AlphaAt(7, 4), uint8{255});
+        TestEqual(TEXT("The bottom-left cap stays transparent"), AlphaAt(0, 4), uint8{0});
+        TestEqual(TEXT("The fill is the neutral shade the hue tints"), Pixels[(2 * 8 + 7) * 4], uint8{0xC8});
     }
     TestFalse(TEXT("Caps that do not fit are refused"), ck::editor_theme::Get_VarPillFill(Body, 4, 3, 8, 5, 2, 1).IsSet());
 
