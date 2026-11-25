@@ -80,6 +80,9 @@ private:
     UPROPERTY(Transient)
     TMap<FString, TObjectPtr<UEditorUtilityWidget>> _CreatedWidgets;
 
+    UPROPERTY(Transient)
+    TArray<TObjectPtr<class UCk_EditorToolbar_CaptionInk_UE>> _CaptionInks;
+
     TArray<TSharedPtr<SWidget>> _ToolbarSlateWidgets;
 };
 
