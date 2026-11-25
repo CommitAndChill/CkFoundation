@@ -5,6 +5,8 @@
 **Depends on:** `CkCore`, `CkEcs`, `CkEditorTools`, `CkLog`, `CkResourceLoader`, `CkSettings`, `CkUI`.
 
 **Light/Dark:** toolbar widgets are UMG assets, which hold only concrete colours. Text inside a button or combo uses
-Use Foreground; any other coloured text binds its colour to `[Ck][EditorToolbar] Get Theme Ink` (`CkStyle::InkOf` of its Dark hue).
+Use Foreground. Any other text with a coloured (not grey) colour is bound at creation to `CkStyle::InkOf` of that colour
+(`UCk_EditorToolbar_CaptionInk_UE`), so it follows a live switch with no binding in the asset. `[Ck][EditorToolbar] Get
+Theme Ink` is the same ink for widgets the toolbar subsystem does not create.
 
 For context, see [`/Source/EDITOR_MODULES.md`](/Source/EDITOR_MODULES.md).
