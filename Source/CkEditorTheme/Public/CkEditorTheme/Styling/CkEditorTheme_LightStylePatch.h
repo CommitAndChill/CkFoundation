@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Styling/SlateBrush.h"
 #include "Styling/SlateColor.h"
 
 class FSlateStyleSet;
@@ -45,6 +46,11 @@ private:
         FLinearColor& InField,
         const FLinearColor& InLightValue) -> void;
 
+    // Widgets hold brush pointers, so a brush is replaced in place; Dark restores the captured original.
+    auto DoCapture_Brush(
+        FSlateBrush& InBrush,
+        const FSlateBrush& InLightValue) -> void;
+
     // Named style colors live inline in the style set's map, so they are found again on every apply instead of held.
     auto DoCapture_NamedColor(
         FSlateStyleSet& InStyleSet,
@@ -72,6 +78,7 @@ private:
 
     TArray<TCapturedField<FSlateColor>> _Fields;
     TArray<TCapturedField<FLinearColor>> _LinearFields;
+    TArray<TCapturedField<FSlateBrush>> _BrushFields;
     TOptional<ECk_EditorTheme_Brightness> _Applied;
     bool _LightGraphNodes = false;
 };

@@ -240,4 +240,48 @@ bool FCkEditorTheme_LightStylePatch_LightGraphNodes::RunTest(const FString& Para
 
 // --------------------------------------------------------------------------------------------------------------------
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkEditorTheme_LightStylePatch_GraphChrome,
+    "Ck.EditorTheme.LightStylePatch.GraphChrome",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCkEditorTheme_LightStylePatch_GraphChrome::RunTest(const FString& Parameters)
+{
+    auto StyleSet = FSlateStyleSet{TEXT("CkEditorThemeGraphChromeTest")};
+    StyleSet.Set("Graph.Node.PinLabelColor", FSlateColor{FLinearColor::White});
+    StyleSet.Set("Graph.TitleBackground", new FSlateColorBrush(FLinearColor{0.0f, 0.0f, 0.0f, 0.5f}));
+    StyleSet.Set("GraphBreadcrumbButtonText", FTextBlockStyle().SetColorAndOpacity(FLinearColor{1.0f, 1.0f, 1.0f, 0.5f}));
+    StyleSet.Set("Graph.Function.FunctionParameterIcon", new FSlateColorBrush(FLinearColor::White));
+    StyleSet.Set("Graph.Function.FunctionLocalVariableIcon", new FSlateColorBrush(FLinearColor::White));
+    StyleSet.Set("Graph.Node.DevelopmentBanner", new FSlateColorBrush(FLinearColor{1.0f, 1.0f, 0.0f, 0.3f}));
+    StyleSet.Set("GraphBreadcrumb.BrowseBack", new FSlateColorBrush(FLinearColor::White));
+    StyleSet.Set("GraphBreadcrumb.BrowseForward", new FSlateColorBrush(FLinearColor::White));
+
+    auto Patch = FCk_EditorTheme_LightStylePatch{};
+    TestEqual(TEXT("Pin label ink, title bar, breadcrumbs, two history arrows, two corner glyphs and the banner are captured"),
+        Patch.Request_Capture(StyleSet), 8);
+
+    const auto* TitleBar = StyleSet.GetBrush("Graph.TitleBackground");
+    const auto* Glyph = StyleSet.GetBrush("Graph.Function.FunctionParameterIcon");
+    const auto* Banner = StyleSet.GetBrush("Graph.Node.DevelopmentBanner");
+    const auto& Breadcrumb = StyleSet.GetWidgetStyle<FTextBlockStyle>("GraphBreadcrumbButtonText");
+
+    Patch.Request_Apply(ECk_EditorTheme_Brightness::Light);
+    TestTrue(TEXT("Light: the title bar is the Title fill, in place"), TitleBar->TintColor == FStyleColors::Title);
+    TestTrue(TEXT("Light: breadcrumbs are dark ink"), Breadcrumb.ColorAndOpacity.GetSpecifiedColor().R < 0.1f);
+    TestTrue(TEXT("Light: the corner glyph takes the ink"), Glyph->TintColor == FStyleColors::Foreground);
+    TestTrue(TEXT("Light: the history arrow takes the ink"), StyleSet.GetBrush("GraphBreadcrumb.BrowseBack")->TintColor == FStyleColors::Foreground);
+    TestTrue(TEXT("Light: the banner is a solid band"), Banner->TintColor.GetSpecifiedColor().A == 1.0f);
+
+    Patch.Request_Apply(ECk_EditorTheme_Brightness::Dark);
+    TestTrue(TEXT("Dark: the title bar is restored"), FMath::IsNearlyEqual(TitleBar->TintColor.GetSpecifiedColor().A, 0.5f));
+    TestTrue(TEXT("Dark: breadcrumbs white again"), Breadcrumb.ColorAndOpacity.GetSpecifiedColor().R == 1.0f);
+    TestTrue(TEXT("Dark: the corner glyph untinted again"), Glyph->TintColor == FSlateColor{FLinearColor::White});
+    TestTrue(TEXT("Dark: the banner restored"), FMath::IsNearlyEqual(Banner->TintColor.GetSpecifiedColor().A, 0.3f));
+
+    return true;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
 #endif
