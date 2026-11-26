@@ -216,6 +216,17 @@ namespace ck
             FFragment_VoiceTalker_Capture& InCapture,
             FFragment_VoiceTalker_Playout& InPlayout)
             -> void;
+
+    private:
+        // The once-per-transmit line naming the stage where a transmit's frames stopped: no audio from the source,
+        // under the voice gate, nothing out of the encoder, or encoded but never sent (and why).
+        static auto
+        Report_NoProgress(
+            HandleType InVoiceTalkerEntity,
+            const FFragment_VoiceTalker_Params& InParams,
+            const FFragment_VoiceTalker_Tunables& InTunables,
+            const FFragment_VoiceTalker_Capture& InCapture)
+            -> void;
     };
 
     // --------------------------------------------------------------------------------------------------------------------

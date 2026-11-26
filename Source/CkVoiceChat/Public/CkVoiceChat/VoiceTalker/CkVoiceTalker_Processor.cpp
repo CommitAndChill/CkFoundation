@@ -169,19 +169,30 @@ namespace ck_voice_talker_processor
         return ::Cast<ACk_VoiceChatRelay_UE>(Result.Get_ChannelActor().Get());
     }
 
+    struct FCk_VoiceChat_SendResult
+    {
+        ck::EVoiceTalker_SendOutcome _Outcome = ck::EVoiceTalker_SendOutcome::NoFrames;
+        int32 _RegisteredChannels = 0;
+    };
+
     // Drains the outbound queue: staleness first, then oldest-first under the byte budget, then
     // bundles of <=FramesPerRpc frames (bounded under the unreliable split threshold) packed once
     // per eligible channel. Unsendable frames (no relay yet, no channel yet) stay queued - the
-    // staleness bound keeps that wait finite.
+    // staleness bound keeps that wait finite. The result says what happened to the frames it had, so
+    // a transmit whose frames never leave the machine can say why.
     auto
     Send_OutboundFrames(
         FCk_Handle_VoiceTalker InTalker,
         uint8 InAmplitudeQ8,
         FCk_Time InCaptureClock,
-        TArray<ck::FCk_VoiceChat_OutboundFrame>& InOutFrames) -> void
+        TArray<ck::FCk_VoiceChat_OutboundFrame>& InOutFrames) -> FCk_VoiceChat_SendResult
     {
+        using ESendOutcome = ck::EVoiceTalker_SendOutcome;
+
+        auto Result = FCk_VoiceChat_SendResult{};
+
         if (InOutFrames.IsEmpty())
-        { return; }
+        { return Result; }
 
         auto Entries = TArray<FCk_VoiceChat_PacingEntry>{};
         Entries.Reserve(InOutFrames.Num());
@@ -206,16 +217,21 @@ namespace ck_voice_talker_processor
             INC_DWORD_STAT_BY(STAT_CkVoiceChat_FramesDroppedStale, StaleIds.Num());
         }
 
-        if (Pacing.Get_SendIds().IsEmpty())
-        { return; }
-
+        // Where the frames would go is resolved before asking whether any are still fresh, so a talker whose frames
+        // keep aging out reports the missing destination that made them age, not the staleness.
         auto TransientEntity = UCk_Utils_EntityLifetime_UE::Get_TransientEntity(InTalker);
 
         if (NOT TransientEntity.Has<ck::FFragment_VoiceChat_ChannelRegistry>())
-        { return; }
+        {
+            Result._Outcome = ESendOutcome::NoChannelRegistry;
+            return Result;
+        }
+
+        const auto& RegistryEntries = TransientEntity.Get<ck::FFragment_VoiceChat_ChannelRegistry>().Get_Entries();
+        Result._RegisteredChannels = RegistryEntries.Num();
 
         auto EligibleChannelIdxs = TArray<uint8>{};
-        for (const auto& Entry : TransientEntity.Get<ck::FFragment_VoiceChat_ChannelRegistry>().Get_Entries())
+        for (const auto& Entry : RegistryEntries)
         {
             const auto& Channel = Entry.Get_Channel();
 
@@ -232,7 +248,10 @@ namespace ck_voice_talker_processor
         }
 
         if (EligibleChannelIdxs.IsEmpty())
-        { return; }
+        {
+            Result._Outcome = ESendOutcome::NotACanTalkMember;
+            return Result;
+        }
 
         auto* World = UCk_Utils_EntityLifetime_UE::Get_WorldForEntity(InTalker);
         const auto IsHost = UCk_Utils_Net_UE::Get_IsEntityNetMode_Host(InTalker);
@@ -251,8 +270,20 @@ namespace ck_voice_talker_processor
             Relay = ResolveRelayChannel_ForPlayer(World, Get_LocalPlayerState(World));
 
             if (ck::Is_NOT_Valid(Relay))
-            { return; }
+            {
+                Result._Outcome = ESendOutcome::NoRelay;
+                return Result;
+            }
         }
+
+        if (Pacing.Get_SendIds().IsEmpty())
+        {
+            Result._Outcome = InOutFrames.IsEmpty() ? ESendOutcome::OnlyStaleFrames : ESendOutcome::OverByteBudget;
+            return Result;
+        }
+
+        auto BundlesHandedOff = 0;
+        auto BundlesRefusedByFullInbox = 0;
 
         const auto FramesPerBundle = FMath::Clamp(UCk_Utils_VoiceChat_Settings_UE::Get_FramesPerRpc(), 1, 3);
         const auto SentIds = TSet<int32>{Pacing.Get_SendIds()};
@@ -273,7 +304,11 @@ namespace ck_voice_talker_processor
                 const auto Header = FCk_VoiceChat_BundleHeader{BundleFirstSeq, ChannelIdx, InAmplitudeQ8};
                 auto Packed = ck::voice_chat::codec::Pack_Bundle(Header, BundleFrames);
 
-                if (Packed.IsEmpty())
+                const auto BundlePacked = NOT Packed.IsEmpty();
+                CK_ENSURE_IF_NOT(BundlePacked,
+                    TEXT("A voice bundle of [{}] frame(s) for VoiceTalker [{}] could not be packed - the bundle builder "
+                         "keeps every bundle inside the wire limits, so this should be unreachable"),
+                    NumFramesInBundle, InTalker)
                 { continue; }
 
                 if (IsHost)
@@ -283,6 +318,7 @@ namespace ck_voice_talker_processor
                     if (Inbox.Num() >= ck::VoiceChat_MaxInboxBundles)
                     {
                         INC_DWORD_STAT(STAT_CkVoiceChat_BundlesDroppedInboxFull_Talker);
+                        ++BundlesRefusedByFullInbox;
                         continue;
                     }
 
@@ -292,6 +328,8 @@ namespace ck_voice_talker_processor
                 {
                     Relay->Server_SendVoiceBundle(InTalker, Packed);
                 }
+
+                ++BundlesHandedOff;
             }
 
             INC_DWORD_STAT_BY(STAT_CkVoiceChat_FramesSent, NumFramesInBundle);
@@ -321,6 +359,15 @@ namespace ck_voice_talker_processor
 
         InOutFrames.RemoveAll([&](const ck::FCk_VoiceChat_OutboundFrame& InFrame)
         { return SentIds.Contains(static_cast<int32>(InFrame.Get_Seq())); });
+
+        if (BundlesHandedOff > 0)
+        { Result._Outcome = ESendOutcome::Sent; }
+        else if (BundlesRefusedByFullInbox > 0)
+        { Result._Outcome = ESendOutcome::HostInboxFull; }
+        else
+        { Result._Outcome = ESendOutcome::NoBundlePacked; }
+
+        return Result;
     }
 }
 
@@ -714,56 +761,131 @@ namespace ck
                 MakePayload(InVoiceTalkerEntity, IsSpeakingNow));
         }
 
-        // The no-progress report: at most once per transmit, when a transmit has run a whole window without encoding
-        // a single frame, one line names which stage produced nothing. A transmit that has encoded anything is
-        // concluded and never reports - the silence between sentences is not a stall. While muted or Disabled the
-        // talker is silent on purpose, so the window does not advance.
+        const auto SendResult = Send_OutboundFrames(InVoiceTalkerEntity, InVoiceTalkerComp.Get_AmplitudeQ8(),
+            InCapture._CaptureClock, InCapture._OutboundFrames);
+
+        // The no-progress report: at most once per transmit, when a transmit has run a whole window without a single
+        // frame reaching its goal, one line names the stage where they stopped. The goal is a frame leaving this
+        // machine (handed to the relay, or placed in the host's own routing inbox); for a loopback talker a frame
+        // reaching its own loopback playout is the goal too, so a working self-monitor never reads as a stall. A
+        // transmit that has delivered anything is concluded and never reports - the silence between sentences is not
+        // a stall. While muted or Disabled the talker is silent on purpose, so the window does not advance.
         if (auto& Window = InCapture._ProgressWindow;
             NOT Window._Concluded && NOT IsMuted && ModeAllowsFrames)
         {
             Window._Elapsed = Window._Elapsed + InDeltaT;
             Window._DrainedBytes += DrainedBytesThisTick;
             Window._GateOpenFrames += GateOpenFramesThisTick;
+            Window._EncodedFrames += FramesEncodedThisTick;
             Window._PeakRms = FMath::Max(Window._PeakRms, MaxRmsThisTick);
 
-            if (FramesEncodedThisTick > 0)
+            if (SendResult._Outcome != EVoiceTalker_SendOutcome::NoFrames &&
+                SendResult._Outcome != EVoiceTalker_SendOutcome::Sent)
+            {
+                Window._LastUnsentOutcome = SendResult._Outcome;
+                Window._RegisteredChannels = SendResult._RegisteredChannels;
+            }
+
+            const auto DeliveredToLoopback =
+                InParams.Get_Loopback() == ECk_EnableDisable::Enable && FramesEncodedThisTick > 0;
+
+            if (SendResult._Outcome == EVoiceTalker_SendOutcome::Sent || DeliveredToLoopback)
             {
                 Window._Concluded = true;
             }
             else if (Window._Elapsed >= NoProgressReportWindow)
             {
                 Window._Concluded = true;
-
-                if (Window._DrainedBytes == 0)
-                {
-                    voice_chat::Log(TEXT("VoiceTalker [{}] has been transmitting for [{}]s and its capture source "
-                        "delivered no audio - the device or source is producing nothing"),
-                        InVoiceTalkerEntity, Window._Elapsed.Get_Seconds());
-                }
-                else if (Window._GateOpenFrames == 0)
-                {
-                    voice_chat::Log(TEXT("VoiceTalker [{}] has been transmitting for [{}]s and encoded no frame: audio "
-                        "arrived but its loudest frame (RMS [{}] after input gain [{}]) never reached the voice-gate "
-                        "threshold [{}]"),
-                        InVoiceTalkerEntity, Window._Elapsed.Get_Seconds(), Window._PeakRms, InTunables.Get_InputGain(),
-                        InParams.Get_VadThreshold());
-                }
-                else
-                {
-                    voice_chat::Log(TEXT("VoiceTalker [{}] has been transmitting for [{}]s and encoded no frame: [{}] "
-                        "frame(s) passed the voice gate but the encoder produced nothing for any of them"),
-                        InVoiceTalkerEntity, Window._Elapsed.Get_Seconds(), Window._GateOpenFrames);
-                }
+                Report_NoProgress(InVoiceTalkerEntity, InParams, InTunables, InCapture);
             }
         }
-
-        Send_OutboundFrames(InVoiceTalkerEntity, InVoiceTalkerComp.Get_AmplitudeQ8(),
-            InCapture._CaptureClock, InCapture._OutboundFrames);
 
         if (InParams.Get_Loopback() != ECk_EnableDisable::Enable)
         { return; }
 
         FProcessor_VoiceTalker_ReceivePlayback::Drain_Playout(InPlayout, InDeltaT);
+    }
+
+    auto
+        FProcessor_VoiceTalker_Capture::
+        Report_NoProgress(
+            HandleType InVoiceTalkerEntity,
+            const FFragment_VoiceTalker_Params& InParams,
+            const FFragment_VoiceTalker_Tunables& InTunables,
+            const FFragment_VoiceTalker_Capture& InCapture)
+        -> void
+    {
+        const auto& Window = InCapture._ProgressWindow;
+        const auto Seconds = Window._Elapsed.Get_Seconds();
+
+        if (Window._DrainedBytes == 0)
+        {
+            voice_chat::Log(TEXT("VoiceTalker [{}] has been transmitting for [{}]s and its capture source delivered no "
+                "audio - the device or source is producing nothing"), InVoiceTalkerEntity, Seconds);
+            return;
+        }
+
+        if (Window._GateOpenFrames == 0)
+        {
+            voice_chat::Log(TEXT("VoiceTalker [{}] has been transmitting for [{}]s and encoded no frame: audio arrived "
+                "but its loudest frame (RMS [{}] after input gain [{}]) never reached the voice-gate threshold [{}]"),
+                InVoiceTalkerEntity, Seconds, Window._PeakRms, InTunables.Get_InputGain(), InParams.Get_VadThreshold());
+            return;
+        }
+
+        if (Window._EncodedFrames == 0)
+        {
+            voice_chat::Log(TEXT("VoiceTalker [{}] has been transmitting for [{}]s and encoded no frame: [{}] frame(s) "
+                "passed the voice gate but the encoder produced nothing for any of them"),
+                InVoiceTalkerEntity, Seconds, Window._GateOpenFrames);
+            return;
+        }
+
+        const auto Why = [&]() -> FString
+        {
+            switch (Window._LastUnsentOutcome)
+            {
+                case EVoiceTalker_SendOutcome::NoChannelRegistry:
+                {
+                    return TEXT("this world has no voice channel registry - no channel is registered here");
+                }
+                case EVoiceTalker_SendOutcome::NotACanTalkMember:
+                {
+                    return ck::Format_UE(TEXT("it is not a CanTalk member of any of the [{}] channel(s) registered "
+                        "here - on a client, its membership has not arrived through the control plane"),
+                        Window._RegisteredChannels);
+                }
+                case EVoiceTalker_SendOutcome::NoRelay:
+                {
+                    return TEXT("no voice relay is resolved for the local player yet");
+                }
+                case EVoiceTalker_SendOutcome::HostInboxFull:
+                {
+                    return TEXT("the host's own routing inbox was full every time");
+                }
+                case EVoiceTalker_SendOutcome::OnlyStaleFrames:
+                {
+                    return TEXT("every frame went stale before it could be sent");
+                }
+                case EVoiceTalker_SendOutcome::OverByteBudget:
+                {
+                    return TEXT("the per-tick byte budget admitted no frame");
+                }
+                case EVoiceTalker_SendOutcome::NoBundlePacked:
+                {
+                    return TEXT("no bundle could be packed");
+                }
+                case EVoiceTalker_SendOutcome::NoFrames:
+                case EVoiceTalker_SendOutcome::Sent:
+                default:
+                {
+                    return TEXT("the send pass reported no reason");
+                }
+            }
+        }();
+
+        voice_chat::Log(TEXT("VoiceTalker [{}] has been transmitting for [{}]s and encoded [{}] frame(s) but sent none: {}"),
+            InVoiceTalkerEntity, Seconds, Window._EncodedFrames, Why);
     }
 
     // --------------------------------------------------------------------------------------------------------------------

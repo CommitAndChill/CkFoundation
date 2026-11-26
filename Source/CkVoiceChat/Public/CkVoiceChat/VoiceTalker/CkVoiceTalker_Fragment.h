@@ -162,6 +162,23 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
+    // What one send pass did with the encoded frames the talker had queued: the last stage of a transmit's
+    // progress. Every value but NoFrames and Sent names why frames that existed did not leave this machine.
+    enum class EVoiceTalker_SendOutcome : uint8
+    {
+        NoFrames,
+        Sent,
+        NoChannelRegistry,
+        NotACanTalkMember,
+        NoRelay,
+        HostInboxFull,
+        OnlyStaleFrames,
+        OverByteBudget,
+        NoBundlePacked
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
     // The send chain: mic source -> gain/VAD -> Opus encode -> the paced outbound queue. Only ever
     // driven on the machine that owns the talker; a replica carries it inert.
     struct CKVOICECHAT_API FFragment_VoiceTalker_Capture
@@ -176,15 +193,20 @@ namespace ck
         friend class UCk_Utils_VoiceTalker_UE;
 
     private:
-        // What the start of a transmit has seen, up to the first encoded frame or the end of the report window,
-        // whichever comes first; after that the transmit is _Concluded and never reports. Progress is audio drained
-        // and frames encoded, never ticks. Silence after a transmit has encoded is not a stall, so it is not watched.
+        // What the start of a transmit has seen, up to its first delivered frame or the end of the report window,
+        // whichever comes first; after that the transmit is _Concluded and never reports. Progress toward the goal
+        // is a frame leaving the machine (handed to the relay or the host's own routing inbox) - or, for a loopback
+        // talker, a frame reaching its own loopback playout - never ticks or encodes alone. Silence after a transmit
+        // has delivered is not a stall, so it is not watched.
         struct FProgressWindow
         {
             FCk_Time _Elapsed;
             int32 _DrainedBytes = 0;
             int32 _GateOpenFrames = 0;
+            int32 _EncodedFrames = 0;
             float _PeakRms = 0.0f;
+            EVoiceTalker_SendOutcome _LastUnsentOutcome = EVoiceTalker_SendOutcome::NoFrames;
+            int32 _RegisteredChannels = 0;
             bool _Concluded = false;
         };
 
