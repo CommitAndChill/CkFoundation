@@ -17,13 +17,22 @@ sessions, or external services.
 `CkSpatialQuery` (the routing probes). UE: `AudioMixer`, `DeveloperSettings`, `GameplayTags`,
 `NetCore`, `Voice`. Never `CkRelationship`.
 
-**Playback config (P4).** A channel's authored `_Attenuation`/`_SourceEffectChain` soft refs
+**Playback config (P4).** A channel's authored `_Attenuation`/`_SourceEffectChain`/`_SoundClass` soft refs
 resolve through CkResourceLoader at channel Setup on every machine (spatializing channels with
-none authored resolve the module default); `Get_ResolvedAttenuation`/`Get_ResolvedSourceEffectChain`
-expose them. Each receiving machine's synth adopts the config of the **highest-`_Priority`
-channel currently delivering that talker's stream** (one synth per talker per machine — the
-single-playback dedupe), attaches at the owning actor's `PlaybackAttachSocketName`, and applies
-spatialization per policy. **HybridRadio** renders per recipient: spatialized proximity speech
+none authored resolve the module default attenuation; there is no default SoundClass);
+`Get_ResolvedAttenuation`/`Get_ResolvedSourceEffectChain`/`Get_ResolvedSoundClass` expose them. Each receiving
+machine's synth adopts the config of the **highest-`_Priority` channel currently delivering that talker's stream**
+(one synth per talker per machine — the single-playback dedupe) and applies spatialization per policy. The
+channel's SoundClass is the synth's for every policy, near or far (a game's voice volume slider overrides that
+class); none authored, or no channel yet, leaves the engine's default SoundClass. **Attach:** the synth attaches
+to the talker Spec's `_PlaybackAttachComponent` when set, else to the bridged actor's root, at
+`_PlaybackAttachSocketName`. Each machine's Spec names its own copy of the component (the Spec is built on every
+machine). Caller errors, each an ensure with a fallback: a component owned by another actor (the root instead),
+and a socket name the target lacks (the target's origin instead). **Volume:** the synth takes this machine's
+`FFragment_VoiceListener::_TalkerVolumes` entry for the talker (`Request_SetTalkerVolume`; 1.0 with no local
+listener or no entry) at creation and on the first receive pass after the value changes, with no bundle needed;
+the applied value is kept on `FFragment_VoiceTalker_Playout` so an unchanged volume costs no engine call. Volume
+never travels upstream. **HybridRadio** renders per recipient: spatialized proximity speech
 inside the channel's `AudibleRange`, flat radio through the channel's effect chain outside it,
 with the same hysteresis asymmetry the routing probes use (near inside range, held to
 range + margin). Remote `Get_CurrentAmplitude` mirrors the wire header while bundles flow and
@@ -35,7 +44,7 @@ releases to zero once the stream idles past the sender's stale-drop age.
 
 - `UCk_Utils_VoiceTalker_UE::Add(Handle, Params)` - compose talker fragments directly on a
   transform-bearing entity. Params: transmit mode (PushToTalk default), input gain (1.2), VAD
-  threshold (0.07), auto-join channel tags, playback attach socket, loopback.
+  threshold (0.07), auto-join channel tags, playback attach component and socket, loopback.
   - **Transmit mode:** the modes differ in who opens the transmit and whether the voice gate applies, nothing else.
     No wire, replication or routing difference; the mode is local to each machine.
 
