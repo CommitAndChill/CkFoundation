@@ -1,10 +1,10 @@
 # CkVoiceChat
 
-> **Status: P4 feature-complete (2026-08-04); ship (P5) gated on the human audition items in
-> the campaign's Gate_4.md `[EDITOR-VERIFY]` block.** Design of record:
-> [docs/specs/2026-08-02-CkVoiceChat-technical-review.md](../../docs/specs/2026-08-02-CkVoiceChat-technical-review.md);
-> binding CTO review: [docs/reviews/2026-08-02-CkVoiceChat-CTO-review.md](../../docs/reviews/2026-08-02-CkVoiceChat-CTO-review.md);
-> living state: [docs/campaigns/2026-08-CkVoiceChat/PROGRESS.md](../../docs/campaigns/2026-08-CkVoiceChat/PROGRESS.md).
+> **Status (2026-11-25):** feature-complete and unit/net-tested; a real microphone has been heard through the
+> loopback gym, but proximity voice between two players has not yet been auditioned by a human. The original
+> design spec, CTO review and campaign log are lost; this file and the code are the design of record.
+> `PushToTalk` and `OpenMic` are not yet told apart (see Key API) - separating them is open work tracked in the
+> Mars proximity-voice campaign (defect D4).
 
 **Purpose:** Proximity voice chat — microphone capture, Opus encoding, server-routed transport
 with server-side interest management, and spatialized playback, as three composable ECS features:
@@ -34,12 +34,53 @@ releases to zero once the stream idles past the sender's stale-drop age.
 
 ## Key API (P0 surface — grows per phase)
 
-- `UCk_Utils_VoiceTalker_UE::Add(Handle, Params)` — compose talker fragments directly on a
+- `UCk_Utils_VoiceTalker_UE::Add(Handle, Params)` - compose talker fragments directly on a
   transform-bearing entity. Params: transmit mode (PushToTalk default), input gain (1.2), VAD
-  threshold (0.07), auto-join channel tags, playback attach socket.
-- `UCk_Utils_VoiceChannel_UE::Add(HostHandle, Params)` — create a channel child entity under a
+  threshold (0.07), auto-join channel tags, playback attach socket, loopback.
+  - **Transmit mode:** `PushToTalk` and `OpenMic` behave identically today - the caller holds every transmit open
+    with `Request_StartTransmit` / `Request_StopTransmit`, and nothing starts or stops one by itself. Only
+    `Disabled` changes behaviour (StartTransmit is refused). `FCk_Request_VoiceTalker_StartTransmit::_ChannelTags`
+    is not read: a transmit goes to every channel the talker is a `CanTalk` member of.
+  - **Capture availability:** `Request_StartTransmit` opens capture BEFORE creating codecs. No device, a device
+    that will not start, a process that renders no audio (`FApp::CanEverRenderAudio()` false: `-nosound`, a
+    dedicated server, a commandlet), or an unattended process (`FApp::IsUnattended()`: automation lanes, CI) is an
+    operational outcome: the request completes Failed, a Log line names the talker, and `Get_CaptureStartResult`
+    returns the `ECk_VoiceChat_CaptureStartResult` until the next attempt. The engine source decides this before it
+    creates any capture, so an unattended run - including a headless gate lane, which does render audio - never
+    opens a real microphone, even when the game starts transmit at spawn. Only a disabled engine Voice module
+    (`[Voice] bEnabled=true` missing) ensures. An injected capture source (`Debug_InjectCaptureSource`) is
+    unaffected by all of this and is never replaced by the engine microphone; injection refuses a transmitting talker.
+  - **Per transmit:** the voice gate, buffered PCM, the outbound queue and the no-progress window reset at
+    StopTransmit, so every transmit starts with the gate closed.
+  - **No-progress report:** at most once per transmit. Progress is a frame **leaving the machine** - handed to the
+    player's relay RPC, or placed in the listen host's own routing inbox - not a frame encoded. For a loopback talker
+    (`_Loopback` enabled, as in the gym) a frame reaching its own loopback playout counts too, so working loopback is
+    never reported. When a transmit has run 5 s (not counting time self-muted or `Disabled`) with no such frame, one
+    Log line names the talker, how long, and the stage where the frames stopped: no audio from the source; audio that
+    never reached the voice-gate threshold (with the peak RMS, gain and threshold); gate-open frames the encoder
+    produced nothing for; or frames encoded but none sent, with the reason `Send_OutboundFrames` returned - no channel
+    registry in this world, not a `CanTalk` member of any of the N channels registered here (on a client: the control
+    plane has not delivered its membership), no relay resolved for the local player yet, the host inbox full, every
+    frame stale, or the byte budget. A transmit that has sent any frame never reports - silence after speech (a quiet
+    room, a closed gate between sentences) is not a stall.
+  - **Codecs:** encoder, loopback decoder and receive decoder are all created through one checked path that
+    ensures (naming the `[Voice]` fix) when the engine returns null; a receiver without a decoder drops and counts
+    the bundles (`VoiceChat Receive Dropped (No Decoder)`).
+- `UCk_Utils_VoiceChannel_UE::Add(HostHandle, Params)` - create a channel child entity under a
   long-lived host, labeled by its `VoiceChat.Channel.*` tag, connected via a Record on the host.
   `TryGet_VoiceChannel(Host, Tag)` resolves by label.
+  - **Auto-join:** on the authority, a talker whose Spec lists a channel name in `_AutoJoinChannels` joins every
+    registered channel of exactly that name whose Spec enables `_AutoJoinTalkers`, whichever was composed first
+    (`FProcessor_VoiceTalker_AutoJoin`, level-triggered on the registry's generation). Each pair is joined once,
+    through the ordinary Join request; an explicit Leave afterwards stands. Clients never join - they learn
+    membership from the control plane.
+  - **Membership integrity:** a talker that begins teardown on the authority leaves every channel through the
+    ordinary Leave request (`FProcessor_VoiceTalker_LeaveChannels`, prompt); each channel also sweeps member and
+    server-mute keys whose entity no longer exists (`FProcessor_VoiceChannel_SweepMembers`, eventual, logs a
+    Warning, no MemberLeft for a key whose talker is gone). Both re-push the control plane, so clients converge.
+    Before this, routing past a destroyed member ensured in `Get_MemberFlags` and in the ownership-chain walk.
+  - **Proximity probes** compose the frame a Positional3D member has a Transform; a member without one keeps its
+    reconcile pending (one Log line when the wait starts) rather than never getting probes.
 - `UCk_Utils_VoiceListener_UE::Add(Handle)` — compose local ears state (mute set + volume map).
 - `UCk_Utils_VoiceChat_Settings_UE` — project settings getters with constexpr fallbacks
   (`ck::voice_chat::defaults`): codec (48 kHz/24 kbps/20 ms), transport (frames per RPC, byte
@@ -92,7 +133,7 @@ private void OnTransmitStarted(FCk_Handle_VoiceTalker InTalker)
 
 `OnTransmitStopped` is the classic roger-beep edge (squelch-close "over"). For a per-CHANNEL beep
 (different radio nets sounding different), key the cue tag off the channel the talker transmits
-on. Audition: gym station (P4 `[EDITOR-VERIFY]`).
+on. Audition: the CkVoiceChat gym station (`[EDITOR-VERIFY]`).
 
 ## Anti-patterns
 
