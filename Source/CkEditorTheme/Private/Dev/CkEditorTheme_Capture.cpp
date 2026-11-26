@@ -5,6 +5,7 @@
 
 #include "ContentBrowserModule.h"
 #include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphNode.h"
 #include "Editor.h"
 #include "Engine/Blueprint.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -137,6 +138,10 @@ namespace ck_editor_theme_capture
             auto Path = FString{};
             auto GraphName = FString{};
             Value.Split(TEXT(":"), &Path, &GraphName);
+            // An optional third part centres the view on the first node whose title contains it (spaces ignored).
+            auto NodeTitle = FString{};
+            if (GraphName.Contains(TEXT(":")))
+            { GraphName.Split(TEXT(":"), &GraphName, &NodeTitle); }
 
             auto* Blueprint = LoadObject<UBlueprint>(nullptr, *Path);
             if (Blueprint == nullptr)
@@ -151,7 +156,17 @@ namespace ck_editor_theme_capture
             {
                 if (Graph != nullptr && Graph->GetName().Replace(TEXT(" "), TEXT("")) == GraphName.Replace(TEXT(" "), TEXT("")))
                 {
-                    FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(Graph);
+                    auto* Focus = static_cast<UObject*>(Graph);
+                    for (const auto& Node : Graph->Nodes)
+                    {
+                        if (Node != nullptr && NOT NodeTitle.IsEmpty() && Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString()
+                            .Replace(TEXT(" "), TEXT("")).Contains(NodeTitle.Replace(TEXT(" "), TEXT(""))))
+                        {
+                            Focus = Node.Get();
+                            break;
+                        }
+                    }
+                    FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(Focus);
                     return SettleSeconds * 2.0;
                 }
             }
@@ -227,7 +242,7 @@ namespace ck_editor_theme_capture
     FAutoConsoleCommand CaptureCommand(
         TEXT("Ck.EditorTheme.Capture"),
         TEXT("Dev: run capture steps in order. light | dark (saved like a Preferences change), prefs, tab=<TabId>, "
-             "asset=<ObjectPath>, browse=<Folder>, graph=<BP>:<Graph>, wait=<Seconds>, "
+             "asset=<ObjectPath>, browse=<Folder>, graph=<BP>:<Graph>[:<NodeTitle>], wait=<Seconds>, "
              "shot=<Label> (Saved/CkEditorTheme/Capture/<Label>_<Window>.png), quit."),
         FConsoleCommandWithArgsDelegate::CreateStatic(&OnCommand));
 }
