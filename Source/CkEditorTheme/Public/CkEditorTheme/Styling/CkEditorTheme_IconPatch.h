@@ -42,7 +42,8 @@ namespace ck::editor_theme
         int32 InWidth,
         int32 InHeight) -> TOptional<TArray64<uint8>>;
 
-    // Variable node colour fill: the body's pill shape, solid #C8, so the hue fills the pill and a white SET title reads.
+    // Variable node colour fill: the body's pill shape, white so the tint is the hue, its interior at 30% so a light body
+    // shows through as a pale tint under dark ink, and its outline ring opaque so the hue rims the pill.
     // Resampled to the target size with the corner caps kept and the middle stretched (a 9-slice baked into the texture).
     CKEDITORTHEME_API auto Get_VarPillFill(
         const TArray64<uint8>& InBodyBGRA,

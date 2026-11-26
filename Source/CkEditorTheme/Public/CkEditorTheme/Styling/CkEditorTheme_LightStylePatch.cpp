@@ -384,6 +384,7 @@ auto
 
         // The variable-node colour spill is a fixed 132x28 strip stretched across the pill, invisible only while it fades
         // into a dark body; Light gives it the body's 9-slice so the hue fits the pill (IconPatch fills it from the body).
+        // The //++Ck SGraphNodeK2Var patch stretches a box spill over the whole node, so taller nodes are covered too.
         if (auto* Spill = const_cast<FSlateBrush*>(InStyleSet.GetOptionalBrush(TEXT("Graph.VarNode.ColorSpill"), nullptr, nullptr)))
         {
             if (const auto* Body = InStyleSet.GetOptionalBrush(TEXT("Graph.VarNode.Body"), nullptr, nullptr))
