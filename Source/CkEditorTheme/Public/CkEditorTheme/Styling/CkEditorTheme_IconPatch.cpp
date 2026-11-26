@@ -341,9 +341,12 @@ namespace ck::editor_theme
             || InTargetWidth < InCapX * 2 + 1 || InTargetHeight < InCapY * 2 + 1)
         { return {}; }
 
-        // The body's outline ring is more opaque than its interior (209 vs 105 in VarNode_body.png): the interior is the reference.
+        // The body's outline ring is more opaque than its interior (209 vs 105 in VarNode_body.png).
         const auto Interior = InBodyBGRA[(static_cast<int64>(InHeight / 2) * InWidth + InWidth / 2) * 4 + 3];
-        if (Interior == 0)
+        auto Peak = uint8{0};
+        for (auto Pixel = int64{0}; Pixel < PixelCount; ++Pixel)
+        { Peak = FMath::Max(Peak, InBodyBGRA[Pixel * 4 + 3]); }
+        if (Interior == 0 || Peak <= Interior)
         { return {}; }
 
         // Caps map 1:1; the middle samples the source's middle.
@@ -357,8 +360,9 @@ namespace ck::editor_theme
             return InCap + (InTarget - InCap) * Middle / (InTargetSize - InCap * 2);
         };
 
-        // The interior and the ring become opaque; the anti-aliased edge keeps its falloff.
-        constexpr auto Shade = uint8{0xC8};
+        // The interior is a pale tint over the light body and the ring the full colour; the anti-aliased edge fades the ring.
+        constexpr auto InteriorAlpha = 0.3f;
+        const auto Tint = FMath::RoundToInt(255.0f * InteriorAlpha);
         auto Fill = TArray64<uint8>{};
         Fill.SetNumUninitialized(static_cast<int64>(InTargetWidth) * InTargetHeight * 4);
         for (auto Y = 0; Y < InTargetHeight; ++Y)
@@ -369,10 +373,12 @@ namespace ck::editor_theme
                 const auto SourceX = Source(X, InTargetWidth, InWidth, InCapX);
                 const auto Alpha = InBodyBGRA[(static_cast<int64>(SourceY) * InWidth + SourceX) * 4 + 3];
                 auto* Target = &Fill[(static_cast<int64>(Y) * InTargetWidth + X) * 4];
-                Target[0] = Shade;
-                Target[1] = Shade;
-                Target[2] = Shade;
-                Target[3] = static_cast<uint8>(FMath::Min(255, FMath::RoundToInt(255.0f * Alpha / Interior)));
+                Target[0] = 255;
+                Target[1] = 255;
+                Target[2] = 255;
+                Target[3] = static_cast<uint8>(Alpha >= Interior
+                    ? Tint + FMath::RoundToInt(static_cast<float>(255 - Tint) * (Alpha - Interior) / (Peak - Interior))
+                    : FMath::RoundToInt(255.0f * Alpha / Peak));
             }
         }
 

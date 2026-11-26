@@ -145,15 +145,16 @@ bool FCkEditorTheme_IconPatch_LightSurface::RunTest(const FString& Parameters)
         const auto AlphaAt = [&Pixels](int32 InX, int32 InY) { return Pixels[(static_cast<int64>(InY) * 8 + InX) * 4 + 3]; };
         TestEqual(TEXT("Resampled to the target size"), Pixels.Num(), int64{8 * 5 * 4});
         TestEqual(TEXT("The top-left cap maps 1:1, outside the pill stays transparent"), AlphaAt(0, 0), uint8{0});
-        TestEqual(TEXT("The interior is opaque, not the ring-relative half"), AlphaAt(7, 2), uint8{255});
-        TestEqual(TEXT("The stretched middle samples the interior"), AlphaAt(4, 2), uint8{255});
-        TestEqual(TEXT("The ring clamps to opaque"), AlphaAt(1, 2), uint8{255});
-        TestEqual(TEXT("The anti-aliased edge keeps its falloff against the interior"), AlphaAt(0, 2), uint8{126});
+        TestEqual(TEXT("The interior is a 30% tint"), AlphaAt(7, 2), uint8{77});
+        TestEqual(TEXT("The stretched middle samples the interior"), AlphaAt(4, 2), uint8{77});
+        TestEqual(TEXT("The ring is the full colour"), AlphaAt(1, 2), uint8{255});
+        TestEqual(TEXT("The anti-aliased edge fades the ring"), AlphaAt(0, 2), uint8{63});
         TestEqual(TEXT("The bottom cap maps 1:1 from the last source row"), AlphaAt(7, 4), uint8{255});
         TestEqual(TEXT("The bottom-left cap stays transparent"), AlphaAt(0, 4), uint8{0});
-        TestEqual(TEXT("The fill is the neutral shade the hue tints"), Pixels[(2 * 8 + 7) * 4], uint8{0xC8});
+        TestEqual(TEXT("The fill is white so the tint is the hue"), Pixels[(2 * 8 + 7) * 4], uint8{255});
     }
     TestFalse(TEXT("Caps that do not fit are refused"), ck::editor_theme::Get_VarPillFill(Body, 4, 3, 8, 5, 2, 1).IsSet());
+    TestFalse(TEXT("A body without a ring is refused"), ck::editor_theme::Get_VarPillFill(Make_Solid(20, 20, 20), 4, 4, 8, 8, 1, 1).IsSet());
 
     // A banner stripe row: stripe, anti-aliased edge, gap.
     auto Stripes = TArray64<uint8>{};
