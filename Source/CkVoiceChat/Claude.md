@@ -44,14 +44,23 @@ releases to zero once the stream idles past the sender's stale-drop age.
 
 - `UCk_Utils_VoiceTalker_UE::Add(Handle, Params)` - compose talker fragments directly on a
   transform-bearing entity. Params: transmit mode (PushToTalk default), input gain (1.2), VAD
-  threshold (0.07), auto-join channel tags, playback attach component and socket, loopback.
+  threshold (0.07), gate in push-to-talk (Disable), auto-join channel tags, playback attach component and socket,
+  loopback. Mode, gain, threshold and the push-to-talk gate switch seed `FFragment_VoiceTalker_Tunables` at `Add`
+  and change only by request (`Request_SetTransmitMode` / `_SetInputGain` / `_SetVadThreshold` / `_SetGateInPushToTalk`,
+  read back with the matching `Get_*`); all four are local to the machine and never travel.
   - **Transmit mode:** the modes differ in who opens the transmit and whether the voice gate applies, nothing else.
     No wire, replication or routing difference; the mode is local to each machine.
 
     | | `PushToTalk` | `OpenMic` | `Disabled` |
     |---|---|---|---|
     | Who opens the transmit | The caller: `Request_StartTransmit` / `Request_StopTransmit` | The module, once per arming, on the talker this machine's player controls. A caller's Start / Stop still work (unowned talkers, tests) | Nobody: Start is refused (ensure) |
-    | Voice gate | Bypassed: every captured frame is encoded from the first one (no gate update, no attack delay); `Get_IsSpeaking` is true while transmitting unmuted | Applies: `_VadThreshold`, 20 ms attack, 200 ms release | - |
+    | Voice gate | Bypassed unless `_GateInPushToTalk`: every captured frame is encoded from the first one (no gate update, no attack delay); `Get_IsSpeaking` is true while transmitting unmuted. With the switch enabled, the same gate as `OpenMic` (TeamSpeak's "voice activation while push-to-talk": a tuned gate that should hold in a noisy room) | Applies: `_VadThreshold`, 20 ms attack, 200 ms release | - |
+
+    - *Tuning the gate.* `Request_SetVadThreshold` (clamped 0..1) lands on the next captured frame, mid-transmit
+      included, and leaves the gate open or closed as it was. A change that makes the gate start applying to a
+      transmitting talker (`_GateInPushToTalk` enabled in `PushToTalk`, or `PushToTalk -> OpenMic` with it disabled)
+      starts the gate closed, as a transmit's start does; `Get_IsSpeaking` then follows the gate from the next frame.
+      The loopback gym's control panel drives all three by key.
 
     - *Arming.* A talker is armed (`FTag_VoiceTalker_OpenMicPending`) when its mode becomes `OpenMic`: at `Add` from
       the Spec, or by `Request_SetTransmitMode` while it is not transmitting (`OpenMic -> OpenMic` re-arms).
@@ -85,14 +94,14 @@ releases to zero once the stream idles past the sender's stale-drop age.
     (`[Voice] bEnabled=true` missing) ensures. An injected capture source (`Debug_InjectCaptureSource`) is
     unaffected by all of this and is never replaced by the engine microphone; injection refuses a transmitting talker.
   - **Per transmit:** the voice gate, buffered PCM, the outbound queue and the no-progress window reset at
-    StopTransmit, so every `OpenMic` transmit starts with the gate closed.
+    StopTransmit, so every gated transmit starts with the gate closed.
   - **No-progress report:** at most once per transmit. Progress is a frame **leaving the machine** - handed to the
     player's relay RPC, or placed in the listen host's own routing inbox - not a frame encoded. For a loopback talker
     (`_Loopback` enabled, as in the gym) a frame reaching its own loopback playout counts too, so working loopback is
     never reported. When a transmit has run 5 s (not counting time self-muted or `Disabled`) with no such frame, one
     Log line names the talker, how long, and the stage where the frames stopped: no audio from the source; audio that
-    never reached the voice-gate threshold (`OpenMic` only, with the peak RMS, gain and threshold) or, in `PushToTalk`,
-    never filled a whole frame; gate-open frames the encoder
+    never reached the voice-gate threshold (wherever the gate applies, with the peak RMS, gain and the threshold at
+    report time) or, with the gate bypassed, never filled a whole frame; gate-open frames the encoder
     produced nothing for; or frames encoded but none sent, with the reason `Send_OutboundFrames` returned - no channel
     registry in this world, not a `CanTalk` member of any of the N channels registered here (on a client: the control
     plane has not delivered its membership), no relay resolved for the local player yet, the host inbox full, every
