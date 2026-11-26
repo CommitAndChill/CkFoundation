@@ -3,6 +3,8 @@
 #include "CkCore/Macros/CkMacros.h"
 #include "CkCore/Time/CkTime.h"
 
+#include "CkVoiceChat/VoiceTalker/CkVoiceTalker_Fragment_Data.h"
+
 #include <Containers/Array.h>
 #include <Templates/SharedPointer.h>
 
@@ -18,7 +20,9 @@ class CKVOICECHAT_API ICk_VoiceChat_CaptureSource
 public:
     virtual ~ICk_VoiceChat_CaptureSource() = default;
 
-    virtual auto Start() -> bool = 0;
+    // No device, or a process that renders no audio, is an expected outcome reported through the result - never an
+    // ensure. Only a source that returns Started is running.
+    virtual auto Start() -> ECk_VoiceChat_CaptureStartResult = 0;
     virtual auto Stop() -> void = 0;
 
     // Called on the game thread each tick before DrainPcm; scripted sources advance their clock
@@ -31,9 +35,11 @@ public:
 
 // --------------------------------------------------------------------------------------------------------------------
 
-// Engine microphone capture via FVoiceModule::CreateVoiceCapture. Start() fails LOUDLY (one
-// ensure naming the fix) when the engine Voice module is disabled — [Voice] bEnabled=true must
-// exist in the host project's DefaultEngine.ini for real capture; there is no silent fallback.
+// Engine microphone capture via FVoiceModule::CreateVoiceCapture. The availability decision is made BEFORE any
+// device is touched: a process that renders no audio, or an unattended one, never creates a capture. A disabled
+// engine Voice module is a host configuration error ([Voice] bEnabled=true missing from DefaultEngine.ini) and fails
+// LOUDLY with one ensure naming the fix; no device, or a device that will not start, is an operational outcome and
+// only reported.
 class CKVOICECHAT_API FCk_VoiceChat_CaptureSource_Engine : public ICk_VoiceChat_CaptureSource
 {
 public:
@@ -43,7 +49,7 @@ public:
         int32 InSampleRate);
 
 public:
-    auto Start() -> bool override;
+    auto Start() -> ECk_VoiceChat_CaptureStartResult override;
     auto Stop() -> void override;
     auto DrainPcm(TArray<uint8>& OutPcm) -> void override;
 
@@ -67,10 +73,23 @@ public:
         int32 InSampleRate);
 
 public:
-    auto Start() -> bool override;
+    auto Start() -> ECk_VoiceChat_CaptureStartResult override;
     auto Stop() -> void override;
     auto Tick(FCk_Time InDeltaT) -> void override;
     auto DrainPcm(TArray<uint8>& OutPcm) -> void override;
+
+public:
+    // What every Start() reports (Started by default). Any other value models a machine whose microphone is
+    // unavailable, so a test can drive that outcome without depending on - or opening - the real device.
+    auto
+    Set_StartResult(
+        ECk_VoiceChat_CaptureStartResult InStartResult) -> void;
+
+    auto
+    Get_StartCount() const -> int32;
+
+    auto
+    Get_SamplesEmitted() const -> uint64;
 
 public:
     auto
@@ -99,6 +118,8 @@ private:
 private:
     int32 _SampleRate = 48000;
     bool _IsStarted = false;
+    ECk_VoiceChat_CaptureStartResult _StartResult = ECk_VoiceChat_CaptureStartResult::Started;
+    int32 _StartCount = 0;
     double _PendingSeconds = 0.0;
     uint64 _SampleCounter = 0;
     TArray<FSegment> _Segments;

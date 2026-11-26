@@ -122,6 +122,13 @@ public:
     Get_Priority(
         const FCk_Handle_VoiceChannel& InVoiceChannel);
 
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|VoiceChat|Channel",
+              DisplayName="[Ck][VoiceChannel] Get Auto Join Talkers")
+    static ECk_EnableDisable
+    Get_AutoJoinTalkers(
+        const FCk_Handle_VoiceChannel& InVoiceChannel);
+
     // Resolved at channel Setup through CkResourceLoader (nullptr while the async load is
     // pending, if the channel authored none, or if resolution failed - callers fall back to
     // UCk_Utils_VoiceChat_Settings_UE::Get_DefaultAttenuation()).

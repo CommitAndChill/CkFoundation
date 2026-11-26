@@ -275,21 +275,34 @@ namespace ck
     {
         using namespace ck_voice_chat_route_processor;
 
-        InVoiceTalkerEntity.Try_Remove<FTag_VoiceTalker_ProximityDirty>();
-
         const auto MaxRangeCm = Get_MaxPositional3DRangeCm(InVoiceTalkerEntity);
         const auto TalkerHasTransform = UCk_Utils_Transform_UE::Has(InVoiceTalkerEntity);
         const auto WantsProbes = MaxRangeCm > 0.0f && TalkerHasTransform;
         const auto HasProximity = InVoiceTalkerEntity.Has<FFragment_VoiceTalker_Proximity>();
 
+        // The dirty tag is the reconcile's own retry: it stays while the talker is a Positional3D member still
+        // waiting for a Transform, so the probes compose the frame one arrives instead of never.
+        const auto AwaitsTransform = MaxRangeCm > 0.0f && NOT TalkerHasTransform;
+
+        if (AwaitsTransform)
+        {
+            if (NOT InVoiceTalkerEntity.Has<FTag_VoiceTalker_ProbesAwaitTransform>())
+            {
+                InVoiceTalkerEntity.Add<FTag_VoiceTalker_ProbesAwaitTransform>();
+
+                voice_chat::Log(TEXT("Talker [{}] is a Positional3D channel member but has no Transform yet - "
+                    "proximity routing fails closed for it until one is added; its probes compose then"),
+                    InVoiceTalkerEntity);
+            }
+        }
+        else
+        {
+            InVoiceTalkerEntity.Try_Remove<FTag_VoiceTalker_ProximityDirty>();
+            InVoiceTalkerEntity.Try_Remove<FTag_VoiceTalker_ProbesAwaitTransform>();
+        }
+
         if (NOT WantsProbes)
         {
-            if (MaxRangeCm > 0.0f && NOT TalkerHasTransform)
-            {
-                voice_chat::VeryVerbose(TEXT("Talker [{}] is a Positional3D channel member but has no Transform - "
-                    "no probes composed, proximity routing fails closed for it"), InVoiceTalkerEntity);
-            }
-
             if (NOT HasProximity)
             { return; }
 

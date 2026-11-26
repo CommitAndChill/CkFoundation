@@ -5,6 +5,7 @@
 #include "CkVoiceChat/CkVoiceChat_Log.h"
 
 #include "Interfaces/VoiceCapture.h"
+#include "Misc/App.h"
 #include "VoiceModule.h"
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -18,22 +19,39 @@ FCk_VoiceChat_CaptureSource_Engine::FCk_VoiceChat_CaptureSource_Engine(
 auto
     FCk_VoiceChat_CaptureSource_Engine::
     Start()
-    -> bool
+    -> ECk_VoiceChat_CaptureStartResult
 {
     if (_Capture.IsValid())
-    { return _Capture->Start(); }
+    {
+        return _Capture->Start()
+            ? ECk_VoiceChat_CaptureStartResult::Started
+            : ECk_VoiceChat_CaptureStartResult::Unavailable_DeviceFailedToStart;
+    }
+
+    if (NOT FApp::CanEverRenderAudio())
+    { return ECk_VoiceChat_CaptureStartResult::Unavailable_ProcessRendersNoAudio; }
+
+    // An unattended process has nobody at the microphone, so this source has nothing to capture and never opens the
+    // device. Automation lanes render audio and run where a real microphone may exist, so this is what keeps them off
+    // it. An injected source is a different ICk_VoiceChat_CaptureSource and is unaffected.
+    if (FApp::IsUnattended())
+    { return ECk_VoiceChat_CaptureStartResult::Unavailable_UnattendedProcess; }
+
+    const auto VoiceModuleIsEnabled = FVoiceModule::Get().IsVoiceEnabled();
+    CK_ENSURE_IF_NOT(VoiceModuleIsEnabled,
+        TEXT("Engine voice capture cannot be opened: the engine Voice module is disabled. The host project needs "
+             "[Voice] bEnabled=true in DefaultEngine.ini."))
+    { return ECk_VoiceChat_CaptureStartResult::Failed_VoiceModuleDisabled; }
 
     constexpr auto NumChannels = 1;
     _Capture = FVoiceModule::Get().CreateVoiceCapture(FString{}, _SampleRate, NumChannels);
 
-    const auto CaptureCreated = _Capture.IsValid();
-    CK_ENSURE_IF_NOT(CaptureCreated,
-        TEXT("Engine voice capture could not be created (sample rate [{}]). The engine Voice module "
-             "is disabled or has no capture device - the host project needs [Voice] bEnabled=true "
-             "in DefaultEngine.ini and a working microphone."), _SampleRate)
-    { return false; }
+    if (NOT _Capture.IsValid())
+    { return ECk_VoiceChat_CaptureStartResult::Unavailable_NoCaptureDevice; }
 
-    return _Capture->Start();
+    return _Capture->Start()
+        ? ECk_VoiceChat_CaptureStartResult::Started
+        : ECk_VoiceChat_CaptureStartResult::Unavailable_DeviceFailedToStart;
 }
 
 auto
@@ -81,10 +99,37 @@ FCk_VoiceChat_CaptureSource_Fake::FCk_VoiceChat_CaptureSource_Fake(
 auto
     FCk_VoiceChat_CaptureSource_Fake::
     Start()
-    -> bool
+    -> ECk_VoiceChat_CaptureStartResult
 {
-    _IsStarted = true;
-    return true;
+    ++_StartCount;
+    _IsStarted = _StartResult == ECk_VoiceChat_CaptureStartResult::Started;
+
+    return _StartResult;
+}
+
+auto
+    FCk_VoiceChat_CaptureSource_Fake::
+    Set_StartResult(
+        ECk_VoiceChat_CaptureStartResult InStartResult)
+    -> void
+{
+    _StartResult = InStartResult;
+}
+
+auto
+    FCk_VoiceChat_CaptureSource_Fake::
+    Get_StartCount() const
+    -> int32
+{
+    return _StartCount;
+}
+
+auto
+    FCk_VoiceChat_CaptureSource_Fake::
+    Get_SamplesEmitted() const
+    -> uint64
+{
+    return _SampleCounter;
 }
 
 auto

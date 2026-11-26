@@ -20,6 +20,7 @@
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceChannel_Setup);
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceChannel_AssignIdx);
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceChannel_HandleRequests);
+CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceChannel_SweepMembers);
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceChannel_EndPlay);
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceChannel_CancelPendingRequests);
 
@@ -201,6 +202,7 @@ namespace ck
 
         Registry._Entries.Emplace(FCk_VoiceChat_ChannelRegistryEntry{
             InParams.Get_ChannelName(), InVoiceChannelEntity, NewIdx});
+        ++Registry._Generation;
 
         ck_voice_channel_processor::Push_ControlPlane(InVoiceChannelEntity, InVoiceChannel);
 
@@ -337,6 +339,51 @@ namespace ck
     {
         InVoiceChannel._ServerMuted.Remove(InRequest.Get_Talker());
         return true;
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProcessor_VoiceChannel_SweepMembers::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InVoiceChannelEntity,
+            FFragment_VoiceChannel& InVoiceChannel)
+        -> void
+    {
+        const auto IsGone = [](const FCk_Handle& InMember) -> bool
+        {
+            return ck::Is_NOT_Valid(InMember, ck::IsValid_Policy_IncludePendingKill{});
+        };
+
+        auto SweptMembers = 0;
+        for (auto It = InVoiceChannel._Members.CreateIterator(); It; ++It)
+        {
+            if (NOT IsGone(It->Key))
+            { continue; }
+
+            It.RemoveCurrent();
+            ++SweptMembers;
+        }
+
+        auto SweptServerMutes = 0;
+        for (auto It = InVoiceChannel._ServerMuted.CreateIterator(); It; ++It)
+        {
+            if (NOT IsGone(*It))
+            { continue; }
+
+            It.RemoveCurrent();
+            ++SweptServerMutes;
+        }
+
+        if (SweptMembers == 0 && SweptServerMutes == 0)
+        { return; }
+
+        voice_chat::Warning(TEXT("VoiceChannel [{}] swept [{}] member(s) and [{}] server-mute entr(ies) whose entity no "
+            "longer exists - their talker left without its teardown leaving the channel (an entity destroyed without "
+            "EndPlay, or restored state)"), InVoiceChannelEntity, SweptMembers, SweptServerMutes);
+
+        ck_voice_channel_processor::Push_ControlPlane(InVoiceChannelEntity, InVoiceChannel);
     }
 
     // --------------------------------------------------------------------------------------------------------------------

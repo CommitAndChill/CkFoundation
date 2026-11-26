@@ -132,6 +132,15 @@ auto
 
 auto
     UCk_Utils_VoiceChannel_UE::
+    Get_AutoJoinTalkers(
+        const FCk_Handle_VoiceChannel& InVoiceChannel)
+    -> ECk_EnableDisable
+{
+    return InVoiceChannel.Get<ck::FFragment_VoiceChannel_Params>().Get_AutoJoinTalkers();
+}
+
+auto
+    UCk_Utils_VoiceChannel_UE::
     Get_ResolvedAttenuation(
         const FCk_Handle_VoiceChannel& InVoiceChannel)
     -> USoundAttenuation*
@@ -437,7 +446,10 @@ auto
             Entry.Get_ChannelName(), Channel, Entry.Get_ChannelIdx()};
 
         if (ExistingIdx == INDEX_NONE)
-        { Registry._Entries.Emplace(MoveTemp(MirroredEntry)); }
+        {
+            Registry._Entries.Emplace(MoveTemp(MirroredEntry));
+            ++Registry._Generation;
+        }
         else
         { Registry._Entries[ExistingIdx] = MoveTemp(MirroredEntry); }
     }

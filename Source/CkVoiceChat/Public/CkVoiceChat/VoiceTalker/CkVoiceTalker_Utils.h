@@ -159,6 +159,16 @@ public:
     Get_CurrentAmplitude(
         const FCk_Handle_VoiceTalker& InVoiceTalker);
 
+    // What the last StartTransmit found when it opened capture on this machine. A machine without a microphone (or
+    // a process that renders no audio) reports it here and the StartTransmit request completes Failed - never an
+    // ensure. NotAttempted until the first StartTransmit; meaningful only on the machine that transmits.
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|VoiceChat|Talker",
+              DisplayName="[Ck][VoiceTalker] Get Capture Start Result")
+    static ECk_VoiceChat_CaptureStartResult
+    Get_CaptureStartResult(
+        const FCk_Handle_VoiceTalker& InVoiceTalker);
+
 public:
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Utils|VoiceChat|Talker",
@@ -234,8 +244,9 @@ public:
 
 public:
     // Test seams (C++-only). InjectCaptureSource replaces the engine microphone with a scripted
-    // source; call BEFORE Request_StartTransmit. The loopback PCM accessors read/clear what the
-    // full gate->encode->jitter->decode loop produced.
+    // source; call BEFORE Request_StartTransmit (it refuses a transmitting talker, whose running source it would
+    // otherwise leave open). An injected source is never replaced by the engine one. The loopback PCM accessors
+    // read/clear what the full gate->encode->jitter->decode loop produced.
     static auto
     Debug_InjectCaptureSource(
         FCk_Handle_VoiceTalker& InVoiceTalker,

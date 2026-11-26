@@ -34,12 +34,15 @@ DECLARE_DWORD_COUNTER_STAT(TEXT("VoiceChat Frames Sent"),      STAT_CkVoiceChat_
 DECLARE_DWORD_COUNTER_STAT(TEXT("VoiceChat Frames Dropped (Stale)"), STAT_CkVoiceChat_FramesDroppedStale, STATGROUP_CkVoiceChat);
 DECLARE_DWORD_COUNTER_STAT(TEXT("VoiceChat Bundles Dropped (Inbox Full)"), STAT_CkVoiceChat_BundlesDroppedInboxFull_Talker, STATGROUP_CkVoiceChat);
 DECLARE_DWORD_COUNTER_STAT(TEXT("VoiceChat Receive Dropped (Malformed)"), STAT_CkVoiceChat_ReceiveDroppedMalformed, STATGROUP_CkVoiceChat);
+DECLARE_DWORD_COUNTER_STAT(TEXT("VoiceChat Receive Dropped (No Decoder)"), STAT_CkVoiceChat_ReceiveDroppedNoDecoder, STATGROUP_CkVoiceChat);
 
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceTalker_Setup);
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceTalker_HandleRequests);
+CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceTalker_AutoJoin);
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceTalker_CancelPendingRequests);
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceTalker_Capture);
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceTalker_ReceivePlayback);
+CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceTalker_LeaveChannels);
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceTalker_EndPlay);
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -74,6 +77,47 @@ namespace ck_voice_talker_processor
     Get_FrameDurationSeconds() -> double
     {
         return static_cast<double>(UCk_Utils_VoiceChat_Settings_UE::Get_FrameSizeMs()) / 1000.0;
+    }
+
+    // A transmit that has encoded nothing for this long since it began says so in the log, once.
+    const auto NoProgressReportWindow = FCk_Time{5.0};
+
+    // The one creation path for every codec the talker uses (encoder, loopback decoder, receive decoder). The engine
+    // factories return null only when the Voice module is disabled - a host configuration error, so each ensures
+    // naming the fix and hands the caller a null codec to refuse the operation with.
+    auto
+    Request_CreateEncoder(
+        const FCk_Handle_VoiceTalker& InTalker) -> TSharedPtr<IVoiceEncoder>
+    {
+        constexpr auto NumChannels = 1;
+        auto Encoder = FVoiceModule::Get().CreateVoiceEncoder(
+            UCk_Utils_VoiceChat_Settings_UE::Get_SampleRate(), NumChannels, EAudioEncodeHint::VoiceEncode_Voice);
+
+        const auto EncoderCreated = Encoder.IsValid();
+        CK_ENSURE_IF_NOT(EncoderCreated,
+            TEXT("Opus encoder could not be created for VoiceTalker [{}] - the engine Voice module is disabled "
+                 "([Voice] bEnabled=true missing in the host project's DefaultEngine.ini?)"), InTalker)
+        { return {}; }
+
+        Encoder->SetBitrate(UCk_Utils_VoiceChat_Settings_UE::Get_BitrateBps());
+        return Encoder;
+    }
+
+    auto
+    Request_CreateDecoder(
+        const FCk_Handle_VoiceTalker& InTalker) -> TSharedPtr<IVoiceDecoder>
+    {
+        constexpr auto NumChannels = 1;
+        auto Decoder = FVoiceModule::Get().CreateVoiceDecoder(UCk_Utils_VoiceChat_Settings_UE::Get_SampleRate(), NumChannels);
+
+        const auto DecoderCreated = Decoder.IsValid();
+        CK_ENSURE_IF_NOT(DecoderCreated,
+            TEXT("Opus decoder could not be created for VoiceTalker [{}] - this machine cannot play its voice. The "
+                 "engine Voice module is disabled ([Voice] bEnabled=true missing in the host project's "
+                 "DefaultEngine.ini?)"), InTalker)
+        { return {}; }
+
+        return Decoder;
     }
 
     auto
@@ -351,38 +395,39 @@ namespace ck
             TEXT("StartTransmit on VoiceTalker [{}] whose transmit mode is Disabled"), InHandle)
         { return false; }
 
-        const auto SampleRate = UCk_Utils_VoiceChat_Settings_UE::Get_SampleRate();
-
+        // An injected source (the test seam) is never replaced: the engine source is made only when none is set.
         if (NOT InCapture._CaptureSource.IsValid())
         {
-            InCapture._CaptureSource = MakeShared<FCk_VoiceChat_CaptureSource_Engine>(SampleRate);
+            InCapture._CaptureSource = MakeShared<FCk_VoiceChat_CaptureSource_Engine>(
+                UCk_Utils_VoiceChat_Settings_UE::Get_SampleRate());
+        }
+
+        // Availability is decided before the codecs: a machine that cannot capture (no device, a process that renders
+        // no audio) gets a reported outcome, and never reaches the codec factories' configuration ensures.
+        InCapture._LastStartResult = InCapture._CaptureSource->Start();
+
+        if (InCapture._LastStartResult != ECk_VoiceChat_CaptureStartResult::Started)
+        {
+            voice_chat::Log(TEXT("VoiceTalker [{}] cannot transmit: opening capture reported [{}]. The request completes "
+                "Failed; Get_CaptureStartResult holds the outcome until the next attempt."),
+                InHandle, InCapture._LastStartResult);
+            return false;
         }
 
         if (NOT InCapture._Encoder.IsValid())
-        {
-            constexpr auto NumChannels = 1;
-            InCapture._Encoder = FVoiceModule::Get().CreateVoiceEncoder(
-                SampleRate, NumChannels, EAudioEncodeHint::VoiceEncode_Voice);
-
-            const auto EncoderCreated = InCapture._Encoder.IsValid();
-            CK_ENSURE_IF_NOT(EncoderCreated,
-                TEXT("Opus encoder could not be created for VoiceTalker [{}] - the engine Voice module "
-                     "is disabled ([Voice] bEnabled=true missing in the host project's DefaultEngine.ini?)"),
-                InHandle)
-            { return false; }
-
-            InCapture._Encoder->SetBitrate(UCk_Utils_VoiceChat_Settings_UE::Get_BitrateBps());
-        }
+        { InCapture._Encoder = ck_voice_talker_processor::Request_CreateEncoder(InHandle); }
 
         if (InParams.Get_Loopback() == ECk_EnableDisable::Enable && NOT InPlayout._LoopbackDecoder.IsValid())
-        {
-            constexpr auto NumChannels = 1;
-            InPlayout._LoopbackDecoder = FVoiceModule::Get().CreateVoiceDecoder(SampleRate, NumChannels);
-        }
+        { InPlayout._LoopbackDecoder = ck_voice_talker_processor::Request_CreateDecoder(InHandle); }
 
-        const auto CaptureStarted = InCapture._CaptureSource->Start();
-        if (NOT CaptureStarted)
-        { return false; }
+        const auto CodecsAreReady = InCapture._Encoder.IsValid() &&
+            (InParams.Get_Loopback() != ECk_EnableDisable::Enable || InPlayout._LoopbackDecoder.IsValid());
+
+        if (NOT CodecsAreReady)
+        {
+            InCapture._CaptureSource->Stop();
+            return false;
+        }
 
         // The synth is created only AFTER capture is known to be running - creating it earlier
         // left a registered, silently-running component behind when capture failed to start.
@@ -415,8 +460,10 @@ namespace ck
         {
             InCapture._CaptureSource->Stop();
         }
+        InCapture._Vad = {};
         InCapture._PendingPcm.Reset();
         InCapture._OutboundFrames.Reset();
+        InCapture._ProgressWindow = {};
 
         InHandle.Remove<FTag_VoiceTalker_IsTransmitting>();
 
@@ -479,6 +526,63 @@ namespace ck
     // --------------------------------------------------------------------------------------------------------------------
 
     auto
+        FProcessor_VoiceTalker_AutoJoin::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InVoiceTalkerEntity,
+            const FFragment_VoiceTalker_Params& InParams,
+            FFragment_VoiceTalker_AutoJoin& InAutoJoin)
+        -> void
+    {
+        auto TransientEntity = UCk_Utils_EntityLifetime_UE::Get_TransientEntity(InVoiceTalkerEntity);
+
+        if (NOT TransientEntity.Has<FFragment_VoiceChat_ChannelRegistry>())
+        { return; }
+
+        const auto& Registry = TransientEntity.Get<FFragment_VoiceChat_ChannelRegistry>();
+
+        if (Registry.Get_Generation() == InAutoJoin._ReconciledRegistryGeneration)
+        { return; }
+
+        InAutoJoin._ReconciledRegistryGeneration = Registry.Get_Generation();
+
+        for (auto It = InAutoJoin._JoinedChannels.CreateIterator(); It; ++It)
+        {
+            if (ck::Is_NOT_Valid(*It, ck::IsValid_Policy_IncludePendingKill{}))
+            { It.RemoveCurrent(); }
+        }
+
+        for (const auto& Entry : Registry.Get_Entries())
+        {
+            auto Channel = Entry.Get_Channel();
+
+            if (ck::Is_NOT_Valid(Channel) ||
+                UCk_Utils_EntityLifetime_UE::Get_IsPendingDestroy(Channel, ECk_EntityLifetime_DestructionPhase::BeginDestroy))
+            { continue; }
+
+            if (UCk_Utils_VoiceChannel_UE::Get_AutoJoinTalkers(Channel) != ECk_EnableDisable::Enable)
+            { continue; }
+
+            if (NOT InParams.Get_AutoJoinChannels().HasTagExact(Entry.Get_ChannelName()))
+            { continue; }
+
+            if (InAutoJoin._JoinedChannels.Contains(Channel))
+            { continue; }
+
+            // Recorded at issue: the Join handler refuses only an invalid talker handle, and this talker is live
+            // (pending-kill talkers are excluded from this view).
+            InAutoJoin._JoinedChannels.Add(Channel);
+
+            voice_chat::Verbose(TEXT("Auto-joining VoiceTalker [{}] to VoiceChannel [{}] ([{}])"),
+                InVoiceTalkerEntity, Channel, Entry.Get_ChannelName());
+
+            UCk_Utils_VoiceChannel_UE::Request_Join(Channel, FCk_Request_VoiceChannel_Join{InVoiceTalkerEntity}, {});
+        }
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
         FProcessor_VoiceTalker_CancelPendingRequests::
         ForEachEntity(
             TimeType InDeltaT,
@@ -516,11 +620,12 @@ namespace ck
 
         const auto SampleRate = UCk_Utils_VoiceChat_Settings_UE::Get_SampleRate();
 
-        if (const auto DrainedBytes = InCapture._PendingPcm.Num() - DrainStartBytes;
-            DrainedBytes > 0)
+        const auto DrainedBytesThisTick = InCapture._PendingPcm.Num() - DrainStartBytes;
+
+        if (DrainedBytesThisTick > 0)
         {
             auto RawTap = TArray<uint8>{};
-            RawTap.Append(InCapture._PendingPcm.GetData() + DrainStartBytes, DrainedBytes);
+            RawTap.Append(InCapture._PendingPcm.GetData() + DrainStartBytes, DrainedBytesThisTick);
             UUtils_Signal_OnVoiceTalker_FramesCaptured::Broadcast(InVoiceTalkerEntity,
                 MakePayload(InVoiceTalkerEntity, RawTap, SampleRate));
         }
@@ -534,6 +639,8 @@ namespace ck
 
         auto MaxRmsThisTick = 0.0f;
         auto FramesMeasuredThisTick = 0;
+        auto GateOpenFramesThisTick = 0;
+        auto FramesEncodedThisTick = 0;
         auto VadIsOpen = InVoiceTalkerEntity.Has<FTag_VoiceTalker_IsSpeaking>();
 
         while (InCapture._PendingPcm.Num() >= FrameBytes)
@@ -558,6 +665,8 @@ namespace ck
             if (NOT VadIsOpen || IsMuted || NOT ModeAllowsFrames || NOT InCapture._Encoder.IsValid())
             { continue; }
 
+            ++GateOpenFramesThisTick;
+
             auto Encoded = TArray<uint8>{};
             Encoded.SetNumUninitialized(2048);
             auto EncodedSize = static_cast<uint32>(Encoded.Num());
@@ -569,6 +678,7 @@ namespace ck
             Encoded.SetNum(static_cast<int32>(EncodedSize));
 
             INC_DWORD_STAT(STAT_CkVoiceChat_FramesEncoded);
+            ++FramesEncodedThisTick;
 
             const auto FrameSeq = InCapture._Seq++;
 
@@ -602,6 +712,49 @@ namespace ck
 
             UUtils_Signal_OnVoiceTalker_SpeakingStateChanged::Broadcast(InVoiceTalkerEntity,
                 MakePayload(InVoiceTalkerEntity, IsSpeakingNow));
+        }
+
+        // The no-progress report: at most once per transmit, when a transmit has run a whole window without encoding
+        // a single frame, one line names which stage produced nothing. A transmit that has encoded anything is
+        // concluded and never reports - the silence between sentences is not a stall. While muted or Disabled the
+        // talker is silent on purpose, so the window does not advance.
+        if (auto& Window = InCapture._ProgressWindow;
+            NOT Window._Concluded && NOT IsMuted && ModeAllowsFrames)
+        {
+            Window._Elapsed = Window._Elapsed + InDeltaT;
+            Window._DrainedBytes += DrainedBytesThisTick;
+            Window._GateOpenFrames += GateOpenFramesThisTick;
+            Window._PeakRms = FMath::Max(Window._PeakRms, MaxRmsThisTick);
+
+            if (FramesEncodedThisTick > 0)
+            {
+                Window._Concluded = true;
+            }
+            else if (Window._Elapsed >= NoProgressReportWindow)
+            {
+                Window._Concluded = true;
+
+                if (Window._DrainedBytes == 0)
+                {
+                    voice_chat::Log(TEXT("VoiceTalker [{}] has been transmitting for [{}]s and its capture source "
+                        "delivered no audio - the device or source is producing nothing"),
+                        InVoiceTalkerEntity, Window._Elapsed.Get_Seconds());
+                }
+                else if (Window._GateOpenFrames == 0)
+                {
+                    voice_chat::Log(TEXT("VoiceTalker [{}] has been transmitting for [{}]s and encoded no frame: audio "
+                        "arrived but its loudest frame (RMS [{}] after input gain [{}]) never reached the voice-gate "
+                        "threshold [{}]"),
+                        InVoiceTalkerEntity, Window._Elapsed.Get_Seconds(), Window._PeakRms, InTunables.Get_InputGain(),
+                        InParams.Get_VadThreshold());
+                }
+                else
+                {
+                    voice_chat::Log(TEXT("VoiceTalker [{}] has been transmitting for [{}]s and encoded no frame: [{}] "
+                        "frame(s) passed the voice gate but the encoder produced nothing for any of them"),
+                        InVoiceTalkerEntity, Window._Elapsed.Get_Seconds(), Window._GateOpenFrames);
+                }
+            }
         }
 
         Send_OutboundFrames(InVoiceTalkerEntity, InVoiceTalkerComp.Get_AmplitudeQ8(),
@@ -650,6 +803,20 @@ namespace ck
             }
         }
 
+        // The receive decoder is made on the first arrival. A machine that cannot make one cannot play this voice: the
+        // creation path has already said so, and the bundles are dropped and counted rather than queued for a decoder
+        // that will not appear.
+        if (NOT BundlesCopy.IsEmpty() && NOT InPlayout._LoopbackDecoder.IsValid())
+        {
+            InPlayout._LoopbackDecoder = Request_CreateDecoder(InVoiceTalkerEntity);
+
+            if (NOT InPlayout._LoopbackDecoder.IsValid())
+            {
+                INC_DWORD_STAT_BY(STAT_CkVoiceChat_ReceiveDroppedNoDecoder, BundlesCopy.Num());
+                BundlesCopy.Reset();
+            }
+        }
+
         auto BestDeliveringChannel = FCk_Handle_VoiceChannel{};
 
         for (const auto& Packed : BundlesCopy)
@@ -679,13 +846,6 @@ namespace ck
                  UCk_Utils_VoiceChannel_UE::Get_Priority(BestDeliveringChannel)))
             {
                 BestDeliveringChannel = DeliveringChannel;
-            }
-
-            if (NOT InPlayout._LoopbackDecoder.IsValid())
-            {
-                constexpr auto NumChannels = 1;
-                InPlayout._LoopbackDecoder = FVoiceModule::Get().CreateVoiceDecoder(
-                    UCk_Utils_VoiceChat_Settings_UE::Get_SampleRate(), NumChannels);
             }
 
             // Remote amplitude rides the header (the server never decodes) - mirror it so
@@ -747,6 +907,8 @@ namespace ck
     {
         using namespace ck_voice_talker_processor;
 
+        // No decoder is expected control flow, not a stall: a talker that has never received and is not looping back
+        // has nothing to play. Every place that needs one creates it through the checked creation path.
         if (NOT InPlayout._LoopbackDecoder.IsValid())
         {
             InPlayout._LoopbackPopAccumulator = FCk_Time{0.0};
@@ -955,6 +1117,39 @@ namespace ck
         InPlayout._HybridRenderNear = IsNear;
 
         Apply_SynthChannelConfig(InVoiceTalkerEntity, InPlayout);
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProcessor_VoiceTalker_LeaveChannels::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InVoiceTalkerEntity,
+            const FFragment_VoiceTalker_Params& InParams)
+        -> void
+    {
+        auto TransientEntity = UCk_Utils_EntityLifetime_UE::Get_TransientEntity(InVoiceTalkerEntity);
+
+        if (NOT TransientEntity.Has<FFragment_VoiceChat_ChannelRegistry>())
+        { return; }
+
+        for (const auto& Entry : TransientEntity.Get<FFragment_VoiceChat_ChannelRegistry>().Get_Entries())
+        {
+            auto Channel = Entry.Get_Channel();
+
+            if (ck::Is_NOT_Valid(Channel) ||
+                UCk_Utils_EntityLifetime_UE::Get_IsPendingDestroy(Channel, ECk_EntityLifetime_DestructionPhase::BeginDestroy))
+            { continue; }
+
+            if (NOT UCk_Utils_VoiceChannel_UE::Get_IsMember(Channel, InVoiceTalkerEntity))
+            { continue; }
+
+            voice_chat::Verbose(TEXT("VoiceTalker [{}] is tearing down - leaving VoiceChannel [{}]"),
+                InVoiceTalkerEntity, Channel);
+
+            UCk_Utils_VoiceChannel_UE::Request_Leave(Channel, FCk_Request_VoiceChannel_Leave{InVoiceTalkerEntity}, {});
+        }
     }
 
     // --------------------------------------------------------------------------------------------------------------------

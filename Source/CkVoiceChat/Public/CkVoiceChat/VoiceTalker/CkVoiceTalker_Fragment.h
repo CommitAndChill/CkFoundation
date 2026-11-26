@@ -34,6 +34,7 @@ namespace ck
     CK_DEFINE_ECS_TAG(FTag_VoiceTalker_IsTransmitting);
     CK_DEFINE_ECS_TAG(FTag_VoiceTalker_IsSpeaking);
     CK_DEFINE_ECS_TAG(FTag_VoiceTalker_ProximityDirty);
+    CK_DEFINE_ECS_TAG(FTag_VoiceTalker_ProbesAwaitTransform);
 
     // --------------------------------------------------------------------------------------------------------------------
 
@@ -50,15 +51,40 @@ namespace ck
         float _VadThreshold = 0.07f;
         ECk_EnableDisable _Loopback = ECk_EnableDisable::Disable;
         FName _PlaybackAttachSocketName = NAME_None;
+        FGameplayTagContainer _AutoJoinChannels;
 
     public:
         CK_PROPERTY_GET(_VadThreshold);
         CK_PROPERTY_GET(_Loopback);
         CK_PROPERTY_GET(_PlaybackAttachSocketName);
+        CK_PROPERTY_GET(_AutoJoinChannels);
 
     public:
         CK_DEFINE_CONSTRUCTORS(FFragment_VoiceTalker_Params, _VadThreshold, _Loopback,
-            _PlaybackAttachSocketName);
+            _PlaybackAttachSocketName, _AutoJoinChannels);
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // Authority-side, present only on a talker whose Spec lists AutoJoinChannels. Records which registry
+    // channels the auto-join reconcile has already joined this talker to: a pair is joined at most once, so an
+    // explicit Leave afterwards stands. _ReconciledRegistryGeneration is the registry generation the reconcile
+    // last compared against; a different live generation means a channel was registered since.
+    struct CKVOICECHAT_API FFragment_VoiceTalker_AutoJoin
+    {
+    public:
+        CK_GENERATED_BODY(FFragment_VoiceTalker_AutoJoin);
+
+    public:
+        friend class FProcessor_VoiceTalker_AutoJoin;
+
+    private:
+        uint32 _ReconciledRegistryGeneration = 0;
+        TSet<FCk_Handle_VoiceChannel> _JoinedChannels;
+
+    public:
+        CK_PROPERTY_GET(_ReconciledRegistryGeneration);
+        CK_PROPERTY_GET(_JoinedChannels);
     };
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -150,19 +176,37 @@ namespace ck
         friend class UCk_Utils_VoiceTalker_UE;
 
     private:
+        // What the start of a transmit has seen, up to the first encoded frame or the end of the report window,
+        // whichever comes first; after that the transmit is _Concluded and never reports. Progress is audio drained
+        // and frames encoded, never ticks. Silence after a transmit has encoded is not a stall, so it is not watched.
+        struct FProgressWindow
+        {
+            FCk_Time _Elapsed;
+            int32 _DrainedBytes = 0;
+            int32 _GateOpenFrames = 0;
+            float _PeakRms = 0.0f;
+            bool _Concluded = false;
+        };
+
+    private:
         uint16 _Seq = 0;
 
         TSharedPtr<ICk_VoiceChat_CaptureSource> _CaptureSource;
         TSharedPtr<IVoiceEncoder> _Encoder;
+        ECk_VoiceChat_CaptureStartResult _LastStartResult = ECk_VoiceChat_CaptureStartResult::NotAttempted;
 
+        // Per-transmit state: StopTransmit resets all of it, so every transmit starts with the gate closed, nothing
+        // buffered and a fresh progress window.
         FCk_VoiceChat_Vad _Vad;
         TArray<uint8> _PendingPcm;
-        FCk_Time _CaptureClock;
-
         TArray<FCk_VoiceChat_OutboundFrame> _OutboundFrames;
+        FProgressWindow _ProgressWindow;
+
+        FCk_Time _CaptureClock;
 
     public:
         CK_PROPERTY_GET(_Seq);
+        CK_PROPERTY_GET(_LastStartResult);
     };
 
     // --------------------------------------------------------------------------------------------------------------------

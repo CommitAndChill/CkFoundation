@@ -59,7 +59,8 @@ namespace ck
     {
     public:
         using Group = FGroup_Gameplay_Audio;
-        using RunAfter = TDepList<FProcessor_VoiceTalker_Capture, FProcessor_VoiceChat_ProximityProbes>;
+        using RunAfter = TDepList<FProcessor_VoiceTalker_Capture, FProcessor_VoiceChat_ProximityProbes,
+            FProcessor_VoiceChannel_SweepMembers>;
         using MarkedDirtyBy = FFragment_VoiceTalker_ServerInbox;
         static constexpr auto NetModeRequirement = ECk_ProcessorNetModeRequirement::AuthorityOnly;
 

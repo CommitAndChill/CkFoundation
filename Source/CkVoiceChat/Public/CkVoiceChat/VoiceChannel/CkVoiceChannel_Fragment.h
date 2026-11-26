@@ -39,6 +39,7 @@ namespace ck
         friend class FProcessor_VoiceChannel_Setup;
         friend class FProcessor_VoiceChannel_AssignIdx;
         friend class FProcessor_VoiceChannel_HandleRequests;
+        friend class FProcessor_VoiceChannel_SweepMembers;
         friend class UCk_Utils_VoiceChannel_UE;
 
     private:
@@ -130,9 +131,14 @@ namespace ck
         TArray<FCk_VoiceChat_ChannelRegistryEntry> _Entries;
         int32 _NextIdx = 0;
 
+        // Bumped whenever an entry is added; a reader that remembers the generation it last saw knows whether a
+        // channel has been registered since (the talker auto-join reconcile reads it).
+        uint32 _Generation = 0;
+
     public:
         CK_PROPERTY_GET(_Entries);
         CK_PROPERTY_GET(_NextIdx);
+        CK_PROPERTY_GET(_Generation);
     };
 
     // --------------------------------------------------------------------------------------------------------------------

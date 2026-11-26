@@ -2,8 +2,10 @@
 
 #include "CkEcs/EntityLifetime/CkEntityLifetime_Fragment.h"
 #include "CkEcs/Processor/CkProcessor.h"
+#include "CkEcs/Processor/CkProcessor_NetModePolicy.h"
 #include "CkEcs/Scheduler/CkProcessorGroups.h"
 
+#include "CkVoiceChat/VoiceChannel/CkVoiceChannel_Processor.h"
 #include "CkVoiceChat/VoiceTalker/CkVoiceTalker_Fragment.h"
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -115,6 +117,42 @@ namespace ck
             FFragment_VoiceTalker_Capture& InCapture,
             FFragment_VoiceTalker_Playout& InPlayout,
             const FCk_Request_VoiceTalker_SetSelfMute& InRequest) -> bool;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // Authority-side auto-join, level-triggered: whenever the world's channel registry has gained an entry since
+    // this talker last compared against it (or the talker is new), the talker is joined to every registry channel
+    // that opts in (_AutoJoinTalkers) and whose name its AutoJoinChannels lists exactly - so it converges whichever
+    // of the two was composed first. Each (talker, channel) pair is joined at most once and always through the
+    // ordinary Join request (control-plane push, proximity reconcile), so an explicit Leave afterwards stands.
+    // Runs before the channel request drain so the join lands in the frame it is issued, while the talker is
+    // still alive.
+    class CKVOICECHAT_API FProcessor_VoiceTalker_AutoJoin : public ck_exp::TProcessor<
+        FProcessor_VoiceTalker_AutoJoin,
+        FCk_Handle_VoiceTalker,
+        ck::TReadOnly<FFragment_VoiceTalker_Params>,
+        ck::TReadWrite<FFragment_VoiceTalker_AutoJoin>,
+        TExclude<FTag_DestroyEntity_Initiate>,
+        CK_IGNORE_PENDING_KILL>
+    {
+    public:
+        using Group = FGroup_Gameplay_Audio;
+        using RunAfter = TDepList<FProcessor_VoiceChannel_AssignIdx>;
+        using RunBefore = TDepList<FProcessor_VoiceChannel_HandleRequests>;
+        static constexpr auto NetModeRequirement = ECk_ProcessorNetModeRequirement::AuthorityOnly;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        static auto
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InVoiceTalkerEntity,
+            const FFragment_VoiceTalker_Params& InParams,
+            FFragment_VoiceTalker_AutoJoin& InAutoJoin)
+            -> void;
     };
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -254,6 +292,34 @@ namespace ck
         Evaluate_HybridRenderMode(
             HandleType InVoiceTalkerEntity,
             FFragment_VoiceTalker_Playout& InPlayout)
+            -> void;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // The prompt half of membership integrity (FProcessor_VoiceChannel_SweepMembers is the eventual half): when a
+    // talker begins teardown on the authority it leaves every channel it is a member of, through the ordinary Leave
+    // request, so the control plane and the proximity bookkeeping update exactly as they do for an explicit Leave.
+    // A channel that is itself being destroyed is skipped - its membership goes with it.
+    class CKVOICECHAT_API FProcessor_VoiceTalker_LeaveChannels : public ck_exp::TProcessor<
+        FProcessor_VoiceTalker_LeaveChannels,
+        FCk_Handle_VoiceTalker,
+        ck::TReadOnly<FFragment_VoiceTalker_Params>,
+        CK_IF_END_PLAY>
+    {
+    public:
+        using Group = FGroup_EndPlay;
+        static constexpr auto NetModeRequirement = ECk_ProcessorNetModeRequirement::AuthorityOnly;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        static auto
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InVoiceTalkerEntity,
+            const FFragment_VoiceTalker_Params& InParams)
             -> void;
     };
 

@@ -130,6 +130,39 @@ namespace ck
 
     // --------------------------------------------------------------------------------------------------------------------
 
+    // The eventual half of membership integrity, owned by the channel so no consumer has to guard against it: every
+    // frame on the authority, member keys (and server-mute keys) whose entity no longer exists at all are removed
+    // and the control plane re-pushed. The prompt half is the talker's own teardown
+    // (FProcessor_VoiceTalker_LeaveChannels), which leaves through the ordinary Leave request; a key reaching this
+    // sweep is one whose talker exit never ran (an entity destroyed without its EndPlay, a restore), so each sweep
+    // logs a Warning naming the channel. No MemberLeft fires for a swept key - its talker no longer exists to name,
+    // matching the client-side control-plane diff, which skips the signal for a talker it cannot resolve.
+    class CKVOICECHAT_API FProcessor_VoiceChannel_SweepMembers : public ck_exp::TProcessor<
+        FProcessor_VoiceChannel_SweepMembers,
+        FCk_Handle_VoiceChannel,
+        ck::TReadWrite<FFragment_VoiceChannel>,
+        TExclude<FTag_VoiceChannel_NeedsSetup>,
+        CK_IGNORE_PENDING_KILL>
+    {
+    public:
+        using Group = FGroup_Gameplay_Audio;
+        using RunAfter = TDepList<FProcessor_VoiceChannel_HandleRequests>;
+        static constexpr auto NetModeRequirement = ECk_ProcessorNetModeRequirement::AuthorityOnly;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        static auto
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InVoiceChannelEntity,
+            FFragment_VoiceChannel& InVoiceChannel)
+            -> void;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
     // A dying channel releases its proximity claims: every member talker gets re-reconciled so
     // its range probe shrinks (or disappears) now that this channel's audible range no longer
     // contributes. Authority-only - probes exist only where routing runs.

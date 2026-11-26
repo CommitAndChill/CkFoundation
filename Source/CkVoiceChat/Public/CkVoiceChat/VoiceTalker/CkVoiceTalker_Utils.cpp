@@ -23,7 +23,12 @@ auto
     InHandle.Add<ck::FFragment_VoiceTalker_Params>(
         InParams.Get_VadThreshold(),
         InParams.Get_Loopback(),
-        InParams.Get_PlaybackAttachSocketName());
+        InParams.Get_PlaybackAttachSocketName(),
+        InParams.Get_AutoJoinChannels());
+
+    if (NOT InParams.Get_AutoJoinChannels().IsEmpty())
+    { InHandle.Add<ck::FFragment_VoiceTalker_AutoJoin>(); }
+
     InHandle.Add<ck::FFragment_VoiceTalker>();
     InHandle.Add<ck::FFragment_VoiceTalker_Tunables>(
         InParams.Get_TransmitMode(),
@@ -180,6 +185,15 @@ auto
         InVoiceTalker.Get<ck::FFragment_VoiceTalker>().Get_AmplitudeQ8());
 }
 
+auto
+    UCk_Utils_VoiceTalker_UE::
+    Get_CaptureStartResult(
+        const FCk_Handle_VoiceTalker& InVoiceTalker)
+    -> ECk_VoiceChat_CaptureStartResult
+{
+    return InVoiceTalker.Get<ck::FFragment_VoiceTalker_Capture>().Get_LastStartResult();
+}
+
 // --------------------------------------------------------------------------------------------------------------------
 
 auto
@@ -287,6 +301,15 @@ auto
         const TSharedPtr<ICk_VoiceChat_CaptureSource>& InCaptureSource)
     -> void
 {
+    CK_ENSURE_IF_NOT(ck::IsValid(InVoiceTalker),
+        TEXT("Debug_InjectCaptureSource on an invalid VoiceTalker handle [{}]"), InVoiceTalker)
+    { return; }
+
+    CK_ENSURE_IF_NOT(NOT Get_IsTransmitting(InVoiceTalker),
+        TEXT("Debug_InjectCaptureSource on VoiceTalker [{}] while it is transmitting - stop transmit first; replacing "
+             "the running source would leave it open"), InVoiceTalker)
+    { return; }
+
     InVoiceTalker.Get<ck::FFragment_VoiceTalker_Capture>()._CaptureSource = InCaptureSource;
 }
 
