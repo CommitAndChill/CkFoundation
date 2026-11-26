@@ -17,6 +17,7 @@
 #include "CkVoiceChat/Settings/CkVoiceChat_Settings.h"
 #include "CkVoiceChat/VoiceChannel/CkVoiceChannel_Utils.h"
 #include "CkVoiceChat/VoiceListener/CkVoiceListener_Fragment.h"
+#include "CkVoiceChat/VoiceTalker/CkVoiceTalker_Utils.h"
 
 #include "Interfaces/VoiceCodec.h"
 #include "VoiceModule.h"
@@ -38,6 +39,7 @@ DECLARE_DWORD_COUNTER_STAT(TEXT("VoiceChat Receive Dropped (No Decoder)"), STAT_
 
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceTalker_Setup);
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceTalker_HandleRequests);
+CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceTalker_OpenMic);
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceTalker_AutoJoin);
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceTalker_CancelPendingRequests);
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceTalker_Capture);
@@ -81,6 +83,37 @@ namespace ck_voice_talker_processor
 
     // A transmit that has encoded nothing for this long since it began says so in the log, once.
     const auto NoProgressReportWindow = FCk_Time{5.0};
+
+    // A held push-to-talk key bypasses the voice gate: the caller already decided this is speech.
+    auto
+    Get_IsVoiceGateBypassed(
+        ECk_VoiceChat_TransmitMode InTransmitMode) -> bool
+    {
+        return InTransmitMode == ECk_VoiceChat_TransmitMode::PushToTalk;
+    }
+
+    // What the open mic means by "this machine's player controls the talker": a possessed, player-controlled pawn bridged
+    // to the talker's own entity.
+    auto
+    Get_IsControlledByLocalPlayer(
+        const FCk_Handle_VoiceTalker& InTalker) -> bool
+    {
+        if (NOT UCk_Utils_EntityBridge_UE::Has(InTalker))
+        { return false; }
+
+        return UCk_Utils_Net_UE::Get_IsEntityLocallyControlled_ByPlayer(InTalker) ==
+            ECk_Utils_Net_IsLocallyControlled_Result::IsLocallyControlled;
+    }
+
+    auto
+    Arm_OpenMic(
+        FCk_Handle_VoiceTalker& InTalker) -> void
+    {
+        if (InTalker.Has<ck::FTag_VoiceTalker_OpenMicPending>())
+        { return; }
+
+        InTalker.Add<ck::FTag_VoiceTalker_OpenMicPending>();
+    }
 
     // The one creation path for every codec the talker uses (encoder, loopback decoder, receive decoder). The engine
     // factories return null only when the Voice module is disabled - a host configuration error, so each ensures
@@ -437,6 +470,15 @@ namespace ck
         if (InHandle.Has<FTag_VoiceTalker_IsTransmitting>())
         { return true; }
 
+        // The open mic's Start was issued in OpenMic; a mode request drained ahead of it in the same queue took the
+        // talker out of OpenMic, and that request's rule (no transmit without a caller's Start) wins.
+        if (InRequest.Get_IssuedByOpenMic() && InTunables.Get_TransmitMode() != ECk_VoiceChat_TransmitMode::OpenMic)
+        {
+            voice_chat::Verbose(TEXT("VoiceTalker [{}] left OpenMic before its open mic's StartTransmit was handled: "
+                "the transmit is not opened"), InHandle);
+            return false;
+        }
+
         const auto TransmitIsAllowed = InTunables.Get_TransmitMode() != ECk_VoiceChat_TransmitMode::Disabled;
         CK_ENSURE_IF_NOT(TransmitIsAllowed,
             TEXT("StartTransmit on VoiceTalker [{}] whose transmit mode is Disabled"), InHandle)
@@ -483,6 +525,8 @@ namespace ck
             FProcessor_VoiceTalker_ReceivePlayback::TryCreate_PlaybackSynth(InHandle, InPlayout);
         }
 
+        InCapture._OpenedByOpenMic = InRequest.Get_IssuedByOpenMic();
+
         InHandle.Add<FTag_VoiceTalker_IsTransmitting>();
         UUtils_Signal_OnVoiceTalker_TransmitStarted::Broadcast(InHandle, MakePayload(InHandle));
 
@@ -500,28 +544,13 @@ namespace ck
             const FCk_Request_VoiceTalker_StopTransmit& InRequest)
         -> bool
     {
+        // An explicit Stop stands until the talker is armed again, so it also cancels an arming not yet acted on.
+        InHandle.Try_Remove<FTag_VoiceTalker_OpenMicPending>();
+
         if (NOT InHandle.Has<FTag_VoiceTalker_IsTransmitting>())
         { return true; }
 
-        if (InCapture._CaptureSource.IsValid())
-        {
-            InCapture._CaptureSource->Stop();
-        }
-        InCapture._Vad = {};
-        InCapture._PendingPcm.Reset();
-        InCapture._OutboundFrames.Reset();
-        InCapture._ProgressWindow = {};
-
-        InHandle.Remove<FTag_VoiceTalker_IsTransmitting>();
-
-        if (InHandle.Has<FTag_VoiceTalker_IsSpeaking>())
-        {
-            InHandle.Remove<FTag_VoiceTalker_IsSpeaking>();
-            UUtils_Signal_OnVoiceTalker_SpeakingStateChanged::Broadcast(InHandle, MakePayload(InHandle, false));
-        }
-
-        UUtils_Signal_OnVoiceTalker_TransmitStopped::Broadcast(InHandle, MakePayload(InHandle));
-
+        Stop_Transmit(InHandle, InCapture);
         return true;
     }
 
@@ -536,8 +565,57 @@ namespace ck
             const FCk_Request_VoiceTalker_SetTransmitMode& InRequest)
         -> bool
     {
-        InTunables._TransmitMode = InRequest.Get_TransmitMode();
+        const auto PreviousMode = InTunables.Get_TransmitMode();
+        const auto NewMode = InRequest.Get_TransmitMode();
+        const auto IsTransmitting = InHandle.Has<FTag_VoiceTalker_IsTransmitting>();
+
+        InTunables._TransmitMode = NewMode;
+
+        // Arming happens only on a talker that is not transmitting: PushToTalk -> OpenMic keeps the caller's open
+        // transmit as it is, and OpenMic -> OpenMic re-arms a talker whose transmit failed or was stopped.
+        if (NewMode == ECk_VoiceChat_TransmitMode::OpenMic)
+        {
+            if (NOT IsTransmitting)
+            { ck_voice_talker_processor::Arm_OpenMic(InHandle); }
+
+            return true;
+        }
+
+        InHandle.Try_Remove<FTag_VoiceTalker_OpenMicPending>();
+
+        if (NewMode == PreviousMode || NOT IsTransmitting)
+        { return true; }
+
+        Stop_Transmit(InHandle, InCapture);
         return true;
+    }
+
+    auto
+        FProcessor_VoiceTalker_HandleRequests::
+        Stop_Transmit(
+            HandleType InHandle,
+            FFragment_VoiceTalker_Capture& InCapture)
+        -> void
+    {
+        if (InCapture._CaptureSource.IsValid())
+        {
+            InCapture._CaptureSource->Stop();
+        }
+        InCapture._Vad = {};
+        InCapture._PendingPcm.Reset();
+        InCapture._OutboundFrames.Reset();
+        InCapture._ProgressWindow = {};
+        InCapture._OpenedByOpenMic = false;
+
+        InHandle.Remove<FTag_VoiceTalker_IsTransmitting>();
+
+        if (InHandle.Has<FTag_VoiceTalker_IsSpeaking>())
+        {
+            InHandle.Remove<FTag_VoiceTalker_IsSpeaking>();
+            UUtils_Signal_OnVoiceTalker_SpeakingStateChanged::Broadcast(InHandle, MakePayload(InHandle, false));
+        }
+
+        UUtils_Signal_OnVoiceTalker_TransmitStopped::Broadcast(InHandle, MakePayload(InHandle));
     }
 
     auto
@@ -568,6 +646,47 @@ namespace ck
     {
         InTunables._SelfMute = InRequest.Get_SelfMute();
         return true;
+    }
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    auto
+        FProcessor_VoiceTalker_OpenMic::
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InVoiceTalkerEntity,
+            const FFragment_VoiceTalker_Tunables& InTunables)
+        -> void
+    {
+        CK_ENSURE_IF_NOT(InTunables.Get_TransmitMode() == ECk_VoiceChat_TransmitMode::OpenMic,
+            TEXT("VoiceTalker [{}] is armed for an open mic in transmit mode [{}] - every mode request that leaves OpenMic "
+                 "disarms it"), InVoiceTalkerEntity, InTunables.Get_TransmitMode())
+        {
+            InVoiceTalkerEntity.Remove<FTag_VoiceTalker_OpenMicPending>();
+            return;
+        }
+
+        // A bridge is linked when the entity is created, never later: a talker without one can never be controlled.
+        if (NOT UCk_Utils_EntityBridge_UE::Has(InVoiceTalkerEntity))
+        {
+            voice_chat::Verbose(TEXT("VoiceTalker [{}] has no bridged actor, so no player can control it: its open mic is "
+                "disarmed"), InVoiceTalkerEntity);
+            InVoiceTalkerEntity.Remove<FTag_VoiceTalker_OpenMicPending>();
+            return;
+        }
+
+        if (NOT ck_voice_talker_processor::Get_IsControlledByLocalPlayer(InVoiceTalkerEntity))
+        { return; }
+
+        InVoiceTalkerEntity.Remove<FTag_VoiceTalker_OpenMicPending>();
+
+        voice_chat::Verbose(TEXT("Opening the microphone of VoiceTalker [{}]: this machine's player controls it"),
+            InVoiceTalkerEntity);
+
+        auto Request = FCk_Request_VoiceTalker_StartTransmit{};
+        Request._IssuedByOpenMic = true;
+
+        UCk_Utils_VoiceTalker_UE::Request_StartTransmit(InVoiceTalkerEntity, Request, {});
     }
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -656,6 +775,18 @@ namespace ck
     {
         using namespace ck_voice_talker_processor;
 
+        // An open mic is only ever open on the talker this machine's player controls: an unpossess closes it (or the
+        // server's spoof guard would refuse every frame) and re-arms it for the next possession.
+        if (InCapture._OpenedByOpenMic && NOT Get_IsControlledByLocalPlayer(InVoiceTalkerEntity))
+        {
+            voice_chat::Verbose(TEXT("VoiceTalker [{}] is no longer controlled by this machine's player: its open mic "
+                "closes and waits for control again"), InVoiceTalkerEntity);
+
+            FProcessor_VoiceTalker_HandleRequests::Stop_Transmit(InVoiceTalkerEntity, InCapture);
+            Arm_OpenMic(InVoiceTalkerEntity);
+            return;
+        }
+
         if (NOT InCapture._CaptureSource.IsValid())
         { return; }
 
@@ -683,12 +814,13 @@ namespace ck
         const auto VadParams = FCk_VoiceChat_VadParams{}.Set_Threshold(InParams.Get_VadThreshold());
         const auto IsMuted = InTunables.Get_SelfMute() == ECk_EnableDisable::Enable;
         const auto ModeAllowsFrames = InTunables.Get_TransmitMode() != ECk_VoiceChat_TransmitMode::Disabled;
+        const auto VoiceGateIsBypassed = Get_IsVoiceGateBypassed(InTunables.Get_TransmitMode());
 
         auto MaxRmsThisTick = 0.0f;
         auto FramesMeasuredThisTick = 0;
         auto GateOpenFramesThisTick = 0;
         auto FramesEncodedThisTick = 0;
-        auto VadIsOpen = InVoiceTalkerEntity.Has<FTag_VoiceTalker_IsSpeaking>();
+        auto VadIsOpen = VoiceGateIsBypassed || InVoiceTalkerEntity.Has<FTag_VoiceTalker_IsSpeaking>();
 
         while (InCapture._PendingPcm.Num() >= FrameBytes)
         {
@@ -707,7 +839,7 @@ namespace ck
             MaxRmsThisTick = FMath::Max(MaxRmsThisTick, Rms);
             ++FramesMeasuredThisTick;
 
-            VadIsOpen = InCapture._Vad.Update(Rms, FCk_Time{FrameDurationSeconds}, VadParams);
+            VadIsOpen = VoiceGateIsBypassed || InCapture._Vad.Update(Rms, FCk_Time{FrameDurationSeconds}, VadParams);
 
             if (NOT VadIsOpen || IsMuted || NOT ModeAllowsFrames || NOT InCapture._Encoder.IsValid())
             { continue; }
@@ -822,6 +954,14 @@ namespace ck
         {
             voice_chat::Log(TEXT("VoiceTalker [{}] has been transmitting for [{}]s and its capture source delivered no "
                 "audio - the device or source is producing nothing"), InVoiceTalkerEntity, Seconds);
+            return;
+        }
+
+        if (Window._GateOpenFrames == 0 && ck_voice_talker_processor::Get_IsVoiceGateBypassed(InTunables.Get_TransmitMode()))
+        {
+            voice_chat::Log(TEXT("VoiceTalker [{}] has been transmitting for [{}]s in [{}] and encoded no frame: audio "
+                "arrived but never filled a whole frame for the encoder"),
+                InVoiceTalkerEntity, Seconds, InTunables.Get_TransmitMode());
             return;
         }
 

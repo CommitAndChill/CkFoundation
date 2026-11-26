@@ -70,6 +70,16 @@ namespace ck
             FFragment_VoiceTalker_Playout& InPlayout,
             FFragment_VoiceTalker_Requests& InRequests) const -> void;
 
+    public:
+        // The one way a transmit closes: StopTransmit, a mode that leaves OpenMic or enters Disabled, and an open mic
+        // whose talker is no longer controlled here. Stops capture, resets the per-transmit state and fires the stop
+        // edges. The talker must be transmitting.
+        static auto
+        Stop_Transmit(
+            HandleType InHandle,
+            FFragment_VoiceTalker_Capture& InCapture)
+            -> void;
+
     private:
         // The overloads share one leading parameter list because the request visitor dispatches
         // them through a single call expression - a handler that ignores a fragment still takes it.
@@ -117,6 +127,38 @@ namespace ck
             FFragment_VoiceTalker_Capture& InCapture,
             FFragment_VoiceTalker_Playout& InPlayout,
             const FCk_Request_VoiceTalker_SetSelfMute& InRequest) -> bool;
+    };
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+    // The open mic, level-triggered on the arming: a pending talker opens its transmit through the ordinary
+    // StartTransmit request, once, the first time this machine's player controls it (a possessed pawn bridged to the
+    // talker's entity), and stays pending until then, so late possession converges. A talker with no bridged actor can
+    // never be controlled and is disarmed. Runs before the request drain so the Start lands in the frame it is issued.
+    class CKVOICECHAT_API FProcessor_VoiceTalker_OpenMic : public ck_exp::TProcessor<
+        FProcessor_VoiceTalker_OpenMic,
+        FCk_Handle_VoiceTalker,
+        ck::TReadOnly<FFragment_VoiceTalker_Tunables>,
+        FTag_VoiceTalker_OpenMicPending,
+        TExclude<FTag_VoiceTalker_NeedsSetup>,
+        TExclude<FTag_DestroyEntity_Initiate>,
+        CK_IGNORE_PENDING_KILL>
+    {
+    public:
+        using Group = FGroup_Gameplay_Audio;
+        using RunAfter = TDepList<FProcessor_VoiceTalker_Setup>;
+        using RunBefore = TDepList<FProcessor_VoiceTalker_HandleRequests>;
+
+    public:
+        using TProcessor::TProcessor;
+
+    public:
+        static auto
+        ForEachEntity(
+            TimeType InDeltaT,
+            HandleType InVoiceTalkerEntity,
+            const FFragment_VoiceTalker_Tunables& InTunables)
+            -> void;
     };
 
     // --------------------------------------------------------------------------------------------------------------------

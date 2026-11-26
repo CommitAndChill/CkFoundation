@@ -20,9 +20,23 @@ CKVOICECHAT_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Tag_VoiceChat_Probe_Presence);
 
 // --------------------------------------------------------------------------------------------------------------------
 
-// PushToTalk and OpenMic are not yet told apart: both transmit exactly while the caller holds a transmit open with
-// Request_StartTransmit / Request_StopTransmit, and nothing starts or stops a transmit by itself. Only Disabled
-// changes behavior (StartTransmit is refused and no frames are sent).
+namespace ck { class FProcessor_VoiceTalker_OpenMic; }
+
+// --------------------------------------------------------------------------------------------------------------------
+
+// The modes differ in two ways and nothing else: who opens the transmit, and whether the voice gate applies.
+// - PushToTalk: the caller opens and closes every transmit (Request_StartTransmit / Request_StopTransmit). The voice
+//   gate is bypassed: every captured frame is encoded from the first one, and the talker is speaking while it
+//   transmits unmuted.
+// - OpenMic: the module opens the transmit itself, once per arming, on the talker this machine's player controls
+//   (a possessed pawn bridged to the talker's entity). A talker is armed when its mode becomes OpenMic (at Add, or by
+//   Request_SetTransmitMode while it is not transmitting); an arming waits for local control, and a transmit it opened
+//   closes and re-arms when that control is lost. A failed open is not retried, and an explicit StopTransmit stands,
+//   until the talker is armed again. A caller's Start / Stop work as in PushToTalk. The voice gate applies
+//   (_VadThreshold, attack, release).
+// - Disabled: nobody transmits; StartTransmit is refused.
+// Leaving OpenMic, or entering Disabled, closes an open transmit, so a microphone is never left open in PushToTalk
+// without a Start, or in Disabled at all.
 UENUM(BlueprintType)
 enum class ECk_VoiceChat_TransmitMode : uint8
 {
@@ -81,8 +95,9 @@ public:
     CK_GENERATED_BODY(FCk_VoiceTalker_Spec);
 
 private:
-    // PushToTalk and OpenMic currently behave identically (see ECk_VoiceChat_TransmitMode): the caller drives every
-    // transmit through Request_StartTransmit / Request_StopTransmit.
+    // PushToTalk: the caller opens every transmit and the voice gate is bypassed. OpenMic: the talker is armed at Add
+    // and opens its own transmit once this machine's player controls it, through the voice gate. Disabled: no transmit.
+    // See ECk_VoiceChat_TransmitMode.
     UPROPERTY(EditAnywhere, BlueprintReadWrite,
               meta = (AllowPrivateAccess = true))
     ECk_VoiceChat_TransmitMode _TransmitMode = ECk_VoiceChat_TransmitMode::PushToTalk;
@@ -134,6 +149,9 @@ public:
     CK_GENERATED_BODY(FCk_Request_VoiceTalker_StartTransmit);
     CK_REQUEST_DEFINE_DEBUG_NAME(FCk_Request_VoiceTalker_StartTransmit);
 
+public:
+    friend class ck::FProcessor_VoiceTalker_OpenMic;
+
 private:
     // Not read by anything yet: a transmit is sent on every channel the talker is a member of with CanTalk,
     // whatever this holds. Kept so callers can already state their intent.
@@ -141,8 +159,14 @@ private:
               meta = (AllowPrivateAccess = true, Categories = "VoiceChat.Channel"))
     FGameplayTagContainer _ChannelTags;
 
+    // Set only by the open mic, on the Start it issues for an arming, so the transmit it opens is known to be the
+    // module's (closed when local control is lost) and a mode that left OpenMic before the drain drops it quietly.
+    // Not reflected: no caller can claim it.
+    bool _IssuedByOpenMic = false;
+
 public:
     CK_PROPERTY(_ChannelTags);
+    CK_PROPERTY_GET(_IssuedByOpenMic);
 };
 
 // --------------------------------------------------------------------------------------------------------------------

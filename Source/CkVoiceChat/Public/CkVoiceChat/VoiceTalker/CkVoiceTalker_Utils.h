@@ -84,6 +84,7 @@ public:
         const FCk_Request_VoiceTalker_StartTransmit& InRequest,
         const FCk_Delegate_Request_OnCompleted& InDelegate);
 
+    // Also cancels an OpenMic arming the module has not acted on: an explicit Stop stands until the talker is armed again.
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Utils|VoiceChat|Talker",
               DisplayName="[Ck][VoiceTalker] Request Stop Transmit",
@@ -93,6 +94,8 @@ public:
         UPARAM(ref) FCk_Handle_VoiceTalker& InVoiceTalker,
         const FCk_Delegate_Request_OnCompleted& InDelegate);
 
+    // Entering OpenMic arms a talker that is not transmitting (OpenMic -> OpenMic re-arms it); leaving OpenMic disarms
+    // it and, like entering Disabled, closes an open transmit. See ECk_VoiceChat_TransmitMode.
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Utils|VoiceChat|Talker",
               DisplayName="[Ck][VoiceTalker] Request Set Transmit Mode",

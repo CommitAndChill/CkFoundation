@@ -36,6 +36,10 @@ namespace ck
     CK_DEFINE_ECS_TAG(FTag_VoiceTalker_ProximityDirty);
     CK_DEFINE_ECS_TAG(FTag_VoiceTalker_ProbesAwaitTransform);
 
+    // An OpenMic arming not yet acted on: FProcessor_VoiceTalker_OpenMic opens the transmit, once, when this machine's
+    // player controls the talker.
+    CK_DEFINE_ECS_TAG(FTag_VoiceTalker_OpenMicPending);
+
     // --------------------------------------------------------------------------------------------------------------------
 
     // The retained immutable residue of FCk_VoiceTalker_Spec: the only fields read after
@@ -226,9 +230,14 @@ namespace ck
 
         FCk_Time _CaptureClock;
 
+        // The open transmit was opened by the open mic, so it closes (and the talker re-arms) when this machine's
+        // player stops controlling the talker. A caller's transmit never is.
+        bool _OpenedByOpenMic = false;
+
     public:
         CK_PROPERTY_GET(_Seq);
         CK_PROPERTY_GET(_LastStartResult);
+        CK_PROPERTY_GET(_OpenedByOpenMic);
     };
 
     // --------------------------------------------------------------------------------------------------------------------

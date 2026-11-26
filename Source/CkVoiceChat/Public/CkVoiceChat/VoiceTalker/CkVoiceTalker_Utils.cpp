@@ -38,6 +38,9 @@ auto
     InHandle.Add<ck::FFragment_VoiceTalker_Fairness>();
     InHandle.Add<ck::FTag_VoiceTalker_NeedsSetup>();
 
+    if (InParams.Get_TransmitMode() == ECk_VoiceChat_TransmitMode::OpenMic)
+    { InHandle.Add<ck::FTag_VoiceTalker_OpenMicPending>(); }
+
     return Cast(InHandle);
 }
 
