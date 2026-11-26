@@ -16,6 +16,7 @@
 #include "CkVoiceChannel_Fragment_Data.generated.h"
 
 class USoundAttenuation;
+class USoundClass;
 class USoundEffectSourcePresetChain;
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -86,6 +87,13 @@ private:
               meta = (AllowPrivateAccess = true))
     TSoftObjectPtr<USoundEffectSourcePresetChain> _SourceEffectChain;
 
+    // The SoundClass every receiving machine's voice synth plays through while this channel configures it, for every
+    // spatialization policy: the hook a game's voice volume setting (a SoundMix class override) reaches. None
+    // authored: the synth keeps the engine's default SoundClass.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    TSoftObjectPtr<USoundClass> _SoundClass;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite,
               meta = (AllowPrivateAccess = true))
     int32 _Priority = 0;
@@ -101,6 +109,7 @@ public:
     CK_PROPERTY(_AudibleRange);
     CK_PROPERTY(_Attenuation);
     CK_PROPERTY(_SourceEffectChain);
+    CK_PROPERTY(_SoundClass);
     CK_PROPERTY(_Priority);
     CK_PROPERTY(_AutoJoinTalkers);
 

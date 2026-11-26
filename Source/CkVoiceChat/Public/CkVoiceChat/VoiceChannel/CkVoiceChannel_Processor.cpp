@@ -15,6 +15,7 @@
 #include "CkVoiceChat/VoiceTalker/CkVoiceTalker_Fragment.h"
 
 #include <Sound/SoundAttenuation.h>
+#include <Sound/SoundClass.h>
 #include <Sound/SoundEffectSource.h>
 
 CK_REGISTER_PROCESSOR(ck::FProcessor_VoiceChannel_Setup);
@@ -113,10 +114,11 @@ namespace ck
             return UCk_Utils_VoiceChat_Settings_UE::Get_DefaultAttenuation();
         }();
         const auto& SourceEffectChain = InParams.Get_SourceEffectChain();
+        const auto& SoundClass = InParams.Get_SoundClass();
 
-        // Both assets are optional-by-design (ADR-5); a channel that resolves neither has nothing
+        // Every asset is optional-by-design (ADR-5); a channel that resolves none has nothing
         // to load. Resolution runs on EVERY machine - clients apply the config at playback.
-        if (ck::IsValid(Attenuation) || ck::IsValid(SourceEffectChain))
+        if (ck::IsValid(Attenuation) || ck::IsValid(SourceEffectChain) || ck::IsValid(SoundClass))
         {
             if (NOT InVoiceChannel._LoadedAudioAssets.Get_IsRequested())
             {
@@ -126,6 +128,8 @@ namespace ck
                 { PathsToLoad.Emplace(Attenuation.ToSoftObjectPath()); }
                 if (ck::IsValid(SourceEffectChain))
                 { PathsToLoad.Emplace(SourceEffectChain.ToSoftObjectPath()); }
+                if (ck::IsValid(SoundClass))
+                { PathsToLoad.Emplace(SoundClass.ToSoftObjectPath()); }
 
                 InVoiceChannel._LoadedAudioAssets = UCk_Utils_ResourceLoader_UE::RequestLoad_RootedBatch(
                     TEXT("VoiceChannel.Setup"), PathsToLoad);
@@ -143,20 +147,27 @@ namespace ck
             const auto ResolvedSourceEffectChain = ck::IsValid(SourceEffectChain)
                 ? Cast<USoundEffectSourcePresetChain>(InVoiceChannel._LoadedAudioAssets.Get_ResolvedObject(SourceEffectChain.ToSoftObjectPath()))
                 : nullptr;
+            const auto ResolvedSoundClass = ck::IsValid(SoundClass)
+                ? Cast<USoundClass>(InVoiceChannel._LoadedAudioAssets.Get_ResolvedObject(SoundClass.ToSoftObjectPath()))
+                : nullptr;
 
             const auto EveryAuthoredAssetResolved =
                 NOT InVoiceChannel._LoadedAudioAssets.Get_HasFailed() &&
                 (ck::Is_NOT_Valid(Attenuation) || ck::IsValid(ResolvedAttenuation)) &&
-                (ck::Is_NOT_Valid(SourceEffectChain) || ck::IsValid(ResolvedSourceEffectChain));
+                (ck::Is_NOT_Valid(SourceEffectChain) || ck::IsValid(ResolvedSourceEffectChain)) &&
+                (ck::Is_NOT_Valid(SoundClass) || ck::IsValid(ResolvedSoundClass));
 
             CK_ENSURE_IF_NOT(EveryAuthoredAssetResolved,
                 TEXT("VoiceChannel [{}] failed to resolve its authored audio config through CkResourceLoader "
-                     "(Attenuation [{}], SourceEffectChain [{}]) - playback on this machine falls back to module defaults"),
-                InVoiceChannelEntity, Attenuation.ToSoftObjectPath(), SourceEffectChain.ToSoftObjectPath())
+                     "(Attenuation [{}], SourceEffectChain [{}], SoundClass [{}]) - playback on this machine falls back to "
+                     "module defaults"),
+                InVoiceChannelEntity, Attenuation.ToSoftObjectPath(), SourceEffectChain.ToSoftObjectPath(),
+                SoundClass.ToSoftObjectPath())
             {
                 InVoiceChannel._LoadedAudioAssets = {};
                 InVoiceChannel._ResolvedAttenuation = nullptr;
                 InVoiceChannel._ResolvedSourceEffectChain = nullptr;
+                InVoiceChannel._ResolvedSoundClass = nullptr;
                 InVoiceChannelEntity.Try_Remove<FTag_VoiceChannel_PendingAssetLoad>();
                 InVoiceChannelEntity.Remove<MarkedDirtyBy>();
                 return;
@@ -164,6 +175,7 @@ namespace ck
 
             InVoiceChannel._ResolvedAttenuation = ResolvedAttenuation;
             InVoiceChannel._ResolvedSourceEffectChain = ResolvedSourceEffectChain;
+            InVoiceChannel._ResolvedSoundClass = ResolvedSoundClass;
             InVoiceChannelEntity.Try_Remove<FTag_VoiceChannel_PendingAssetLoad>();
         }
 

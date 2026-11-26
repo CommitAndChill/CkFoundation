@@ -8,6 +8,7 @@
 #include "CkEcs/Handle/CkHandle_Typesafe.h"
 #include "CkEcs/Request/CkRequest_Data.h"
 
+#include <Components/SceneComponent.h>
 #include <GameplayTagContainer.h>
 #include <NativeGameplayTags.h>
 
@@ -119,6 +120,15 @@ private:
               meta = (AllowPrivateAccess = true, Categories = "VoiceChat.Channel"))
     FGameplayTagContainer _AutoJoinChannels;
 
+    // Where every machine's voice synth for this talker attaches: this component when set, otherwise the root of the
+    // actor bridged to the talker's entity. It must belong to that actor (a caller error otherwise: ensure, root).
+    // Local to each machine: each machine's Spec names its own copy of the component. Weak: the Spec only observes it.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    TWeakObjectPtr<USceneComponent> _PlaybackAttachComponent;
+
+    // A socket (or bone) on the attach target above. A name the target does not have is a caller error: ensure, and
+    // the synth attaches at the target's origin.
     UPROPERTY(EditAnywhere, BlueprintReadWrite,
               meta = (AllowPrivateAccess = true))
     FName _PlaybackAttachSocketName;
@@ -134,6 +144,7 @@ public:
     CK_PROPERTY(_InputGain);
     CK_PROPERTY(_VadThreshold);
     CK_PROPERTY(_AutoJoinChannels);
+    CK_PROPERTY(_PlaybackAttachComponent);
     CK_PROPERTY(_PlaybackAttachSocketName);
     CK_PROPERTY(_Loopback);
 };

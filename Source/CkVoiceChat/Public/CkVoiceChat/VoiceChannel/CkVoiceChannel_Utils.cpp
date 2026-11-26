@@ -157,6 +157,15 @@ auto
     return InVoiceChannel.Get<ck::FFragment_VoiceChannel>().Get_ResolvedSourceEffectChain().Get();
 }
 
+auto
+    UCk_Utils_VoiceChannel_UE::
+    Get_ResolvedSoundClass(
+        const FCk_Handle_VoiceChannel& InVoiceChannel)
+    -> USoundClass*
+{
+    return InVoiceChannel.Get<ck::FFragment_VoiceChannel>().Get_ResolvedSoundClass().Get();
+}
+
 // --------------------------------------------------------------------------------------------------------------------
 
 auto

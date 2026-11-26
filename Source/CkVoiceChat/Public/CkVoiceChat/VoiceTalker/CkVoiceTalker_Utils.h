@@ -16,6 +16,7 @@
 
 class ICk_VoiceChat_CaptureSource;
 class APlayerState;
+class UAudioComponent;
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -292,6 +293,18 @@ public:
     static auto
     Debug_Get_HybridRenderNear(
         const FCk_Handle_VoiceTalker& InVoiceTalker) -> TOptional<bool>;
+
+    // The playback synth on this machine (nullptr until the first bundle or loopback creates it, and wherever the
+    // world has no audio device) - net specs read what it was given: attach parent and socket, SoundClass, volume.
+    static auto
+    Debug_Get_PlaybackSynth(
+        const FCk_Handle_VoiceTalker& InVoiceTalker) -> UCk_VoiceChatSynthComponent_UE*;
+
+    // The audio component that synth plays through (nullptr until the synth has started once): its SoundClassOverride
+    // and VolumeMultiplier are what the render actually uses. Here so a test module need not link AudioMixer.
+    static auto
+    Debug_Get_PlaybackAudioComponent(
+        const FCk_Handle_VoiceTalker& InVoiceTalker) -> UAudioComponent*;
 
     // Prune seam: TOTAL talker entries across the world-scoped authority maps (ServeHistory +
     // ListenerMuteMatrix). Takes any LIVE handle in the world as the anchor - a destroyed

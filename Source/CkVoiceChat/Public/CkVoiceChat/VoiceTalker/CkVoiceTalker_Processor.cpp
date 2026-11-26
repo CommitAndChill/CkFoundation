@@ -25,6 +25,7 @@
 #include <GameFramework/PlayerController.h>
 #include <GameFramework/PlayerState.h>
 #include <Sound/SoundAttenuation.h>
+#include <Sound/SoundClass.h>
 #include <Sound/SoundEffectSource.h>
 
 DECLARE_DWORD_COUNTER_STAT(TEXT("VoiceChat Frames Captured"),  STAT_CkVoiceChat_FramesCaptured,  STATGROUP_CkVoiceChat);
@@ -1157,6 +1158,9 @@ namespace ck
             Evaluate_HybridRenderMode(InVoiceTalkerEntity, InPlayout);
         }
 
+        // Every pass, not only on arrival: a volume set while the talker is silent is already in place when it speaks.
+        Apply_LocalListenerVolume(InVoiceTalkerEntity, InPlayout);
+
         Drain_Playout(InPlayout, InDeltaT);
     }
 
@@ -1255,21 +1259,56 @@ namespace ck
             Synth->bAutoActivate = false;
             Synth->RegisterComponentWithWorld(World);
 
-            if (auto* OwningActor = UCk_Utils_EntityBridge_UE::TryGet_Actor(InVoiceTalkerEntity);
-                ck::IsValid(OwningActor))
+            const auto& TalkerParams = InVoiceTalkerEntity.Get<FFragment_VoiceTalker_Params>();
+            auto* OwningActor = UCk_Utils_EntityBridge_UE::TryGet_Actor(InVoiceTalkerEntity);
+
+            // The Spec's component when it is set, else the actor's root. A component of another actor (or of any
+            // actor, for a talker with no bridged actor) is a caller error: the voice must follow the talker.
+            auto* AttachTarget = [&]() -> USceneComponent*
             {
-                if (auto* AttachTarget = OwningActor->GetRootComponent();
-                    ck::IsValid(AttachTarget))
+                const auto RootComponent = ck::IsValid(OwningActor) ? OwningActor->GetRootComponent() : nullptr;
+                const auto& AttachComponent = TalkerParams.Get_PlaybackAttachComponent();
+
+                if (NOT AttachComponent.IsValid())
+                { return RootComponent; }
+
+                CK_ENSURE_IF_NOT(ck::IsValid(OwningActor) && AttachComponent->GetOwner() == OwningActor,
+                    TEXT("VoiceTalker [{}]'s PlaybackAttachComponent [{}] belongs to actor [{}], not to the talker's actor [{}]. "
+                         "The voice synth attaches to the talker actor's root instead."),
+                    InVoiceTalkerEntity, GetNameSafe(AttachComponent.Get()), GetNameSafe(AttachComponent->GetOwner()),
+                    GetNameSafe(OwningActor))
+                { return RootComponent; }
+
+                return AttachComponent.Get();
+            }();
+
+            if (ck::IsValid(AttachTarget))
+            {
+                const auto SocketName = [&]() -> FName
                 {
-                    const auto& SocketName = InVoiceTalkerEntity.Get<FFragment_VoiceTalker_Params>().Get_PlaybackAttachSocketName();
-                    Synth->AttachToComponent(AttachTarget,
-                        FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketName);
-                }
+                    const auto& AuthoredSocketName = TalkerParams.Get_PlaybackAttachSocketName();
+
+                    if (AuthoredSocketName.IsNone())
+                    { return NAME_None; }
+
+                    CK_ENSURE_IF_NOT(AttachTarget->DoesSocketExist(AuthoredSocketName),
+                        TEXT("VoiceTalker [{}]'s PlaybackAttachSocketName [{}] is not a socket or bone of its attach target [{}] "
+                             "on actor [{}]. The voice synth attaches at the target's origin instead."),
+                        InVoiceTalkerEntity, AuthoredSocketName, GetNameSafe(AttachTarget),
+                        GetNameSafe(AttachTarget->GetOwner()))
+                    { return NAME_None; }
+
+                    return AuthoredSocketName;
+                }();
+
+                Synth->AttachToComponent(AttachTarget,
+                    FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketName);
             }
 
             InPlayout._LoopbackSynth = TStrongObjectPtr{Synth};
 
             Apply_SynthChannelConfig(InVoiceTalkerEntity, InPlayout);
+            Apply_LocalListenerVolume(InVoiceTalkerEntity, InPlayout);
         }
     }
 
@@ -1288,6 +1327,7 @@ namespace ck
         auto Policy = ECk_VoiceChat_SpatializationPolicy::Global2D;
         auto Attenuation = static_cast<USoundAttenuation*>(nullptr);
         auto SourceEffectChain = static_cast<USoundEffectSourcePresetChain*>(nullptr);
+        auto SoundClass = static_cast<USoundClass*>(nullptr);
 
         if (const auto& ConfigChannel = InPlayout._PlaybackConfigChannel;
             ck::IsValid(ConfigChannel))
@@ -1295,6 +1335,7 @@ namespace ck
             Policy = UCk_Utils_VoiceChannel_UE::Get_SpatializationPolicy(ConfigChannel);
             Attenuation = UCk_Utils_VoiceChannel_UE::Get_ResolvedAttenuation(ConfigChannel);
             SourceEffectChain = UCk_Utils_VoiceChannel_UE::Get_ResolvedSourceEffectChain(ConfigChannel);
+            SoundClass = UCk_Utils_VoiceChannel_UE::Get_ResolvedSoundClass(ConfigChannel);
         }
 
         // HybridRadio near = plain proximity speech (spatialized, NO radio filter); far = flat
@@ -1319,7 +1360,47 @@ namespace ck
         Synth->bAllowSpatialization = Spatialize;
         Synth->AttenuationSettings = Spatialize ? Attenuation : nullptr;
         Synth->SourceEffectChain = ApplyEffectChain ? SourceEffectChain : nullptr;
+        // Every policy, near or far: the SoundClass is how a game's voice volume reaches this synth. Null = the engine's
+        // default SoundClass (USynthComponent::GetSoundClass).
+        Synth->SoundClass = SoundClass;
         Synth->Start();
+    }
+
+    auto
+        FProcessor_VoiceTalker_ReceivePlayback::
+        Apply_LocalListenerVolume(
+            HandleType InVoiceTalkerEntity,
+            FFragment_VoiceTalker_Playout& InPlayout)
+        -> void
+    {
+        auto* Synth = InPlayout._LoopbackSynth.Get();
+
+        if (ck::Is_NOT_Valid(Synth))
+        { return; }
+
+        const auto Volume = [&]() -> float
+        {
+            constexpr auto UnsetVolume = 1.0f;
+
+            auto TransientEntity = UCk_Utils_EntityLifetime_UE::Get_TransientEntity(InVoiceTalkerEntity);
+
+            if (NOT TransientEntity.Has<FFragment_VoiceChat_LocalListener>())
+            { return UnsetVolume; }
+
+            const auto& LocalListener = TransientEntity.Get<FFragment_VoiceChat_LocalListener>().Get_Listener();
+
+            if (ck::Is_NOT_Valid(LocalListener))
+            { return UnsetVolume; }
+
+            const auto* FoundVolume = LocalListener.Get<FFragment_VoiceListener>().Get_TalkerVolumes().Find(InVoiceTalkerEntity);
+            return FoundVolume != nullptr ? *FoundVolume : UnsetVolume;
+        }();
+
+        if (InPlayout._AppliedTalkerVolume.IsSet() && InPlayout._AppliedTalkerVolume.GetValue() == Volume)
+        { return; }
+
+        Synth->SetVolumeMultiplier(Volume);
+        InPlayout._AppliedTalkerVolume = Volume;
     }
 
     auto
@@ -1340,7 +1421,7 @@ namespace ck
         }
 
         // The talker's position comes from its owning actor - the synth is attached to that
-        // actor's root anyway, and the near/far STATE is a distance decision, not a render one,
+        // actor (its root or the Spec's component of it) anyway, and the near/far STATE is a distance decision, not a render one,
         // so it must compute even where no audio device exists (headless: the state is what the
         // specs pin; Apply's attach guard still gates the actual render independently).
         auto* OwningActor = UCk_Utils_EntityBridge_UE::TryGet_Actor(InVoiceTalkerEntity);

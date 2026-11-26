@@ -57,6 +57,7 @@ namespace ck
         FCk_ResourceLoader_RootedAssetBatch _LoadedAudioAssets;
         TWeakObjectPtr<USoundAttenuation> _ResolvedAttenuation;
         TWeakObjectPtr<USoundEffectSourcePresetChain> _ResolvedSourceEffectChain;
+        TWeakObjectPtr<USoundClass> _ResolvedSoundClass;
 
     public:
         CK_PROPERTY_GET(_ChannelIdx);
@@ -64,6 +65,7 @@ namespace ck
         CK_PROPERTY_GET(_ServerMuted);
         CK_PROPERTY_GET(_ResolvedAttenuation);
         CK_PROPERTY_GET(_ResolvedSourceEffectChain);
+        CK_PROPERTY_GET(_ResolvedSoundClass);
     };
 
     // --------------------------------------------------------------------------------------------------------------------

@@ -315,23 +315,34 @@ namespace ck
             -> void;
 
         // Creates + starts the playback synth if the world can render audio; no-op otherwise
-        // (headless PIE) - the decode path still fills the test-readable PCM buffer. Attaches at
-        // the owning actor's PlaybackAttachSocketName and applies the config-channel render
-        // settings before the first Start.
+        // (headless PIE) - the decode path still fills the test-readable PCM buffer. Attaches to
+        // the Spec's PlaybackAttachComponent (else the owning actor's root) at its
+        // PlaybackAttachSocketName, applies the config-channel render settings before the first
+        // Start, then the local listener's volume for this talker.
         static auto
         TryCreate_PlaybackSynth(
             HandleType InVoiceTalkerEntity,
             FFragment_VoiceTalker_Playout& InPlayout)
             -> void;
 
-        // (Re)applies _PlaybackConfigChannel's spatialization/attenuation/effect chain to the
-        // synth via Stop -> set -> Start (USynthComponent::Start copies the fields to its audio
-        // component; the PCM queue survives the cycle by design). Invalid config channel = flat
-        // non-spatialized playback (capture loopback, unresolved control plane). Spatialization
-        // additionally requires the synth to be attached - an unattached synth has no world
-        // position and MUST render flat regardless of policy.
+        // (Re)applies _PlaybackConfigChannel's spatialization/attenuation/effect chain/SoundClass
+        // to the synth via Stop -> set -> Start (USynthComponent::Start copies the fields to its
+        // audio component; the PCM queue survives the cycle by design). Invalid config channel =
+        // flat non-spatialized playback with the engine's default SoundClass (capture loopback,
+        // unresolved control plane). Spatialization additionally requires the synth to be
+        // attached - an unattached synth has no world position and MUST render flat regardless
+        // of policy.
         static auto
         Apply_SynthChannelConfig(
+            HandleType InVoiceTalkerEntity,
+            FFragment_VoiceTalker_Playout& InPlayout)
+            -> void;
+
+        // Gives the synth this machine's listener volume for the talker (1.0 with no local
+        // listener or no entry) when it differs from the volume last given. Local only: the
+        // volume never travels upstream. No-op without a synth.
+        static auto
+        Apply_LocalListenerVolume(
             HandleType InVoiceTalkerEntity,
             FFragment_VoiceTalker_Playout& InPlayout)
             -> void;

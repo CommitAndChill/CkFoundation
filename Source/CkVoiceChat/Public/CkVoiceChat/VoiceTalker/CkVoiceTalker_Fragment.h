@@ -54,18 +54,20 @@ namespace ck
     private:
         float _VadThreshold = 0.07f;
         ECk_EnableDisable _Loopback = ECk_EnableDisable::Disable;
+        TWeakObjectPtr<USceneComponent> _PlaybackAttachComponent;
         FName _PlaybackAttachSocketName = NAME_None;
         FGameplayTagContainer _AutoJoinChannels;
 
     public:
         CK_PROPERTY_GET(_VadThreshold);
         CK_PROPERTY_GET(_Loopback);
+        CK_PROPERTY_GET(_PlaybackAttachComponent);
         CK_PROPERTY_GET(_PlaybackAttachSocketName);
         CK_PROPERTY_GET(_AutoJoinChannels);
 
     public:
         CK_DEFINE_CONSTRUCTORS(FFragment_VoiceTalker_Params, _VadThreshold, _Loopback,
-            _PlaybackAttachSocketName, _AutoJoinChannels);
+            _PlaybackAttachComponent, _PlaybackAttachSocketName, _AutoJoinChannels);
     };
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -274,6 +276,10 @@ namespace ck
         // flat radio through the channel's effect chain. Unset until the first distance
         // evaluation, and whenever the config channel is not HybridRadio.
         TOptional<bool> _HybridRenderNear;
+
+        // The local listener's volume for this talker as last given to the synth (unset until the synth exists), so the
+        // receive path calls into the engine only when the stored volume changes.
+        TOptional<float> _AppliedTalkerVolume;
 
         // Zero until this machine receives its first forwarded bundle - the guard that keeps the
         // remote amplitude release from ever touching a capture-loopback talker's amplitude.

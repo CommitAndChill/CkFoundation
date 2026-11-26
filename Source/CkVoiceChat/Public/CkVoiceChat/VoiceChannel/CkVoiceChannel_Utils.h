@@ -146,6 +146,15 @@ public:
     Get_ResolvedSourceEffectChain(
         const FCk_Handle_VoiceChannel& InVoiceChannel);
 
+    // Resolved with the attenuation and effect chain (nullptr while the load is pending, if the channel authored none,
+    // or if resolution failed - the synth then keeps the engine's default SoundClass).
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|VoiceChat|Channel",
+              DisplayName="[Ck][VoiceChannel] Get Resolved Sound Class")
+    static USoundClass*
+    Get_ResolvedSoundClass(
+        const FCk_Handle_VoiceChannel& InVoiceChannel);
+
 public:
     // Membership is server-authoritative: every request below rejects non-authority callers
     // synchronously (Failed_NotEnqueued) - clients receive membership via the control plane.

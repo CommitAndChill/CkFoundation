@@ -23,6 +23,7 @@ auto
     InHandle.Add<ck::FFragment_VoiceTalker_Params>(
         InParams.Get_VadThreshold(),
         InParams.Get_Loopback(),
+        InParams.Get_PlaybackAttachComponent(),
         InParams.Get_PlaybackAttachSocketName(),
         InParams.Get_AutoJoinChannels());
 
@@ -404,6 +405,28 @@ auto
     { return {}; }
 
     return InVoiceTalker.Get<ck::FFragment_VoiceTalker_Playout>().Get_HybridRenderNear();
+}
+
+auto
+    UCk_Utils_VoiceTalker_UE::
+    Debug_Get_PlaybackSynth(
+        const FCk_Handle_VoiceTalker& InVoiceTalker)
+    -> UCk_VoiceChatSynthComponent_UE*
+{
+    if (NOT InVoiceTalker.Has<ck::FFragment_VoiceTalker_Playout>())
+    { return nullptr; }
+
+    return InVoiceTalker.Get<ck::FFragment_VoiceTalker_Playout>()._LoopbackSynth.Get();
+}
+
+auto
+    UCk_Utils_VoiceTalker_UE::
+    Debug_Get_PlaybackAudioComponent(
+        const FCk_Handle_VoiceTalker& InVoiceTalker)
+    -> UAudioComponent*
+{
+    auto* Synth = Debug_Get_PlaybackSynth(InVoiceTalker);
+    return ck::IsValid(Synth) ? Synth->GetAudioComponent() : nullptr;
 }
 
 auto
