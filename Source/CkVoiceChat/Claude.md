@@ -1,10 +1,9 @@
 # CkVoiceChat
 
-> **Status (2026-11-25):** feature-complete and unit/net-tested; a real microphone has been heard through the
+> **Status (2026-11-26):** feature-complete and unit/net-tested; a real microphone has been heard through the
 > loopback gym, but proximity voice between two players has not yet been auditioned by a human. The original
 > design spec, CTO review and campaign log are lost; this file and the code are the design of record.
-> `PushToTalk` and `OpenMic` are not yet told apart (see Key API) - separating them is open work tracked in the
-> Mars proximity-voice campaign (defect D4).
+> `PushToTalk` and `OpenMic` are distinct (see Key API, Transmit mode); neither has been heard by a human yet.
 
 **Purpose:** Proximity voice chat — microphone capture, Opus encoding, server-routed transport
 with server-side interest management, and spatialized playback, as three composable ECS features:
@@ -37,10 +36,36 @@ releases to zero once the stream idles past the sender's stale-drop age.
 - `UCk_Utils_VoiceTalker_UE::Add(Handle, Params)` - compose talker fragments directly on a
   transform-bearing entity. Params: transmit mode (PushToTalk default), input gain (1.2), VAD
   threshold (0.07), auto-join channel tags, playback attach socket, loopback.
-  - **Transmit mode:** `PushToTalk` and `OpenMic` behave identically today - the caller holds every transmit open
-    with `Request_StartTransmit` / `Request_StopTransmit`, and nothing starts or stops one by itself. Only
-    `Disabled` changes behaviour (StartTransmit is refused). `FCk_Request_VoiceTalker_StartTransmit::_ChannelTags`
-    is not read: a transmit goes to every channel the talker is a `CanTalk` member of.
+  - **Transmit mode:** the modes differ in who opens the transmit and whether the voice gate applies, nothing else.
+    No wire, replication or routing difference; the mode is local to each machine.
+
+    | | `PushToTalk` | `OpenMic` | `Disabled` |
+    |---|---|---|---|
+    | Who opens the transmit | The caller: `Request_StartTransmit` / `Request_StopTransmit` | The module, once per arming, on the talker this machine's player controls. A caller's Start / Stop still work (unowned talkers, tests) | Nobody: Start is refused (ensure) |
+    | Voice gate | Bypassed: every captured frame is encoded from the first one (no gate update, no attack delay); `Get_IsSpeaking` is true while transmitting unmuted | Applies: `_VadThreshold`, 20 ms attack, 200 ms release | - |
+
+    - *Arming.* A talker is armed (`FTag_VoiceTalker_OpenMicPending`) when its mode becomes `OpenMic`: at `Add` from
+      the Spec, or by `Request_SetTransmitMode` while it is not transmitting (`OpenMic -> OpenMic` re-arms).
+      `FProcessor_VoiceTalker_OpenMic` (after Setup, before HandleRequests, every net mode) acts on a pending talker
+      the first time `UCk_Utils_Net_UE::Get_IsEntityLocallyControlled_ByPlayer` reports `IsLocallyControlled` - a
+      possessed, player-controlled pawn bridged to the talker's own entity: it disarms and issues the ordinary
+      `Request_StartTransmit`, so every rule of that handler applies. A talker that is not controlled here stays
+      pending, so late possession converges; a talker with no bridged actor is disarmed (it can never be controlled).
+      An owner chain that is not a possessed pawn (an actor owned by a PlayerController) never opens.
+    - *One attempt per arming.* A Start that cannot open capture reports through the capture-availability line below
+      and is not retried until the talker is armed again. An explicit `Request_StopTransmit` stands until re-armed;
+      it also cancels an arming not yet acted on.
+    - *Leaving `OpenMic`.* `SetTransmitMode` to `PushToTalk` or `Disabled` disarms and closes an open transmit through
+      the same path as StopTransmit (`FProcessor_VoiceTalker_HandleRequests::Stop_Transmit`); so does `PushToTalk ->
+      Disabled`. A microphone is never left open in `PushToTalk` without a Start, or in `Disabled` at all.
+      `PushToTalk -> OpenMic` while transmitting keeps the caller's transmit and arms nothing. Setting the mode the
+      talker already has changes nothing, except the `OpenMic` re-arm above.
+    - *Losing local control.* A transmit the open mic opened (`FFragment_VoiceTalker_Capture::_OpenedByOpenMic`) closes
+      and re-arms when the talker stops being controlled here (checked by the capture processor), so an unpossess
+      never sends frames the server's spoof guard would refuse. A caller's transmit is not touched.
+
+    `FCk_Request_VoiceTalker_StartTransmit::_ChannelTags` is not read: a transmit goes to every channel the talker is
+    a `CanTalk` member of.
   - **Capture availability:** `Request_StartTransmit` opens capture BEFORE creating codecs. No device, a device
     that will not start, a process that renders no audio (`FApp::CanEverRenderAudio()` false: `-nosound`, a
     dedicated server, a commandlet), or an unattended process (`FApp::IsUnattended()`: automation lanes, CI) is an
@@ -51,13 +76,14 @@ releases to zero once the stream idles past the sender's stale-drop age.
     (`[Voice] bEnabled=true` missing) ensures. An injected capture source (`Debug_InjectCaptureSource`) is
     unaffected by all of this and is never replaced by the engine microphone; injection refuses a transmitting talker.
   - **Per transmit:** the voice gate, buffered PCM, the outbound queue and the no-progress window reset at
-    StopTransmit, so every transmit starts with the gate closed.
+    StopTransmit, so every `OpenMic` transmit starts with the gate closed.
   - **No-progress report:** at most once per transmit. Progress is a frame **leaving the machine** - handed to the
     player's relay RPC, or placed in the listen host's own routing inbox - not a frame encoded. For a loopback talker
     (`_Loopback` enabled, as in the gym) a frame reaching its own loopback playout counts too, so working loopback is
     never reported. When a transmit has run 5 s (not counting time self-muted or `Disabled`) with no such frame, one
     Log line names the talker, how long, and the stage where the frames stopped: no audio from the source; audio that
-    never reached the voice-gate threshold (with the peak RMS, gain and threshold); gate-open frames the encoder
+    never reached the voice-gate threshold (`OpenMic` only, with the peak RMS, gain and threshold) or, in `PushToTalk`,
+    never filled a whole frame; gate-open frames the encoder
     produced nothing for; or frames encoded but none sent, with the reason `Send_OutboundFrames` returned - no channel
     registry in this world, not a `CanTalk` member of any of the N channels registered here (on a client: the control
     plane has not delivered its membership), no relay resolved for the local player yet, the host inbox full, every
