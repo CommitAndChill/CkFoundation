@@ -117,6 +117,30 @@ public:
         float InInputGain,
         const FCk_Delegate_Request_OnCompleted& InDelegate);
 
+    // Clamped to 0..1. Takes effect on the next captured frame, mid-transmit included, without changing whether the gate
+    // is open right now.
+    UFUNCTION(BlueprintCallable,
+              Category = "Ck|Utils|VoiceChat|Talker",
+              DisplayName="[Ck][VoiceTalker] Request Set Vad Threshold",
+              meta = (AutoCreateRefTerm = "InDelegate"))
+    static FCk_Handle_VoiceTalker
+    Request_SetVadThreshold(
+        UPARAM(ref) FCk_Handle_VoiceTalker& InVoiceTalker,
+        float InVadThreshold,
+        const FCk_Delegate_Request_OnCompleted& InDelegate);
+
+    // Enable: PushToTalk runs the voice gate as OpenMic does. Disable (the default): a held key bypasses it. Enabling it
+    // mid-transmit starts the gate closed. See ECk_VoiceChat_TransmitMode.
+    UFUNCTION(BlueprintCallable,
+              Category = "Ck|Utils|VoiceChat|Talker",
+              DisplayName="[Ck][VoiceTalker] Request Set Gate In Push To Talk",
+              meta = (AutoCreateRefTerm = "InDelegate"))
+    static FCk_Handle_VoiceTalker
+    Request_SetGateInPushToTalk(
+        UPARAM(ref) FCk_Handle_VoiceTalker& InVoiceTalker,
+        ECk_EnableDisable InGateInPushToTalk,
+        const FCk_Delegate_Request_OnCompleted& InDelegate);
+
     UFUNCTION(BlueprintCallable,
               Category = "Ck|Utils|VoiceChat|Talker",
               DisplayName="[Ck][VoiceTalker] Request Set Self Mute",
@@ -154,6 +178,20 @@ public:
               DisplayName="[Ck][VoiceTalker] Get Input Gain")
     static float
     Get_InputGain(
+        const FCk_Handle_VoiceTalker& InVoiceTalker);
+
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|VoiceChat|Talker",
+              DisplayName="[Ck][VoiceTalker] Get Vad Threshold")
+    static float
+    Get_VadThreshold(
+        const FCk_Handle_VoiceTalker& InVoiceTalker);
+
+    UFUNCTION(BlueprintPure,
+              Category = "Ck|Utils|VoiceChat|Talker",
+              DisplayName="[Ck][VoiceTalker] Get Gate In Push To Talk")
+    static ECk_EnableDisable
+    Get_GateInPushToTalk(
         const FCk_Handle_VoiceTalker& InVoiceTalker);
 
     UFUNCTION(BlueprintPure,

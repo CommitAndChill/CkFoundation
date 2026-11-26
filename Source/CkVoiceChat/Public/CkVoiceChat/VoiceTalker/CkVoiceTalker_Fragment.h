@@ -43,30 +43,28 @@ namespace ck
     // --------------------------------------------------------------------------------------------------------------------
 
     // The retained immutable residue of FCk_VoiceTalker_Spec: the only fields read after
-    // construction. _TransmitMode and _InputGain are DISSOLVED into FFragment_VoiceTalker_Tunables
-    // (seeded at Add) - keeping the authored copies here too would give each two homes, and the
-    // Spec's copy would silently go stale the moment a Set_* request lands.
+    // construction. _TransmitMode, _InputGain, _VadThreshold and _GateInPushToTalk are DISSOLVED into
+    // FFragment_VoiceTalker_Tunables (seeded at Add) - keeping the authored copies here too would give each two homes,
+    // and the Spec's copy would silently go stale the moment a Set_* request lands.
     struct CKVOICECHAT_API FFragment_VoiceTalker_Params
     {
     public:
         CK_GENERATED_BODY(FFragment_VoiceTalker_Params);
 
     private:
-        float _VadThreshold = 0.07f;
         ECk_EnableDisable _Loopback = ECk_EnableDisable::Disable;
         TWeakObjectPtr<USceneComponent> _PlaybackAttachComponent;
         FName _PlaybackAttachSocketName = NAME_None;
         FGameplayTagContainer _AutoJoinChannels;
 
     public:
-        CK_PROPERTY_GET(_VadThreshold);
         CK_PROPERTY_GET(_Loopback);
         CK_PROPERTY_GET(_PlaybackAttachComponent);
         CK_PROPERTY_GET(_PlaybackAttachSocketName);
         CK_PROPERTY_GET(_AutoJoinChannels);
 
     public:
-        CK_DEFINE_CONSTRUCTORS(FFragment_VoiceTalker_Params, _VadThreshold, _Loopback,
+        CK_DEFINE_CONSTRUCTORS(FFragment_VoiceTalker_Params, _Loopback,
             _PlaybackAttachComponent, _PlaybackAttachSocketName, _AutoJoinChannels);
     };
 
@@ -154,16 +152,20 @@ namespace ck
     private:
         ECk_VoiceChat_TransmitMode _TransmitMode = ECk_VoiceChat_TransmitMode::PushToTalk;
         float _InputGain = 1.2f;
+        float _VadThreshold = 0.07f;
+        ECk_EnableDisable _GateInPushToTalk = ECk_EnableDisable::Disable;
         ECk_EnableDisable _SelfMute = ECk_EnableDisable::Disable;
 
     public:
         CK_PROPERTY_GET(_TransmitMode);
         CK_PROPERTY_GET(_InputGain);
+        CK_PROPERTY_GET(_VadThreshold);
+        CK_PROPERTY_GET(_GateInPushToTalk);
         CK_PROPERTY_GET(_SelfMute);
 
     public:
         // _SelfMute is not authored - it starts Disable and only ever moves via a request.
-        CK_DEFINE_CONSTRUCTORS(FFragment_VoiceTalker_Tunables, _TransmitMode, _InputGain);
+        CK_DEFINE_CONSTRUCTORS(FFragment_VoiceTalker_Tunables, _TransmitMode, _InputGain, _VadThreshold, _GateInPushToTalk);
     };
 
     // --------------------------------------------------------------------------------------------------------------------
@@ -327,6 +329,8 @@ namespace ck
             FCk_Request_VoiceTalker_StopTransmit,
             FCk_Request_VoiceTalker_SetTransmitMode,
             FCk_Request_VoiceTalker_SetInputGain,
+            FCk_Request_VoiceTalker_SetVadThreshold,
+            FCk_Request_VoiceTalker_SetGateInPushToTalk,
             FCk_Request_VoiceTalker_SetSelfMute>;
         using RequestList = TArray<RequestType>;
 

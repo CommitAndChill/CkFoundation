@@ -126,6 +126,24 @@ namespace ck
             FFragment_VoiceTalker_Tunables& InTunables,
             FFragment_VoiceTalker_Capture& InCapture,
             FFragment_VoiceTalker_Playout& InPlayout,
+            const FCk_Request_VoiceTalker_SetVadThreshold& InRequest) -> bool;
+
+        static auto
+        DoHandleRequest(
+            HandleType InHandle,
+            const FFragment_VoiceTalker_Params& InParams,
+            FFragment_VoiceTalker_Tunables& InTunables,
+            FFragment_VoiceTalker_Capture& InCapture,
+            FFragment_VoiceTalker_Playout& InPlayout,
+            const FCk_Request_VoiceTalker_SetGateInPushToTalk& InRequest) -> bool;
+
+        static auto
+        DoHandleRequest(
+            HandleType InHandle,
+            const FFragment_VoiceTalker_Params& InParams,
+            FFragment_VoiceTalker_Tunables& InTunables,
+            FFragment_VoiceTalker_Capture& InCapture,
+            FFragment_VoiceTalker_Playout& InPlayout,
             const FCk_Request_VoiceTalker_SetSelfMute& InRequest) -> bool;
     };
 

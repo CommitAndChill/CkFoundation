@@ -27,8 +27,10 @@ namespace ck { class FProcessor_VoiceTalker_OpenMic; }
 
 // The modes differ in two ways and nothing else: who opens the transmit, and whether the voice gate applies.
 // - PushToTalk: the caller opens and closes every transmit (Request_StartTransmit / Request_StopTransmit). The voice
-//   gate is bypassed: every captured frame is encoded from the first one, and the talker is speaking while it
-//   transmits unmuted.
+//   gate is bypassed unless the talker's _GateInPushToTalk is enabled: every captured frame is encoded from the first
+//   one, and the talker is speaking while it transmits unmuted. With the switch enabled the gate applies exactly as in
+//   OpenMic (a tuned gate that should hold in a noisy room while the key is held: TeamSpeak's "voice activation while
+//   push-to-talk").
 // - OpenMic: the module opens the transmit itself, once per arming, on the talker this machine's player controls
 //   (a possessed pawn bridged to the talker's entity). A talker is armed when its mode becomes OpenMic (at Add, or by
 //   Request_SetTransmitMode while it is not transmitting); an arming waits for local control, and a transmit it opened
@@ -96,9 +98,9 @@ public:
     CK_GENERATED_BODY(FCk_VoiceTalker_Spec);
 
 private:
-    // PushToTalk: the caller opens every transmit and the voice gate is bypassed. OpenMic: the talker is armed at Add
-    // and opens its own transmit once this machine's player controls it, through the voice gate. Disabled: no transmit.
-    // See ECk_VoiceChat_TransmitMode.
+    // PushToTalk: the caller opens every transmit and the voice gate is bypassed unless _GateInPushToTalk. OpenMic: the
+    // talker is armed at Add and opens its own transmit once this machine's player controls it, through the voice gate.
+    // Disabled: no transmit. See ECk_VoiceChat_TransmitMode.
     UPROPERTY(EditAnywhere, BlueprintReadWrite,
               meta = (AllowPrivateAccess = true))
     ECk_VoiceChat_TransmitMode _TransmitMode = ECk_VoiceChat_TransmitMode::PushToTalk;
@@ -109,9 +111,20 @@ private:
               meta = (AllowPrivateAccess = true, ClampMin = "0.0", ClampMax = "10.0"))
     float _InputGain = 1.2f;
 
+    // The voice gate opens on a captured frame's RMS (after input gain) at or above this, held for the 20 ms attack, and
+    // closes after it stays below for the 200 ms release. Seeds the talker's tunable at Add; Request_SetVadThreshold
+    // changes it from the next captured frame on.
     UPROPERTY(EditAnywhere, BlueprintReadWrite,
               meta = (AllowPrivateAccess = true, ClampMin = "0.0", ClampMax = "1.0"))
     float _VadThreshold = 0.07f;
+
+    // Enabled: PushToTalk runs the voice gate as OpenMic does, so a held key still sends nothing under _VadThreshold
+    // (TeamSpeak's "voice activation while push-to-talk": a tuned gate that should hold in a noisy room). Disabled (the
+    // default): a held key bypasses the gate. OpenMic always gates, whatever this holds. Seeds the talker's tunable at
+    // Add; Request_SetGateInPushToTalk changes it.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    ECk_EnableDisable _GateInPushToTalk = ECk_EnableDisable::Disable;
 
     // On the authority, the talker joins every channel whose name is listed here exactly and whose Spec enables
     // _AutoJoinTalkers, whichever of the two is composed first. Each channel is joined once; an explicit Leave
@@ -143,6 +156,7 @@ public:
     CK_PROPERTY(_TransmitMode);
     CK_PROPERTY(_InputGain);
     CK_PROPERTY(_VadThreshold);
+    CK_PROPERTY(_GateInPushToTalk);
     CK_PROPERTY(_AutoJoinChannels);
     CK_PROPERTY(_PlaybackAttachComponent);
     CK_PROPERTY(_PlaybackAttachSocketName);
@@ -236,6 +250,56 @@ public:
 
 public:
     CK_DEFINE_CONSTRUCTORS(FCk_Request_VoiceTalker_SetInputGain, _InputGain);
+};
+
+// --------------------------------------------------------------------------------------------------------------------
+
+// Clamped to 0..1 when handled. Takes effect on the next captured frame, mid-transmit included; the gate keeps its
+// open/closed state and its attack/release timing carries on against the new threshold.
+USTRUCT(BlueprintType)
+struct CKVOICECHAT_API FCk_Request_VoiceTalker_SetVadThreshold : public FCk_Request_Base
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(FCk_Request_VoiceTalker_SetVadThreshold);
+    CK_REQUEST_DEFINE_DEBUG_NAME(FCk_Request_VoiceTalker_SetVadThreshold);
+
+private:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true, ClampMin = "0.0", ClampMax = "1.0"))
+    float _VadThreshold = 0.07f;
+
+public:
+    CK_PROPERTY_GET(_VadThreshold);
+
+public:
+    CK_DEFINE_CONSTRUCTORS(FCk_Request_VoiceTalker_SetVadThreshold, _VadThreshold);
+};
+
+// --------------------------------------------------------------------------------------------------------------------
+
+// Takes effect on the next captured frame. A change that makes the gate apply to a transmitting PushToTalk talker
+// starts the gate closed, as every transmit does; a change that bypasses it lets every frame through from the next one.
+USTRUCT(BlueprintType)
+struct CKVOICECHAT_API FCk_Request_VoiceTalker_SetGateInPushToTalk : public FCk_Request_Base
+{
+    GENERATED_BODY()
+
+public:
+    CK_GENERATED_BODY(FCk_Request_VoiceTalker_SetGateInPushToTalk);
+    CK_REQUEST_DEFINE_DEBUG_NAME(FCk_Request_VoiceTalker_SetGateInPushToTalk);
+
+private:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite,
+              meta = (AllowPrivateAccess = true))
+    ECk_EnableDisable _GateInPushToTalk = ECk_EnableDisable::Disable;
+
+public:
+    CK_PROPERTY_GET(_GateInPushToTalk);
+
+public:
+    CK_DEFINE_CONSTRUCTORS(FCk_Request_VoiceTalker_SetGateInPushToTalk, _GateInPushToTalk);
 };
 
 // --------------------------------------------------------------------------------------------------------------------

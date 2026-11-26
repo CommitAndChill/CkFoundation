@@ -85,12 +85,14 @@ namespace ck_voice_talker_processor
     // A transmit that has encoded nothing for this long since it began says so in the log, once.
     const auto NoProgressReportWindow = FCk_Time{5.0};
 
-    // A held push-to-talk key bypasses the voice gate: the caller already decided this is speech.
+    // A held push-to-talk key bypasses the voice gate - the caller already decided this is speech - unless the talker
+    // asked for the gate in push-to-talk too.
     auto
     Get_IsVoiceGateBypassed(
-        ECk_VoiceChat_TransmitMode InTransmitMode) -> bool
+        const ck::FFragment_VoiceTalker_Tunables& InTunables) -> bool
     {
-        return InTransmitMode == ECk_VoiceChat_TransmitMode::PushToTalk;
+        return InTunables.Get_TransmitMode() == ECk_VoiceChat_TransmitMode::PushToTalk &&
+            InTunables.Get_GateInPushToTalk() == ECk_EnableDisable::Disable;
     }
 
     // What the open mic means by "this machine's player controls the talker": a possessed, player-controlled pawn bridged
@@ -569,8 +571,14 @@ namespace ck
         const auto PreviousMode = InTunables.Get_TransmitMode();
         const auto NewMode = InRequest.Get_TransmitMode();
         const auto IsTransmitting = InHandle.Has<FTag_VoiceTalker_IsTransmitting>();
+        const auto GateWasBypassed = ck_voice_talker_processor::Get_IsVoiceGateBypassed(InTunables);
 
         InTunables._TransmitMode = NewMode;
+
+        // A gate that starts applying mid-transmit (PushToTalk -> OpenMic with the push-to-talk gate off) starts
+        // closed, as at every transmit's start: its state froze while it was bypassed and says nothing about now.
+        if (GateWasBypassed && NOT ck_voice_talker_processor::Get_IsVoiceGateBypassed(InTunables))
+        { InCapture._Vad = {}; }
 
         // Arming happens only on a talker that is not transmitting: PushToTalk -> OpenMic keeps the caller's open
         // transmit as it is, and OpenMic -> OpenMic re-arms a talker whose transmit failed or was stopped.
@@ -631,6 +639,47 @@ namespace ck
         -> bool
     {
         InTunables._InputGain = InRequest.Get_InputGain();
+        return true;
+    }
+
+    auto
+        FProcessor_VoiceTalker_HandleRequests::
+        DoHandleRequest(
+            HandleType InHandle,
+            const FFragment_VoiceTalker_Params& InParams,
+            FFragment_VoiceTalker_Tunables& InTunables,
+            FFragment_VoiceTalker_Capture& InCapture,
+            FFragment_VoiceTalker_Playout& InPlayout,
+            const FCk_Request_VoiceTalker_SetVadThreshold& InRequest)
+        -> bool
+    {
+        // The capture processor reads the threshold per frame, so this lands on the next captured frame, mid-transmit
+        // included. The gate keeps its open/closed state: only the band its next frames are compared against moves.
+        InTunables._VadThreshold = FMath::Clamp(InRequest.Get_VadThreshold(), 0.0f, 1.0f);
+        return true;
+    }
+
+    auto
+        FProcessor_VoiceTalker_HandleRequests::
+        DoHandleRequest(
+            HandleType InHandle,
+            const FFragment_VoiceTalker_Params& InParams,
+            FFragment_VoiceTalker_Tunables& InTunables,
+            FFragment_VoiceTalker_Capture& InCapture,
+            FFragment_VoiceTalker_Playout& InPlayout,
+            const FCk_Request_VoiceTalker_SetGateInPushToTalk& InRequest)
+        -> bool
+    {
+        const auto GateWasBypassed = ck_voice_talker_processor::Get_IsVoiceGateBypassed(InTunables);
+
+        InTunables._GateInPushToTalk = InRequest.Get_GateInPushToTalk();
+
+        // Enabling it on a PushToTalk talker mid-transmit starts the gate closed, as at every transmit's start: the gate
+        // state froze while it was bypassed and says nothing about now. IsSpeaking then follows the gate from the next
+        // captured frame (a voice above the threshold reopens it after the attack).
+        if (GateWasBypassed && NOT ck_voice_talker_processor::Get_IsVoiceGateBypassed(InTunables))
+        { InCapture._Vad = {}; }
+
         return true;
     }
 
@@ -812,10 +861,10 @@ namespace ck
         const auto FrameBytes = Get_FrameBytes();
         const auto FrameDurationSeconds = Get_FrameDurationSeconds();
 
-        const auto VadParams = FCk_VoiceChat_VadParams{}.Set_Threshold(InParams.Get_VadThreshold());
+        const auto VadParams = FCk_VoiceChat_VadParams{}.Set_Threshold(InTunables.Get_VadThreshold());
         const auto IsMuted = InTunables.Get_SelfMute() == ECk_EnableDisable::Enable;
         const auto ModeAllowsFrames = InTunables.Get_TransmitMode() != ECk_VoiceChat_TransmitMode::Disabled;
-        const auto VoiceGateIsBypassed = Get_IsVoiceGateBypassed(InTunables.Get_TransmitMode());
+        const auto VoiceGateIsBypassed = Get_IsVoiceGateBypassed(InTunables);
 
         auto MaxRmsThisTick = 0.0f;
         auto FramesMeasuredThisTick = 0;
@@ -958,7 +1007,7 @@ namespace ck
             return;
         }
 
-        if (Window._GateOpenFrames == 0 && ck_voice_talker_processor::Get_IsVoiceGateBypassed(InTunables.Get_TransmitMode()))
+        if (Window._GateOpenFrames == 0 && ck_voice_talker_processor::Get_IsVoiceGateBypassed(InTunables))
         {
             voice_chat::Log(TEXT("VoiceTalker [{}] has been transmitting for [{}]s in [{}] and encoded no frame: audio "
                 "arrived but never filled a whole frame for the encoder"),
@@ -970,7 +1019,7 @@ namespace ck
         {
             voice_chat::Log(TEXT("VoiceTalker [{}] has been transmitting for [{}]s and encoded no frame: audio arrived "
                 "but its loudest frame (RMS [{}] after input gain [{}]) never reached the voice-gate threshold [{}]"),
-                InVoiceTalkerEntity, Seconds, Window._PeakRms, InTunables.Get_InputGain(), InParams.Get_VadThreshold());
+                InVoiceTalkerEntity, Seconds, Window._PeakRms, InTunables.Get_InputGain(), InTunables.Get_VadThreshold());
             return;
         }
 

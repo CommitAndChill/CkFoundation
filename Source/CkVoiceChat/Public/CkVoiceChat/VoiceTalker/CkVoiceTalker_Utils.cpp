@@ -21,7 +21,6 @@ auto
     ck::voice_chat::VeryVerbose(TEXT("Adding VoiceTalker feature to Entity [{}]"), InHandle);
 
     InHandle.Add<ck::FFragment_VoiceTalker_Params>(
-        InParams.Get_VadThreshold(),
         InParams.Get_Loopback(),
         InParams.Get_PlaybackAttachComponent(),
         InParams.Get_PlaybackAttachSocketName(),
@@ -33,7 +32,9 @@ auto
     InHandle.Add<ck::FFragment_VoiceTalker>();
     InHandle.Add<ck::FFragment_VoiceTalker_Tunables>(
         InParams.Get_TransmitMode(),
-        InParams.Get_InputGain());
+        InParams.Get_InputGain(),
+        InParams.Get_VadThreshold(),
+        InParams.Get_GateInPushToTalk());
     InHandle.Add<ck::FFragment_VoiceTalker_Capture>();
     InHandle.Add<ck::FFragment_VoiceTalker_Playout>();
     InHandle.Add<ck::FFragment_VoiceTalker_Fairness>();
@@ -125,6 +126,42 @@ auto
 
 auto
     UCk_Utils_VoiceTalker_UE::
+    Request_SetVadThreshold(
+        FCk_Handle_VoiceTalker& InVoiceTalker,
+        float InVadThreshold,
+        const FCk_Delegate_Request_OnCompleted& InDelegate)
+    -> FCk_Handle_VoiceTalker
+{
+    const auto Request = FCk_Request_VoiceTalker_SetVadThreshold{InVadThreshold};
+
+    if (InDelegate.IsBound())
+    { Request.Set_CompletionDelegate(InDelegate); }
+
+    InVoiceTalker.AddOrGet<ck::FFragment_VoiceTalker_Requests>()._Requests.Emplace(Request);
+
+    return InVoiceTalker;
+}
+
+auto
+    UCk_Utils_VoiceTalker_UE::
+    Request_SetGateInPushToTalk(
+        FCk_Handle_VoiceTalker& InVoiceTalker,
+        ECk_EnableDisable InGateInPushToTalk,
+        const FCk_Delegate_Request_OnCompleted& InDelegate)
+    -> FCk_Handle_VoiceTalker
+{
+    const auto Request = FCk_Request_VoiceTalker_SetGateInPushToTalk{InGateInPushToTalk};
+
+    if (InDelegate.IsBound())
+    { Request.Set_CompletionDelegate(InDelegate); }
+
+    InVoiceTalker.AddOrGet<ck::FFragment_VoiceTalker_Requests>()._Requests.Emplace(Request);
+
+    return InVoiceTalker;
+}
+
+auto
+    UCk_Utils_VoiceTalker_UE::
     Request_SetSelfMute(
         FCk_Handle_VoiceTalker& InVoiceTalker,
         ECk_EnableDisable InSelfMute,
@@ -177,6 +214,24 @@ auto
     -> float
 {
     return InVoiceTalker.Get<ck::FFragment_VoiceTalker_Tunables>().Get_InputGain();
+}
+
+auto
+    UCk_Utils_VoiceTalker_UE::
+    Get_VadThreshold(
+        const FCk_Handle_VoiceTalker& InVoiceTalker)
+    -> float
+{
+    return InVoiceTalker.Get<ck::FFragment_VoiceTalker_Tunables>().Get_VadThreshold();
+}
+
+auto
+    UCk_Utils_VoiceTalker_UE::
+    Get_GateInPushToTalk(
+        const FCk_Handle_VoiceTalker& InVoiceTalker)
+    -> ECk_EnableDisable
+{
+    return InVoiceTalker.Get<ck::FFragment_VoiceTalker_Tunables>().Get_GateInPushToTalk();
 }
 
 auto
