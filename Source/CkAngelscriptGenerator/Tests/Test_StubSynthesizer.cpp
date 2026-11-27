@@ -1700,4 +1700,170 @@ bool FCkTest_StubSynthesizer_Quarantine_SkipsClassesWithNoSource::RunTest(const 
     return true;
 }
 
+// --------------------------------------------------------------------------------------------------------------------
+// Headless self-heal is two processes, and the startup sweep runs between them. A canonical that is present
+// but predates the stub's classes must not cost pass 2 its stub, or every pass repeats pass 1.
+// --------------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_StubSynthesizer_Is_StubSupersededByCanonical,
+    "CkAngelscriptGenerator.UnitTests.StubSynthesizer.Is_StubSupersededByCanonical",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCkTest_StubSynthesizer_Is_StubSupersededByCanonical::RunTest(const FString&)
+{
+    const auto Build_FullShape = [](const TCHAR* InClassName) -> FString
+    {
+        auto Shape = FCk_AsClassShape{};
+        Shape.Found               = true;
+        Shape.ClassName           = InClassName;
+        Shape.FlattenedProperties = { FCk_AsExposedProperty{TEXT("int32"), TEXT("Count")} };
+
+        auto Error = FCk_AsParsedError{};
+        Error.Kind              = ECk_AsParsedError_Kind::BareCtorNoMatchingSignatures;
+        Error.MissingIdentifier = FCkAsStubSynthesizer::Derive_SpawnParamsStructName(InClassName);
+        Error.FilePath          = TEXT("D:/Test/Caller.as");
+
+        return FCkAsStubSynthesizer::Build_EntityScriptParamsStub_FullShape(Shape, Error);
+    };
+
+    const auto Build_ErrorText = [](const TCHAR* InClassName, bool InEmitStruct) -> FString
+    {
+        return FCkAsStubSynthesizer::Build_EntityScriptParamsStub(
+            Make_ParsedError(InClassName, TEXT("Params"), TEXT("int32")), InEmitStruct);
+    };
+
+    const auto Header = FCkAsStubSynthesizer::Get_StubFileHeader();
+
+    const auto StaleCanonical = FString{TEXT(
+        "struct FTestRet_Old_SpawnParams\n"
+        "{\n"
+        "}\n"
+        "namespace UTestRet_Old\n"
+        "{\n"
+        "    FTestRet_Old_SpawnParams Params() { return FTestRet_Old_SpawnParams(); }\n"
+        "}\n")};
+
+    const auto CanonicalWithNewA = StaleCanonical + TEXT(
+        "struct FTestRet_NewA_SpawnParams\n"
+        "{\n"
+        "}\n"
+        "namespace UTestRet_NewA\n"
+        "{\n"
+        "}\n");
+
+    const auto CanonicalWithBoth = CanonicalWithNewA + TEXT(
+        "struct FTestRet_NewB_SpawnParams\n"
+        "{\n"
+        "}\n"
+        "namespace UTestRet_NewB\n"
+        "{\n"
+        "}\n");
+
+    TestFalse(TEXT("stale canonical + full-shape stub of a new class -> kept"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(
+            Header + Build_FullShape(TEXT("UTestRet_NewA")), StaleCanonical));
+
+    const auto TwoNewClasses = Header + Build_FullShape(TEXT("UTestRet_NewA")) + Build_FullShape(TEXT("UTestRet_NewB"));
+
+    TestFalse(TEXT("several new classes, none in the canonical -> kept"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(TwoNewClasses, StaleCanonical));
+
+    TestTrue(TEXT("canonical defines the stub's struct -> superseded"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(
+            Header + Build_FullShape(TEXT("UTestRet_NewA")), CanonicalWithNewA));
+
+    TestTrue(TEXT("canonical defines every struct of a multi-class stub -> superseded"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(TwoNewClasses, CanonicalWithBoth));
+
+    TestTrue(TEXT("canonical defines one of two -> superseded (keeping it would duplicate a declaration)"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(TwoNewClasses, CanonicalWithNewA));
+
+    TestFalse(TEXT("error-text stub that emits its struct, absent from the canonical -> kept"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(
+            Header + Build_ErrorText(TEXT("UTestRet_NewA"), /*InEmitStruct=*/true), StaleCanonical));
+
+    TestTrue(TEXT("overload-only error-text stub (no struct) -> superseded"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(
+            Header + Build_ErrorText(TEXT("UTestRet_Old"), /*InEmitStruct=*/false), StaleCanonical));
+
+    TestTrue(TEXT("empty stub text -> superseded"),
+        FCkAsStubSynthesizer::Is_StubSupersededByCanonical(FString{}, StaleCanonical));
+
+    return true;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+// The dispatcher can discard the sibling a full shape was written to in this same process. After
+// Forget_SessionFullShapes the process no longer claims that shape, and the next inject for the class
+// writes it again instead of no-oping.
+// --------------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkTest_StubSynthesizer_Inject_SourceDerived_AfterSiblingDiscarded,
+    "CkAngelscriptGenerator.UnitTests.StubSynthesizer.Inject_SourceDerived_AfterSiblingDiscarded",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCkTest_StubSynthesizer_Inject_SourceDerived_AfterSiblingDiscarded::RunTest(const FString&)
+{
+    FCkAsStubSynthesizer::Reset_SessionState_ForTests();
+
+    const auto TempRoot = FPaths::ConvertRelativePathToFull(
+        FPaths::ProjectIntermediateDir() / TEXT("CkStubSynthTest_AfterDiscard"));
+    IFileManager::Get().DeleteDirectory(*TempRoot, /*RequireExists=*/false, /*Tree=*/true);
+
+    const auto ScriptRoot   = TempRoot / TEXT("Script");
+    const auto ClassFile    = ScriptRoot / TEXT("Classes/TestDiscard_Fresh.as");
+    const auto ExpectedStub = ScriptRoot / TEXT("Generated/_StubRecovery_FakeProj_EntitySpawnParams.as");
+
+    IFileManager::Get().MakeDirectory(*FPaths::GetPath(ClassFile), /*Tree=*/true);
+    FFileHelper::SaveStringToFile(FString{TEXT("{}")}, *(TempRoot / TEXT("FakeProj.uproject")));
+    FFileHelper::SaveStringToFile(FString{TEXT(
+        "class UTestDiscard_Fresh : UCk_GenericEntityScript_UE\n"
+        "{\n"
+        "    UPROPERTY(ExposeOnSpawn)\n"
+        "    int32 Count;\n"
+        "}\n")}, *ClassFile, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+
+    auto Error = FCk_AsParsedError{};
+    Error.Kind              = ECk_AsParsedError_Kind::IdentifierNotADataType;
+    Error.MissingIdentifier = TEXT("FTestDiscard_Fresh_SpawnParams");
+    Error.FilePath          = *ClassFile;
+
+    const auto First = FCkAsStubSynthesizer::Inject_EntityScriptParamsStub_SourceDerived(
+        TEXT("UTestDiscard_Fresh"), Error, {}, {ScriptRoot});
+    TestTrue(TEXT("first inject wrote the sibling"), First.Success && IFileManager::Get().FileExists(*ExpectedStub));
+
+    const auto SignatureMiss = Make_ParsedError(TEXT("UTestDiscard_Fresh"), TEXT("Params"), TEXT("int32"), *ClassFile);
+
+    TestTrue(TEXT("before forgetting, a same-process signature miss no-ops against the full shape"),
+        FCkAsStubSynthesizer::Inject_EntityScriptParamsStub_SourceDerived(
+            TEXT("UTestDiscard_Fresh"), SignatureMiss, {}, {ScriptRoot}).Success);
+
+    auto Discarded = FString{};
+    FFileHelper::LoadFileToString(Discarded, *ExpectedStub);
+    FCkAsStubSynthesizer::Forget_SessionFullShapes(Discarded);
+
+    const auto AfterForget = FCkAsStubSynthesizer::Inject_EntityScriptParamsStub_SourceDerived(
+        TEXT("UTestDiscard_Fresh"), SignatureMiss, {}, {ScriptRoot});
+    TestTrue(TEXT("after forgetting, the process no longer claims the on-disk shape (defers like a new process)"),
+        NOT AfterForget.Success && AfterForget.FailReason == ECk_StubInjectFailReason::FullShapeOnDiskStillMismatched);
+
+    IFileManager::Get().Delete(*ExpectedStub);
+
+    const auto Second = FCkAsStubSynthesizer::Inject_EntityScriptParamsStub_SourceDerived(
+        TEXT("UTestDiscard_Fresh"), SignatureMiss, {}, {ScriptRoot});
+    TestTrue(TEXT("inject after the discard succeeds"), Second.Success);
+
+    auto Stub = FString{};
+    TestTrue(TEXT("sibling rewritten after the discard"), FFileHelper::LoadFileToString(Stub, *ExpectedStub));
+    TestTrue(TEXT("rewritten sibling starts with the recovery header"), Stub.StartsWith(FCkAsStubSynthesizer::Get_StubFileHeader()));
+    TestEqual(TEXT("struct defined exactly once"),
+        Count_Occurrences(Stub, TEXT("struct FTestDiscard_Fresh_SpawnParams")), 1);
+
+    IFileManager::Get().DeleteDirectory(*TempRoot, /*RequireExists=*/false, /*Tree=*/true);
+    FCkAsStubSynthesizer::Reset_SessionState_ForTests();
+    return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

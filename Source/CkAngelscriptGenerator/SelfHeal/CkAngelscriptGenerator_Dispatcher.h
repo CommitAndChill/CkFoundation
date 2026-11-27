@@ -15,6 +15,7 @@ namespace ck::angelscriptgenerator::self_heal
         KickGenerator_DynamicHandle,
         KickGenerator_AssetRegistry,
         Quarantine_StaleEspCanonical,
+        Discard_StaleEspRecoveryStub,
         Author_FixupRequired_AdjacentStringLiteral,
         Unrecognized,
     };

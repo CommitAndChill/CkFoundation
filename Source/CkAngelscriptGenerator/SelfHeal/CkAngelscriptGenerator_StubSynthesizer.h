@@ -96,6 +96,12 @@ namespace ck::angelscriptgenerator::self_heal
         static auto Enumerate_EntityScriptNamespaces(
             const FString& InCanonicalContents) -> TArray<FString>;
 
+        // False only when the stub defines F<X>_SpawnParams structs and the canonical defines none
+        // of them. A partial overlap counts as superseded: keeping it would duplicate declarations.
+        static auto Is_StubSupersededByCanonical(
+            const FString& InStubContents,
+            const FString& InCanonicalContents) -> bool;
+
         // Stale-canonical escalation (CkAngelscriptGenerator/CLAUDE.md § Recovery
         // strategies). Success requires every seed class to have synthesized;
         // skipped non-seed classes don't fail the escalation.
@@ -109,6 +115,9 @@ namespace ck::angelscriptgenerator::self_heal
         // Clears the session-static "full shapes written this process" set, letting
         // tests simulate the next-process boundary (headless cook retry).
         static auto Reset_SessionState_ForTests() -> void;
+
+        // The dispatcher discarded the sibling holding these full shapes; this process no longer wrote them.
+        static auto Forget_SessionFullShapes(const FString& InDiscardedStubContents) -> void;
 
         static auto Get_MarkerComment    () -> FString;
         static auto Get_StubFileHeader   () -> FString;
