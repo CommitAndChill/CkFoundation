@@ -67,8 +67,8 @@ namespace ck
 
     // Deferred net apply can move a root in the tail pump, after normal projection.
     // Project that pose before next frame's cleanup discards its update marker.
-    class CKUNREALCOMPONENT_API FProcessor_UnrealComponent_PushLateTransform : public ck_exp::TProcessor<
-            FProcessor_UnrealComponent_PushLateTransform,
+    class CKUNREALCOMPONENT_API FProcessor_UnrealComponent_PushTransform_BeforeCleanup : public ck_exp::TProcessor<
+            FProcessor_UnrealComponent_PushTransform_BeforeCleanup,
             FCk_Handle_Transform,
             ck::TReadOnly<FFragment_Transform>,
             ck::TReadWrite<FFragment_RecordOfUnrealComponents>,
