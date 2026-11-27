@@ -260,11 +260,11 @@ not from this fragment.
 
 ## Transform-local settle after derived producers
 
-### Late writes after the normal propagation pass
+### Tail-pump writes after the normal propagation pass
 
 Tail-pump transform requests can apply after the normal SceneNode pass. `FTag_Transform_Updated`
 is cleared near the start of the next frame, so it cannot be the sole wake-up for those descendants.
-`FProcessor_SceneNode_QueueLateChildren` runs after Physics and before both `FProcessor_Transform_Cleanup`
+`FProcessor_SceneNode_QueueChildren_BeforeCleanup` runs after Physics and before both `FProcessor_Transform_Cleanup`
 and `FGroup_Transform_SyncFrom`, preserving cleanup-before-anchor-write ordering while
 publishing only updated parents with child records into the durable, consumed SceneNode propagation queue.
 The existing world-transform watermark avoids re-queuing already-published poses. This includes intermediate
