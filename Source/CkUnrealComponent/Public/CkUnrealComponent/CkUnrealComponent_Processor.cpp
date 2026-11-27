@@ -33,7 +33,7 @@
 
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_Setup);
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_PushTransform);
-CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_PushLateTransform);
+CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_PushTransform_BeforeCleanup);
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_PushTransform_Late);
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_Tick);
 CK_REGISTER_PROCESSOR(ck::FProcessor_UnrealComponent_HandleRequests);
@@ -333,7 +333,7 @@ namespace ck
     // --------------------------------------------------------------------------------------------------------------------
 
     auto
-        FProcessor_UnrealComponent_PushLateTransform::
+        FProcessor_UnrealComponent_PushTransform_BeforeCleanup::
         ForEachEntity(
             TimeType InDeltaT,
             HandleType InHandle,

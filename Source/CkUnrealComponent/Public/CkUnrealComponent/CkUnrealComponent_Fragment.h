@@ -92,7 +92,7 @@ namespace ck
         using TFragment_RecordOfEntities::TFragment_RecordOfEntities;
 
         friend class FProcessor_UnrealComponent_PushTransform;
-        friend class FProcessor_UnrealComponent_PushLateTransform;
+        friend class FProcessor_UnrealComponent_PushTransform_BeforeCleanup;
 
     private:
         // Session-only projection cache. The inherited record serializer handles entries only.
