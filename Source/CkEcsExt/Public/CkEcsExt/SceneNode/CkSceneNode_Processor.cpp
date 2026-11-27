@@ -20,7 +20,7 @@ CK_REGISTER_PROCESSOR(ck::FProcessor_SceneNode_HandleRequests);
 CK_REGISTER_PROCESSOR(ck::FProcessor_SceneNode_CancelPendingRequests);
 CK_REGISTER_PROCESSOR(ck::FProcessor_SceneNode_FollowUnrealAnchor);
 CK_REGISTER_PROCESSOR(ck::FProcessor_SceneNode_LateFollowUnrealAnchor);
-CK_REGISTER_PROCESSOR(ck::FProcessor_SceneNode_QueueLateChildren);
+CK_REGISTER_PROCESSOR(ck::FProcessor_SceneNode_QueueChildren_BeforeCleanup);
 CK_REGISTER_PROCESSOR(ck::FProcessor_SceneNode_QueueRootChildren);
 
 namespace ck_scene_node_processor
@@ -297,7 +297,7 @@ namespace ck
     // --------------------------------------------------------------------------------------------------------------------
 
     auto
-        FProcessor_SceneNode_QueueLateChildren::
+        FProcessor_SceneNode_QueueChildren_BeforeCleanup::
         ForEachEntity(
             TimeType InDeltaT,
             HandleType InHandle,

@@ -158,8 +158,8 @@ namespace ck
 
     // Tail-pump writes outlive the normal propagation pass, but not next frame's transform cleanup.
     // Preserve their descendants in the consumed SceneNode queue before that marker is discarded.
-    class CKECSEXT_API FProcessor_SceneNode_QueueLateChildren : public ck_exp::TProcessor<
-            FProcessor_SceneNode_QueueLateChildren,
+    class CKECSEXT_API FProcessor_SceneNode_QueueChildren_BeforeCleanup : public ck_exp::TProcessor<
+            FProcessor_SceneNode_QueueChildren_BeforeCleanup,
             FCk_Handle_Transform,
             ck::TReadOnly<FFragment_Transform>,
             ck::TReadOnly<FFragment_RecordOfSceneNodes>,
