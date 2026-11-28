@@ -6,24 +6,27 @@
 // --------------------------------------------------------------------------------------------------------------------
 // Granular macros — prefer the 'meta' macros further below.
 
+// Keep these empty wrappers header-only: exporting them also imports template-base AngelScript registrars
+// that have no DLL owner. Retain the _API_ parameters for existing macro call sites.
+
 #define CK_DEFINE_SIGNAL(_API_, _SignalName_, ...)\
-    _API_ struct FFragment_Signal_##_SignalName_ \
+    struct FFragment_Signal_##_SignalName_ \
     : public ck::TFragment_Signal<__VA_ARGS__> {}
 
 #define CK_DEFINE_SIGNAL_UTILS(_API_, _SignalName_)\
-    _API_ class UUtilsSignal_##_SignalName_ \
+    class UUtilsSignal_##_SignalName_ \
     : public ck::TUtils_Signal<FFragment_Signal_##_SignalName_> {}
 
 #define CK_DEFINE_SIGNAL_WITH_DELEGATE(_API_, _SignalName_, _DelegateName_, ...)\
-    _API_ struct FFragment_Signal_Delegate_##_SignalName_ \
+    struct FFragment_Signal_Delegate_##_SignalName_ \
     : public ck::TFragment_Signal_Delegate<_DelegateName_, ECk_Signal_PostFireBehavior::DoNothing, __VA_ARGS__> {};\
-    _API_ struct FFragment_Signal_Delegate_##_SignalName_##_PostFireUnbind \
+    struct FFragment_Signal_Delegate_##_SignalName_##_PostFireUnbind \
     : public ck::TFragment_Signal_Delegate<_DelegateName_, ECk_Signal_PostFireBehavior::Unbind, __VA_ARGS__> {}
 
 #define CK_DEFINE_SIGNAL_WITH_DELEGATE_UTILS(_API_, _SignalName_)\
-    _API_ class UUtils_Signal_##_SignalName_ \
+    class UUtils_Signal_##_SignalName_ \
     : public ck::TUtils_Signal_Delegate<FFragment_Signal_##_SignalName_, FFragment_Signal_Delegate_##_SignalName_> {};\
-    _API_ class UUtils_Signal_##_SignalName_##_PostFireUnbind\
+    class UUtils_Signal_##_SignalName_##_PostFireUnbind\
     : public ck::TUtils_Signal_Delegate<FFragment_Signal_##_SignalName_, FFragment_Signal_Delegate_##_SignalName_##_PostFireUnbind> {}
 
 // --------------------------------------------------------------------------------------------------------------------

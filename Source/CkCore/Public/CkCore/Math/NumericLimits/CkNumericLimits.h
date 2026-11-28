@@ -47,11 +47,11 @@ public:
 private:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
               meta = (AllowPrivateAccess = true))
-    float _Min = std::numeric_limits<double>().lowest();
+    double _Min = std::numeric_limits<double>().lowest();
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
               meta = (AllowPrivateAccess = true))
-    float _Max = std::numeric_limits<double>().max();
+    double _Max = std::numeric_limits<double>().max();
 
 public:
     CK_PROPERTY_GET(_Min);

@@ -466,6 +466,7 @@ uint VertexFactoryGetPrimitiveId(FVertexFactoryInterpolantsVSToPS Interpolants)
     return Interpolants.PrimitiveId;
 }
 
+#define VF_IMPLEMENTED_GET_INSTANCE_HIT_PROXY_ID
 float4 VertexFactoryGetInstanceHitProxyId(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates)
 {
     return (float4) 0;
