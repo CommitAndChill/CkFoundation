@@ -1,0 +1,22 @@
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+// Bounded artist-controlled spectral palette; not a diffraction solver.
+float3 CkUsf_OpalSpectrum(float Phase)
+{
+    return 0.5 + 0.5 * cos(6.2831853 * (Phase + float3(0.0, 0.33, 0.67)));
+}
+
+// Single dielectric coating approximation. White grazing response is provided by
+// the native Slab. RGB wavelengths approximate reflectance, never emitted light.
+float3 CkUsf_CoatingF0(float NoV, float GlassIor, float FilmIor, float ThicknessNm)
+{
+    float N = clamp(FilmIor, 1.01, 2.4);
+    float G = clamp(GlassIor, 1.01, 2.4);
+    float CosFilm = sqrt(saturate(1.0 - (1.0-NoV*NoV)/(N*N)));
+    float R01 = (1.0-N)/(1.0+N);
+    float R12 = (N-G)/(N+G);
+    float3 Phase = 12.5663706*N*max(ThicknessNm,0.0)*CosFilm/float3(650.0,510.0,475.0);
+    float3 CrossTerm = 2.0*R01*R12*cos(Phase);
+    return clamp((R01*R01+R12*R12+CrossTerm)/(1.0+R01*R01*R12*R12+CrossTerm),0.005,0.18);
+}

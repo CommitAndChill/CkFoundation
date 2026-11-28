@@ -2,9 +2,12 @@
 
 #include "CkCore/Validation/CkIsValid.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialInterface.h"
 #include "Materials/MaterialExpressionSingleLayerWaterMaterialOutput.h"
 #include "Materials/MaterialExpressionThinTranslucentMaterialOutput.h"
 #include "Misc/FileHelper.h"
+#include "Misc/PackageName.h"
+#include "UObject/Package.h"
 #include "RenderUtils.h"
 #include "DataDrivenShaderPlatformInfo.h"
 #include "ShaderCore.h"
@@ -25,11 +28,50 @@ namespace ck::usf_editor
         const auto Platform = GMaxRHIShaderPlatform;
         if (Support.Enabled && static_cast<uint32>(Platform) < static_cast<uint32>(SP_NumPlatforms)
             && FDataDrivenShaderPlatformInfo::IsValid(Platform))
-        { Support.BlendableGBuffer = Substrate::IsSubstrateBlendableGBufferEnabled(Platform); }
+        {
+            Support.BlendableGBuffer = Substrate::IsSubstrateBlendableGBufferEnabled(Platform);
+            Support.GlintsEnabled = Substrate::IsGlintEnabled(Platform);
+            Support.MaxClosuresPerPixel = Substrate::GetClosurePerPixel(Platform, GetCurrentMaterialQualityLevelChecked());
+        }
 #if defined(UE_CK_USF_SUBSTRATE_BLENDABLE_VERSION) && UE_CK_USF_SUBSTRATE_BLENDABLE_VERSION >= 1
         Support.ToonBridge = true;
 #endif
         return Support;
+    }
+
+    auto Is_AdaptiveSurfaceGraph(ECk_Usf_SurfaceGraph InGraph) -> bool
+    {
+        return InGraph == ECk_Usf_SurfaceGraph::AdaptiveVertical
+            || InGraph == ECk_Usf_SurfaceGraph::AdaptiveMix;
+    }
+
+    auto Is_OpticalSurfaceGraph(ECk_Usf_SurfaceGraph InGraph) -> bool
+    {
+        return InGraph == ECk_Usf_SurfaceGraph::NativeTranslucentSlab
+            || InGraph == ECk_Usf_SurfaceGraph::NativeRefractiveSlab;
+    }
+
+    auto Requires_AdaptiveGBuffer(ECk_Usf_SurfaceGraph InGraph) -> bool
+    {
+        return Is_AdaptiveSurfaceGraph(InGraph) || Is_OpticalSurfaceGraph(InGraph)
+            || Is_LayeredOpticalSurfaceGraph(InGraph) || Is_Stack3OpticalSurfaceGraph(InGraph);
+    }
+
+    auto Is_LayeredOpticalSurfaceGraph(ECk_Usf_SurfaceGraph InGraph) -> bool
+    {
+        return InGraph == ECk_Usf_SurfaceGraph::NativeTranslucentVertical;
+    }
+
+    auto Is_Stack3OpticalSurfaceGraph(ECk_Usf_SurfaceGraph InGraph) -> bool
+    {
+        return InGraph == ECk_Usf_SurfaceGraph::NativeTranslucentStack3;
+    }
+
+    auto Get_RequiredSubstrateClosureCount(ECk_Usf_SurfaceGraph InGraph) -> uint32
+    {
+        if (Is_Stack3OpticalSurfaceGraph(InGraph))
+        { return 3u; }
+        return Is_AdaptiveSurfaceGraph(InGraph) || Is_LayeredOpticalSurfaceGraph(InGraph) ? 2u : 1u;
     }
 
     auto
@@ -39,6 +81,39 @@ namespace ck::usf_editor
             TArray<FString>& OutErrors)
         -> bool
     {
+        if (InContract.AdaptiveBaseGlints && InContract.SurfaceGraph != ECk_Usf_SurfaceGraph::AdaptiveVertical)
+        {
+            OutErrors.Add(TEXT("_AdaptiveBaseGlints requires AdaptiveVertical"));
+            return false;
+        }
+        if (InContract.SurfaceGraph != ECk_Usf_SurfaceGraph::Legacy)
+        {
+            if (Requires_AdaptiveGBuffer(InContract.SurfaceGraph))
+            {
+                const auto RequiredClosures = Get_RequiredSubstrateClosureCount(InContract.SurfaceGraph);
+                if (NOT InSupport.Enabled || InSupport.BlendableGBuffer || InSupport.MaxClosuresPerPixel < RequiredClosures)
+                {
+                    OutErrors.Add(RequiredClosures == 3u
+                        ? TEXT("Native translucent stack requires enabled Substrate with Adaptive GBuffer and at least three supported closures per pixel")
+                        : RequiredClosures == 2u
+                            ? TEXT("Adaptive CkUsf graphs require enabled Substrate with Adaptive GBuffer and at least two supported closures per pixel")
+                            : TEXT("Native translucent Slab requires enabled Substrate with Adaptive GBuffer and at least one supported closure per pixel"));
+                    return false;
+                }
+                if (InContract.AdaptiveBaseGlints && NOT InSupport.GlintsEnabled)
+                {
+                    OutErrors.Add(TEXT("_AdaptiveBaseGlints requires native Substrate glints enabled for the active shader platform (r.Substrate.Glints)."));
+                    return false;
+                }
+                return true;
+            }
+            if (NOT InSupport.Enabled || NOT InSupport.BlendableGBuffer)
+            {
+                OutErrors.Add(TEXT("Native CkUsf BSDF graphs require enabled Substrate with Blendable GBuffer"));
+                return false;
+            }
+            return true;
+        }
         if (NOT InSupport.Enabled)
         { return true; }
         const auto InitialErrors = OutErrors.Num();
@@ -86,12 +161,15 @@ namespace ck::usf_editor
         }
     }
 
-    auto Parse_ShadingModelDeclaration(const FString& InSource,
-        TOptional<ECk_Usf_ShadingModel>& OutModel, FString& OutError) -> bool
+    static auto Parse_SurfaceDeclarations(const FString& InSource,
+        TOptional<ECk_Usf_ShadingModel>& OutModel, TOptional<ECk_Usf_SurfaceGraph>& OutGraph,
+        FString& OutError) -> bool
     {
         OutModel.Reset();
+        OutGraph.Reset();
         OutError.Reset();
         auto Parsed = TOptional<ECk_Usf_ShadingModel>{};
+        auto ParsedGraph = TOptional<ECk_Usf_SurfaceGraph>{};
         auto Header = true;
         auto BlockComment = false;
         auto Lines = TArray<FString>{};
@@ -102,21 +180,54 @@ namespace ck::usf_editor
             const auto Marker = Line.Find(TEXT("@ckusf"), ESearchCase::CaseSensitive);
             if (Marker != INDEX_NONE)
             {
-                if (BlockComment || NOT Header || NOT Line.StartsWith(TEXT("// @ckusf shading_model ")) || Parsed.IsSet())
+                const auto ModelPrefix = FString{TEXT("// @ckusf shading_model ")};
+                const auto GraphPrefix = FString{TEXT("// @ckusf surface_graph ")};
+                if (BlockComment || NOT Header || Parsed.IsSet() || ParsedGraph.IsSet()
+                    || (NOT Line.StartsWith(ModelPrefix) && NOT Line.StartsWith(GraphPrefix)))
                 {
-                    OutError = TEXT("Shading-model declaration must occur once in the leading top-level // comment header");
+                    OutError = TEXT("Surface declaration must occur once in the leading top-level // comment header; shading_model and surface_graph cannot be mixed");
                     return false;
                 }
-                const auto Name = Line.Mid(24).TrimStartAndEnd();
-                for (const auto& Entry : shading_model_contract::Get_Models())
+                if (Line.StartsWith(GraphPrefix))
                 {
-                    if (Name == Entry.Name)
-                    { Parsed = Entry.Model; break; }
+                    const auto Name = Line.Mid(GraphPrefix.Len()).TrimStartAndEnd();
+                    if (Name == TEXT("Slab"))
+                    { ParsedGraph = ECk_Usf_SurfaceGraph::NativeSlab; }
+                    else if (Name == TEXT("Toon"))
+                    { ParsedGraph = ECk_Usf_SurfaceGraph::NativeToon; }
+                    else if (Name == TEXT("SimpleClearCoat"))
+                    { ParsedGraph = ECk_Usf_SurfaceGraph::NativeSimpleClearCoat; }
+                    else if (Name == TEXT("AdaptiveVertical"))
+                    { ParsedGraph = ECk_Usf_SurfaceGraph::AdaptiveVertical; }
+                    else if (Name == TEXT("AdaptiveMix"))
+                    { ParsedGraph = ECk_Usf_SurfaceGraph::AdaptiveMix; }
+                    else if (Name == TEXT("NativeTranslucentSlab"))
+                    { ParsedGraph = ECk_Usf_SurfaceGraph::NativeTranslucentSlab; }
+                    else if (Name == TEXT("NativeRefractiveSlab"))
+                    { ParsedGraph = ECk_Usf_SurfaceGraph::NativeRefractiveSlab; }
+                    else if (Name == TEXT("NativeTranslucentVertical"))
+                    { ParsedGraph = ECk_Usf_SurfaceGraph::NativeTranslucentVertical; }
+                    else if (Name == TEXT("NativeTranslucentStack3"))
+                    { ParsedGraph = ECk_Usf_SurfaceGraph::NativeTranslucentStack3; }
+                    else
+                    {
+                        OutError = TEXT("Unknown surface-graph declaration; use Slab, Toon, SimpleClearCoat, AdaptiveVertical, AdaptiveMix, NativeTranslucentSlab, NativeRefractiveSlab, NativeTranslucentVertical or NativeTranslucentStack3");
+                        return false;
+                    }
                 }
-                if (NOT Parsed.IsSet())
+                else
                 {
-                    OutError = FString::Printf(TEXT("Unknown shading-model declaration [%s]; use a symbolic model name"), *Name);
-                    return false;
+                    const auto Name = Line.Mid(ModelPrefix.Len()).TrimStartAndEnd();
+                    for (const auto& Entry : shading_model_contract::Get_Models())
+                    {
+                        if (Name == Entry.Name)
+                        { Parsed = Entry.Model; break; }
+                    }
+                    if (NOT Parsed.IsSet())
+                    {
+                        OutError = FString::Printf(TEXT("Unknown shading-model declaration [%s]; use a symbolic model name"), *Name);
+                        return false;
+                    }
                 }
                 continue;
             }
@@ -138,10 +249,53 @@ namespace ck::usf_editor
             }
         }
         OutModel = Parsed;
+        OutGraph = ParsedGraph;
         return true;
     }
 
-    auto Resolve_ShadingModelContract(const UCkUsf_LookDefinition& InDefinition,
+    auto Parse_ShadingModelDeclaration(const FString& InSource,
+        TOptional<ECk_Usf_ShadingModel>& OutModel, FString& OutError) -> bool
+    {
+        auto Graph = TOptional<ECk_Usf_SurfaceGraph>{};
+        return Parse_SurfaceDeclarations(InSource, OutModel, Graph, OutError);
+    }
+
+    auto Parse_SurfaceGraphDeclaration(const FString& InSource,
+        TOptional<ECk_Usf_SurfaceGraph>& OutGraph, FString& OutError) -> bool
+    {
+        auto Model = TOptional<ECk_Usf_ShadingModel>{};
+        return Parse_SurfaceDeclarations(InSource, Model, OutGraph, OutError);
+    }
+
+    auto Get_SurfaceOutputType(const FShadingModelContract& InContract) -> FString
+    {
+        switch (InContract.SurfaceGraph)
+        {
+            case ECk_Usf_SurfaceGraph::NativeSlab: return TEXT("FCkUsf_SlabOutput");
+            case ECk_Usf_SurfaceGraph::NativeSimpleClearCoat: return TEXT("FCkUsf_CoatedOutput");
+            case ECk_Usf_SurfaceGraph::NativeToon: return TEXT("FCkUsf_ToonOutput");
+            case ECk_Usf_SurfaceGraph::AdaptiveVertical: return TEXT("FCkUsf_AdaptiveVerticalOutput");
+            case ECk_Usf_SurfaceGraph::AdaptiveMix: return TEXT("FCkUsf_AdaptiveMixOutput");
+            case ECk_Usf_SurfaceGraph::NativeTranslucentSlab: return TEXT("FCkUsf_TranslucentSlabOutput");
+            case ECk_Usf_SurfaceGraph::NativeRefractiveSlab: return TEXT("FCkUsf_TranslucentSlabOutput");
+            case ECk_Usf_SurfaceGraph::NativeTranslucentVertical: return TEXT("FCkUsf_TranslucentVerticalOutput");
+            case ECk_Usf_SurfaceGraph::NativeTranslucentStack3: return TEXT("FCkUsf_TranslucentStack3Output");
+            default: return TEXT("FCkUsf_SurfaceOutput");
+        }
+    }
+
+    auto Get_SurfacePrimaryField(const FShadingModelContract& InContract) -> FString
+    {
+        if (Is_AdaptiveSurfaceGraph(InContract.SurfaceGraph) || Is_LayeredOpticalSurfaceGraph(InContract.SurfaceGraph)
+            || Is_Stack3OpticalSurfaceGraph(InContract.SurfaceGraph))
+        { return TEXT("ADiffuseAlbedo"); }
+        return InContract.SurfaceGraph == ECk_Usf_SurfaceGraph::NativeSlab
+            || InContract.SurfaceGraph == ECk_Usf_SurfaceGraph::NativeSimpleClearCoat
+            || Is_OpticalSurfaceGraph(InContract.SurfaceGraph)
+            ? TEXT("DiffuseAlbedo") : TEXT("BaseColor");
+    }
+
+    auto detail::Resolve_ShadingModelAuthoringContract(const UCkUsf_LookDefinition& InDefinition,
         FShadingModelContract& OutContract, TArray<FString>& OutErrors) -> bool
     {
         const auto InitialErrors = OutErrors.Num();
@@ -155,10 +309,88 @@ namespace ck::usf_editor
             return false;
         }
         auto Declared = TOptional<ECk_Usf_ShadingModel>{};
+        auto DeclaredGraph = TOptional<ECk_Usf_SurfaceGraph>{};
         auto ParseError = FString{};
-        if (NOT Parse_ShadingModelDeclaration(Source, Declared, ParseError))
+        if (NOT Parse_SurfaceDeclarations(Source, Declared, DeclaredGraph, ParseError))
         {
             OutErrors.Add(ParseError);
+            return false;
+        }
+        Candidate.SurfaceGraph = DeclaredGraph.Get(InDefinition._SurfaceGraph);
+        if (Candidate.SurfaceGraph != ECk_Usf_SurfaceGraph::Legacy)
+        {
+            Candidate.SourceOverride = DeclaredGraph.IsSet();
+            Candidate.DirectionalShading = InDefinition._DirectionalShading;
+            Candidate.SlabFuzz = InDefinition._SlabFuzz;
+            Candidate.AdaptiveBaseGlints = InDefinition._AdaptiveBaseGlints;
+            Candidate.TwoSided = InDefinition._TwoSided;
+            const auto Optical = Is_OpticalSurfaceGraph(Candidate.SurfaceGraph)
+                || Is_LayeredOpticalSurfaceGraph(Candidate.SurfaceGraph) || Is_Stack3OpticalSurfaceGraph(Candidate.SurfaceGraph);
+            if (Candidate.SurfaceGraph != ECk_Usf_SurfaceGraph::NativeSlab
+                && Candidate.SurfaceGraph != ECk_Usf_SurfaceGraph::NativeSimpleClearCoat
+                && Candidate.SurfaceGraph != ECk_Usf_SurfaceGraph::NativeToon
+                && NOT Optical
+                && NOT Is_AdaptiveSurfaceGraph(Candidate.SurfaceGraph))
+            { OutErrors.Add(TEXT("Unsupported native surface-graph value")); }
+            if (Candidate.AdaptiveBaseGlints && Candidate.SurfaceGraph != ECk_Usf_SurfaceGraph::AdaptiveVertical)
+            { OutErrors.Add(TEXT("_AdaptiveBaseGlints requires AdaptiveVertical")); }
+            if (Candidate.SlabFuzz && Candidate.SurfaceGraph != ECk_Usf_SurfaceGraph::NativeSlab)
+            { OutErrors.Add(TEXT("_SlabFuzz requires NativeSlab")); }
+            if (Candidate.SlabFuzz && Candidate.DirectionalShading)
+            { OutErrors.Add(TEXT("Blendable native fuzz does not preserve anisotropy")); }
+            if (Candidate.SurfaceGraph == ECk_Usf_SurfaceGraph::NativeSimpleClearCoat && Candidate.DirectionalShading)
+            { OutErrors.Add(TEXT("Native Simple Clear Coat does not support directional shading")); }
+            if (Optical && Candidate.DirectionalShading)
+            { OutErrors.Add(TEXT("Native translucent Slab does not support directional shading in this contract")); }
+            if (InDefinition._Domain != ECk_Usf_Domain::SurfaceLit)
+            { OutErrors.Add(TEXT("Native BSDF graphs require SurfaceLit")); }
+            if (Declared.IsSet() || InDefinition._ShadingModel != ECk_Usf_ShadingModel::Inherit)
+            { OutErrors.Add(TEXT("Native BSDF graphs require shading-model Inherit and cannot use shading_model declarations")); }
+            if (InDefinition._BlendMode != ECk_Usf_BlendMode::Inherit
+                && (Optical || InDefinition._BlendMode != ECk_Usf_BlendMode::Opaque))
+            { OutErrors.Add(Optical ? TEXT("Native translucent Slab requires blend-mode Inherit; colored transmittance is fixed by its graph")
+                : TEXT("Native BSDF graphs currently require Opaque blend")); }
+            if (InDefinition._SubsurfaceProfile || InDefinition._SurfaceSceneColor
+                || InDefinition._SceneColorReplacesBackground
+                || InDefinition._TranslucencyLighting != ECk_Usf_TranslucencyLighting::Inherit)
+            { OutErrors.Add(TEXT("Native BSDF graphs do not support legacy profiles, scene-color or translucency settings")); }
+            if (NOT InDefinition._WpoFunctionName.IsNone())
+            { OutErrors.Add(TEXT("Native BSDF graphs do not yet support a separate WPO function")); }
+            if (Candidate.SurfaceGraph == ECk_Usf_SurfaceGraph::NativeToon)
+            {
+                Candidate.ToonProfile = InDefinition._ToonProfile;
+                if (ck::Is_NOT_Valid(Candidate.ToonProfile))
+                { OutErrors.Add(TEXT("Native Toon requires a valid persistent _ToonProfile asset")); }
+                else if (Candidate.ToonProfile->HasAnyFlags(RF_Transient) || NOT Candidate.ToonProfile->IsAsset()
+                    || Candidate.ToonProfile->GetPackage()->HasAnyFlags(RF_Transient)
+                    || NOT FPackageName::DoesPackageExist(Candidate.ToonProfile->GetPackage()->GetName()))
+                { OutErrors.Add(TEXT("Native Toon requires a non-transient _ToonProfile in a saved asset package")); }
+            }
+            else if (InDefinition._ToonProfile)
+            { OutErrors.Add(TEXT("Native Slab does not consume _ToonProfile")); }
+            if (OutErrors.Num() != InitialErrors)
+            { return false; }
+            if (Optical)
+            {
+                Candidate.BlendMode = BLEND_TranslucentColoredTransmittance;
+                Candidate.TranslucencyLighting = TLM_SurfacePerPixelLighting;
+            }
+            OutContract = Candidate;
+            return true;
+        }
+        if (InDefinition._AdaptiveBaseGlints)
+        {
+            OutErrors.Add(TEXT("_AdaptiveBaseGlints requires AdaptiveVertical"));
+            return false;
+        }
+        if (InDefinition._SlabFuzz)
+        {
+            OutErrors.Add(TEXT("_SlabFuzz requires NativeSlab"));
+            return false;
+        }
+        if (InDefinition._ToonProfile)
+        {
+            OutErrors.Add(TEXT("Legacy graphs do not consume _ToonProfile; select NativeToon"));
             return false;
         }
         const auto Surface = InDefinition._Domain == ECk_Usf_Domain::SurfaceLit
@@ -219,6 +451,17 @@ namespace ck::usf_editor
         { OutErrors.Add(TEXT("Selected shading model requires Opaque or Masked blend")); }
         Candidate.TwoSided = InDefinition._TwoSided || Candidate.Model == ECk_Usf_ShadingModel::TwoSidedFoliage;
         Candidate.TangentSpaceNormal = Candidate.Model != ECk_Usf_ShadingModel::Hair;
+        Candidate.DirectionalShading = InDefinition._DirectionalShading;
+        if (Candidate.DirectionalShading && (InDefinition._Domain != ECk_Usf_Domain::SurfaceLit
+            || (Candidate.Model != ECk_Usf_ShadingModel::DefaultLit && Candidate.Model != ECk_Usf_ShadingModel::ClearCoat)
+            || NOT OpaqueOrMasked))
+        { OutErrors.Add(TEXT("Directional shading requires Opaque or Masked SurfaceLit DefaultLit or ClearCoat")); }
+        if (InDefinition._SurfaceSceneColor && (InDefinition._Domain != ECk_Usf_Domain::SurfaceLit
+            || Candidate.BlendMode != BLEND_Translucent
+            || (Candidate.Model != ECk_Usf_ShadingModel::DefaultLit && Candidate.Model != ECk_Usf_ShadingModel::ThinTranslucent)))
+        { OutErrors.Add(TEXT("Surface scene color requires Translucent SurfaceLit DefaultLit or ThinTranslucent")); }
+        if (InDefinition._SceneColorReplacesBackground && NOT InDefinition._SurfaceSceneColor)
+        { OutErrors.Add(TEXT("Scene-color background replacement requires surface scene color")); }
         if (Candidate.Model == ECk_Usf_ShadingModel::Eye || Candidate.Model == ECk_Usf_ShadingModel::SubsurfaceProfile)
         {
             Candidate.Profile = InDefinition._SubsurfaceProfile;
@@ -247,8 +490,143 @@ namespace ck::usf_editor
         return true;
     }
 
+    auto Resolve_ShadingModelContract(const UCkUsf_LookDefinition& InDefinition,
+        FShadingModelContract& OutContract, TArray<FString>& OutErrors) -> bool
+    {
+        auto Candidate = FShadingModelContract{};
+        if (NOT detail::Resolve_ShadingModelAuthoringContract(InDefinition, Candidate, OutErrors))
+        { return false; }
+        if (Candidate.SurfaceGraph != ECk_Usf_SurfaceGraph::Legacy
+            && NOT Validate_SubstrateShadingModelSupport(Candidate, Get_SubstrateShadingModelSupport(), OutErrors))
+        { return false; }
+        OutContract = Candidate;
+        return true;
+    }
+
     auto Get_ShadingModelOutputs(const FShadingModelContract& InContract) -> TArray<FShadingModelOutput>
     {
+        if (Is_Stack3OpticalSurfaceGraph(InContract.SurfaceGraph))
+        {
+            return {
+                {TEXT("CkUsf_AF0"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_ARoughness"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_ANormal"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_AEmissiveColor"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_BDiffuseAlbedo"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_BF0"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_BRoughness"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_BNormal"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_BEmissiveColor"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_CDiffuseAlbedo"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_CF0"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_CRoughness"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_CNormal"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_CEmissiveColor"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_ATransmittanceColor"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_AReferenceThicknessCm"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_AThicknessCm"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_BTransmittanceColor"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_BReferenceThicknessCm"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_BThicknessCm"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_CTransmittanceColor"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_CReferenceThicknessCm"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_CThicknessCm"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_RefractionStrength"), CMOT_Float1, MP_MAX}};
+        }
+        if (Is_LayeredOpticalSurfaceGraph(InContract.SurfaceGraph))
+        {
+            return {
+                {TEXT("CkUsf_AF0"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_ARoughness"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_ANormal"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_AEmissiveColor"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_BDiffuseAlbedo"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_BF0"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_BRoughness"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_BNormal"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_BEmissiveColor"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_ATransmittanceColor"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_AReferenceThicknessCm"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_AThicknessCm"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_BTransmittanceColor"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_BReferenceThicknessCm"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_BThicknessCm"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_RefractionStrength"), CMOT_Float1, MP_MAX}};
+        }
+        if (Is_AdaptiveSurfaceGraph(InContract.SurfaceGraph))
+        {
+            auto Outputs = TArray<FShadingModelOutput>{
+                {TEXT("CkUsf_AF0"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_ARoughness"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_ANormal"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_AEmissiveColor"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_BDiffuseAlbedo"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_BF0"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_BRoughness"), CMOT_Float1, MP_MAX},
+                {TEXT("CkUsf_BNormal"), CMOT_Float3, MP_MAX},
+                {TEXT("CkUsf_BEmissiveColor"), CMOT_Float3, MP_MAX}};
+            if (InContract.SurfaceGraph == ECk_Usf_SurfaceGraph::AdaptiveVertical)
+            {
+                Outputs.Add({TEXT("CkUsf_ATransmittanceColor"), CMOT_Float3, MP_MAX});
+                Outputs.Add({TEXT("CkUsf_ThicknessCm"), CMOT_Float1, MP_MAX});
+            }
+            else
+            { Outputs.Add({TEXT("CkUsf_MixWeight"), CMOT_Float1, MP_MAX}); }
+            if (InContract.DirectionalShading)
+            {
+                Outputs.Add({TEXT("CkUsf_AAnisotropy"), CMOT_Float1, MP_MAX});
+                Outputs.Add({TEXT("CkUsf_ATangent"), CMOT_Float3, MP_MAX});
+                Outputs.Add({TEXT("CkUsf_BAnisotropy"), CMOT_Float1, MP_MAX});
+                Outputs.Add({TEXT("CkUsf_BTangent"), CMOT_Float3, MP_MAX});
+            }
+            if (InContract.AdaptiveBaseGlints)
+            {
+                Outputs.Add({TEXT("CkUsf_BGlintValue"), CMOT_Float1, MP_MAX});
+                Outputs.Add({TEXT("CkUsf_BGlintUV"), CMOT_Float2, MP_MAX});
+            }
+            return Outputs;
+        }
+        if (InContract.SurfaceGraph != ECk_Usf_SurfaceGraph::Legacy)
+        {
+            auto Outputs = InContract.SurfaceGraph == ECk_Usf_SurfaceGraph::NativeSlab
+                || InContract.SurfaceGraph == ECk_Usf_SurfaceGraph::NativeSimpleClearCoat
+                || Is_OpticalSurfaceGraph(InContract.SurfaceGraph)
+                ? TArray<FShadingModelOutput>{
+                    {TEXT("EmissiveColor"), CMOT_Float3, MP_MAX},
+                    {TEXT("Roughness"), CMOT_Float1, MP_MAX},
+                    {TEXT("Normal"), CMOT_Float3, MP_MAX},
+                    {TEXT("F0"), CMOT_Float3, MP_MAX}}
+                : TArray<FShadingModelOutput>{
+                    {TEXT("Metallic"), CMOT_Float1, MP_MAX},
+                    {TEXT("Specular"), CMOT_Float1, MP_MAX},
+                    {TEXT("Roughness"), CMOT_Float1, MP_MAX},
+                    {TEXT("Normal"), CMOT_Float3, MP_MAX},
+                    {TEXT("EmissiveColor"), CMOT_Float3, MP_MAX},
+                    {TEXT("PatternUVs"), CMOT_Float2, MP_MAX}};
+            if (Is_OpticalSurfaceGraph(InContract.SurfaceGraph))
+            {
+                Outputs.Add({TEXT("CkUsf_TransmittanceColor"), CMOT_Float3, MP_MAX});
+                Outputs.Add({TEXT("CkUsf_ReferenceThicknessCm"), CMOT_Float1, MP_MAX});
+                Outputs.Add({TEXT("CkUsf_ThicknessCm"), CMOT_Float1, MP_MAX});
+                Outputs.Add({TEXT("CkUsf_RefractionStrength"), CMOT_Float1, MP_MAX});
+            }
+            if (InContract.SurfaceGraph == ECk_Usf_SurfaceGraph::NativeSimpleClearCoat)
+            {
+                Outputs.Add({TEXT("CkUsf_CoatCoverage"), CMOT_Float1, MP_MAX});
+                Outputs.Add({TEXT("CkUsf_CoatRoughness"), CMOT_Float1, MP_MAX});
+            }
+            if (InContract.SlabFuzz)
+            {
+                Outputs.Add({TEXT("CkUsf_FuzzAmount"), CMOT_Float1, MP_MAX});
+                Outputs.Add({TEXT("CkUsf_FuzzColor"), CMOT_Float3, MP_MAX});
+            }
+            if (InContract.DirectionalShading)
+            {
+                Outputs.Add({TEXT("CkUsf_Anisotropy"), CMOT_Float1, MP_MAX});
+                Outputs.Add({TEXT("CkUsf_Tangent"), CMOT_Float3, MP_MAX});
+            }
+            return Outputs;
+        }
         auto Outputs = TArray<FShadingModelOutput>{
             {TEXT("EmissiveColor"), CMOT_Float3, MP_EmissiveColor},
             {TEXT("Roughness"), CMOT_Float1, MP_Roughness},
@@ -293,6 +671,11 @@ namespace ck::usf_editor
                 break;
             default: break;
         }
+        if (InContract.DirectionalShading)
+        {
+            Outputs.Add({TEXT("CkUsf_Anisotropy"), CMOT_Float1, MP_Anisotropy});
+            Outputs.Add({TEXT("CkUsf_Tangent"), CMOT_Float3, MP_Tangent});
+        }
         return Outputs;
     }
 
@@ -304,6 +687,17 @@ namespace ck::usf_editor
             const auto Field = Output.Name.StartsWith(TEXT("CkUsf_")) ? Output.Name.Mid(6) : Output.Name;
             if (Output.Name == TEXT("ToonThreshold") || Output.Name == TEXT("ToonSoftness"))
             { Code += FString::Printf(TEXT("%s = saturate(O.%s);\n"), *Output.Name, *Field); }
+            else if (Output.Name == TEXT("CkUsf_ATransmittanceColor") || Output.Name == TEXT("CkUsf_TransmittanceColor")
+                || Output.Name == TEXT("CkUsf_BTransmittanceColor") || Output.Name == TEXT("CkUsf_CTransmittanceColor"))
+            { Code += FString::Printf(TEXT("%s = clamp(O.%s, 0.0001, 0.9999);\n"), *Output.Name, *Field); }
+            else if (Output.Name == TEXT("CkUsf_ThicknessCm") || Output.Name == TEXT("CkUsf_ReferenceThicknessCm")
+                || ((Is_LayeredOpticalSurfaceGraph(InContract.SurfaceGraph) || Is_Stack3OpticalSurfaceGraph(InContract.SurfaceGraph))
+                    && Output.Name.EndsWith(TEXT("ThicknessCm"))))
+            { Code += FString::Printf(TEXT("%s = max(O.%s, 0.0001);\n"), *Output.Name, *Field); }
+            else if (Output.Name == TEXT("CkUsf_RefractionStrength"))
+            { Code += FString::Printf(TEXT("%s = clamp(O.%s, 1.0, 1.1);\n"), *Output.Name, *Field); }
+            else if (Output.Name == TEXT("CkUsf_MixWeight"))
+            { Code += FString::Printf(TEXT("%s = saturate(O.%s);\n"), *Output.Name, *Field); }
             else
             { Code += FString::Printf(TEXT("%s = O.%s;\n"), *Output.Name, *Field); }
         }
@@ -313,6 +707,8 @@ namespace ck::usf_editor
     auto Apply_ShadingModelContract(UMaterial& InMaterial,
         UMaterialExpressionCustom& InCustom, const FShadingModelContract& InContract) -> void
     {
+        if (InContract.SurfaceGraph != ECk_Usf_SurfaceGraph::Legacy)
+        { return; }
         InMaterial.SetShadingModel(InContract.NativeModel);
         InMaterial.BlendMode = InContract.BlendMode;
         InMaterial.TranslucencyLightingMode = InContract.TranslucencyLighting;
@@ -343,7 +739,7 @@ namespace ck::usf_editor
         const auto Outputs = Get_ShadingModelOutputs(InContract);
         for (const auto Property : {MP_BaseColor, MP_Normal, MP_Metallic, MP_Specular, MP_Roughness,
             MP_AmbientOcclusion, MP_EmissiveColor, MP_Opacity, MP_OpacityMask, MP_Refraction,
-            MP_SubsurfaceColor, MP_CustomData0, MP_CustomData1})
+            MP_SubsurfaceColor, MP_CustomData0, MP_CustomData1, MP_Anisotropy, MP_Tangent})
         {
             InMaterial.GetExpressionInputForProperty(Property)->Expression = nullptr;
         }

@@ -1,0 +1,70 @@
+#pragma once
+#include "/CkUsf/Common.ush"
+
+#if defined(CK_USF_SURFACE_SCENE_COLOR) && CK_USF_SURFACE_SCENE_COLOR && PIXELSHADER
+// Fixed, symmetric disk taps avoid the displaced-edge lattice of a sparse Cartesian kernel.
+// Radius is in render-buffer pixels. The decoder already removes pre-exposure.
+float3 CkUsf_BlurSurfaceSceneColor(float2 ViewportUV, float3 CenterColor, float RadiusPixels)
+{
+    float Radius = clamp(RadiusPixels, 0.0, 12.0);
+    if (Radius <= 0.001)
+    { return CenterColor; }
+    float2 CenterUV = ViewportUVToBufferUV(ViewportUV);
+    float2 StepUV = View.BufferSizeAndInvSize.zw * Radius;
+    const float2 Offsets[32] = {
+        float2(0.125000000, 0.000000000),
+        float2(-0.159645045, 0.146247939),
+        float2(0.024436233, -0.278438271),
+        float2(0.201222239, 0.262458779),
+        float2(-0.369267557, -0.065318232),
+        float2(0.349802466, -0.222515695),
+        float2(-0.117002080, 0.435241902),
+        float2(-0.223135653, -0.429634124),
+        float2(0.484115115, 0.176798065),
+        float2(-0.503641109, 0.207895727),
+        float2(0.242788296, -0.518824482),
+        float2(0.179414372, 0.572001296),
+        float2(-0.540757005, -0.313379740),
+        float2(0.634369524, -0.139464358),
+        float2(-0.387145847, 0.550675125),
+        float2(-0.089439652, -0.690199644),
+        float2(0.549071755, 0.462758261),
+        float2(-0.738878471, 0.030554941),
+        float2(0.538955128, -0.536332332),
+        float2(-0.036058190, 0.779791515),
+        float2(-0.512817529, -0.614526796),
+        float2(0.812359593, 0.109301839),
+        float2(-0.688310643, 0.478908612),
+        float2(0.188086063, -0.836061381),
+        float2(0.435033261, 0.759191058),
+        float2(-0.850448409, -0.271316244),
+        float2(0.826102404, -0.381680257),
+        float2(-0.357888208, 0.855155559),
+        float2(-0.319407328, -0.888033760),
+        float2(0.849908632, 0.446688166),
+        float2(-0.944034648, 0.248844495),
+        float2(0.536595815, -0.834529766)
+    };
+    const float Weights[32] = {
+        0.954206666, 0.868815056, 0.791065111, 0.720272980, 0.655816011, 0.597127273, 0.543690570, 0.495035897,
+        0.450735313, 0.410399173, 0.373672699, 0.340232865, 0.309785548, 0.282062952, 0.256821240, 0.233838400,
+        0.212912286, 0.193858843, 0.176510485, 0.160714625, 0.146332332, 0.133237104, 0.121313764, 0.110457439,
+        0.100572643, 0.091572433, 0.083377649, 0.075916214, 0.069122499, 0.062936752, 0.057304564, 0.052176400
+    };
+    float3 Color = 0.0;
+    float Weight = 0.0;
+    [unroll]
+    for (int I = 0; I < 32; ++I)
+    {
+        float2 OffsetUV = Offsets[I] * StepUV;
+        float2 PositiveUV = clamp(CenterUV + OffsetUV,
+            ResolvedView.BufferBilinearUVMinMax.xy, ResolvedView.BufferBilinearUVMinMax.zw);
+        float2 NegativeUV = clamp(CenterUV - OffsetUV,
+            ResolvedView.BufferBilinearUVMinMax.xy, ResolvedView.BufferBilinearUVMinMax.zw);
+        Color += (DecodeSceneColorAndAlpharForMaterialNode(PositiveUV).rgb
+            + DecodeSceneColorAndAlpharForMaterialNode(NegativeUV).rgb) * Weights[I];
+        Weight += 2.0 * Weights[I];
+    }
+    return Color / Weight;
+}
+#endif

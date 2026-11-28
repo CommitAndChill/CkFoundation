@@ -1,0 +1,43 @@
+// @ckusf surface_graph Slab
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+// CC0 ambientCG Tiles133A backing; see Batch4Textures/Manifest.json.
+// Ceramic composition is unverified. Native Slab supplies all lighting.
+FCkUsf_SlabOutput CkUsf_Look_NativePorcelainSlab(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    Texture2D TileMask, SamplerState TileMaskSampler,
+    float3 TintColor, float3 GroutColor, float UVScale, float UVRotation,
+    float NormalStrength, float RoughnessScale, float RoughnessBias,
+    float GroutNormalStrength, float GroutRoughness, float DebugView)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float Tile = saturate(CkUsf_SampleTexture2D(TileMask, TileMaskSampler, UV).r);
+    float3 Color = CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV).rgb;
+    float Roughness = CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r;
+    float Grain = dot(Color, float3(0.2126, 0.7152, 0.0722));
+    float3 Grout = max(GroutColor, 0.0) * (0.85 + Grain * 0.3);
+    float3 Albedo = lerp(Grout, saturate(Color * max(TintColor, 0.0)), Tile);
+    FCkUsf_SlabOutput O = CkUsf_DefaultSlab();
+    O.DiffuseAlbedo = Albedo;
+    O.Normal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV),
+        lerp(max(GroutNormalStrength, 0.0), max(NormalStrength, 0.0), Tile), UVRotation);
+    float TileRoughness = clamp(Roughness * max(RoughnessScale, 0.0) + RoughnessBias, 0.045, 1.0);
+    O.Roughness = lerp(clamp(GroutRoughness + (Roughness - 0.5) * 0.12, 0.35, 1.0), TileRoughness, Tile);
+    if (DebugView > 0.5)
+    {
+        float3 Inspection = Albedo;
+        if (DebugView > 1.5 && DebugView < 2.5)
+        { Inspection = O.Normal * 0.5 + 0.5; }
+        if (DebugView > 2.5 && DebugView < 3.5)
+        { Inspection = O.Roughness.xxx; }
+        if (DebugView > 3.5)
+        { Inspection = Tile.xxx; }
+        O.EmissiveColor = Inspection;
+        O.DiffuseAlbedo = 0.0;
+        O.F0 = 0.0;
+    }
+    return O;
+}

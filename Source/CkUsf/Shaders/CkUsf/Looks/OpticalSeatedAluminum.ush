@@ -1,0 +1,22 @@
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_OpticalSeatedAluminum(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TintColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float Anisotropy)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV,UVScale,UVRotation);
+    FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
+    float3 Detail = CkUsf_SampleTexture2D(BaseColorMap,BaseColorMapSampler,UV).rgb;
+    O.BaseColor = saturate(TintColor*(.9+Detail*.2));
+    O.Metallic = 1.0;
+    O.Normal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(NormalMap,NormalMapSampler,UV),NormalStrength,UVRotation);
+    O.Roughness = clamp(CkUsf_SampleTexture2D(RoughnessMap,RoughnessMapSampler,UV).r*max(RoughnessScale,0.0)+RoughnessBias,.18,.8);
+    O.Anisotropy = clamp(Anisotropy,-.9,.9);
+    float Angle = UVRotation*.01745329252;
+    O.Tangent = float3(cos(Angle),sin(Angle),0.0);
+    return O;
+}

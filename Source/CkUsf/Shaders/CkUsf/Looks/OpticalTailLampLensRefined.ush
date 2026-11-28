@@ -1,0 +1,22 @@
+// @ckusf surface_graph NativeTranslucentSlab
+#pragma once
+#include "/CkUsf/Looks/OpticalTailLampLens.ush"
+
+FCkUsf_TranslucentSlabOutput CkUsf_Look_OpticalTailLampLensRefined(FCkUsf_SurfaceInput In,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    Texture2D ThicknessMap, SamplerState ThicknessMapSampler,
+    float3 TransmissionColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float Ior, float AbsorptionStrength,
+    float ReferenceThicknessCm, float ThicknessCm, float ThicknessVariation, float DistortionStrength)
+{
+    // Sampling and optical response stay in the shared live-editable implementation.
+    // The refined texture set encodes distinct optical fields and a smooth molded rim.
+    FCkUsf_TranslucentSlabOutput O = CkUsf_Look_OpticalTailLampLens(In,
+        NormalMap, NormalMapSampler, RoughnessMap, RoughnessMapSampler,
+        ThicknessMap, ThicknessMapSampler, TransmissionColor, UVScale, UVRotation,
+        NormalStrength, RoughnessScale, RoughnessBias, Ior, AbsorptionStrength,
+        ReferenceThicknessCm, ThicknessCm, ThicknessVariation, DistortionStrength);
+    O.Roughness = max(O.Roughness, 0.045);
+    return O;
+}

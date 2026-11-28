@@ -1,0 +1,26 @@
+// @ckusf shading_model DefaultLit
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_LibraryBrass(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TintColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float FinishVariation, float Anisotropy, float BrushRotation, float DebugView)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float4 Color = CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV);
+    FCkUsf_SurfaceOutput O = CkUsf_LibrarySurface(Color,
+        CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV),
+        CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r,
+        TintColor, NormalStrength, RoughnessScale, RoughnessBias, UVRotation);
+    // The source supplies machining variation; brass reflectance is authored independently.
+    float Finish = clamp(dot(Color.rgb, float3(0.2126, 0.7152, 0.0722)) * 4.0, 0.5, 1.5);
+    O.BaseColor = saturate(TintColor * lerp(1.0, Finish, saturate(FinishVariation)));
+    O.Metallic = 1.0;
+    float Angle = (BrushRotation - UVRotation) * 0.01745329252;
+    O.Tangent = float3(cos(Angle), sin(Angle), 0.0);
+    O.Anisotropy = clamp(Anisotropy, -0.95, 0.95);
+    return CkUsf_LibraryInspect(O, DebugView);
+}

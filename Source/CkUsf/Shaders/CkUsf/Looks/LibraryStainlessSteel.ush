@@ -1,0 +1,24 @@
+// @ckusf shading_model DefaultLit
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_LibraryStainlessSteel(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TintColor, float UVScale, float UVRotation, float NormalStrength, float RoughnessScale, float RoughnessBias, float MetalColorVariation, float Polish, float DebugView)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float4 ColorSample = CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV);
+    FCkUsf_SurfaceOutput O = CkUsf_LibrarySurface(
+        ColorSample,
+        CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV),
+        CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r,
+        TintColor, NormalStrength, RoughnessScale, RoughnessBias, UVRotation);
+    // Neutral authored conductor reflectance; source BC supplies bounded finish variation.
+    // The finish source does not establish a particular stainless-steel alloy.
+    O.BaseColor = saturate(max(TintColor, 0.0) * lerp(1.0, ColorSample.rgb, saturate(MetalColorVariation)));
+    O.Metallic = 1.0;
+    O.Roughness = lerp(O.Roughness, max(0.12, O.Roughness * 0.45), saturate(Polish));
+    return CkUsf_LibraryInspect(O, DebugView);
+}

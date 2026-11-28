@@ -26,16 +26,23 @@ namespace ck_usf_look_validator
         TEXT("Time"), TEXT("UV"), TEXT("UV1"), TEXT("UV2"), TEXT("LocalPosition"),
         TEXT("WorldPosition"), TEXT("CameraVector"), TEXT("VertexNormal"),
         TEXT("VertexTangent"), TEXT("PixelDepth"), TEXT("VertexColor"),
+        TEXT("SurfaceScreenUV"),
         TEXT("SceneColor"), TEXT("SceneDepth"), TEXT("SceneNormal"), TEXT("CustomDepth"), TEXT("CustomStencil"),
         TEXT("SceneBaseColor"), TEXT("SceneMetallic"), TEXT("SceneRoughness"), TEXT("SceneSpecular"),
         TEXT("ParticleColor"), TEXT("ParticleAlpha"),
         TEXT("DynParam0"), TEXT("DynParam1"), TEXT("DynParam2"), TEXT("DynParam3"),
+        TEXT("F0"), TEXT("PatternUVs"), TEXT("DiffuseAlbedo"),
+        TEXT("CkUsf_FuzzAmount"), TEXT("CkUsf_FuzzColor"), TEXT("CkUsf_CoatCoverage"), TEXT("CkUsf_CoatRoughness"),
+        TEXT("CkUsf_AF0"), TEXT("CkUsf_ARoughness"), TEXT("CkUsf_ANormal"), TEXT("CkUsf_AEmissiveColor"),
+        TEXT("CkUsf_BDiffuseAlbedo"), TEXT("CkUsf_BF0"), TEXT("CkUsf_BRoughness"), TEXT("CkUsf_BNormal"), TEXT("CkUsf_BEmissiveColor"),
+        TEXT("CkUsf_AAnisotropy"), TEXT("CkUsf_ATangent"), TEXT("CkUsf_BAnisotropy"), TEXT("CkUsf_BTangent"),
+        TEXT("CkUsf_ATransmittanceColor"), TEXT("CkUsf_ThicknessCm"), TEXT("CkUsf_MixWeight"),
         TEXT("EmissiveColor"), TEXT("Roughness"), TEXT("Metallic"), TEXT("Specular"),
         TEXT("AmbientOcclusion"), TEXT("Normal"), TEXT("Opacity"), TEXT("OpacityMask"),
         TEXT("Refraction"), TEXT("SubsurfaceColor"), TEXT("ClearCoat"), TEXT("ClearCoatRoughness"),
     };
 
-    // Lowercase set — HLSL is case-sensitive, and so is the comparison against it.
+    // Lowercase set â€” HLSL is case-sensitive, and so is the comparison against it.
     static const TCHAR* kHlslKeywords[] =
     {
         TEXT("bool"), TEXT("break"), TEXT("case"), TEXT("centroid"), TEXT("const"), TEXT("continue"),
@@ -194,7 +201,7 @@ namespace ck_usf_look_validator
                     }
                 }
             }
-            return false;   // unbalanced parens — treat as not found
+            return false;   // unbalanced parens â€” treat as not found
         }
     }
 
@@ -231,7 +238,7 @@ namespace ck_usf_look_validator
         if (Found.IsEmpty() || NOT Found[0].Type.Contains(InFirstParamType))
         {
             InOutResult.Errors.Add(FString::Printf(
-                TEXT("Look [%s]: [%s]'s first parameter must be `%s In` — expected signature: %s"),
+                TEXT("Look [%s]: [%s]'s first parameter must be `%s In` â€” expected signature: %s"),
                 *InLookName.ToString(), *InFnName, *InFirstParamType,
                 *Render_Signature(InReturnType, InFnName, InFirstParamType + TEXT(" In"), InExpected)));
             return;
@@ -241,7 +248,7 @@ namespace ck_usf_look_validator
         if (Found.Num() != InExpected.Num())
         {
             InOutResult.Errors.Add(FString::Printf(
-                TEXT("Look [%s]: [%s] takes %d parameter(s) after In but the asset declares %d — expected signature: %s"),
+                TEXT("Look [%s]: [%s] takes %d parameter(s) after In but the asset declares %d â€” expected signature: %s"),
                 *InLookName.ToString(), *InFnName, Found.Num(), InExpected.Num(),
                 *Render_Signature(InReturnType, InFnName, InFirstParamType + TEXT(" In"), InExpected)));
             return;
@@ -252,7 +259,7 @@ namespace ck_usf_look_validator
             if (Found[Index].Type != InExpected[Index].Type)
             {
                 InOutResult.Errors.Add(FString::Printf(
-                    TEXT("Look [%s]: [%s] parameter %d is [%s %s] but the asset declares [%s %s] — wiring is positional, this would mis-bind"),
+                    TEXT("Look [%s]: [%s] parameter %d is [%s %s] but the asset declares [%s %s] â€” wiring is positional, this would mis-bind"),
                     *InLookName.ToString(), *InFnName, Index + 1,
                     *Found[Index].Type, *Found[Index].Name,
                     *InExpected[Index].Type, *InExpected[Index].Name));
@@ -261,7 +268,7 @@ namespace ck_usf_look_validator
             if (Found[Index].Name != InExpected[Index].Name)
             {
                 InOutResult.Warnings.Add(FString::Printf(
-                    TEXT("Look [%s]: [%s] parameter %d is named [%s] in HLSL but [%s] in the asset — works (positional), but rename one to match"),
+                    TEXT("Look [%s]: [%s] parameter %d is named [%s] in HLSL but [%s] in the asset â€” works (positional), but rename one to match"),
                     *InLookName.ToString(), *InFnName, Index + 1,
                     *Found[Index].Name, *InExpected[Index].Name));
             }
@@ -279,10 +286,10 @@ namespace ck_usf_look_validator
         {
             InOutResult.Errors.Add(NameAppears
                 ? FString::Printf(
-                    TEXT("Look [%s]: [%s] appears in [%s] but not as `%s %s(...)` — wrong return type, or generated via macro (the entry point must be a plain definition)"),
+                    TEXT("Look [%s]: [%s] appears in [%s] but not as `%s %s(...)` â€” wrong return type, or generated via macro (the entry point must be a plain definition)"),
                     *InLookName.ToString(), *InFnName, *InIncludePath, *InReturnType, *InFnName)
                 : FString::Printf(
-                    TEXT("Look [%s]: entry point [%s] not found in [%s] (it must be defined directly in that file) — expected signature: %s"),
+                    TEXT("Look [%s]: entry point [%s] not found in [%s] (it must be defined directly in that file) â€” expected signature: %s"),
                     *InLookName.ToString(), *InFnName, *InIncludePath,
                     *Render_Signature(InReturnType, InFnName, InFirstParamType + TEXT(" In"), InExpected)));
             return;
@@ -318,13 +325,13 @@ namespace ck_usf_look_validator
 
         if (NOT Root.StartsWith(TEXT("/")))
         {
-            AddRootError(TEXT("must start with '/' — it is a long package path such as /Game/MyGame/GeneratedLooks"));
+            AddRootError(TEXT("must start with '/' â€” it is a long package path such as /Game/MyGame/GeneratedLooks"));
             return;
         }
 
         if (Root.EndsWith(TEXT("/")))
         {
-            AddRootError(TEXT("must not end with '/' — the generated master's name is appended after a separator"));
+            AddRootError(TEXT("must not end with '/' â€” the generated master's name is appended after a separator"));
             return;
         }
 
@@ -359,7 +366,7 @@ namespace ck_usf_look_validator
         if (FPaths::IsUnderDirectory(PackageFilename, FPaths::EngineDir()))
         {
             AddRootError(FString::Printf(
-                TEXT("resolves to [%s], under the engine directory — a generated master must be saved in project or plugin content"),
+                TEXT("resolves to [%s], under the engine directory â€” a generated master must be saved in project or plugin content"),
                 *FPaths::ConvertRelativePathToFull(PackageFilename)));
         }
     }
@@ -369,11 +376,13 @@ namespace ck_usf_look_validator
 
 namespace ck::usf_editor
 {
-    auto Validate_LookDefinition(const UCkUsf_LookDefinition* InDef) -> FLookValidationResult
+    static auto Validate_LookDefinitionImpl(TObjectPtr<const UCkUsf_LookDefinition> InDef,
+        bool InValidateRenderer, FShadingModelContract& OutResolvedContract) -> FLookValidationResult
     {
         using namespace ck_usf_look_validator;
 
         FLookValidationResult Result;
+        OutResolvedContract = {};
 
         if (InDef == nullptr)
         {
@@ -383,20 +392,35 @@ namespace ck::usf_editor
 
         const auto LookName = InDef->Get_EffectiveLookName();
 
-        auto Contract = FShadingModelContract{};
-        if (NOT Resolve_ShadingModelContract(*InDef, Contract, Result.Errors))
-        { return Result; }
+        for (const auto& Define : InDef->_Defines)
+        {
+            FString Name, Value;
+            if (NOT Define.Split(TEXT("="), &Name, &Value))
+            { Name = Define; }
+            Name.TrimStartAndEndInline();
+            if (Name == TEXT("CK_USF_SURFACE_SCENE_COLOR"))
+            { Result.Errors.Add(TEXT("CK_USF_SURFACE_SCENE_COLOR is generated internally; use _SurfaceSceneColor")); }
+        }
 
-        if (Contract.SourceOverride)
+        auto Contract = FShadingModelContract{};
+        if (NOT detail::Resolve_ShadingModelAuthoringContract(*InDef, Contract, Result.Errors))
+        { return Result; }
+        OutResolvedContract = Contract;
+
+        if (Contract.SourceOverride || Contract.SurfaceGraph != ECk_Usf_SurfaceGraph::Legacy)
         {
             const auto Platform = GMaxRHIShaderPlatform;
-            Validate_SubstrateShadingModelSupport(Contract, Get_SubstrateShadingModelSupport(), Result.Errors);
+            if (InValidateRenderer)
+            { Validate_SubstrateShadingModelSupport(Contract, Get_SubstrateShadingModelSupport(), Result.Errors); }
             if (static_cast<uint32>(Platform) >= static_cast<uint32>(SP_NumPlatforms))
             { Result.Errors.Add(TEXT("Source shading-model selection requires an initialized desktop deferred shader platform.")); }
             else if (NOT FDataDrivenShaderPlatformInfo::IsValid(Platform))
             { Result.Errors.Add(TEXT("Source shading-model selection requires initialized shader-platform metadata.")); }
             else if (IsMobilePlatform(Platform) || IsForwardShadingEnabled(Platform))
             { Result.Errors.Add(TEXT("Source shading-model selection currently supports desktop deferred rendering.")); }
+            else if (Requires_AdaptiveGBuffer(Contract.SurfaceGraph)
+                && NOT FDataDrivenShaderPlatformInfo::GetSupportsAdaptiveGBuffer(Platform))
+            { Result.Errors.Add(TEXT("Adaptive CkUsf graphs require a shader platform supporting Adaptive GBuffer.")); }
             if (NOT Result.Errors.IsEmpty())
             { return Result; }
         }
@@ -419,7 +443,7 @@ namespace ck::usf_editor
                 Result.Errors.Add(FString::Printf(
                     TEXT("Look [%s]: Toon currently supports only Opaque blending"), *LookName.ToString()));
             }
-            if (NOT Contract.SourceOverride)
+            if (InValidateRenderer && NOT Contract.SourceOverride)
             { Validate_SubstrateShadingModelSupport(Contract, Get_SubstrateShadingModelSupport(), Result.Errors); }
             const auto ShaderPlatform = GMaxRHIShaderPlatform;
             if (static_cast<uint32>(ShaderPlatform) >= static_cast<uint32>(SP_NumPlatforms))
@@ -482,7 +506,7 @@ namespace ck::usf_editor
                 if (Param._Name == FName{Reserved})
                 {
                     Result.Errors.Add(FString::Printf(
-                        TEXT("Look [%s]: param [%s] collides with the generated Custom-node input/output/local of the same name — rename it"),
+                        TEXT("Look [%s]: param [%s] collides with the generated Custom-node input/output/local of the same name â€” rename it"),
                         *LookName.ToString(), *Name));
                     break;
                 }
@@ -520,7 +544,7 @@ namespace ck::usf_editor
                 && Param._Type != ECk_Usf_ParamType::Vector)
             {
                 Result.Errors.Add(FString::Printf(
-                    TEXT("Look [%s]: param [%s] is _PerInstance but not Scalar/Vector — textures cannot ride per-instance custom data"),
+                    TEXT("Look [%s]: param [%s] is _PerInstance but not Scalar/Vector â€” textures cannot ride per-instance custom data"),
                     *LookName.ToString(), *Name));
             }
 
@@ -529,14 +553,14 @@ namespace ck::usf_editor
                 && Param._Type != ECk_Usf_ParamType::Vector)
             {
                 Result.Errors.Add(FString::Printf(
-                    TEXT("Look [%s]: param [%s] is _CustomPrimitiveData but not Scalar/Vector — textures cannot ride custom primitive data"),
+                    TEXT("Look [%s]: param [%s] is _CustomPrimitiveData but not Scalar/Vector â€” textures cannot ride custom primitive data"),
                     *LookName.ToString(), *Name));
             }
 
             if (Param._CustomPrimitiveData && Param._PerInstance)
             {
                 Result.Errors.Add(FString::Printf(
-                    TEXT("Look [%s]: param [%s] declares both _PerInstance and _CustomPrimitiveData — they are two different data sources and the generator emits one node per param"),
+                    TEXT("Look [%s]: param [%s] declares both _PerInstance and _CustomPrimitiveData â€” they are two different data sources and the generator emits one node per param"),
                     *LookName.ToString(), *Name));
             }
 
@@ -544,7 +568,7 @@ namespace ck::usf_editor
             if (Param._CustomPrimitiveData && Param._CustomPrimitiveDataIndex < 0)
             {
                 Result.Errors.Add(FString::Printf(
-                    TEXT("Look [%s]: param [%s] is _CustomPrimitiveData but its _CustomPrimitiveDataIndex is [%d] — the CPD layout is owned by the writer, so the index must be set explicitly"),
+                    TEXT("Look [%s]: param [%s] is _CustomPrimitiveData but its _CustomPrimitiveDataIndex is [%d] â€” the CPD layout is owned by the writer, so the index must be set explicitly"),
                     *LookName.ToString(), *Name, Param._CustomPrimitiveDataIndex));
             }
 
@@ -571,7 +595,7 @@ namespace ck::usf_editor
         if (InDef->Get_NumPerInstanceFloats() > 0 && NOT IsSurfaceDomain)
         {
             Result.Warnings.Add(FString::Printf(
-                TEXT("Look [%s]: has _PerInstance params but a non-surface domain — there are no instances to source them from"),
+                TEXT("Look [%s]: has _PerInstance params but a non-surface domain â€” there are no instances to source them from"),
                 *LookName.ToString()));
         }
 
@@ -580,7 +604,7 @@ namespace ck::usf_editor
         if ((InDef->_ParticleColor || InDef->_ParticleDynamicParameter) && NOT IsSurfaceDomain)
         {
             Result.Errors.Add(FString::Printf(
-                TEXT("Look [%s]: _ParticleColor/_ParticleDynamicParameter require a Surface domain — the generator wires them nowhere else"),
+                TEXT("Look [%s]: _ParticleColor/_ParticleDynamicParameter require a Surface domain â€” the generator wires them nowhere else"),
                 *LookName.ToString()));
         }
 
@@ -588,25 +612,25 @@ namespace ck::usf_editor
             && NOT IsSurfaceDomain)
         {
             Result.Warnings.Add(FString::Printf(
-                TEXT("Look [%s]: a Niagara usage flag is set but the domain is not Surface — a particle renderer cannot use this master"),
+                TEXT("Look [%s]: a Niagara usage flag is set but the domain is not Surface â€” a particle renderer cannot use this master"),
                 *LookName.ToString()));
         }
 
         // A particle look whose master declares NO renderer usage renders as the DEFAULT material in a packaged
-        // build — the exact silent-fallback these flags exist to prevent.
+        // build â€” the exact silent-fallback these flags exist to prevent.
         if ((InDef->_ParticleColor || InDef->_ParticleDynamicParameter)
             && NOT InDef->_UsedWithNiagaraSprites && NOT InDef->_UsedWithNiagaraMeshParticles
             && NOT InDef->_UsedWithNiagaraRibbons)
         {
             Result.Warnings.Add(FString::Printf(
-                TEXT("Look [%s]: reads particle inputs but declares none of _UsedWithNiagaraSprites / _UsedWithNiagaraMeshParticles / _UsedWithNiagaraRibbons — a Niagara renderer would fall back to the default material"),
+                TEXT("Look [%s]: reads particle inputs but declares none of _UsedWithNiagaraSprites / _UsedWithNiagaraMeshParticles / _UsedWithNiagaraRibbons â€” a Niagara renderer would fall back to the default material"),
                 *LookName.ToString()));
         }
 
         if (InDef->_ParticleDynamicParameterNames.Num() > 4)
         {
             Result.Warnings.Add(FString::Printf(
-                TEXT("Look [%s]: _ParticleDynamicParameterNames has %d entries — only the first 4 are used"),
+                TEXT("Look [%s]: _ParticleDynamicParameterNames has %d entries â€” only the first 4 are used"),
                 *LookName.ToString(), InDef->_ParticleDynamicParameterNames.Num()));
         }
 
@@ -615,7 +639,7 @@ namespace ck::usf_editor
             if (InDef->_Domain != ECk_Usf_Domain::PostProcess)
             {
                 Result.Warnings.Add(FString::Printf(
-                    TEXT("Look [%s]: _SceneTextures is set but the domain is not PostProcess — it is ignored"),
+                    TEXT("Look [%s]: _SceneTextures is set but the domain is not PostProcess â€” it is ignored"),
                     *LookName.ToString()));
             }
 
@@ -625,7 +649,7 @@ namespace ck::usf_editor
                 if (SeenTextures.Contains(SceneTexture))
                 {
                     Result.Errors.Add(FString::Printf(
-                        TEXT("Look [%s]: duplicate _SceneTextures entry — it would wire two Custom-node inputs of the same name"),
+                        TEXT("Look [%s]: duplicate _SceneTextures entry â€” it would wire two Custom-node inputs of the same name"),
                         *LookName.ToString()));
                     break;
                 }
@@ -638,7 +662,7 @@ namespace ck::usf_editor
         if (InDef->_PostProcessWorldPosition && InDef->_Domain != ECk_Usf_Domain::PostProcess)
         {
             Result.Warnings.Add(FString::Printf(
-                TEXT("Look [%s]: _PostProcessWorldPosition is set but the domain is not PostProcess — it is ignored (surface looks always receive In.WorldPosition)"),
+                TEXT("Look [%s]: _PostProcessWorldPosition is set but the domain is not PostProcess â€” it is ignored (surface looks always receive In.WorldPosition)"),
                 *LookName.ToString()));
         }
 
@@ -651,7 +675,7 @@ namespace ck::usf_editor
         if (DiskPath.IsEmpty() || NOT FFileHelper::LoadFileToString(Source, *DiskPath))
         {
             Result.Errors.Add(FString::Printf(
-                TEXT("Look [%s]: _UshIncludePath [%s] does not resolve to a readable file — check the virtual path and the module's AddShaderSourceDirectoryMapping"),
+                TEXT("Look [%s]: _UshIncludePath [%s] does not resolve to a readable file â€” check the virtual path and the module's AddShaderSourceDirectoryMapping"),
                 *LookName.ToString(), *InDef->_UshIncludePath));
             return Result;
         }
@@ -661,7 +685,7 @@ namespace ck::usf_editor
         const auto Expected = Build_ExpectedParams(InDef);
 
         Validate_EntryPoint(LookName, Stripped, InDef->_UshFunctionName.ToString(),
-            TEXT("FCkUsf_SurfaceOutput"), TEXT("FCkUsf_SurfaceInput"), Expected,
+            Get_SurfaceOutputType(Contract), TEXT("FCkUsf_SurfaceInput"), Expected,
             InDef->_UshIncludePath, Result);
 
         if (NOT InDef->_WpoFunctionName.IsNone())
@@ -675,12 +699,70 @@ namespace ck::usf_editor
             else
             {
                 Result.Warnings.Add(FString::Printf(
-                    TEXT("Look [%s]: _WpoFunctionName is set but the domain is not Surface — WPO is ignored"),
+                    TEXT("Look [%s]: _WpoFunctionName is set but the domain is not Surface â€” WPO is ignored"),
                     *LookName.ToString()));
             }
         }
 
         return Result;
+    }
+
+    auto Validate_LookDefinition(const UCkUsf_LookDefinition* InDef) -> FLookValidationResult
+    {
+        auto Contract = FShadingModelContract{};
+        return Validate_LookDefinitionImpl(InDef, true, Contract);
+    }
+
+    auto Classify_LookForGeneration(TObjectPtr<const UCkUsf_LookDefinition> InDef,
+        const FSubstrateShadingModelSupport& InSupport) -> FLookGenerationAdmissionResult
+    {
+        auto Result = FLookGenerationAdmissionResult{};
+        auto Contract = FShadingModelContract{};
+        Result.Validation = Validate_LookDefinitionImpl(InDef, false, Contract);
+        Result.ResolvedGraph = Contract.SurfaceGraph;
+        if (NOT Result.Validation.Get_IsValid())
+        { Result.Reason = TEXT("Look authoring validation failed."); return Result; }
+
+        const auto NeedsRendererAdmission = Contract.SurfaceGraph != ECk_Usf_SurfaceGraph::Legacy
+            || Contract.SourceOverride || Contract.Model == ECk_Usf_ShadingModel::Toon;
+        if (NOT NeedsRendererAdmission)
+        {
+            Result.RequiredProfile = TEXT("Any");
+            Result.Admission = ELookGenerationAdmission::Compatible;
+            return Result;
+        }
+        const auto NeedsAdaptive = Requires_AdaptiveGBuffer(Contract.SurfaceGraph);
+        Result.RequiredProfile = NeedsAdaptive ? TEXT("Adaptive") : TEXT("Blendable");
+        const auto OtherProfile = InSupport.Enabled && InSupport.BlendableGBuffer == NeedsAdaptive;
+        auto AdmissionSupport = InSupport;
+        if (OtherProfile)
+        {
+            // Exclusion describes the current mode mismatch only. Blendable forces the effective
+            // closure count to one; it cannot certify the capacity of a future Adaptive process.
+            AdmissionSupport.BlendableGBuffer = NOT NeedsAdaptive;
+            if (NeedsAdaptive)
+            { AdmissionSupport.MaxClosuresPerPixel = FMath::Max(Get_RequiredSubstrateClosureCount(Contract.SurfaceGraph), AdmissionSupport.MaxClosuresPerPixel); }
+            // IsGlintEnabled is forced off by Blendable. Exclusion does not certify the
+            // feature policy/capacity of a future Adaptive startup; that gate remains strict.
+            if (NeedsAdaptive && Contract.AdaptiveBaseGlints)
+            { AdmissionSupport.GlintsEnabled = true; }
+        }
+        if (NOT Validate_SubstrateShadingModelSupport(Contract, AdmissionSupport, Result.Validation.Errors))
+        { Result.Reason = TEXT("The renderer lacks required look capabilities."); return Result; }
+        if (OtherProfile)
+        {
+            Result.Admission = ELookGenerationAdmission::OtherRendererProfile;
+            Result.Reason = FString::Printf(TEXT("Requires %s GBuffer; the selected renderer uses %s. Target-profile rendering and capacity remain unverified."),
+                *Result.RequiredProfile, InSupport.BlendableGBuffer ? TEXT("Blendable") : TEXT("Adaptive"));
+            return Result;
+        }
+        Result.Admission = ELookGenerationAdmission::Compatible;
+        return Result;
+    }
+
+    auto Classify_LookForGeneration(TObjectPtr<const UCkUsf_LookDefinition> InDef) -> FLookGenerationAdmissionResult
+    {
+        return Classify_LookForGeneration(InDef, Get_SubstrateShadingModelSupport());
     }
 }
 

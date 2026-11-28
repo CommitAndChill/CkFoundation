@@ -1,0 +1,24 @@
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_AmberHeroLeaf(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    Texture2D OpacityMap, SamplerState OpacityMapSampler,
+    float3 TintColor, float UVScale, float NormalStrength, float RoughnessScale,
+    float RoughnessBias, float TransmissionStrength)
+{
+    float2 UV = In.UV * max(UVScale, 0.001);
+    FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
+    O.BaseColor = saturate(CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV).rgb * max(TintColor, 0.0));
+    float DryTissue = dot(O.BaseColor, float3(0.2126, 0.7152, 0.0722));
+    O.BaseColor = DryTissue * float3(0.7, 0.6, 0.45);
+    O.Normal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV), NormalStrength, 0.0);
+    O.Roughness = clamp(CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r * max(RoughnessScale, 0.0) + RoughnessBias, 0.05, 1.0);
+    O.OpacityMask = CkUsf_SampleTexture2D(OpacityMap, OpacityMapSampler, UV).r;
+    // Artist-controlled thin-lamina transmission; no measured leaf thickness map claimed.
+    O.SubsurfaceColor = saturate(O.BaseColor * max(TransmissionStrength, 0.0) * 0.12);
+    O.Metallic = 0.0;
+    return O;
+}

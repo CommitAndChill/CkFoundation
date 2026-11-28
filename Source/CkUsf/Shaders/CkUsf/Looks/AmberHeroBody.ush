@@ -1,0 +1,20 @@
+// @ckusf surface_graph NativeRefractiveSlab
+#pragma once
+#include "/CkUsf/Looks/AmberSpecimen.ush"
+
+FCkUsf_TranslucentSlabOutput CkUsf_Look_AmberHeroBody(FCkUsf_SurfaceInput In,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    Texture2D ThicknessMap, SamplerState ThicknessMapSampler,
+    Texture2D TintMap, SamplerState TintMapSampler,
+    float3 TransmissionColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float Ior, float AbsorptionStrength,
+    float ReferenceThicknessCm, float ThicknessCm, float EdgeThicknessCm,
+    float TintVariation, float DistortionStrength)
+{
+    return CkUsf_Look_AmberSpecimen(In, NormalMap, NormalMapSampler,
+        RoughnessMap, RoughnessMapSampler, ThicknessMap, ThicknessMapSampler,
+        TintMap, TintMapSampler, TransmissionColor, UVScale, UVRotation,
+        NormalStrength, RoughnessScale, RoughnessBias, Ior, AbsorptionStrength,
+        ReferenceThicknessCm, ThicknessCm, EdgeThicknessCm, TintVariation, DistortionStrength);
+}

@@ -1,0 +1,64 @@
+// @ckusf surface_graph NativeTranslucentStack3
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_TranslucentStack3Output CkUsf_Look_OpticalOpalInternal(FCkUsf_SurfaceInput In,
+    Texture2D ColorMap, SamplerState ColorMapSampler,
+    Texture2D DomainMap, SamplerState DomainMapSampler,
+    Texture2D DomainNormalMap, SamplerState DomainNormalMapSampler,
+    Texture2D PolishNormalMap, SamplerState PolishNormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 MilkColor, float3 CoatTransmission, float3 BodyTransmission,
+    float UVScale, float UVRotation, float ScatteringStrength,
+    float DomainNormalStrength, float DomainRoughness, float FlashReflectance,
+    float CoatRoughness, float CoatNormalStrength, float CoatIor,
+    float CoatThicknessCm, float CoatReferenceThicknessCm,
+    float InternalReflectorThicknessCm, float InternalReferenceThicknessCm,
+    float BodyThicknessCm, float BodyReferenceThicknessCm, float RefractionStrength)
+{
+    float2 UV = saturate(CkUsf_LibraryUV(In.UV,UVScale,UVRotation));
+    float3 PotentialColor = saturate(CkUsf_SampleTexture2D(ColorMap,ColorMapSampler,UV).rgb);
+    float3 DomainData = CkUsf_SampleTexture2D(DomainMap,DomainMapSampler,UV).rgb;
+    float Finish = CkUsf_SampleTexture2D(RoughnessMap,RoughnessMapSampler,UV).r;
+    // Small optical domains sit within the larger, unchanged color formations.
+    // This is a texture-backed orientation field, not a color/coverage mask.
+    float2 OpticalDomainUV = frac(UV * 3.0);
+    float3 OpticalNormal = CkUsf_LibraryNormal(
+        CkUsf_SampleTexture2D(DomainNormalMap,DomainNormalMapSampler,OpticalDomainUV),DomainNormalStrength,UVRotation);
+
+    FCkUsf_TranslucentStack3Output O = CkUsf_DefaultTranslucentStack3();
+    float Ior = clamp(CoatIor,1.01,2.0);
+    O.ADiffuseAlbedo = 0.0;
+    O.AF0 = pow((Ior-1.0)/(Ior+1.0),2.0).xxx;
+    O.ARoughness = clamp(CoatRoughness,.01,.5);
+    O.ANormal = CkUsf_LibraryNormal(
+        CkUsf_SampleTexture2D(PolishNormalMap,PolishNormalMapSampler,UV),CoatNormalStrength,UVRotation);
+    O.ATransmittanceColor = clamp(CoatTransmission,.001,.999);
+    O.AReferenceThicknessCm = max(CoatReferenceThicknessCm,.0001);
+    O.AThicknessCm = clamp(CoatThicknessCm,.001,.1);
+
+    // Every region can reflect. Native incident-light/view evaluation reveals its
+    // textured color and optical orientation; no coverage or camera-color gate.
+    O.BDiffuseAlbedo = 0.0;
+    O.BF0 = saturate(PotentialColor * PotentialColor * max(FlashReflectance,0.0));
+    O.BRoughness = clamp(DomainRoughness*Finish/(31.0/255.0),.045,.5);
+    O.BNormal = OpticalNormal;
+    O.BTransmittanceColor = .999.xxx;
+    O.BReferenceThicknessCm = max(InternalReferenceThicknessCm,.0001);
+    O.BThicknessCm = clamp(InternalReflectorThicknessCm*lerp(.9,1.1,DomainData.g),.0001,.1);
+
+    // The medium has its own smooth normal, independent of the internal reflectors.
+    O.CDiffuseAlbedo = saturate(PotentialColor * MilkColor * max(ScatteringStrength,0.0));
+    O.CF0 = .002.xxx;
+    // The silica interface is smooth; milkiness belongs to volume transport.
+    O.CRoughness = .025;
+    O.CNormal = float3(0.0,0.0,1.0);
+    O.CTransmittanceColor = clamp(BodyTransmission,.001,.999);
+    O.CReferenceThicknessCm = max(BodyReferenceThicknessCm,.0001);
+    O.CThicknessCm = clamp(BodyThicknessCm,.001,10.0);
+    O.RefractionStrength = clamp(RefractionStrength,1.0,1.1);
+    O.AEmissiveColor = 0.0;
+    O.BEmissiveColor = 0.0;
+    O.CEmissiveColor = 0.0;
+    return O;
+}

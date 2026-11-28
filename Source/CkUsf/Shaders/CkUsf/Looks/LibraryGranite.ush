@@ -1,0 +1,21 @@
+// @ckusf shading_model DefaultLit
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_LibraryGranite(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TintColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float MineralContrast, float Polish, float DebugView)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float4 Color = CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV);
+    FCkUsf_SurfaceOutput O = CkUsf_LibrarySurface(Color,
+        CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV),
+        CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r,
+        TintColor, NormalStrength, RoughnessScale, RoughnessBias, UVRotation);
+    O.BaseColor = saturate((O.BaseColor - 0.5) * max(MineralContrast, 0.0) + 0.5);
+    O.Roughness = lerp(O.Roughness, max(0.10, O.Roughness * 0.4), saturate(Polish));
+    return CkUsf_LibraryInspect(O, DebugView);
+}

@@ -1,0 +1,48 @@
+// @ckusf surface_graph SimpleClearCoat
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+// CC0 ambientCG Fabric004: crossed-tow carbon-tagged weave. Resin is authored; carbon remains dielectric.
+// Source maps and licenses are pinned by the matching Batch3/Batch7 manifest.
+FCkUsf_CoatedOutput CkUsf_Look_NativeResinCarbon(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TintColor,
+    float UVScale,
+    float UVRotation,
+    float NormalStrength,
+    float RoughnessScale,
+    float RoughnessBias,
+    float DebugView,
+    float CoatWeight,
+    float CoatRoughness,
+    float TowContrast)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float3 Color = CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV).rgb;
+    float Roughness = CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r;
+    FCkUsf_CoatedOutput O = CkUsf_DefaultCoated();
+    O.Normal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV),
+        NormalStrength, UVRotation);
+    O.Roughness = clamp(Roughness * max(RoughnessScale, 0.0) + RoughnessBias, 0.045, 1.0);
+    O.DiffuseAlbedo = pow(max(saturate(Color * max(TintColor, 0.0)), 1e-5), max(TowContrast, 0.01));
+    O.F0 = float3(0.04, 0.04, 0.04);
+    O.CoatCoverage = saturate(CoatWeight);
+    O.CoatRoughness = clamp(CoatRoughness, 0.045, 1.0);
+    if (DebugView > 0.5)
+    {
+        float3 Inspection = O.DiffuseAlbedo;
+        if (DebugView > 1.5 && DebugView < 2.5)
+        { Inspection = O.Normal * 0.5 + 0.5; }
+        if (DebugView > 2.5 && DebugView < 3.5)
+        { Inspection = O.Roughness.xxx; }
+        if (DebugView > 3.5)
+        { Inspection = O.F0; }
+        O.DiffuseAlbedo = 0.0;
+        O.F0 = 0.0;
+        O.EmissiveColor = Inspection;
+        O.CoatCoverage = 0.0;
+    }
+    return O;
+}

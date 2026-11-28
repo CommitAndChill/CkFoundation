@@ -1,0 +1,36 @@
+// @ckusf shading_model ClearCoat
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_LibraryMosaic(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    Texture2D TileMask, SamplerState TileMaskSampler,
+    float3 TintColor, float3 GroutColor, float UVScale, float UVRotation,
+    float NormalStrength, float RoughnessScale, float RoughnessBias,
+    float GroutNormalStrength, float GroutRoughness, float GlazeWeight, float GlazeRoughness,
+    float DebugView)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float Tile = saturate(CkUsf_SampleTexture2D(TileMask, TileMaskSampler, UV).r);
+    float4 Color = CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV);
+    float Roughness = CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r;
+    FCkUsf_SurfaceOutput O = CkUsf_LibrarySurface(Color,
+        CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV), Roughness,
+        TintColor, lerp(GroutNormalStrength, NormalStrength, Tile),
+        RoughnessScale, RoughnessBias, UVRotation);
+    float Grain = dot(Color.rgb, float3(0.2126, 0.7152, 0.0722));
+    float3 Grout = max(GroutColor, 0.0) * (0.85 + Grain * 0.3);
+    O.BaseColor = lerp(Grout, O.BaseColor, Tile);
+    O.Roughness = lerp(clamp(GroutRoughness + (Roughness - 0.5) * 0.12, 0.35, 1.0), O.Roughness, Tile);
+    O.ClearCoat = Tile * saturate(GlazeWeight);
+    O.ClearCoatRoughness = clamp(GlazeRoughness, 0.045, 1.0);
+    // Optional inspection: source tile mask (5) or masked glaze weight (6).
+    if (DebugView > 4.5)
+    {
+        O.BaseColor = (DebugView < 5.5 ? Tile : O.ClearCoat).xxx;
+        DebugView = 1.0;
+    }
+    return CkUsf_LibraryInspect(O, DebugView);
+}

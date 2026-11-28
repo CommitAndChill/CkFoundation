@@ -1,0 +1,52 @@
+// @ckusf surface_graph AdaptiveVertical
+#pragma once
+#include "/CkUsf/OpticalPair.ush"
+
+FCkUsf_AdaptiveVerticalOutput CkUsf_Look_OpticalOpalGlints(FCkUsf_SurfaceInput In,
+    Texture2D ColorMap, SamplerState ColorMapSampler,
+    Texture2D DomainMap, SamplerState DomainMapSampler,
+    Texture2D DomainNormalMap, SamplerState DomainNormalMapSampler,
+    Texture2D PolishNormalMap, SamplerState PolishNormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 MilkColor, float UVScale, float UVRotation, float BodyColorMix,
+    float DetailFilterMip, float InternalDepthUV, float InternalLayerMix,
+    float DomainNormalStrength, float DomainRoughness,
+    float FlashReflectance, float FlashStrength, float FlashCoverage,
+    float WavelengthShift, float CoatRoughness, float CoatNormalStrength,
+    float LayerThicknessCm, float GlintDensity, float GlintUVScale)
+{
+    float2 SurfaceUV = CkUsf_LibraryUV(In.UV,UVScale,UVRotation);
+    float3 View = CkUsf_ViewDirTS(In);
+    float3 Ray = refract(-View,float3(0.0,0.0,1.0),1.0/1.45);
+    float2 Offset = Ray.xy/max(abs(Ray.z),.5)*clamp(InternalDepthUV,0.0,.025);
+    float2 NearUV = saturate(SurfaceUV+Offset);
+    float2 DeepUV = saturate((SurfaceUV-.5)*.93+.5+Offset*1.8+float2(.07,-.05));
+    float Mip = clamp(DetailFilterMip,0.0,5.0);
+    float3 NearColor = ColorMap.SampleLevel(ColorMapSampler,NearUV,Mip).rgb;
+    float3 DeepColor = ColorMap.SampleLevel(ColorMapSampler,DeepUV,Mip+2.0).rgb;
+    float3 Data = CkUsf_SampleTexture2D(DomainMap,DomainMapSampler,NearUV).rgb;
+    float Coverage = saturate(Data.r*clamp(FlashCoverage,0.0,2.0))*saturate(FlashStrength);
+    float3 MineralTint = pow(saturate(NearColor/max(max(NearColor.r,NearColor.g),max(NearColor.b,.001))),1.6);
+    float3 Spectrum = CkUsf_OpalSpectrum(Data.b*.75+(1.0-saturate(View.z))*.2+WavelengthShift);
+    float3 Flash = saturate(lerp(MineralTint,Spectrum,.15));
+    float Roughness = CkUsf_SampleTexture2D(RoughnessMap,RoughnessMapSampler,NearUV).r;
+    float3 MineralBody = lerp(NearColor,DeepColor,saturate(InternalLayerMix));
+
+    FCkUsf_AdaptiveVerticalOutput O = CkUsf_DefaultAdaptiveVertical();
+    O.ThicknessCm = clamp(LayerThicknessCm,.001,.2);
+    O.ADiffuseAlbedo = 0.0;
+    O.AF0 = .04;
+    O.ATransmittanceColor = pow(float3(.995,.997,.998),O.ThicknessCm/.04);
+    O.ANormal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(PolishNormalMap,PolishNormalMapSampler,SurfaceUV),CoatNormalStrength,UVRotation);
+    O.ARoughness = clamp(CoatRoughness,.02,.6);
+    O.BDiffuseAlbedo = saturate(lerp(MilkColor,MineralBody,saturate(BodyColorMix)));
+    O.BF0 = lerp(.035.xxx,Flash*clamp(FlashReflectance,.04,.75),Coverage);
+    O.BNormal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(DomainNormalMap,DomainNormalMapSampler,NearUV),clamp(DomainNormalStrength,0.0,1.0),UVRotation);
+    O.BRoughness = clamp(DomainRoughness+(Roughness-.30)*.3,.06,.6);
+    O.BGlintValue = lerp(1.0,clamp(GlintDensity,0.0,1.0),Coverage);
+    // Native glints need continuous screen-space derivatives of the original mesh UVs.
+    O.BGlintUV = SurfaceUV*clamp(GlintUVScale,.001,1000.0);
+    O.AEmissiveColor = 0.0;
+    O.BEmissiveColor = 0.0;
+    return O;
+}

@@ -1,0 +1,31 @@
+// @ckusf shading_model ThinTranslucent
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_LibraryGlass(FCkUsf_SurfaceInput In,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TintColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float SpecularLevel,
+    float TransmissionAmount, float GlassCoverage, float Ior, float DebugView)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
+    O.BaseColor = 0.0;
+    O.ClearCoat = 0.0;
+    O.Normal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV), NormalStrength, UVRotation);
+    O.Roughness = clamp(CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r * max(RoughnessScale, 0.0) + RoughnessBias, 0.045, 1.0);
+    O.Specular = saturate(SpecularLevel);
+    // ThinTranslucent opacity covers the transmission with an opaque top surface.
+    O.Opacity = 0.0;
+    O.ThinTransmittance = saturate(TintColor * TransmissionAmount);
+    O.ThinSurfaceCoverage = saturate(GlassCoverage);
+    O.Refraction = clamp(Ior, 1.0, 1.6);
+    if (DebugView > 0.5)
+    {
+        O.BaseColor = TintColor;
+        O.Opacity = 1.0;
+        O.ThinTransmittance = 0.0;
+    }
+    return CkUsf_LibraryInspect(O, DebugView);
+}

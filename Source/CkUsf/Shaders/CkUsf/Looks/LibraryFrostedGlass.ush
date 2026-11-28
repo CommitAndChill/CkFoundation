@@ -1,0 +1,37 @@
+// @ckusf shading_model ThinTranslucent
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+#include "/CkUsf/SurfaceSceneColor.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_LibraryFrostedGlass(FCkUsf_SurfaceInput In,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TintColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float SpecularLevel,
+    float TransmissionAmount, float GlassCoverage, float BlurRadius, float DebugView)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
+    O.BaseColor = 0.0;
+    O.ClearCoat = 0.0;
+    O.Normal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV), NormalStrength, UVRotation);
+    float Finish = CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r;
+    O.Roughness = clamp(Finish * max(RoughnessScale, 0.0) + RoughnessBias, 0.045, 1.0);
+    O.Specular = saturate(SpecularLevel);
+    // Replace the sharp opaque background copy, then retain the native reflective interface.
+    O.Opacity = 1.0;
+    O.ThinTransmittance = 1.0;
+    O.ThinSurfaceCoverage = saturate(GlassCoverage);
+    O.Refraction = 1.0;
+#if defined(CK_USF_SURFACE_SCENE_COLOR) && CK_USF_SURFACE_SCENE_COLOR && PIXELSHADER
+    O.EmissiveColor = CkUsf_BlurSurfaceSceneColor(In.SurfaceScreenUV, In.SceneColor.rgb,
+        max(BlurRadius, 0.0) * lerp(0.85, 1.15, Finish)) * max(TintColor, 0.0) * saturate(TransmissionAmount);
+#endif
+    if (DebugView > 0.5)
+    {
+        O.BaseColor = TintColor;
+        O.Opacity = 1.0;
+        O.ThinTransmittance = 0.0;
+    }
+    return CkUsf_LibraryInspect(O, DebugView);
+}

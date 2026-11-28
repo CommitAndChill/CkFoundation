@@ -1,0 +1,22 @@
+// @ckusf shading_model DefaultLit
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_LibraryCopper(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TintColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float FinishVariation, float DebugView)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float4 ColorSample = CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV);
+    FCkUsf_SurfaceOutput O = CkUsf_LibrarySurface(ColorSample,
+        CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV),
+        CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r,
+        TintColor, NormalStrength, RoughnessScale, RoughnessBias, UVRotation);
+    float Finish = clamp(dot(ColorSample.rgb, float3(0.2126, 0.7152, 0.0722)) * 4.0, 0.5, 1.5);
+    O.BaseColor = saturate(TintColor * lerp(1.0, Finish, saturate(FinishVariation)));
+    O.Metallic = 1.0;
+    return CkUsf_LibraryInspect(O, DebugView);
+}

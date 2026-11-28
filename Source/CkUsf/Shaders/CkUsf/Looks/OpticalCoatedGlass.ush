@@ -1,0 +1,28 @@
+// @ckusf surface_graph NativeTranslucentSlab
+#pragma once
+#include "/CkUsf/OpticalPair.ush"
+
+FCkUsf_TranslucentSlabOutput CkUsf_Look_OpticalCoatedGlass(FCkUsf_SurfaceInput In,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    Texture2D CoatingMap, SamplerState CoatingMapSampler,
+    float3 TransmissionColor, float UVScale, float UVRotation, float NormalStrength,
+    float PolishRoughness, float GlassIor, float CoatingIor, float CoatingThicknessNm,
+    float CoatingVariationNm, float CoatingStrength, float ReferenceThicknessCm, float GlassThicknessCm)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV,UVScale,UVRotation);
+    FCkUsf_TranslucentSlabOutput O = CkUsf_DefaultTranslucentSlab();
+    O.Normal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(NormalMap,NormalMapSampler,UV),NormalStrength,UVRotation);
+    float NoV = saturate(abs(dot(CkUsf_ViewDirTS(In),O.Normal)));
+    float Thickness = CoatingThicknessNm+(CkUsf_SampleTexture2D(CoatingMap,CoatingMapSampler,UV).r-.5)*CoatingVariationNm;
+    float F0 = pow((clamp(GlassIor,1.01,2.4)-1.0)/(clamp(GlassIor,1.01,2.4)+1.0),2.0);
+    O.F0 = lerp(F0.xxx,CkUsf_CoatingF0(NoV,GlassIor,CoatingIor,Thickness),saturate(CoatingStrength));
+    O.Roughness = clamp(PolishRoughness+CkUsf_SampleTexture2D(RoughnessMap,RoughnessMapSampler,UV).r*.15,.02,.7);
+    O.TransmittanceColor = clamp(TransmissionColor,.001,.999);
+    O.ReferenceThicknessCm = max(ReferenceThicknessCm,.001);
+    O.ThicknessCm = max(GlassThicknessCm,.001);
+    O.RefractionStrength = 1.0;
+    O.DiffuseAlbedo = 0.0;
+    O.EmissiveColor = 0.0;
+    return O;
+}

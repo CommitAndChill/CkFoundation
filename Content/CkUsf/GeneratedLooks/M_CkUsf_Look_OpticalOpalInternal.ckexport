@@ -1,0 +1,1038 @@
+{
+	"material": "M_CkUsf_Look_OpticalOpalInternal",
+	"packagePath": "/CkFoundation/CkUsf/GeneratedLooks/M_CkUsf_Look_OpticalOpalInternal",
+	"_meta":
+	{
+		"format": "CkAssetExporter sidecar - UTF-8 JSON export of the sibling .uasset of the same name",
+		"sourceHash": "d3e74460534380c01449f1e4dccf3e0a",
+		"exporterVersion": 3
+	},
+	"blendMode": "BLEND_TranslucentColoredTransmittance",
+	"twoSided": false,
+	"unlit": false,
+	"shadingModel": "MSM_DefaultLit",
+	"domain": "MD_Surface",
+	"connectedOutputs": [],
+	"expressions":
+	{
+		"CameraVectorWS": 1,
+		"Custom": 1,
+		"PixelDepth": 1,
+		"ScalarParameter": 16,
+		"SubstrateSlabBSDF": 3,
+		"SubstrateTransmittanceToMFP": 3,
+		"SubstrateVerticalLayering": 2,
+		"TextureCoordinate": 1,
+		"TextureObjectParameter": 5,
+		"Time": 1,
+		"VectorParameter": 3,
+		"VertexColor": 1,
+		"VertexNormalWS": 1,
+		"VertexTangentWS": 1,
+		"WorldPosition": 1
+	},
+	"graph":
+	{
+		"nodes": [
+			{
+				"id": 0,
+				"class": "Custom",
+				"name": "MaterialExpressionCustom_0",
+				"inputs": [
+					{
+						"index": 0,
+						"name": "WorldPosition",
+						"node": 1,
+						"output": 0,
+						"mask": "rgb"
+					},
+					{
+						"index": 1,
+						"name": "CameraVector",
+						"node": 2,
+						"output": 0
+					},
+					{
+						"index": 2,
+						"name": "VertexNormal",
+						"node": 3,
+						"output": 0
+					},
+					{
+						"index": 3,
+						"name": "VertexTangent",
+						"node": 4,
+						"output": 0
+					},
+					{
+						"index": 4,
+						"name": "PixelDepth",
+						"node": 5,
+						"output": 0,
+						"mask": "r"
+					},
+					{
+						"index": 5,
+						"name": "VertexColor",
+						"node": 6,
+						"output": 0,
+						"mask": "rgb"
+					},
+					{
+						"index": 6,
+						"name": "ColorMap",
+						"node": 7,
+						"output": 0
+					},
+					{
+						"index": 7,
+						"name": "DomainMap",
+						"node": 8,
+						"output": 0
+					},
+					{
+						"index": 8,
+						"name": "DomainNormalMap",
+						"node": 9,
+						"output": 0
+					},
+					{
+						"index": 9,
+						"name": "PolishNormalMap",
+						"node": 10,
+						"output": 0
+					},
+					{
+						"index": 10,
+						"name": "RoughnessMap",
+						"node": 11,
+						"output": 0
+					},
+					{
+						"index": 11,
+						"name": "MilkColor",
+						"node": 12,
+						"output": 0,
+						"mask": "rgb"
+					},
+					{
+						"index": 12,
+						"name": "CoatTransmission",
+						"node": 13,
+						"output": 0,
+						"mask": "rgb"
+					},
+					{
+						"index": 13,
+						"name": "BodyTransmission",
+						"node": 14,
+						"output": 0,
+						"mask": "rgb"
+					},
+					{
+						"index": 14,
+						"name": "UVScale",
+						"node": 15,
+						"output": 0
+					},
+					{
+						"index": 15,
+						"name": "UVRotation",
+						"node": 16,
+						"output": 0
+					},
+					{
+						"index": 16,
+						"name": "ScatteringStrength",
+						"node": 17,
+						"output": 0
+					},
+					{
+						"index": 17,
+						"name": "DomainNormalStrength",
+						"node": 18,
+						"output": 0
+					},
+					{
+						"index": 18,
+						"name": "DomainRoughness",
+						"node": 19,
+						"output": 0
+					},
+					{
+						"index": 19,
+						"name": "FlashReflectance",
+						"node": 20,
+						"output": 0
+					},
+					{
+						"index": 20,
+						"name": "CoatRoughness",
+						"node": 21,
+						"output": 0
+					},
+					{
+						"index": 21,
+						"name": "CoatNormalStrength",
+						"node": 22,
+						"output": 0
+					},
+					{
+						"index": 22,
+						"name": "CoatIor",
+						"node": 23,
+						"output": 0
+					},
+					{
+						"index": 23,
+						"name": "CoatThicknessCm",
+						"node": 24,
+						"output": 0
+					},
+					{
+						"index": 24,
+						"name": "CoatReferenceThicknessCm",
+						"node": 25,
+						"output": 0
+					},
+					{
+						"index": 25,
+						"name": "InternalReflectorThicknessCm",
+						"node": 26,
+						"output": 0
+					},
+					{
+						"index": 26,
+						"name": "InternalReferenceThicknessCm",
+						"node": 27,
+						"output": 0
+					},
+					{
+						"index": 27,
+						"name": "BodyThicknessCm",
+						"node": 28,
+						"output": 0
+					},
+					{
+						"index": 28,
+						"name": "BodyReferenceThicknessCm",
+						"node": 29,
+						"output": 0
+					},
+					{
+						"index": 29,
+						"name": "RefractionStrength",
+						"node": 30,
+						"output": 0
+					},
+					{
+						"index": 30,
+						"name": "Time",
+						"node": 31,
+						"output": 0
+					},
+					{
+						"index": 31,
+						"name": "UV",
+						"node": 32,
+						"output": 0
+					}
+				],
+				"outputs": [
+					"return",
+					"CkUsf_AF0",
+					"CkUsf_ARoughness",
+					"CkUsf_ANormal",
+					"CkUsf_AEmissiveColor",
+					"CkUsf_BDiffuseAlbedo",
+					"CkUsf_BF0",
+					"CkUsf_BRoughness",
+					"CkUsf_BNormal",
+					"CkUsf_BEmissiveColor",
+					"CkUsf_CDiffuseAlbedo",
+					"CkUsf_CF0",
+					"CkUsf_CRoughness",
+					"CkUsf_CNormal",
+					"CkUsf_CEmissiveColor",
+					"CkUsf_ATransmittanceColor",
+					"CkUsf_AReferenceThicknessCm",
+					"CkUsf_AThicknessCm",
+					"CkUsf_BTransmittanceColor",
+					"CkUsf_BReferenceThicknessCm",
+					"CkUsf_BThicknessCm",
+					"CkUsf_CTransmittanceColor",
+					"CkUsf_CReferenceThicknessCm",
+					"CkUsf_CThicknessCm",
+					"CkUsf_RefractionStrength"
+				],
+				"props":
+				{
+					"Code": "FCkUsf_SurfaceInput In = CkUsf_DefaultInput();\nIn.Time = Time;\nIn.UV = UV;\nIn.WorldPosition = WorldPosition;\nIn.CameraVector = CameraVector;\nIn.VertexNormal = VertexNormal;\nIn.VertexTangent = VertexTangent;\nIn.PixelDepth = PixelDepth;\nIn.VertexColor = VertexColor;\nFCkUsf_TranslucentStack3Output O = CkUsf_Look_OpticalOpalInternal(In, ColorMap, ColorMapSampler, DomainMap, DomainMapSampler, DomainNormalMap, DomainNormalMapSampler, PolishNormalMap, PolishNormalMapSampler, RoughnessMap, RoughnessMapSampler, MilkColor.rgb, CoatTransmission.rgb, BodyTransmission.rgb, UVScale, UVRotation, ScatteringStrength, DomainNormalStrength, DomainRoughness, FlashReflectance, CoatRoughness, CoatNormalStrength, CoatIor, CoatThicknessCm, CoatReferenceThicknessCm, InternalReflectorThicknessCm, InternalReferenceThicknessCm, BodyThicknessCm, BodyReferenceThicknessCm, RefractionStrength);\nCkUsf_AF0 = O.AF0;\nCkUsf_ARoughness = O.ARoughness;\nCkUsf_ANormal = O.ANormal;\nCkUsf_AEmissiveColor = O.AEmissiveColor;\nCkUsf_BDiffuseAlbedo = O.BDiffuseAlbedo;\nCkUsf_BF0 = O.BF0;\nCkUsf_BRoughness = O.BRoughness;\nCkUsf_BNormal = O.BNormal;\nCkUsf_BEmissiveColor = O.BEmissiveColor;\nCkUsf_CDiffuseAlbedo = O.CDiffuseAlbedo;\nCkUsf_CF0 = O.CF0;\nCkUsf_CRoughness = O.CRoughness;\nCkUsf_CNormal = O.CNormal;\nCkUsf_CEmissiveColor = O.CEmissiveColor;\nCkUsf_ATransmittanceColor = clamp(O.ATransmittanceColor, 0.0001, 0.9999);\nCkUsf_AReferenceThicknessCm = max(O.AReferenceThicknessCm, 0.0001);\nCkUsf_AThicknessCm = max(O.AThicknessCm, 0.0001);\nCkUsf_BTransmittanceColor = clamp(O.BTransmittanceColor, 0.0001, 0.9999);\nCkUsf_BReferenceThicknessCm = max(O.BReferenceThicknessCm, 0.0001);\nCkUsf_BThicknessCm = max(O.BThicknessCm, 0.0001);\nCkUsf_CTransmittanceColor = clamp(O.CTransmittanceColor, 0.0001, 0.9999);\nCkUsf_CReferenceThicknessCm = max(O.CReferenceThicknessCm, 0.0001);\nCkUsf_CThicknessCm = max(O.CThicknessCm, 0.0001);\nCkUsf_RefractionStrength = clamp(O.RefractionStrength, 1.0, 1.1);\nreturn O.ADiffuseAlbedo;",
+					"IncludeFilePaths": [
+						"/CkUsf/Looks/OpticalOpalInternal.ush"
+					]
+				}
+			},
+			{
+				"id": 1,
+				"class": "WorldPosition",
+				"name": "MaterialExpressionWorldPosition_0",
+				"outputs": [
+					"XYZ",
+					"XY",
+					"Z"
+				]
+			},
+			{
+				"id": 2,
+				"class": "CameraVectorWS",
+				"name": "MaterialExpressionCameraVectorWS_0"
+			},
+			{
+				"id": 3,
+				"class": "VertexNormalWS",
+				"name": "MaterialExpressionVertexNormalWS_0"
+			},
+			{
+				"id": 4,
+				"class": "VertexTangentWS",
+				"name": "MaterialExpressionVertexTangentWS_0"
+			},
+			{
+				"id": 5,
+				"class": "PixelDepth",
+				"name": "MaterialExpressionPixelDepth_0"
+			},
+			{
+				"id": 6,
+				"class": "VertexColor",
+				"name": "MaterialExpressionVertexColor_0",
+				"outputs": [
+					"None",
+					"None",
+					"None",
+					"None",
+					"None"
+				]
+			},
+			{
+				"id": 7,
+				"class": "TextureObjectParameter",
+				"name": "MaterialExpressionTextureObjectParameter_0",
+				"props":
+				{
+					"ParameterName": "ColorMap",
+					"Group": "Textures",
+					"SortPriority": 0,
+					"Texture": "/CkFoundation/CkUsf/Textures/Optical/OpalInternal/T_OpalInternal_OpalColor.T_OpalInternal_OpalColor"
+				}
+			},
+			{
+				"id": 8,
+				"class": "TextureObjectParameter",
+				"name": "MaterialExpressionTextureObjectParameter_1",
+				"props":
+				{
+					"ParameterName": "DomainMap",
+					"Group": "Textures",
+					"SortPriority": 10,
+					"Texture": "/CkFoundation/CkUsf/Textures/Optical/OpalInternal/T_OpalInternal_OpalDomains.T_OpalInternal_OpalDomains",
+					"SamplerType": "SAMPLERTYPE_Masks"
+				}
+			},
+			{
+				"id": 9,
+				"class": "TextureObjectParameter",
+				"name": "MaterialExpressionTextureObjectParameter_2",
+				"props":
+				{
+					"ParameterName": "DomainNormalMap",
+					"Group": "Textures",
+					"SortPriority": 20,
+					"Texture": "/CkFoundation/CkUsf/Textures/Optical/OpalInternal/T_OpalInternal_OpalDomainNormal.T_OpalInternal_OpalDomainNormal",
+					"SamplerType": "SAMPLERTYPE_Normal"
+				}
+			},
+			{
+				"id": 10,
+				"class": "TextureObjectParameter",
+				"name": "MaterialExpressionTextureObjectParameter_3",
+				"props":
+				{
+					"ParameterName": "PolishNormalMap",
+					"Group": "Textures",
+					"SortPriority": 30,
+					"Texture": "/CkFoundation/CkUsf/Textures/Optical/OpalInternal/T_OpalInternal_OpalPolishNormal.T_OpalInternal_OpalPolishNormal",
+					"SamplerType": "SAMPLERTYPE_Normal"
+				}
+			},
+			{
+				"id": 11,
+				"class": "TextureObjectParameter",
+				"name": "MaterialExpressionTextureObjectParameter_4",
+				"props":
+				{
+					"ParameterName": "RoughnessMap",
+					"Group": "Textures",
+					"SortPriority": 40,
+					"Texture": "/CkFoundation/CkUsf/Textures/Optical/OpalInternal/T_OpalInternal_OpalRoughness.T_OpalInternal_OpalRoughness",
+					"SamplerType": "SAMPLERTYPE_Masks"
+				}
+			},
+			{
+				"id": 12,
+				"class": "VectorParameter",
+				"name": "MaterialExpressionVectorParameter_0",
+				"outputs": [
+					"RGB",
+					"R",
+					"G",
+					"B",
+					"A",
+					"RGBA"
+				],
+				"props":
+				{
+					"DefaultValue": "(R=0.250000,G=0.270000,B=0.240000,A=1.000000)",
+					"ParameterName": "MilkColor",
+					"Group": "Surface",
+					"SortPriority": 0
+				}
+			},
+			{
+				"id": 13,
+				"class": "VectorParameter",
+				"name": "MaterialExpressionVectorParameter_1",
+				"outputs": [
+					"RGB",
+					"R",
+					"G",
+					"B",
+					"A",
+					"RGBA"
+				],
+				"props":
+				{
+					"DefaultValue": "(R=0.995000,G=0.998000,B=0.999000,A=1.000000)",
+					"ParameterName": "CoatTransmission",
+					"Group": "Surface",
+					"SortPriority": 10
+				}
+			},
+			{
+				"id": 14,
+				"class": "VectorParameter",
+				"name": "MaterialExpressionVectorParameter_2",
+				"outputs": [
+					"RGB",
+					"R",
+					"G",
+					"B",
+					"A",
+					"RGBA"
+				],
+				"props":
+				{
+					"DefaultValue": "(R=0.400000,G=0.440000,B=0.480000,A=1.000000)",
+					"ParameterName": "BodyTransmission",
+					"Group": "Surface",
+					"SortPriority": 20
+				}
+			},
+			{
+				"id": 15,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_0",
+				"props":
+				{
+					"DefaultValue": 1,
+					"ParameterName": "UVScale",
+					"Group": "Surface",
+					"SortPriority": 0
+				}
+			},
+			{
+				"id": 16,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_1",
+				"props":
+				{
+					"ParameterName": "UVRotation",
+					"Group": "Surface",
+					"SortPriority": 10
+				}
+			},
+			{
+				"id": 17,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_2",
+				"props":
+				{
+					"DefaultValue": 0.34999999403953552,
+					"ParameterName": "ScatteringStrength",
+					"Group": "Surface",
+					"SortPriority": 20
+				}
+			},
+			{
+				"id": 18,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_3",
+				"props":
+				{
+					"DefaultValue": 1,
+					"ParameterName": "DomainNormalStrength",
+					"Group": "Surface",
+					"SortPriority": 30
+				}
+			},
+			{
+				"id": 19,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_4",
+				"props":
+				{
+					"DefaultValue": 0.11999999731779099,
+					"ParameterName": "DomainRoughness",
+					"Group": "Surface",
+					"SortPriority": 40
+				}
+			},
+			{
+				"id": 20,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_5",
+				"props":
+				{
+					"DefaultValue": 0.30000001192092896,
+					"ParameterName": "FlashReflectance",
+					"Group": "Surface",
+					"SortPriority": 50
+				}
+			},
+			{
+				"id": 21,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_6",
+				"props":
+				{
+					"DefaultValue": 0.02500000037252903,
+					"ParameterName": "CoatRoughness",
+					"Group": "Surface",
+					"SortPriority": 60
+				}
+			},
+			{
+				"id": 22,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_7",
+				"props":
+				{
+					"ParameterName": "CoatNormalStrength",
+					"Group": "Surface",
+					"SortPriority": 70
+				}
+			},
+			{
+				"id": 23,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_8",
+				"props":
+				{
+					"DefaultValue": 1.4500000476837158,
+					"ParameterName": "CoatIor",
+					"Group": "Surface",
+					"SortPriority": 80
+				}
+			},
+			{
+				"id": 24,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_9",
+				"props":
+				{
+					"DefaultValue": 0.029999999329447746,
+					"ParameterName": "CoatThicknessCm",
+					"Group": "Surface",
+					"SortPriority": 90
+				}
+			},
+			{
+				"id": 25,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_10",
+				"props":
+				{
+					"DefaultValue": 0.10000000149011612,
+					"ParameterName": "CoatReferenceThicknessCm",
+					"Group": "Surface",
+					"SortPriority": 100
+				}
+			},
+			{
+				"id": 26,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_11",
+				"props":
+				{
+					"DefaultValue": 0.0099999997764825821,
+					"ParameterName": "InternalReflectorThicknessCm",
+					"Group": "Surface",
+					"SortPriority": 110
+				}
+			},
+			{
+				"id": 27,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_12",
+				"props":
+				{
+					"DefaultValue": 0.0099999997764825821,
+					"ParameterName": "InternalReferenceThicknessCm",
+					"Group": "Surface",
+					"SortPriority": 120
+				}
+			},
+			{
+				"id": 28,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_13",
+				"props":
+				{
+					"DefaultValue": 4,
+					"ParameterName": "BodyThicknessCm",
+					"Group": "Surface",
+					"SortPriority": 130
+				}
+			},
+			{
+				"id": 29,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_14",
+				"props":
+				{
+					"DefaultValue": 4,
+					"ParameterName": "BodyReferenceThicknessCm",
+					"Group": "Surface",
+					"SortPriority": 140
+				}
+			},
+			{
+				"id": 30,
+				"class": "ScalarParameter",
+				"name": "MaterialExpressionScalarParameter_15",
+				"props":
+				{
+					"DefaultValue": 1,
+					"ParameterName": "RefractionStrength",
+					"Group": "Surface",
+					"SortPriority": 150
+				}
+			},
+			{
+				"id": 31,
+				"class": "Time",
+				"name": "MaterialExpressionTime_0"
+			},
+			{
+				"id": 32,
+				"class": "TextureCoordinate",
+				"name": "MaterialExpressionTextureCoordinate_0"
+			},
+			{
+				"id": 33,
+				"class": "SubstrateSlabBSDF",
+				"name": "MaterialExpressionSubstrateSlabBSDF_0",
+				"desc": "CkUsf_Stack3OpticalSurfaceGraph",
+				"inputs": [
+					{
+						"index": 0,
+						"name": "Diffuse Albedo",
+						"node": 0,
+						"output": 0
+					},
+					{
+						"index": 1,
+						"name": "F0",
+						"node": 0,
+						"output": 1
+					},
+					{
+						"index": 3,
+						"name": "Roughness",
+						"node": 0,
+						"output": 2
+					},
+					{
+						"index": 5,
+						"name": "Normal",
+						"node": 0,
+						"output": 3
+					},
+					{
+						"index": 7,
+						"name": "SSS MFP",
+						"node": 34,
+						"output": 0
+					},
+					{
+						"index": 10,
+						"name": "Emissive Color",
+						"node": 0,
+						"output": 4
+					}
+				],
+				"props":
+				{
+					"SubSurfaceType": "MSS_SimpleVolume"
+				}
+			},
+			{
+				"id": 34,
+				"class": "SubstrateTransmittanceToMFP",
+				"name": "MaterialExpressionSubstrateTransmittanceToMFP_0",
+				"desc": "CkUsf_Stack3OpticalSurfaceGraph",
+				"inputs": [
+					{
+						"index": 0,
+						"name": "TransmittanceColor",
+						"node": 0,
+						"output": 15
+					},
+					{
+						"index": 1,
+						"name": "Thickness",
+						"node": 0,
+						"output": 16
+					}
+				],
+				"outputs": [
+					"MFP",
+					"Thickness"
+				]
+			},
+			{
+				"id": 35,
+				"class": "SubstrateSlabBSDF",
+				"name": "MaterialExpressionSubstrateSlabBSDF_1",
+				"desc": "CkUsf_Stack3OpticalSurfaceGraph",
+				"inputs": [
+					{
+						"index": 0,
+						"name": "Diffuse Albedo",
+						"node": 0,
+						"output": 5
+					},
+					{
+						"index": 1,
+						"name": "F0",
+						"node": 0,
+						"output": 6
+					},
+					{
+						"index": 3,
+						"name": "Roughness",
+						"node": 0,
+						"output": 7
+					},
+					{
+						"index": 5,
+						"name": "Normal",
+						"node": 0,
+						"output": 8
+					},
+					{
+						"index": 7,
+						"name": "SSS MFP",
+						"node": 36,
+						"output": 0
+					},
+					{
+						"index": 10,
+						"name": "Emissive Color",
+						"node": 0,
+						"output": 9
+					}
+				],
+				"props":
+				{
+					"SubSurfaceType": "MSS_SimpleVolume"
+				}
+			},
+			{
+				"id": 36,
+				"class": "SubstrateTransmittanceToMFP",
+				"name": "MaterialExpressionSubstrateTransmittanceToMFP_1",
+				"desc": "CkUsf_Stack3OpticalSurfaceGraph",
+				"inputs": [
+					{
+						"index": 0,
+						"name": "TransmittanceColor",
+						"node": 0,
+						"output": 18
+					},
+					{
+						"index": 1,
+						"name": "Thickness",
+						"node": 0,
+						"output": 19
+					}
+				],
+				"outputs": [
+					"MFP",
+					"Thickness"
+				]
+			},
+			{
+				"id": 37,
+				"class": "SubstrateSlabBSDF",
+				"name": "MaterialExpressionSubstrateSlabBSDF_2",
+				"desc": "CkUsf_Stack3OpticalSurfaceGraph",
+				"inputs": [
+					{
+						"index": 0,
+						"name": "Diffuse Albedo",
+						"node": 0,
+						"output": 10
+					},
+					{
+						"index": 1,
+						"name": "F0",
+						"node": 0,
+						"output": 11
+					},
+					{
+						"index": 3,
+						"name": "Roughness",
+						"node": 0,
+						"output": 12
+					},
+					{
+						"index": 5,
+						"name": "Normal",
+						"node": 0,
+						"output": 13
+					},
+					{
+						"index": 7,
+						"name": "SSS MFP",
+						"node": 38,
+						"output": 0
+					},
+					{
+						"index": 10,
+						"name": "Emissive Color",
+						"node": 0,
+						"output": 14
+					}
+				],
+				"props":
+				{
+					"SubSurfaceType": "MSS_SimpleVolume"
+				}
+			},
+			{
+				"id": 38,
+				"class": "SubstrateTransmittanceToMFP",
+				"name": "MaterialExpressionSubstrateTransmittanceToMFP_2",
+				"desc": "CkUsf_Stack3OpticalSurfaceGraph",
+				"inputs": [
+					{
+						"index": 0,
+						"name": "TransmittanceColor",
+						"node": 0,
+						"output": 21
+					},
+					{
+						"index": 1,
+						"name": "Thickness",
+						"node": 0,
+						"output": 22
+					}
+				],
+				"outputs": [
+					"MFP",
+					"Thickness"
+				]
+			},
+			{
+				"id": 39,
+				"class": "SubstrateVerticalLayering",
+				"name": "MaterialExpressionSubstrateVerticalLayering_0",
+				"desc": "CkUsf_Stack3OpticalSurfaceGraph",
+				"inputs": [
+					{
+						"index": 0,
+						"name": "Top",
+						"node": 33,
+						"output": 0
+					},
+					{
+						"index": 1,
+						"name": "Bottom",
+						"node": 40,
+						"output": 0
+					},
+					{
+						"index": 2,
+						"name": "Top Thickness",
+						"node": 0,
+						"output": 17
+					}
+				]
+			},
+			{
+				"id": 40,
+				"class": "SubstrateVerticalLayering",
+				"name": "MaterialExpressionSubstrateVerticalLayering_1",
+				"desc": "CkUsf_Stack3OpticalSurfaceGraph",
+				"inputs": [
+					{
+						"index": 0,
+						"name": "Top",
+						"node": 35,
+						"output": 0
+					},
+					{
+						"index": 1,
+						"name": "Bottom",
+						"node": 37,
+						"output": 0
+					},
+					{
+						"index": 2,
+						"name": "Top Thickness",
+						"node": 0,
+						"output": 20
+					}
+				]
+			}
+		],
+		"outputs": [
+			{
+				"property": "MP_Refraction",
+				"node": 0,
+				"output": 24
+			},
+			{
+				"property": "MP_FrontMaterial",
+				"node": 39,
+				"output": 0
+			},
+			{
+				"property": "MP_SurfaceThickness",
+				"node": 0,
+				"output": 23
+			}
+		]
+	},
+	"scalarParams": [
+		{
+			"name": "UVScale",
+			"value": 1
+		},
+		{
+			"name": "UVRotation",
+			"value": 0
+		},
+		{
+			"name": "ScatteringStrength",
+			"value": 0.34999999403953552
+		},
+		{
+			"name": "DomainNormalStrength",
+			"value": 1
+		},
+		{
+			"name": "DomainRoughness",
+			"value": 0.11999999731779099
+		},
+		{
+			"name": "FlashReflectance",
+			"value": 0.30000001192092896
+		},
+		{
+			"name": "CoatRoughness",
+			"value": 0.02500000037252903
+		},
+		{
+			"name": "CoatNormalStrength",
+			"value": 0
+		},
+		{
+			"name": "CoatIor",
+			"value": 1.4500000476837158
+		},
+		{
+			"name": "CoatThicknessCm",
+			"value": 0.029999999329447746
+		},
+		{
+			"name": "CoatReferenceThicknessCm",
+			"value": 0.10000000149011612
+		},
+		{
+			"name": "InternalReflectorThicknessCm",
+			"value": 0.0099999997764825821
+		},
+		{
+			"name": "InternalReferenceThicknessCm",
+			"value": 0.0099999997764825821
+		},
+		{
+			"name": "BodyThicknessCm",
+			"value": 4
+		},
+		{
+			"name": "BodyReferenceThicknessCm",
+			"value": 4
+		},
+		{
+			"name": "RefractionStrength",
+			"value": 1
+		}
+	],
+	"vectorParams": [
+		{
+			"name": "MilkColor",
+			"value": "RGBA(0.25, 0.27, 0.24, 1)"
+		},
+		{
+			"name": "CoatTransmission",
+			"value": "RGBA(0.995, 0.998, 0.999, 1)"
+		},
+		{
+			"name": "BodyTransmission",
+			"value": "RGBA(0.4, 0.44, 0.48, 1)"
+		}
+	],
+	"textureParams": [
+		{
+			"name": "ColorMap",
+			"value": "/CkFoundation/CkUsf/Textures/Optical/OpalInternal/T_OpalInternal_OpalColor.T_OpalInternal_OpalColor"
+		},
+		{
+			"name": "DomainMap",
+			"value": "/CkFoundation/CkUsf/Textures/Optical/OpalInternal/T_OpalInternal_OpalDomains.T_OpalInternal_OpalDomains"
+		},
+		{
+			"name": "DomainNormalMap",
+			"value": "/CkFoundation/CkUsf/Textures/Optical/OpalInternal/T_OpalInternal_OpalDomainNormal.T_OpalInternal_OpalDomainNormal"
+		},
+		{
+			"name": "PolishNormalMap",
+			"value": "/CkFoundation/CkUsf/Textures/Optical/OpalInternal/T_OpalInternal_OpalPolishNormal.T_OpalInternal_OpalPolishNormal"
+		},
+		{
+			"name": "RoughnessMap",
+			"value": "/CkFoundation/CkUsf/Textures/Optical/OpalInternal/T_OpalInternal_OpalRoughness.T_OpalInternal_OpalRoughness"
+		}
+	],
+	"usedTextures": [
+		"/CkFoundation/CkUsf/Textures/Optical/OpalInternal/T_OpalInternal_OpalColor.T_OpalInternal_OpalColor",
+		"/CkFoundation/CkUsf/Textures/Optical/OpalInternal/T_OpalInternal_OpalDomains.T_OpalInternal_OpalDomains",
+		"/CkFoundation/CkUsf/Textures/Optical/OpalInternal/T_OpalInternal_OpalDomainNormal.T_OpalInternal_OpalDomainNormal",
+		"/CkFoundation/CkUsf/Textures/Optical/OpalInternal/T_OpalInternal_OpalPolishNormal.T_OpalInternal_OpalPolishNormal",
+		"/CkFoundation/CkUsf/Textures/Optical/OpalInternal/T_OpalInternal_OpalRoughness.T_OpalInternal_OpalRoughness"
+	]
+}

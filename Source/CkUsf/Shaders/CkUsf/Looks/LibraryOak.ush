@@ -1,0 +1,22 @@
+// @ckusf shading_model ClearCoat
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_LibraryOak(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TintColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float FinishWeight, float FinishRoughness, float DebugView)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    FCkUsf_SurfaceOutput O = CkUsf_LibrarySurface(
+        CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV),
+        CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV),
+        CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r,
+        TintColor, NormalStrength, RoughnessScale, RoughnessBias, UVRotation);
+    O.ClearCoat = saturate(FinishWeight);
+    O.ClearCoatRoughness = clamp(FinishRoughness, 0.045, 1.0);
+    return CkUsf_LibraryInspect(O, DebugView);
+}
+

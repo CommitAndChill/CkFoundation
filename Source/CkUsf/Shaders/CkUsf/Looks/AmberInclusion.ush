@@ -1,0 +1,19 @@
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_AmberInclusion(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TintColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
+    O.BaseColor = max(TintColor, 0.0) * CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV).rgb;
+    O.Normal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV), NormalStrength, UVRotation);
+    O.Roughness = clamp(CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r * max(RoughnessScale, 0.0) + RoughnessBias, 0.04, 1.0);
+    O.Metallic = 0.0;
+    O.ClearCoat = 0.0;
+    return O;
+}

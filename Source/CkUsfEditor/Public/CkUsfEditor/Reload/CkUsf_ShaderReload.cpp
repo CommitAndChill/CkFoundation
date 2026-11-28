@@ -35,7 +35,7 @@ namespace ck::usf_editor
                 TEXT("Reload affected loaded CkUsf material looks after shader saves (1=on, 0=off). Global shaders always require an explicit command."));
             _ReloadCommand = MakeUnique<FAutoConsoleCommand>(
                 TEXT("Ck_Usf_ReloadShaders"),
-                TEXT("Recompile all loaded CkUsf look masters in place, including live transient masters; no generation or asset saves."),
+                TEXT("Recompile compatible loaded CkUsf look masters in place; fully validated native masters for another renderer profile are excluded. No generation or asset saves."),
                 FConsoleCommandDelegate::CreateRaw(this, &FState::RequestMaterialReload));
             _GlobalCommand = MakeUnique<FAutoConsoleCommand>(
                 TEXT("Ck_Usf_ReloadGlobalShaders"),
@@ -262,10 +262,14 @@ namespace ck::usf_editor
             if (NOT Manual && ChangedFiles.IsEmpty())
             { return; }
             if (MissingSource)
-            { return; }
+            {
+                Warning(TEXT("CkUsf reload batch rejected: changed shader source is absent or unreadable. No materials changed."));
+                return;
+            }
 
             FlushShaderFileCache();
             auto Candidates = TArray<TWeakObjectPtr<UMaterial>>{};
+            auto ContractErrors = TArray<FString>{};
             for (TObjectIterator<UMaterial> It{RF_ClassDefaultObject, true, EInternalObjectFlags::Garbage}; It; ++It)
             {
                 if (It->HasAnyFlags(RF_ClassDefaultObject | RF_BeginDestroyed | RF_FinishDestroyed))
@@ -275,14 +279,17 @@ namespace ck::usf_editor
                 { continue; }
                 auto Affected = Manual || Removal;
                 auto SourcesValid = true;
+                auto SourceErrors = TArray<FString>{};
                 for (const auto& Include : Includes)
                 {
+                    Affected |= ChangedFiles.Contains(Include);
                     auto Error = FString{};
                     if (TryGetShaderFileHash(*Include, GMaxRHIShaderPlatform, &Error) == nullptr)
                     {
                         Warning(TEXT("CkUsf reload rejected material [{}], include [{}]: {}"), It->GetPathName(), Include, Error);
+                        SourceErrors.Add(FString::Printf(TEXT("Affected master [%s] has an unreadable shader include [%s]: %s"), *It->GetPathName(), *Include, *Error));
                         SourcesValid = false;
-                        break;
+                        continue;
                     }
                     if (NOT Affected)
                     {
@@ -296,30 +303,58 @@ namespace ck::usf_editor
                         }
                     }
                 }
+                if (Affected)
+                { ContractErrors.Append(SourceErrors); }
                 if (SourcesValid && Affected)
                 { Candidates.Add(TWeakObjectPtr<UMaterial>{*It}); }
             }
 
-            if (Candidates.IsEmpty())
+            if (Candidates.IsEmpty() && ContractErrors.IsEmpty())
             {
                 Log(TEXT("CkUsf reload: no affected loaded look masters."));
+                Log(TEXT("CkUsf reload complete: [0] master(s), [0] failed, [0] excluded for another renderer profile. No assets saved."));
                 return;
             }
             auto Preparations = TArray<FPreparedLookShadingModelReload>{};
-            auto ContractErrors = TArray<FString>{};
+            auto Exclusions = TArray<FString>{};
+            auto Dispositions = TArray<ELookShadingModelReloadAdmission>{};
             for (const auto& Material : Candidates)
             {
                 auto Prepared = FPreparedLookShadingModelReload{};
+                auto ExclusionReason = FString{};
+                auto Disposition = ELookShadingModelReloadAdmission::Invalid;
+                const auto ErrorCount = ContractErrors.Num();
                 if (Material.IsValid())
-                { Prepare_LookShadingModelReload(*Material, Prepared, ContractErrors); }
+                { Disposition = Prepare_LookShadingModelReloadForBatch(*Material, Prepared, ExclusionReason, ContractErrors); }
                 else
                 { ContractErrors.Add(TEXT("A reload candidate was destroyed before preflight.")); }
+                if (Disposition == ELookShadingModelReloadAdmission::Invalid && ContractErrors.Num() == ErrorCount)
+                { ContractErrors.Add(TEXT("A reload candidate failed preflight without a diagnostic.")); }
+                if (Disposition == ELookShadingModelReloadAdmission::OtherRendererProfile
+                    && (Prepared.Custom.IsValid() || NOT Prepared.Code.IsEmpty() || ExclusionReason.IsEmpty()))
+                { ContractErrors.Add(TEXT("An excluded reload candidate retained a runnable preparation or lacked a named reason.")); }
                 Preparations.Add(MoveTemp(Prepared));
+                Exclusions.Add(MoveTemp(ExclusionReason));
+                Dispositions.Add(Disposition);
             }
             if (NOT ContractErrors.IsEmpty())
             {
                 for (const auto& Error : ContractErrors)
                 { Warning(TEXT("CkUsf reload rejected before material changes: {}"), Error); }
+                Warning(TEXT("CkUsf reload batch rejected: [{}] preflight error(s). No materials changed."), ContractErrors.Num());
+                return;
+            }
+            _BatchExcludedProfileCount = 0;
+            for (auto Index = 0; Index < Dispositions.Num(); ++Index)
+            {
+                if (Dispositions[Index] != ELookShadingModelReloadAdmission::OtherRendererProfile)
+                { continue; }
+                ++_BatchExcludedProfileCount;
+                Log(TEXT("CkUsf reload profile exclusion: {}"), Exclusions[Index]);
+            }
+            if (_BatchExcludedProfileCount == Candidates.Num())
+            {
+                Log(TEXT("CkUsf reload complete: [0] master(s), [0] failed, [{}] excluded for another renderer profile. No assets saved."), _BatchExcludedProfileCount);
                 return;
             }
             {
@@ -327,7 +362,7 @@ namespace ck::usf_editor
                 for (auto Index = 0; Index < Candidates.Num(); ++Index)
                 {
                     const auto& Material = Candidates[Index];
-                    if (NOT Material.IsValid())
+                    if (Dispositions[Index] != ELookShadingModelReloadAdmission::Prepared || NOT Material.IsValid())
                     { continue; }
                     UpdateContext.AddMaterial(Material.Get());
                     Material->PreEditChange(nullptr);
@@ -392,8 +427,8 @@ namespace ck::usf_editor
                     { Warning(TEXT("CkUsf [{}]: {}"), Material->GetPathName(), Error); }
                 }
             }
-            Log(TEXT("CkUsf reload complete: [{}] master(s), [{}] failed, [{}] seconds. No assets saved."),
-                _ActiveMaterials.Num(), Failed, FPlatformTime::Seconds() - _BatchStarted);
+            Log(TEXT("CkUsf reload complete: [{}] master(s), [{}] failed, [{}] excluded for another renderer profile, [{}] seconds. No assets saved."),
+                _ActiveMaterials.Num(), Failed, _BatchExcludedProfileCount, FPlatformTime::Seconds() - _BatchStarted);
             _ActiveMaterials.Reset();
             if (GEditor != nullptr)
             { GEditor->RedrawAllViewports(); }
@@ -427,6 +462,7 @@ namespace ck::usf_editor
         }
 
         int32 _AutoReload = 1;
+        int32 _BatchExcludedProfileCount = 0;
         bool _WatchesAttempted = false;
         bool _ManualReload = false;
         bool _GlobalReload = false;

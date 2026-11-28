@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "Engine/SubsurfaceProfile.h"
+#include "Engine/ToonProfile.h"
 #include "CkUsf_LookDefinition.generated.h"
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -17,6 +18,27 @@ enum class ECk_Usf_Domain : uint8
     Decal
 };
 
+UENUM(BlueprintType)
+enum class ECk_Usf_SurfaceGraph : uint8
+{
+    Legacy,
+    NativeSlab,
+    NativeToon,
+    NativeSimpleClearCoat,
+    // Fixed two-Slab topologies; retained closures require Adaptive GBuffer.
+    AdaptiveVertical,
+    AdaptiveMix,
+    // Fixed thin-surface colored-transmittance Slab; Adaptive GBuffer, one closure.
+    NativeTranslucentSlab,
+    // Same optical Slab with native refraction derived from F0; no root Refraction input.
+    // The shared numeric output's RefractionStrength field is unused by this graph.
+    NativeRefractiveSlab,
+    // Two transmitting Slabs, explicit A/B calibration and thickness; Adaptive, two closures.
+    NativeTranslucentVertical,
+    // Three transmitting Slabs with nested Vertical operators; Adaptive, three closures.
+    NativeTranslucentStack3
+};
+
 // Blend-mode override on top of the domain default. `Inherit` keeps the domain's blend.
 UENUM(BlueprintType)
 enum class ECk_Usf_BlendMode : uint8
@@ -29,7 +51,7 @@ enum class ECk_Usf_BlendMode : uint8
     Modulate
 };
 
-// Shading-model override. `Inherit` keeps the domain default (SurfaceLit→DefaultLit, others→Unlit).
+// Shading-model override. `Inherit` keeps the domain default (SurfaceLitâ†’DefaultLit, othersâ†’Unlit).
 UENUM(BlueprintType)
 enum class ECk_Usf_ShadingModel : uint8
 {
@@ -79,27 +101,27 @@ enum class ECk_Usf_SceneTexture : uint8
 
 // PostProcess-only: where in the post-processing chain the generated blendable runs (maps to
 // EBlendableLocation). Custom Depth/Stencil-derived looks REQUIRE a pre-TAA location or their edges
-// shimmer; pre-TAA is also pre-tonemap. Trade-offs: CkUsf/CLAUDE.md § Blendable location.
+// shimmer; pre-TAA is also pre-tonemap. Trade-offs: CkUsf/CLAUDE.md Â§ Blendable location.
 UENUM(BlueprintType)
 enum class ECk_Usf_BlendableLocation : uint8
 {
-    AfterTonemapping,      // BL_SceneColorAfterTonemapping — display res, post-TAA (historical default)
-    SceneColorAfterDOF,    // BL_SceneColorAfterDOF         — render res, pre-TSR/TAA
-    SceneColorBeforeDOF,   // BL_SceneColorBeforeDOF        — render res, pre-TSR/TAA, before DOF
-    SceneColorBeforeBloom, // BL_SceneColorBeforeBloom      — display res, post-TAA, pre-bloom/tonemap
+    AfterTonemapping,      // BL_SceneColorAfterTonemapping â€” display res, post-TAA (historical default)
+    SceneColorAfterDOF,    // BL_SceneColorAfterDOF         â€” render res, pre-TSR/TAA
+    SceneColorBeforeDOF,   // BL_SceneColorBeforeDOF        â€” render res, pre-TSR/TAA, before DOF
+    SceneColorBeforeBloom, // BL_SceneColorBeforeBloom      â€” display res, post-TAA, pre-bloom/tonemap
 
-    // BL_ReplacingTonemapper — the look's output IS the final image; no tonemapper runs after it. APPENDED
+    // BL_ReplacingTonemapper â€” the look's output IS the final image; no tonemapper runs after it. APPENDED
     // last on purpose: these values are serialized in look assets, so inserting one renumbers every look
     // declared after it.
     //
-    // For a LOOK this is usually the wrong choice — you inherit responsibility for the whole tonemap. It is
+    // For a LOOK this is usually the wrong choice â€” you inherit responsibility for the whole tonemap. It is
     // here for the other kind of pass: one whose output is DATA rather than a picture, where a tonemap curve
     // applied afterwards would corrupt the values it is meant to carry (an id, a mask, a depth).
     ReplacingTonemapper
 };
 
 // Translucency lighting for LIT translucent-family surface looks. `Inherit` keeps the engine default
-// (volumetric non-directional — cheap but flat); glass-like surfaces usually want `SurfacePerPixel`.
+// (volumetric non-directional â€” cheap but flat); glass-like surfaces usually want `SurfacePerPixel`.
 UENUM(BlueprintType)
 enum class ECk_Usf_TranslucencyLighting : uint8
 {
@@ -131,7 +153,7 @@ struct CKUSF_API FCk_Usf_ParamDesc
 
     // Scalar/Vector-only: source this param from per-instance custom data (ISM/CkIsmRenderer) instead of a
     // uniform. Safe on non-instanced meshes (the node returns the param default). Runtime writers must NOT
-    // count slots by hand — query Get_PerInstanceSlotOf / Get_NumPerInstanceFloats.
+    // count slots by hand â€” query Get_PerInstanceSlotOf / Get_NumPerInstanceFloats.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     bool _PerInstance = false;
 
@@ -142,7 +164,7 @@ struct CKUSF_API FCk_Usf_ParamDesc
     int32 _PerInstanceSlot = -1;
 
     // Scalar/Vector-only: source this param from the primitive's CUSTOM PRIMITIVE DATA instead of a
-    // uniform — the per-component channel a UPrimitiveComponent carries (SetCustomPrimitiveDataFloat),
+    // uniform â€” the per-component channel a UPrimitiveComponent carries (SetCustomPrimitiveDataFloat),
     // which is what a per-entity SKMC has where an ISM has per-instance custom data. Mutually exclusive
     // with _PerInstance. Safe on any primitive: an unwritten CPD slot reads 0.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
@@ -160,7 +182,7 @@ struct CKUSF_API FCk_Usf_ParamDesc
     FString _DefaultTexturePath;
 
     // Parameter-panel group on the generated master (and every MID of it), e.g. "Distortion". None leaves
-    // the parameter ungrouped, which is where the engine files it today — so existing looks regenerate
+    // the parameter ungrouped, which is where the engine files it today â€” so existing looks regenerate
     // byte-identically. Purely presentational: it changes no wiring and no shader code.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     FName _Group = NAME_None;
@@ -211,14 +233,30 @@ public:
     // (PostProcessMaterialShaders.usf overwrites SvPosition.z with the scene's device Z before the material
     // parameters are built), so it is the world point the pixel is looking at, not the quad's own position.
     // Opt-in because it costs the reconstruction on every pixel, and because at after-tonemap / SSR
-    // placements that reconstruction is dynamic-resolution scaled — intended for the pre-TAA locations.
+    // placements that reconstruction is dynamic-resolution scaled â€” intended for the pre-TAA locations.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     bool _PostProcessWorldPosition = false;
 
     // PostProcess-only: chain placement of the generated blendable (see the enum for the pre- vs post-TAA
-    // trade-off — Custom Depth/Stencil looks need a pre-TAA location). Ignored for non-PostProcess domains.
+    // trade-off â€” Custom Depth/Stencil looks need a pre-TAA location). Ignored for non-PostProcess domains.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     ECk_Usf_BlendableLocation _BlendableLocation = ECk_Usf_BlendableLocation::AfterTonemapping;
+
+    // Native graphs are explicit opt-ins; existing serialized shading models retain their meaning.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
+    ECk_Usf_SurfaceGraph _SurfaceGraph = ECk_Usf_SurfaceGraph::Legacy;
+
+    // NativeSlab only. Connected fuzz changes the compiled feature even at zero weight.
+    // Blendable preserves amount/color, fixes fuzz roughness, and cannot combine it with anisotropy.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
+    bool _SlabFuzz = false;
+
+    // AdaptiveVertical only; explicitly connects native glints on the lower B Slab.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
+    bool _AdaptiveBaseGlints = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
+    TObjectPtr<UToonProfile> _ToonProfile;
 
     // Surface-domain overrides (ignored for PostProcess/UI/Decal, which keep their domain config).
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
@@ -226,6 +264,23 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     ECk_Usf_ShadingModel _ShadingModel = ECk_Usf_ShadingModel::Inherit;
+
+    // Wire O.Anisotropy and tangent-space O.Tangent for native graphs or
+    // Opaque/Masked SurfaceLit legacy DefaultLit/ClearCoat.
+    // Opt-in because a connected Custom output enables the anisotropic shader feature even when its
+    // HLSL result is zero. Changing this setting requires regenerating the master outside PIE.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
+    bool _DirectionalShading = false;
+
+    // Translucent SurfaceLit DefaultLit/ThinTranslucent only. Adds the opaque scene-color copy
+    // and viewport coordinates to the pixel node; changing this requires regeneration.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
+    bool _SurfaceSceneColor = false;
+
+    // Copied opaque color already contains fog. Replacement compositing must suppress a
+    // second fog application on this material; ordinary scene-color consumers keep fogging.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
+    bool _SceneColorReplacesBackground = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     TObjectPtr<USubsurfaceProfile> _SubsurfaceProfile;
@@ -263,12 +318,12 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     bool _UsedWithNiagaraSprites = false;
 
-    // Niagara MESH-PARTICLE renderers (MATUSAGE_NiagaraMeshParticles) — the same silent packaged-build
+    // Niagara MESH-PARTICLE renderers (MATUSAGE_NiagaraMeshParticles) â€” the same silent packaged-build
     // fallback as the sprite flag, on the renderer that draws a carrier mesh per particle.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")
     bool _UsedWithNiagaraMeshParticles = false;
 
-    // Niagara RIBBON renderers (MATUSAGE_NiagaraRibbons) — the trail renderer that links particles into a strip.
+    // Niagara RIBBON renderers (MATUSAGE_NiagaraRibbons) â€” the trail renderer that links particles into a strip.
     // The three Niagara usages are INDEPENDENT engine bits, so a material drawn on a ribbon in one system and on
     // a sprite in another needs two generated masters, not one carrying both flags.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CkUsf")

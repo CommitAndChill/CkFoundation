@@ -1,0 +1,139 @@
+// @ckusf shading_model DefaultLit
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+// Intended for the owned unmirrored +U=X, +V=Y ground grid at unit actor scale.
+// POM changes sampled UVs only: no pixel-depth, silhouette or shadow offset.
+float2 CkUsf_GroundPom(Texture2D HeightMap, SamplerState HeightMapSampler,
+    float2 UV, float2 Dx, float2 Dy, float3 View, float Scale, float Steps)
+{
+#if PIXELSHADER
+    int Count = (int)clamp(round(Steps), 8.0, 48.0);
+    float LayerStep = 1.0 / Count;
+    float2 Delta = View.xy / max(View.z, 0.15) * Scale / Count;
+    float2 Current = UV;
+    float Depth = 0.0;
+    float Gap = 1.0 - HeightMap.SampleGrad(HeightMapSampler, Current, Dx, Dy).r;
+    float PreviousGap = Gap;
+    float2 Previous = Current;
+    [loop]
+    for (int Index = 0; Index < Count; ++Index)
+    {
+        if (Depth >= Gap) { break; }
+        Previous = Current;
+        PreviousGap = Gap - Depth;
+        Current -= Delta;
+        Depth += LayerStep;
+        Gap = 1.0 - HeightMap.SampleGrad(HeightMapSampler, Current, Dx, Dy).r;
+    }
+    float After = Gap - Depth;
+    float Weight = saturate(PreviousGap / max(PreviousGap - After, 1e-5));
+    return lerp(Previous, Current, Weight);
+#else
+    return UV;
+#endif
+}
+
+FCkUsf_SurfaceOutput CkUsf_Look_EnvironmentGravel(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    Texture2D HeightMap, SamplerState HeightMapSampler,
+    Texture2D AOMap, SamplerState AOMapSampler,
+    float3 TintColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float ReliefCm, float TileSizeCm,
+    float PomAmount, float DisplacementAmount, float StepCount, float HeightMip, float DebugView)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float2 Dx = 0.0;
+    float2 Dy = 0.0;
+#if PIXELSHADER
+    Dx = ddx(UV);
+    Dy = ddy(UV);
+    float3 N = normalize(In.VertexNormal);
+    float3 T = normalize(In.VertexTangent - N * dot(N, In.VertexTangent));
+    float3 B = cross(N, T);
+    float3 View = float3(dot(In.CameraVector, T), dot(In.CameraVector, B), dot(In.CameraVector, N));
+    float Angle = UVRotation * 0.01745329252;
+    View.xy = float2(cos(Angle) * View.x - sin(Angle) * View.y,
+                     sin(Angle) * View.x + cos(Angle) * View.y);
+    float GrazingFade = smoothstep(0.12, 0.3, View.z);
+    float FootprintFade = 1.0 - smoothstep(0.008, 0.03, max(length(Dx), length(Dy)));
+    // Full geometric relief and full POM never apply together.
+    float Scale = clamp(ReliefCm, 0.0, 12.0) / max(TileSizeCm, 1.0)
+        * max(abs(UVScale), 0.001) * saturate(PomAmount)
+        * (1.0 - saturate(DisplacementAmount)) * GrazingFade * FootprintFade;
+    if (Scale > 0.000001)
+    {
+        UV = CkUsf_GroundPom(HeightMap, HeightMapSampler, UV, Dx, Dy, View, Scale, StepCount);
+    }
+    float4 ColorSample = BaseColorMap.SampleGrad(BaseColorMapSampler, UV, Dx, Dy);
+    float4 NormalSample = NormalMap.SampleGrad(NormalMapSampler, UV, Dx, Dy);
+    float Roughness = RoughnessMap.SampleGrad(RoughnessMapSampler, UV, Dx, Dy).r;
+    float Height = HeightMap.SampleGrad(HeightMapSampler, UV, Dx, Dy).r;
+    float AO = AOMap.SampleGrad(AOMapSampler, UV, Dx, Dy).r;
+#else
+    float4 ColorSample = BaseColorMap.SampleLevel(BaseColorMapSampler, UV, 2);
+    float4 NormalSample = NormalMap.SampleLevel(NormalMapSampler, UV, 2);
+    float Roughness = RoughnessMap.SampleLevel(RoughnessMapSampler, UV, 2).r;
+    float Height = HeightMap.SampleLevel(HeightMapSampler, UV, 2).r;
+    float AO = AOMap.SampleLevel(AOMapSampler, UV, 2).r;
+#endif
+    FCkUsf_SurfaceOutput O = CkUsf_LibrarySurface(ColorSample, NormalSample, Roughness,
+        TintColor, NormalStrength, RoughnessScale, RoughnessBias, UVRotation);
+    O.AmbientOcclusion = saturate(AO);
+    if (DisplacementAmount > 0.0)
+    {
+        // WPO does not update mesh normals. Derive slopes from the same filtered height.
+        float Epsilon = 1.0 / 1024.0;
+        float Mip = clamp(HeightMip, 0.0, 8.0);
+        float DxHeight = (HeightMap.SampleLevel(HeightMapSampler, UV + float2(Epsilon, 0), Mip).r
+            - HeightMap.SampleLevel(HeightMapSampler, UV - float2(Epsilon, 0), Mip).r) / (2.0 * Epsilon);
+        float DyHeight = (HeightMap.SampleLevel(HeightMapSampler, UV + float2(0, Epsilon), Mip).r
+            - HeightMap.SampleLevel(HeightMapSampler, UV - float2(0, Epsilon), Mip).r) / (2.0 * Epsilon);
+        float SlopeScale = clamp(ReliefCm, 0.0, 12.0) * saturate(DisplacementAmount)
+            * max(abs(UVScale), 0.001) / max(TileSizeCm, 1.0);
+        float3 GeometricNormal = normalize(float3(-DxHeight * SlopeScale, -DyHeight * SlopeScale, 1));
+        GeometricNormal = CkUsf_LibraryNormal(float4(GeometricNormal * 0.5 + 0.5, 1), 1, UVRotation);
+        O.Normal = normalize(float3(GeometricNormal.xy + O.Normal.xy, GeometricNormal.z * O.Normal.z));
+    }
+    if (DebugView > 6.5)
+    {
+        O.BaseColor = 0.0;
+        O.Specular = 0.0;
+        float2 DiagnosticUV = DebugView > 7.5 ? UV : In.UV;
+        O.EmissiveColor = float3(saturate(DiagnosticUV * 0.9 + 0.05), 0.0);
+        return O;
+    }
+    if (DebugView > 5.5)
+    {
+        O.BaseColor = 0.0;
+        O.Specular = 0.0;
+        O.EmissiveColor = saturate(In.PixelDepth / 500.0).xxx;
+        return O;
+    }
+    if (DebugView > 4.5)
+    {
+        O.BaseColor = 0.0;
+        O.Specular = 0.0;
+        O.EmissiveColor = Height.xxx;
+        return O;
+    }
+    return CkUsf_LibraryInspect(O, DebugView);
+}
+
+float3 CkUsf_Look_EnvironmentGravel_WPO(FCkUsf_VertexInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    Texture2D HeightMap, SamplerState HeightMapSampler,
+    Texture2D AOMap, SamplerState AOMapSampler,
+    float3 TintColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float ReliefCm, float TileSizeCm,
+    float PomAmount, float DisplacementAmount, float StepCount, float HeightMip, float DebugView)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float Height = HeightMap.SampleLevel(HeightMapSampler, UV, clamp(HeightMip, 0.0, 8.0)).r;
+    return normalize(In.VertexNormal) * (Height - 1.0)
+        * clamp(ReliefCm, 0.0, 12.0) * saturate(DisplacementAmount);
+}

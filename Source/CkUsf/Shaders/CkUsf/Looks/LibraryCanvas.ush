@@ -1,0 +1,23 @@
+// @ckusf shading_model DefaultLit
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_LibraryCanvas(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TintColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float WeaveContrast, float DebugView)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float4 Color = CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV);
+    // Contrast the authored weave color; no synthetic yarn pattern or extra relief.
+    Color.rgb = saturate(0.5 + (Color.rgb - 0.5) * max(WeaveContrast, 0.0));
+    FCkUsf_SurfaceOutput O = CkUsf_LibrarySurface(Color,
+        CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV),
+        CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r,
+        TintColor, NormalStrength, RoughnessScale, RoughnessBias, UVRotation);
+    O.Metallic = 0.0;
+    O.Specular = 0.35;
+    return CkUsf_LibraryInspect(O, DebugView);
+}

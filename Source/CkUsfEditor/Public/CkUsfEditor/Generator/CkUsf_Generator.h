@@ -22,10 +22,25 @@ namespace ck::usf_editor
     CKUSFEDITOR_API auto Apply_LookShadingModelReload(
         UMaterial& InMaterial, const FPreparedLookShadingModelReload& InPrepared) -> void;
 
+    enum class ELookShadingModelReloadAdmission : uint8
+    {
+        Prepared,
+        OtherRendererProfile,
+        Invalid
+    };
+
+    // Batch-only admission. An excluded native master passed full authoring/topology preflight,
+    // but OutPrepared remains empty and cannot be applied. Strict single-look prepare is unchanged.
+    CKUSFEDITOR_API auto Prepare_LookShadingModelReloadForBatch(UMaterial& InMaterial,
+        FPreparedLookShadingModelReload& OutPrepared, FString& OutExclusionReason,
+        TArray<FString>& OutErrors) -> ELookShadingModelReloadAdmission;
+
     struct FGenerateResult
     {
         int32 NumGenerated = 0;
         int32 NumSkipped = 0;
+        int32 NumIncompatible = 0;
+        TArray<FString> IncompatibleLooks; // validated authoring excluded only by the selected GBuffer profile
         TArray<FString> Errors;     // validation + shader-compile failures (each names its look)
         TArray<FString> Warnings;   // legal-but-drifting looks (e.g. HLSL param-name mismatch)
     };

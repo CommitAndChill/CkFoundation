@@ -1,0 +1,22 @@
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_OpticalTailLampHardware(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TintColor, float3 EmissionColor, float UVScale, float UVRotation,
+    float NormalStrength, float RoughnessScale, float RoughnessBias,
+    float MetalnessLevel, float ColorMapInfluence, float EmissionStrength)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
+    float3 Finish = CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV).rgb;
+    O.BaseColor = max(TintColor, 0.0) * lerp(1.0.xxx, Finish, saturate(ColorMapInfluence));
+    O.Normal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV), NormalStrength, UVRotation);
+    O.Roughness = clamp(CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r * max(RoughnessScale, 0.0) + RoughnessBias, 0.035, 1.0);
+    O.Metallic = saturate(MetalnessLevel);
+    O.ClearCoat = 0.0;
+    O.EmissiveColor = max(EmissionColor, 0.0) * max(EmissionStrength, 0.0);
+    return O;
+}

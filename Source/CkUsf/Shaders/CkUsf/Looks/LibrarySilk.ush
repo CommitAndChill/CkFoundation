@@ -1,0 +1,28 @@
+// @ckusf shading_model DefaultLit
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_LibrarySilk(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    Texture2D DirectionMap, SamplerState DirectionMapSampler,
+    Texture2D AnisotropyMap, SamplerState AnisotropyMapSampler,
+    float3 TintColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float Anisotropy, float FiberRotation, float DebugView)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    FCkUsf_SurfaceOutput O = CkUsf_LibrarySurface(
+        CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV),
+        CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV),
+        CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r,
+        TintColor, NormalStrength, RoughnessScale, RoughnessBias, UVRotation);
+    float4 Direction = CkUsf_LibraryDirection(
+        CkUsf_SampleTexture2D(DirectionMap, DirectionMapSampler, UV), FiberRotation - UVRotation);
+    O.Anisotropy = clamp(Anisotropy * Direction.w
+        * CkUsf_SampleTexture2D(AnisotropyMap, AnisotropyMapSampler, UV).r, -0.95, 0.95);
+    O.Tangent = Direction.xyz;
+    O.Specular = 0.55;
+    return CkUsf_LibraryInspect(O, DebugView);
+}
+

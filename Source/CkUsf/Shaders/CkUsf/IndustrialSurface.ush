@@ -1,0 +1,100 @@
+#pragma once
+#include "/CkUsf/Common.ush"
+
+// Linear data textures: Detail RGBA = steel height / paint height / rust height / dust;
+// Placement RGBA = damage susceptibility / oxidation / grime / discoloration.
+// This family selects surface regions. It does not construct Substrate slab topology.
+struct FCkUsf_IndustrialWeights
+{
+    float Paint;
+    float Primer;
+    float Steel;
+    float Rust;
+    float Dust;
+};
+
+// RGB reflectance and perceptual roughness share the same region weights.
+float4 CkUsf_IndustrialPaintSurface(float3 Tint, float Macro, float Grain, float Blur, float Scratches)
+{
+    return float4(saturate(Tint) * (0.90 + Macro * 0.10),
+        clamp(Blur + Grain * 0.10 + Scratches * 0.10, 0.18, 0.75));
+}
+
+float4 CkUsf_IndustrialPrimerSurface(float3 Tint, float Macro, float Grain)
+{
+    return float4(saturate(Tint) * (0.93 + Macro * 0.07), 0.58 + Grain * 0.08);
+}
+
+float4 CkUsf_IndustrialSteelSurface(float Grain, float Scratches)
+{
+    return float4(float3(0.52, 0.55, 0.57) * (0.96 + Grain * 0.08),
+        0.30 + Grain * 0.16 + Scratches * 0.08);
+}
+
+float4 CkUsf_IndustrialRustSurface(float Oxidation, float Height, float Grain)
+{
+    return float4(lerp(float3(0.055, 0.017, 0.006), float3(0.28, 0.085, 0.022),
+        saturate(Oxidation * 0.60 + Height * 0.40)), 0.84 + Grain * 0.16);
+}
+
+float4 CkUsf_IndustrialDustSurface(float Grain)
+{
+    return float4(float3(0.19, 0.155, 0.11) * (0.95 + Grain * 0.10), 0.88 + Grain * 0.08);
+}
+
+float4 CkUsf_IndustrialCompose(float4 Paint, float4 Primer, float4 Steel,
+    float4 Rust, float4 Dust, FCkUsf_IndustrialWeights W)
+{
+    return Paint * W.Paint + Primer * W.Primer + Steel * W.Steel + Rust * W.Rust + Dust * W.Dust;
+}
+
+float4 CkUsf_IndustrialSample(Texture2D Tex, SamplerState Samp, float2 UV,
+    float2 UVdx, float2 UVdy)
+{
+#if PIXELSHADER
+    return Tex.SampleGrad(Samp, UV, UVdx, UVdy);
+#else
+    return Tex.SampleLevel(Samp, UV, 0);
+#endif
+}
+
+FCkUsf_IndustrialWeights CkUsf_IndustrialRegions(float Damage, float Oxidation,
+    float Dust, float Wear, float RustAmount, float EdgeWidth, float RustEdgeWidth)
+{
+    float Threshold = 1.04 - saturate(Wear) * 0.98;
+    float PaintGone = smoothstep(Threshold - EdgeWidth, Threshold + EdgeWidth, Damage);
+    // Filtering must not invent damage at the explicit clean endpoint.
+    PaintGone = Wear > 0.0 ? PaintGone : 0.0;
+    float PrimerGone = smoothstep(Threshold + 0.018 - EdgeWidth,
+        Threshold + 0.018 + EdgeWidth, Damage);
+    float RustThreshold = 1.02 - saturate(RustAmount);
+    float Rust = smoothstep(RustThreshold - RustEdgeWidth, RustThreshold + RustEdgeWidth, Oxidation);
+    Rust = RustAmount > 0.0 ? Rust : 0.0;
+    float Undusted = 1.0 - saturate(Dust);
+
+    FCkUsf_IndustrialWeights W;
+    W.Paint = (1.0 - PaintGone) * Undusted;
+    W.Primer = PaintGone * (1.0 - PrimerGone) * Undusted;
+    W.Steel = PaintGone * PrimerGone * (1.0 - Rust) * Undusted;
+    W.Rust = PaintGone * PrimerGone * Rust * Undusted;
+    W.Dust = 1.0 - Undusted;
+    return W;
+}
+
+float CkUsf_IndustrialHeight(float4 Detail, FCkUsf_IndustrialWeights W)
+{
+    // Heights in detail-UV units: stronger granular rust, restrained enamel orange peel.
+    // Region weights are held fixed across taps; chip boundaries have no fabricated relief.
+    return dot(Detail, float4(W.Steel * 0.0010, (W.Paint + W.Primer * 0.4) * 0.0003,
+        W.Rust * 0.0018, W.Dust * 0.0003));
+}
+
+float3 CkUsf_IndustrialDetailNormal(float4 Left, float4 Right, float4 Down, float4 Up,
+    float2 Texel, FCkUsf_IndustrialWeights W, float Strength)
+{
+    // Central differences in texture U/V, never screen X/Y. This is a tangent-space
+    // microdetail normal; its amplitude is intentionally defined per repeated detail tile.
+    float2 Gradient = float2(CkUsf_IndustrialHeight(Right, W) - CkUsf_IndustrialHeight(Left, W),
+        CkUsf_IndustrialHeight(Up, W) - CkUsf_IndustrialHeight(Down, W)) / (2.0 * Texel);
+    return normalize(float3(-Gradient * clamp(Strength, 0.0, 3.0), 1.0));
+}

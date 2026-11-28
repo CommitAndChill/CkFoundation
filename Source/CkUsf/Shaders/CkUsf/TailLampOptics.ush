@@ -1,0 +1,14 @@
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+float CkUsf_TailLampDielectricF0(float Ior)
+{
+    float Eta = clamp(Ior, 1.0, 2.0);
+    float Ratio = (Eta - 1.0) / (Eta + 1.0);
+    return Ratio * Ratio;
+}
+
+float3 CkUsf_TailLampTransmission(float3 Color, float Strength)
+{
+    return pow(clamp(Color, 0.001, 0.999), max(Strength, 0.0));
+}

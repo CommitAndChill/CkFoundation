@@ -1,0 +1,70 @@
+// @ckusf surface_graph AdaptiveVertical
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+#include "/CkUsf/AdaptiveSurface.ush"
+
+// Two native Slabs: dyed transmitting upper medium over a neutral conductor.
+// CC0 Plastic010 and Metal057A supply finish detail, not a measured candy-paint scan.
+// No third clearcoat or metallic-flake population is claimed by this first graph.
+FCkUsf_AdaptiveVerticalOutput CkUsf_Look_AdaptiveCandyPaint(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    Texture2D MetalNormalMap, SamplerState MetalNormalMapSampler,
+    Texture2D MetalRoughnessMap, SamplerState MetalRoughnessMapSampler,
+    float3 TintColor, float3 DyeTransmittance, float3 MetalTint,
+    float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float DebugView,
+    float MetalNormalStrength, float MetalRoughnessScale, float MetalRoughnessBias,
+    float TopRoughnessScale, float TopRoughnessBias,
+    float ThicknessCm, float DyeReferenceThicknessCm, float ThicknessVariation,
+    float MetalColorVariation)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float3 Color = CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV).rgb;
+    float Finish = CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r;
+    float MetalFinish = CkUsf_SampleTexture2D(MetalRoughnessMap, MetalRoughnessMapSampler, UV).r;
+    FCkUsf_AdaptiveVerticalOutput O = CkUsf_DefaultAdaptiveVertical();
+    O.ADiffuseAlbedo = 0.0;
+    O.AF0 = float3(0.04, 0.04, 0.04);
+    O.ANormal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV),
+        NormalStrength, UVRotation);
+    O.ARoughness = clamp((Finish * max(TopRoughnessScale, 0.0) + TopRoughnessBias)
+        * max(RoughnessScale, 0.0) + RoughnessBias, 0.035, 1.0);
+    O.ThicknessCm = max(ThicknessCm, 0.00001) * max(1.0 + ThicknessVariation * (Finish - 0.5), 0.05);
+    // Tint is transmittance at an authored reference thickness. Beer-Lambert scaling
+    // keeps absorption material properties fixed as physical layer thickness changes.
+    float3 ReferenceTransmission = clamp(DyeTransmittance * max(TintColor, 0.0), 0.001, 0.999);
+    O.ATransmittanceColor = pow(ReferenceTransmission, O.ThicknessCm / max(DyeReferenceThicknessCm, 0.00001));
+    O.BDiffuseAlbedo = 0.0;
+    float3 RelativeColor = Color / float3(0.96, 0.64, 0.54);
+    O.BF0 = saturate(max(MetalTint, 0.0) * lerp(float3(1.0, 1.0, 1.0),
+        clamp(RelativeColor, 0.5, 1.5), saturate(MetalColorVariation)));
+    O.BNormal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(MetalNormalMap, MetalNormalMapSampler, UV),
+        MetalNormalStrength, UVRotation);
+    O.BRoughness = clamp((MetalFinish * max(MetalRoughnessScale, 0.0) + MetalRoughnessBias)
+        * max(RoughnessScale, 0.0) + RoughnessBias, 0.045, 1.0);
+    if (DebugView > 0.5)
+    {
+        float3 Inspection = O.ATransmittanceColor;
+        if (DebugView > 1.5 && DebugView < 2.5)
+        { Inspection = O.ANormal * 0.5 + 0.5; }
+        if (DebugView > 2.5 && DebugView < 3.5)
+        { Inspection = O.ARoughness.xxx; }
+        if (DebugView > 3.5)
+        { Inspection = O.BF0; }
+        O.ADiffuseAlbedo = 0.0;
+        O.AF0 = 0.0;
+        O.ATransmittanceColor = float3(0.999, 0.999, 0.999);
+        O.AEmissiveColor = Inspection;
+        O.BF0 = 0.0;
+        O.BEmissiveColor = 0.0;
+    }
+    O.ADiffuseAlbedo = CkUsf_AdaptiveColor(O.ADiffuseAlbedo);
+    O.BDiffuseAlbedo = CkUsf_AdaptiveColor(O.BDiffuseAlbedo);
+    O.AF0 = CkUsf_AdaptiveColor(O.AF0);
+    O.BF0 = CkUsf_AdaptiveColor(O.BF0);
+    O.AEmissiveColor = CkUsf_AdaptiveColor(O.AEmissiveColor);
+    O.BEmissiveColor = CkUsf_AdaptiveColor(O.BEmissiveColor);
+    return O;
+}

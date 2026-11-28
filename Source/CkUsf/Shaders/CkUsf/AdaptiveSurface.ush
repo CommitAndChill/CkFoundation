@@ -1,0 +1,8 @@
+#pragma once
+
+// Identity seam for independently verifying transitive numeric reload of Adaptive looks.
+// This helper owns no BSDF evaluation; engine native nodes provide all lighting.
+float3 CkUsf_AdaptiveColor(float3 InColor)
+{
+    return InColor;
+}

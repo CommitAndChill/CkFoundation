@@ -1,0 +1,29 @@
+// @ckusf surface_graph NativeTranslucentSlab
+#pragma once
+#include "/CkUsf/TailLampOptics.ush"
+
+FCkUsf_TranslucentSlabOutput CkUsf_Look_AmberSpecimen(FCkUsf_SurfaceInput In,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    Texture2D ThicknessMap, SamplerState ThicknessMapSampler,
+    Texture2D TintMap, SamplerState TintMapSampler,
+    float3 TransmissionColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float Ior, float AbsorptionStrength,
+    float ReferenceThicknessCm, float ThicknessCm, float EdgeThicknessCm,
+    float TintVariation, float DistortionStrength)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    FCkUsf_TranslucentSlabOutput O = CkUsf_DefaultTranslucentSlab();
+    float3 Tint = CkUsf_SampleTexture2D(TintMap, TintMapSampler, UV).rgb;
+    float PathLength = saturate(CkUsf_SampleTexture2D(ThicknessMap, ThicknessMapSampler, UV).r);
+    O.DiffuseAlbedo = 0.0;
+    O.EmissiveColor = 0.0;
+    O.F0 = CkUsf_TailLampDielectricF0(Ior).xxx;
+    O.Normal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV), NormalStrength, UVRotation);
+    O.Roughness = clamp(CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r * max(RoughnessScale, 0.0) + RoughnessBias, 0.025, 0.9);
+    O.TransmittanceColor = CkUsf_TailLampTransmission(TransmissionColor * lerp(1.0.xxx, Tint, saturate(TintVariation)), AbsorptionStrength);
+    O.ReferenceThicknessCm = max(ReferenceThicknessCm, 0.001);
+    O.ThicknessCm = max(lerp(max(EdgeThicknessCm, 0.001), max(ThicknessCm, 0.001), PathLength), 0.001);
+    O.RefractionStrength = 1.0 + clamp(DistortionStrength, 0.0, 0.1);
+    return O;
+}

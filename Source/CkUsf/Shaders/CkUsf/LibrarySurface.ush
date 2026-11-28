@@ -1,0 +1,61 @@
+#pragma once
+#include "/CkUsf/Common.ush"
+
+// Shared sampling only: each look owns its material response and finish.
+float2 CkUsf_LibraryUV(float2 UV, float Scale, float Rotation)
+{
+    float Angle = Rotation * 0.01745329252;
+    float S = sin(Angle);
+    float C = cos(Angle);
+    float2 P = (UV - 0.5) * max(abs(Scale), 0.001);
+    return float2(C * P.x - S * P.y, S * P.x + C * P.y) + 0.5;
+}
+
+float3 CkUsf_LibraryNormal(float4 Sample, float Strength, float Rotation)
+{
+    float3 N = CkUsf_UnpackNormal(Sample, max(Strength, 0.0));
+    // Sampling rotates UVs; rotate normal slopes back into the mesh tangent basis.
+    float Angle = Rotation * 0.01745329252;
+    float S = sin(Angle);
+    float C = cos(Angle);
+    return normalize(float3(C * N.x + S * N.y, -S * N.x + C * N.y, N.z));
+}
+
+// Axial directions use cos(2*angle), sin(2*angle) so filtering cannot flip at a half-turn seam.
+float4 CkUsf_LibraryDirection(float4 Sample, float RotationDegrees)
+{
+    float2 Axis = Sample.rg * 2.0 - 1.0;
+    float Angle = 0.5 * atan2(Axis.y, Axis.x + 1e-6) + RotationDegrees * 0.01745329252;
+    return float4(cos(Angle), sin(Angle), 0.0, saturate(Sample.b * length(Axis)));
+}
+
+FCkUsf_SurfaceOutput CkUsf_LibrarySurface(float4 Color, float4 Normal, float Roughness,
+    float3 Tint, float NormalStrength, float RoughnessScale, float RoughnessBias, float Rotation)
+{
+    FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
+    O.BaseColor = saturate(Color.rgb * max(Tint, 0.0));
+    O.Normal = CkUsf_LibraryNormal(Normal, NormalStrength, Rotation);
+    O.Roughness = clamp(Roughness * max(RoughnessScale, 0.0) + RoughnessBias, 0.045, 1.0);
+    O.ClearCoat = 0.0;
+    return O;
+}
+
+FCkUsf_SurfaceOutput CkUsf_LibraryInspect(FCkUsf_SurfaceOutput O, float DebugView)
+{
+    if (DebugView > 0.5)
+    {
+        float3 Color = O.BaseColor;
+        if (DebugView > 1.5 && DebugView < 2.5)
+        { Color = O.Normal * 0.5 + 0.5; }
+        if (DebugView > 2.5 && DebugView < 3.5)
+        { Color = O.Roughness.xxx; }
+        if (DebugView > 3.5)
+        { Color = O.Metallic.xxx; }
+        O.BaseColor = 0.0;
+        O.Specular = 0.0;
+        O.Metallic = 0.0;
+        O.ClearCoat = 0.0;
+        O.EmissiveColor = Color;
+    }
+    return O;
+}

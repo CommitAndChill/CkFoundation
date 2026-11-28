@@ -1,0 +1,48 @@
+// @ckusf surface_graph Slab
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+// CC0 ambientCG Metal057A: clean copper finish, no patina. Isotropic conductor; no fabricated brush direction.
+// Source maps and licenses are pinned by the matching Batch3/Batch7 manifest.
+FCkUsf_SlabOutput CkUsf_Look_NativeCopper(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TintColor,
+    float UVScale,
+    float UVRotation,
+    float NormalStrength,
+    float RoughnessScale,
+    float RoughnessBias,
+    float DebugView,
+    float MetalColorVariation)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float3 Color = CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV).rgb;
+    float Roughness = CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r;
+    FCkUsf_SlabOutput O = CkUsf_DefaultSlab();
+    O.Normal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV),
+        NormalStrength, UVRotation);
+    O.Roughness = clamp(Roughness * max(RoughnessScale, 0.0) + RoughnessBias, 0.045, 1.0);
+    // Normalize the authored source copper color before applying its subtle mineral/finish variation.
+    // This is color modulation, not a measured spectral conductor calibration.
+    float3 RelativeColor = Color / float3(0.96, 0.64, 0.54);
+    float3 Finish = lerp(1.0.xxx, clamp(RelativeColor, 0.5, 1.5), saturate(MetalColorVariation));
+    O.DiffuseAlbedo = 0.0;
+    O.F0 = saturate(max(TintColor, 0.0) * Finish);
+    if (DebugView > 0.5)
+    {
+        float3 Inspection = O.DiffuseAlbedo;
+        Inspection = O.F0;
+        if (DebugView > 1.5 && DebugView < 2.5)
+        { Inspection = O.Normal * 0.5 + 0.5; }
+        if (DebugView > 2.5 && DebugView < 3.5)
+        { Inspection = O.Roughness.xxx; }
+        if (DebugView > 3.5)
+        { Inspection = O.F0; }
+        O.DiffuseAlbedo = 0.0;
+        O.F0 = 0.0;
+        O.EmissiveColor = Inspection;
+    }
+    return O;
+}

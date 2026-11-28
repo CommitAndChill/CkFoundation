@@ -1,0 +1,26 @@
+// @ckusf surface_graph NativeTranslucentSlab
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_TranslucentSlabOutput CkUsf_Look_OpticalOpalShell(FCkUsf_SurfaceInput In,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TransmissionColor, float UVScale, float UVRotation, float NormalStrength,
+    float PolishRoughness, float GlassIor, float ReferenceThicknessCm,
+    float ShellThicknessCm, float RefractionStrength)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV,UVScale,UVRotation);
+    FCkUsf_TranslucentSlabOutput O = CkUsf_DefaultTranslucentSlab();
+    O.Normal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(NormalMap,NormalMapSampler,UV),NormalStrength,UVRotation);
+    float Ior = clamp(GlassIor,1.01,2.4);
+    O.F0 = pow((Ior-1.0)/(Ior+1.0),2.0);
+    O.Roughness = clamp(PolishRoughness+CkUsf_SampleTexture2D(RoughnessMap,RoughnessMapSampler,UV).r*.01,.02,.6);
+    O.DiffuseAlbedo = 0.0;
+    O.TransmittanceColor = clamp(TransmissionColor,.001,.999);
+    O.ReferenceThicknessCm = max(ReferenceThicknessCm,.001);
+    O.ThicknessCm = max(ShellThicknessCm,.001);
+    // Native PNO path: geometric separation supplies depth, not traced exit refraction.
+    O.RefractionStrength = clamp(RefractionStrength,1.0,1.1);
+    O.EmissiveColor = 0.0;
+    return O;
+}

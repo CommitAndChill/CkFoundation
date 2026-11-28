@@ -1,4 +1,5 @@
 #include "CkUsfEditor/Generator/CkUsf_Generator.h"
+#include "CkUsfEditor/Generator/CkUsf_NativeSurfaceGraph.h"
 
 #include "MaterialDomain.h"
 
@@ -7,6 +8,7 @@
 #include "CkUsfEditor_Log.h"
 
 #include "CkCore/Validation/CkIsValid.h"
+#include "CkCore/Ensure/CkEnsure.h"
 
 #include "MaterialEditingLibrary.h"
 #include "MaterialShaderPrecompileMode.h"
@@ -22,6 +24,7 @@
 #include "Materials/MaterialExpressionTime.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionSceneTexture.h"
+#include "Materials/MaterialExpressionSceneColor.h"
 #include "Materials/MaterialExpressionScreenPosition.h"
 #include "Materials/MaterialExpressionWorldPosition.h"
 #include "Materials/MaterialExpressionCameraVectorWS.h"
@@ -249,6 +252,8 @@ namespace ck::usf_editor
             Code += TEXT("In.VertexTangent = VertexTangent;\n");
             Code += TEXT("In.PixelDepth = PixelDepth;\n");
             Code += TEXT("In.VertexColor = VertexColor;\n");
+            if (InDef->_SurfaceSceneColor)
+            { Code += TEXT("In.SceneColor = float4(SceneColor.rgb, 1.0);\nIn.SurfaceScreenUV = SurfaceScreenUV;\n"); }
             if (InDef->_PixelDataChannels)
             {
                 Code += TEXT("In.UV1 = UV1;\n");
@@ -291,7 +296,7 @@ namespace ck::usf_editor
         }
 
         Code += FString::Printf(
-            TEXT("FCkUsf_SurfaceOutput O = %s(%s);\n"), *InDef->_UshFunctionName.ToString(), *Args);
+            TEXT("%s O = %s(%s);\n"), *Get_SurfaceOutputType(InContract), *InDef->_UshFunctionName.ToString(), *Args);
 
         if (InIsPostProcess)
         {
@@ -300,7 +305,7 @@ namespace ck::usf_editor
         }
 
         Code += Build_ShadingModelOutputCode(InContract);
-        Code += TEXT("return O.BaseColor;");
+        Code += FString::Printf(TEXT("return O.%s;"), *Get_SurfacePrimaryField(InContract));
         return Code;
     }
 
@@ -582,9 +587,43 @@ namespace ck::usf_editor
             }
         }
 
+        if (InDef->_SurfaceSceneColor)
+        {
+            FCustomInput Color; Color.InputName = TEXT("SceneColor"); Custom->Inputs.Add(Color);
+            FCustomInput Coordinates; Coordinates.InputName = TEXT("SurfaceScreenUV"); Custom->Inputs.Add(Coordinates);
+        }
         Custom->Code = Build_CustomCode(InDef, IsPostProcess, Contract);
         Apply_LookDefines(Custom, InDef);
+        if (InDef->_SurfaceSceneColor)
+        {
+            FCustomDefine Define;
+            Define.DefineName = TEXT("CK_USF_SURFACE_SCENE_COLOR");
+            Define.DefineValue = TEXT("1");
+            Custom->AdditionalDefines.Add(Define);
+        }
         Custom->RebuildOutputs();
+
+        if (InDef->_SurfaceSceneColor)
+        {
+            const auto Coordinates = TObjectPtr<UMaterialExpressionScreenPosition>{Cast<UMaterialExpressionScreenPosition>(
+                UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionScreenPosition::StaticClass(), -1400, 1440))};
+            const auto Color = TObjectPtr<UMaterialExpressionSceneColor>{Cast<UMaterialExpressionSceneColor>(
+                UMaterialEditingLibrary::CreateMaterialExpression(Material, UMaterialExpressionSceneColor::StaticClass(), -1100, 1440))};
+            CK_ENSURE_IF_NOT(Coordinates != nullptr && Color != nullptr, TEXT("Could not create surface scene-color inputs"))
+            {
+                InOutResult.Errors.Add(TEXT("Could not create surface scene-color inputs"));
+                return nullptr;
+            }
+            Color->InputMode = EMaterialSceneAttributeInputMode::Coordinates;
+            Color->Input.Connect(0, Coordinates.Get());
+            UMaterialEditingLibrary::ConnectMaterialExpressions(Coordinates.Get(), FString(), Custom, TEXT("SurfaceScreenUV"));
+            UMaterialEditingLibrary::ConnectMaterialExpressions(Color.Get(), FString(), Custom, TEXT("SceneColor"));
+            if (InDef->_SceneColorReplacesBackground)
+            {
+                Material->bUseTranslucencyVertexFog = false;
+                Material->bComputeFogPerPixel = false;
+            }
+        }
 
         // ---- PostProcess scene-texture inputs — also declare the usage that legalizes raw SceneTextureLookup() in the .ush ----
         if (IsPostProcess)
@@ -710,6 +749,15 @@ namespace ck::usf_editor
             // EmissiveColor is the only valid PostProcess pin; the primary output IS the final pixel.
             UMaterialEditingLibrary::ConnectMaterialProperty(Custom, FString(), MP_EmissiveColor);
         }
+        else if (Contract.SurfaceGraph != ECk_Usf_SurfaceGraph::Legacy)
+        {
+            if (NOT Create_NativeSurfaceGraph(*Material, *Custom, Contract, InOutResult.Errors))
+            {
+                Material->ClearFlags(RF_Public | RF_Standalone);
+                Material->MarkAsGarbage();
+                return nullptr;
+            }
+        }
         else
         {
             UMaterialEditingLibrary::ConnectMaterialProperty(Custom, FString(), MP_BaseColor);
@@ -815,8 +863,10 @@ namespace ck::usf_editor
 
         UMaterialEditingLibrary::LayoutMaterialExpressions(Material);
         Material->GetOutermost()->GetMetaData().SetValue(Material, TEXT("CkUsf.SourceDefinition.v1"), *InDef->GetPathName());
-        if (Contract.SourceOverride)
+        if (Contract.SourceOverride || Contract.SurfaceGraph != ECk_Usf_SurfaceGraph::Legacy)
         { Material->GetOutermost()->GetMetaData().SetValue(Material, TEXT("CkUsf.SourceSelection.v1"), TEXT("1")); }
+        if (Contract.SurfaceGraph != ECk_Usf_SurfaceGraph::Legacy)
+        { Record_NativeSurfaceGraph(*Material, *Custom, *InDef, Contract); }
         UMaterialEditingLibrary::RecompileMaterial(Material);
         Material->MarkPackageDirty();
         FAssetRegistryModule::AssetCreated(Material);
@@ -838,12 +888,19 @@ namespace ck::usf_editor
         return DoGenerate_LookMaterial(InDef, DiscardedResult, InPackageRootOverride);
     }
 
-    auto Prepare_LookShadingModelReload(UMaterial& InMaterial,
-        FPreparedLookShadingModelReload& OutPrepared, TArray<FString>& OutErrors) -> bool
+    static auto Prepare_LookShadingModelReloadImpl(UMaterial& InMaterial,
+        FPreparedLookShadingModelReload& OutPrepared, TArray<FString>& OutErrors,
+        bool InAllowProfileExclusion, FString& OutExclusionReason) -> bool
     {
         OutPrepared = {};
+        OutExclusionReason.Reset();
+        const auto RecordedNative = NOT InMaterial.GetOutermost()->GetMetaData().GetValue(&InMaterial, TEXT("CkUsf.NativeSurfaceGraph.v1")).IsEmpty();
         if (InMaterial.MaterialDomain != MD_Surface)
-        { return true; }
+        {
+            if (RecordedNative)
+            { OutErrors.Add(TEXT("Recorded native master no longer uses the Surface material domain.")); return false; }
+            return true;
+        }
         const auto SourcePath = InMaterial.GetOutermost()->GetMetaData().GetValue(&InMaterial, TEXT("CkUsf.SourceDefinition.v1"));
         auto Definition = TStrongObjectPtr<UCkUsf_LookDefinition>{};
         if (NOT SourcePath.IsEmpty())
@@ -875,7 +932,15 @@ namespace ck::usf_editor
             if (NOT Custom.IsValid())
             { continue; }
             if (Custom->Code.StartsWith(TEXT("FCkUsf_SurfaceInput In = CkUsf_DefaultInput();"))
-                && Custom->Code.Contains(TEXT("FCkUsf_SurfaceOutput O = ")))
+                && (Custom->Code.Contains(TEXT("FCkUsf_SurfaceOutput O = "))
+                    || Custom->Code.Contains(TEXT("FCkUsf_SlabOutput O = "))
+                    || Custom->Code.Contains(TEXT("FCkUsf_TranslucentSlabOutput O = "))
+                    || Custom->Code.Contains(TEXT("FCkUsf_TranslucentVerticalOutput O = "))
+                    || Custom->Code.Contains(TEXT("FCkUsf_TranslucentStack3Output O = "))
+                    || Custom->Code.Contains(TEXT("FCkUsf_CoatedOutput O = "))
+                    || Custom->Code.Contains(TEXT("FCkUsf_ToonOutput O = "))
+                    || Custom->Code.Contains(TEXT("FCkUsf_AdaptiveVerticalOutput O = "))
+                    || Custom->Code.Contains(TEXT("FCkUsf_AdaptiveMixOutput O = "))))
             {
                 if (Primary.IsValid())
                 { OutErrors.Add(TEXT("Multiple primary CkUsf Custom nodes; regenerate the master.")); return false; }
@@ -884,6 +949,8 @@ namespace ck::usf_editor
         }
         if (NOT Definition.IsValid())
         {
+            if (RecordedNative)
+            { OutErrors.Add(FString::Printf(TEXT("No source LookDefinition for recorded native master [%s]; restore its owner before reload."), *InMaterial.GetPathName())); return false; }
             if (Primary.IsValid())
             {
                 auto UsesSourceSelection = NOT InMaterial.GetOutermost()->GetMetaData().GetValue(&InMaterial, TEXT("CkUsf.SourceSelection.v1")).IsEmpty();
@@ -907,8 +974,83 @@ namespace ck::usf_editor
         if (NOT Primary.IsValid())
         { OutErrors.Add(TEXT("Generated primary CkUsf Custom node is missing; regenerate the master.")); return false; }
         auto Prepared = FPreparedLookShadingModelReload{};
-        if (NOT Resolve_ShadingModelContract(*Definition, Prepared.Contract, OutErrors))
+        auto ExclusionReason = FString{};
+        auto AuthoringValidation = FLookValidationResult{};
+        if (InAllowProfileExclusion)
+        {
+            const auto Admission = Classify_LookForGeneration(Definition.Get());
+            if (Admission.Admission == ELookGenerationAdmission::Invalid)
+            { OutErrors.Append(Admission.Validation.Errors); return false; }
+            if (Admission.Admission == ELookGenerationAdmission::OtherRendererProfile)
+            {
+                if (NOT RecordedNative || Admission.ResolvedGraph == ECk_Usf_SurfaceGraph::Legacy)
+                { OutErrors.Add(TEXT("Opposite-profile legacy master lacks native graph provenance; regenerate under its supported profile before reload.")); return false; }
+                if (NOT detail::Resolve_ShadingModelAuthoringContract(*Definition, Prepared.Contract, OutErrors))
+                { return false; }
+                AuthoringValidation = Admission.Validation;
+                ExclusionReason = FString::Printf(TEXT("Master [%s], definition [%s], graph [%d]: %s"),
+                    *InMaterial.GetPathName(), *Definition->GetPathName(), static_cast<int32>(Prepared.Contract.SurfaceGraph), *Admission.Reason);
+            }
+        }
+        if (ExclusionReason.IsEmpty() && NOT Resolve_ShadingModelContract(*Definition, Prepared.Contract, OutErrors))
         { return false; }
+        if (Prepared.Contract.SurfaceGraph != ECk_Usf_SurfaceGraph::Legacy || RecordedNative)
+        {
+            if (Prepared.Contract.SurfaceGraph == ECk_Usf_SurfaceGraph::Legacy)
+            { OutErrors.Add(TEXT("Native graph selection changed; regenerate the master before reload.")); return false; }
+            const auto Validation = ExclusionReason.IsEmpty() ? Validate_LookDefinition(Definition.Get()) : AuthoringValidation;
+            OutErrors.Append(Validation.Errors);
+            if (NOT Validation.Get_IsValid())
+            { return false; }
+            const auto Code = Build_CustomCode(Definition.Get(), false, Prepared.Contract);
+            if (Primary->Code != Code)
+            { OutErrors.Add(TEXT("Native Custom call contract changed; regenerate the master before reload.")); return false; }
+            if (NOT Validate_NativeSurfaceGraph(InMaterial, *Primary, *Definition, Prepared.Contract, OutErrors))
+            { return false; }
+            if (NOT ExclusionReason.IsEmpty())
+            {
+                OutExclusionReason = ExclusionReason;
+                return true;
+            }
+            Prepared.Custom = Primary;
+            Prepared.Code = Code;
+            OutPrepared = MoveTemp(Prepared);
+            return true;
+        }
+        const auto HasAnisotropy = Primary->AdditionalOutputs.ContainsByPredicate([](const FCustomOutput& InOutput)
+        { return InOutput.OutputName == TEXT("CkUsf_Anisotropy"); });
+        const auto HasTangent = Primary->AdditionalOutputs.ContainsByPredicate([](const FCustomOutput& InOutput)
+        { return InOutput.OutputName == TEXT("CkUsf_Tangent"); });
+        if (HasAnisotropy != Prepared.Contract.DirectionalShading || HasTangent != Prepared.Contract.DirectionalShading)
+        { OutErrors.Add(TEXT("Directional shading layout changed; regenerate the master before shader reload.")); return false; }
+        const auto SceneColorInputs = Primary->Inputs.FilterByPredicate([](const FCustomInput& InInput)
+        { return InInput.InputName == TEXT("SceneColor") || InInput.InputName == TEXT("SurfaceScreenUV"); });
+        const auto SceneColorDefines = Primary->AdditionalDefines.FilterByPredicate([](const FCustomDefine& InDefine)
+        { return InDefine.DefineName == TEXT("CK_USF_SURFACE_SCENE_COLOR"); });
+        const auto ExpectedFogging = NOT Definition->_SceneColorReplacesBackground;
+        if (SceneColorInputs.Num() != (Definition->_SurfaceSceneColor ? 2 : 0)
+            || SceneColorDefines.Num() != (Definition->_SurfaceSceneColor ? 1 : 0)
+            || (Definition->_SurfaceSceneColor && (SceneColorDefines[0].DefineValue != TEXT("1")
+                || InMaterial.bUseTranslucencyVertexFog != ExpectedFogging
+                || (Definition->_SceneColorReplacesBackground && InMaterial.bComputeFogPerPixel))))
+        { OutErrors.Add(TEXT("Surface scene-color layout or fog policy changed; regenerate the master before shader reload.")); return false; }
+        if (Definition->_SurfaceSceneColor)
+        {
+            const auto ColorIndex = Primary->Inputs.IndexOfByPredicate([](const FCustomInput& InInput)
+            { return InInput.InputName == TEXT("SceneColor"); });
+            const auto CoordinatesIndex = Primary->Inputs.IndexOfByPredicate([](const FCustomInput& InInput)
+            { return InInput.InputName == TEXT("SurfaceScreenUV"); });
+            if (ColorIndex == INDEX_NONE || CoordinatesIndex == INDEX_NONE)
+            { OutErrors.Add(TEXT("Surface scene-color inputs are missing; regenerate the master.")); return false; }
+            const auto Color = TWeakObjectPtr<UMaterialExpressionSceneColor>{Cast<UMaterialExpressionSceneColor>(Primary->Inputs[ColorIndex].Input.Expression)};
+            const auto Coordinates = TWeakObjectPtr<UMaterialExpressionScreenPosition>{Cast<UMaterialExpressionScreenPosition>(Primary->Inputs[CoordinatesIndex].Input.Expression)};
+            if (NOT Color.IsValid() || NOT Coordinates.IsValid())
+            { OutErrors.Add(TEXT("Surface scene-color input types changed; regenerate the master.")); return false; }
+            if (Color->InputMode != EMaterialSceneAttributeInputMode::Coordinates
+                || Color->Input.Expression != Coordinates.Get() || Color->Input.OutputIndex != 0
+                || Primary->Inputs[ColorIndex].Input.OutputIndex != 0 || Primary->Inputs[CoordinatesIndex].Input.OutputIndex != 0)
+            { OutErrors.Add(TEXT("Surface scene-color coordinates changed; regenerate the master.")); return false; }
+        }
         if (NOT Prepared.Contract.SourceOverride
             && InMaterial.GetOutermost()->GetMetaData().GetValue(&InMaterial, TEXT("CkUsf.SourceSelection.v1")).IsEmpty())
         { return true; }
@@ -941,6 +1083,8 @@ namespace ck::usf_editor
             for (auto Channel = 0; Channel < 4; ++Channel)
             { ExpectedInputs.Add(FName{*FString::Printf(TEXT("DynParam%d"), Channel)}); }
         }
+        if (Definition->_SurfaceSceneColor)
+        { ExpectedInputs.Append({TEXT("SceneColor"), TEXT("SurfaceScreenUV")}); }
         auto InputsMatch = ExpectedInputs.Num() == Primary->Inputs.Num()
             && Primary->IncludeFilePaths.Contains(Definition->_UshIncludePath);
         for (auto Index = 0; InputsMatch && Index < ExpectedInputs.Num(); ++Index)
@@ -960,11 +1104,34 @@ namespace ck::usf_editor
         return true;
     }
 
+    auto Prepare_LookShadingModelReload(UMaterial& InMaterial,
+        FPreparedLookShadingModelReload& OutPrepared, TArray<FString>& OutErrors) -> bool
+    {
+        auto ExclusionReason = FString{};
+        return Prepare_LookShadingModelReloadImpl(InMaterial, OutPrepared, OutErrors, false, ExclusionReason);
+    }
+
+    auto Prepare_LookShadingModelReloadForBatch(UMaterial& InMaterial,
+        FPreparedLookShadingModelReload& OutPrepared, FString& OutExclusionReason,
+        TArray<FString>& OutErrors) -> ELookShadingModelReloadAdmission
+    {
+        if (NOT Prepare_LookShadingModelReloadImpl(InMaterial, OutPrepared, OutErrors, true, OutExclusionReason))
+        { return ELookShadingModelReloadAdmission::Invalid; }
+        return OutExclusionReason.IsEmpty() ? ELookShadingModelReloadAdmission::Prepared
+            : ELookShadingModelReloadAdmission::OtherRendererProfile;
+    }
+
     auto Apply_LookShadingModelReload(UMaterial& InMaterial, const FPreparedLookShadingModelReload& InPrepared) -> void
     {
         if (NOT InPrepared.Custom.IsValid())
         { return; }
         auto& Custom = *InPrepared.Custom;
+        if (InPrepared.Contract.SurfaceGraph != ECk_Usf_SurfaceGraph::Legacy)
+        {
+            // Preflight established exact native wiring. Numeric source reload does not rebuild topology.
+            Custom.Code = InPrepared.Code;
+            return;
+        }
         Custom.AdditionalOutputs.Reset();
         for (const auto& Output : Get_ShadingModelOutputs(InPrepared.Contract))
         { Custom.AdditionalOutputs.Add(FCustomOutput{FName{*Output.Name}, Output.Type}); }
@@ -1040,8 +1207,37 @@ namespace ck::usf_editor
         ARM.GetAssetsByClass(UCkUsf_LookDefinition::StaticClass()->GetClassPathName(), Assets);
         for (const auto& A : Assets)
         {
-            auto* Def = Cast<UCkUsf_LookDefinition>(A.GetAsset());
-            auto* Material = DoGenerate_LookMaterial(Def, Result, InPackageRootOverride);
+            const auto Def = TObjectPtr<UCkUsf_LookDefinition>{Cast<UCkUsf_LookDefinition>(A.GetAsset())};
+            const auto Admission = Classify_LookForGeneration(Def);
+            if (Admission.Admission != ELookGenerationAdmission::Compatible)
+            {
+                for (const auto& Warning : Admission.Validation.Warnings)
+                {
+                    ck::usf_editor::Warning(TEXT("{}"), Warning);
+                    Result.Warnings.Add(Warning);
+                }
+                if (Admission.Admission == ELookGenerationAdmission::OtherRendererProfile)
+                {
+                    const auto Receipt = FString::Printf(TEXT("LookDefinition [%s], resolved graph [%d], required profile [%s]: %s"),
+                        *A.GetSoftObjectPath().ToString(), static_cast<int32>(Admission.ResolvedGraph),
+                        *Admission.RequiredProfile, *Admission.Reason);
+                    ++Result.NumIncompatible;
+                    Result.IncompatibleLooks.Add(Receipt);
+                    ck::usf_editor::Log(TEXT("CkUsf bulk exclusion: {}"), Receipt);
+                }
+                else
+                {
+                    ++Result.NumSkipped;
+                    for (const auto& ValidationError : Admission.Validation.Errors)
+                    {
+                        const auto Error = FString::Printf(TEXT("LookDefinition [%s]: %s"), *A.GetSoftObjectPath().ToString(), *ValidationError);
+                        Result.Errors.Add(Error);
+                        ck::usf_editor::Error(TEXT("{}"), Error);
+                    }
+                }
+                continue;
+            }
+            const auto Material = TObjectPtr<UMaterial>{DoGenerate_LookMaterial(Def, Result, InPackageRootOverride)};
             if (ck::Is_NOT_Valid(Material))
             { ++Result.NumSkipped; continue; }
 
@@ -1049,8 +1245,8 @@ namespace ck::usf_editor
             constexpr auto ForceSynchronousCompile = false;   // see the header — forcing leaves masters unrenderable
             Validate_LookShaderCompile(Material, Def->Get_EffectiveLookName(), Result.Errors, ForceSynchronousCompile);
         }
-        ck::usf_editor::Log(TEXT("CkUsf generate: {} generated, {} skipped, {} error(s), {} warning(s)"),
-            Result.NumGenerated, Result.NumSkipped, Result.Errors.Num(), Result.Warnings.Num());
+        ck::usf_editor::Log(TEXT("CkUsf generate: {} generated, {} skipped, {} incompatible-profile exclusion(s), {} error(s), {} warning(s)"),
+            Result.NumGenerated, Result.NumSkipped, Result.NumIncompatible, Result.Errors.Num(), Result.Warnings.Num());
         return Result;
     }
 }

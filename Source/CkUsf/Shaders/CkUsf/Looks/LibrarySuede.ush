@@ -1,0 +1,31 @@
+// @ckusf shading_model Cloth
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_LibrarySuede(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TintColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float NapWeight, float3 NapColor,
+    float NapContrast, float DebugView)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float SourceRoughness = CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r;
+    FCkUsf_SurfaceOutput O = CkUsf_LibrarySurface(
+        CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV),
+        CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV), SourceRoughness,
+        TintColor, NormalStrength, RoughnessScale, RoughnessBias, UVRotation);
+    // Source roughness supplies restrained nap variation; it is not a measured fiber mask.
+    float NapVariation = clamp(1.0 + (SourceRoughness - 0.5) * max(NapContrast, 0.0), 0.5, 1.5);
+    O.Metallic = 0.0;
+    O.Specular = 0.4;
+    O.SubsurfaceColor = saturate(NapColor);
+    O.ClothMask = saturate(saturate(NapWeight) * NapVariation);
+    if (DebugView > 0.5)
+    {
+        O.ClothMask = 0.0;
+        O.SubsurfaceColor = 0.0;
+    }
+    return CkUsf_LibraryInspect(O, DebugView);
+}

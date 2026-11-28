@@ -1,0 +1,68 @@
+// @ckusf surface_graph AdaptiveVertical
+#pragma once
+#include "/CkUsf/OpticalPair.ush"
+
+FCkUsf_AdaptiveVerticalOutput CkUsf_Look_OpticalOpalCore(FCkUsf_SurfaceInput In,
+    Texture2D ColorMap, SamplerState ColorMapSampler,
+    Texture2D DomainMap, SamplerState DomainMapSampler,
+    Texture2D DomainNormalMap, SamplerState DomainNormalMapSampler,
+    Texture2D PolishNormalMap, SamplerState PolishNormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 MilkColor, float UVScale, float UVRotation, float BodyColorMix,
+    float DetailFilterMip, float InternalDepthUV, float InternalLayerMix,
+    float DomainOrientationStrength, float DomainNormalStrength, float DomainRoughness,
+    float FlashReflectance, float FlashStrength, float FlashCoverage,
+    float WavelengthShift, float WavelengthMinNm, float WavelengthMaxNm,
+    float SpectralBandwidthNm, float CoatRoughness, float CoatNormalStrength,
+    float LayerThicknessCm, float GlintDensity, float GlintUVScale)
+{
+    float2 SurfaceUV = CkUsf_LibraryUV(In.UV,UVScale,UVRotation);
+    float3 View = CkUsf_ViewDirTS(In);
+    float3 InternalView = -refract(-View,float3(0.0,0.0,1.0),1.0/1.45);
+    float2 Offset = -InternalView.xy/max(abs(InternalView.z),.5)*clamp(InternalDepthUV,0.0,.025);
+    float2 NearUV = saturate(SurfaceUV+Offset);
+    float2 DeepUV = saturate((SurfaceUV-.5)*.93+.5+Offset*1.8+float2(.07,-.05));
+    float Mip = clamp(DetailFilterMip,0.0,5.0);
+    float3 NearColor = ColorMap.SampleLevel(ColorMapSampler,NearUV,Mip).rgb;
+    float3 DeepColor = ColorMap.SampleLevel(ColorMapSampler,DeepUV,Mip+2.0).rgb;
+    float3 Data = CkUsf_SampleTexture2D(DomainMap,DomainMapSampler,NearUV).rgb;
+    float4 OrientationSample = CkUsf_SampleTexture2D(DomainNormalMap,DomainNormalMapSampler,NearUV);
+    // This texture describes internal optical domains, independently of the surface normal.
+    float3 OpticalAxis = CkUsf_LibraryNormal(OrientationSample,DomainOrientationStrength,UVRotation);
+    float Alignment = saturate(dot(normalize(InternalView),OpticalAxis));
+    float Phase = saturate((Data.b-.10)/.55);
+    float Lambda = lerp(clamp(WavelengthMinNm,380.0,850.0),clamp(WavelengthMaxNm,380.0,850.0),Phase)*Alignment+WavelengthShift*150.0;
+    float3 Bands = (Lambda-float3(610.0,535.0,460.0))/clamp(SpectralBandwidthNm,10.0,80.0);
+    // The spectral window controls activity only. Original texture hues and filled
+    // patch shapes remain intact instead of becoming a smooth rainbow in diffuse.
+    float3 VisibleBands = exp(-.5*Bands*Bands);
+    float SpectralActivity = max(VisibleBands.r,max(VisibleBands.g,VisibleBands.b));
+    float High = max(max(NearColor.r,NearColor.g),NearColor.b);
+    float Low = min(min(NearColor.r,NearColor.g),NearColor.b);
+    float Chroma = (High-Low)/max(High,.001);
+    float3 PatchTint = pow(saturate(NearColor/max(High,.001)),1.6);
+    float PeakAlignment = lerp(.78,.98,Phase);
+    float AngularBand = exp(-.5*pow((Alignment-PeakAlignment)/.06,2.0));
+    float Coverage = saturate(Data.r*FlashCoverage)*smoothstep(.55,.85,Chroma)*saturate(FlashStrength);
+    Coverage *= lerp(.08,1.0,AngularBand)*SpectralActivity;
+    float3 MineralBody = lerp(NearColor,DeepColor,saturate(InternalLayerMix));
+    float Roughness = CkUsf_SampleTexture2D(RoughnessMap,RoughnessMapSampler,NearUV).r;
+
+    FCkUsf_AdaptiveVerticalOutput O = CkUsf_DefaultAdaptiveVertical();
+    O.ThicknessCm = clamp(LayerThicknessCm,.001,.4);
+    // Internal haze belongs to this inset core. The separate Shell owns the polish.
+    O.ADiffuseAlbedo = 0.0;
+    O.AF0 = .005;
+    O.ATransmittanceColor = float3(.985,.990,.995);
+    O.ANormal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(PolishNormalMap,PolishNormalMapSampler,SurfaceUV),CoatNormalStrength,UVRotation);
+    O.ARoughness = clamp(CoatRoughness,.1,.6);
+    O.BDiffuseAlbedo = saturate(lerp(MilkColor,MineralBody,saturate(BodyColorMix)));
+    O.BF0 = lerp(.035.xxx,PatchTint*clamp(FlashReflectance,.04,.7),Coverage);
+    O.BNormal = CkUsf_LibraryNormal(OrientationSample,DomainNormalStrength,UVRotation);
+    O.BRoughness = clamp(DomainRoughness+(Roughness-.30)*.15,.06,.6);
+    O.BGlintValue = lerp(1.0,clamp(GlintDensity,0.0,1.0),Coverage);
+    O.BGlintUV = SurfaceUV*clamp(GlintUVScale,.001,1000.0);
+    O.AEmissiveColor = 0.0;
+    O.BEmissiveColor = 0.0;
+    return O;
+}

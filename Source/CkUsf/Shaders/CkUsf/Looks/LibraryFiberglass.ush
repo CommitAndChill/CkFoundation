@@ -1,0 +1,23 @@
+// @ckusf shading_model ClearCoat
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_LibraryFiberglass(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 TintColor, float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float ResinWeight, float ResinRoughness, float DebugView)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float4 ColorSample = CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV);
+    FCkUsf_SurfaceOutput O = CkUsf_LibrarySurface(ColorSample,
+        CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV),
+        CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r,
+        TintColor, NormalStrength, RoughnessScale, RoughnessBias, UVRotation);
+    // Glass-fabric photograph backs the weave. Resin is an authored coating,
+    // and its derived normal/roughness maps are not a measured material scan.
+    O.ClearCoat = saturate(ResinWeight);
+    O.ClearCoatRoughness = clamp(ResinRoughness, 0.045, 1.0);
+    return CkUsf_LibraryInspect(O, DebugView);
+}

@@ -1,0 +1,89 @@
+// @ckusf surface_graph AdaptiveVertical
+#pragma once
+#include "/CkUsf/Looks/OpticalOpal.ush"
+
+float2 CkUsf_OpalDomainHash(float2 Cell)
+{
+    return frac(sin(float2(dot(Cell,float2(127.1,311.7)),dot(Cell,float2(269.5,183.3))))*43758.5453);
+}
+
+float2 CkUsf_OpalDomainTilt(float2 UV)
+{
+    float2 P = UV*48.0;
+    float2 Cell = floor(P);
+    float Best = 10.0;
+    float2 Tilt = 0.0;
+    [unroll] for (int Y=-1;Y<=1;++Y)
+    [unroll] for (int X=-1;X<=1;++X)
+    {
+        float2 Key = Cell+float2(X,Y);
+        float2 Delta = Key+.15+.7*CkUsf_OpalDomainHash(Key)-P;
+        float Distance = dot(Delta,Delta);
+        if (Distance<Best)
+        {
+            Best = Distance;
+            float2 Random = CkUsf_OpalDomainHash(Key+41.3);
+            float Angle = Random.x*6.2831853;
+            Tilt = sqrt(Random.y)*float2(cos(Angle),sin(Angle));
+        }
+    }
+    return Tilt;
+}
+
+FCkUsf_AdaptiveVerticalOutput CkUsf_Look_OpticalOpalDepth(FCkUsf_SurfaceInput In,
+    Texture2D ColorMap, SamplerState ColorMapSampler,
+    Texture2D DomainMap, SamplerState DomainMapSampler,
+    Texture2D DomainNormalMap, SamplerState DomainNormalMapSampler,
+    Texture2D PolishNormalMap, SamplerState PolishNormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 MilkColor, float UVScale, float UVRotation, float MilkAmount,
+    float FlashCoverage, float FlashStrength, float DomainNormalStrength,
+    float DomainRoughness, float WavelengthShift, float CoatRoughness,
+    float CoatNormalStrength, float LayerThicknessCm, float InternalDepthUV, float InternalLayerMix)
+{
+    float3 Ray = refract(-CkUsf_ViewDirTS(In),float3(0.0,0.0,1.0),1.0/1.45);
+    float2 Offset = Ray.xy/max(abs(Ray.z),.5)*clamp(InternalDepthUV,0.0,.02);
+    FCkUsf_SurfaceInput A = In;
+    FCkUsf_SurfaceInput B = In;
+    A.UV = saturate(In.UV+Offset);
+    B.UV = saturate((In.UV-.5)*.94+.5+Offset*1.6+float2(.075,-.055));
+    FCkUsf_AdaptiveVerticalOutput O = CkUsf_Look_OpticalOpal(A,
+        ColorMap,ColorMapSampler,DomainMap,DomainMapSampler,DomainNormalMap,DomainNormalMapSampler,
+        PolishNormalMap,PolishNormalMapSampler,RoughnessMap,RoughnessMapSampler,
+        MilkColor,UVScale,UVRotation,MilkAmount,FlashCoverage,FlashStrength,DomainNormalStrength,
+        DomainRoughness,WavelengthShift,CoatRoughness,CoatNormalStrength,LayerThicknessCm);
+    FCkUsf_AdaptiveVerticalOutput Inner = CkUsf_Look_OpticalOpal(B,
+        ColorMap,ColorMapSampler,DomainMap,DomainMapSampler,DomainNormalMap,DomainNormalMapSampler,
+        PolishNormalMap,PolishNormalMapSampler,RoughnessMap,RoughnessMapSampler,
+        MilkColor,UVScale,UVRotation,MilkAmount,FlashCoverage,FlashStrength,DomainNormalStrength,
+        DomainRoughness,WavelengthShift+.18,CoatRoughness,CoatNormalStrength,LayerThicknessCm);
+    float Weight = saturate(InternalLayerMix);
+    O.BDiffuseAlbedo = lerp(O.BDiffuseAlbedo,Inner.BDiffuseAlbedo,Weight);
+    O.BF0 = lerp(O.BF0,Inner.BF0,Weight);
+    O.BNormal = normalize(lerp(O.BNormal,Inner.BNormal,Weight));
+    float2 MineralUV = CkUsf_LibraryUV(A.UV,UVScale,UVRotation);
+    float2 DeepUV = CkUsf_LibraryUV(B.UV,UVScale,UVRotation);
+    float3 Mineral = lerp(CkUsf_SampleTexture2D(ColorMap,ColorMapSampler,MineralUV).rgb,
+        CkUsf_SampleTexture2D(ColorMap,ColorMapSampler,DeepUV).rgb,Weight);
+    float3 Domains = lerp(CkUsf_SampleTexture2D(DomainMap,DomainMapSampler,MineralUV).rgb,
+        CkUsf_SampleTexture2D(DomainMap,DomainMapSampler,DeepUV).rgb,Weight);
+    float3 MineralTint = pow(saturate(Mineral/max(max(Mineral.r,Mineral.g),max(Mineral.b,.001))),3.0);
+    float Coverage = saturate(Domains.r*max(FlashCoverage,0.0))*saturate(FlashStrength);
+    O.BDiffuseAlbedo = saturate(MilkColor)*lerp(.35,1.0,saturate(MilkAmount))*(.65+.35*Domains.g)
+        *lerp(1.0.xxx,MineralTint,Coverage*.25);
+    O.BDiffuseAlbedo = lerp(O.BDiffuseAlbedo,MineralTint*.75,Coverage*.8);
+    float2 DomainTilt = CkUsf_OpalDomainTilt(MineralUV)*clamp(DomainNormalStrength*10.0,0.0,1.0)*smoothstep(.25,.9,Coverage);
+    O.BNormal = normalize(float3(DomainTilt+O.BNormal.xy*.1,1.0));
+    float3 Spectrum = CkUsf_OpalSpectrum(Domains.b*.95+(1.0-saturate(dot(CkUsf_ViewDirTS(In),O.BNormal)))*.12+WavelengthShift);
+    O.BF0 = lerp(.035.xxx,saturate(lerp(MineralTint,pow(Spectrum,1.4),.65)*.65),Coverage);
+    O.BRoughness = clamp(DomainRoughness+.13,.06,.85);
+    // The existing native top Slab supplies a finite scattering veil. The colored
+    // lower reflection remains lit; neither layer emits light.
+    O.ADiffuseAlbedo = float3(.08,.08,.075)*saturate(MilkAmount/.65);
+    O.ATransmittanceColor = pow((1.0-.02*saturate(MilkAmount/.65)).xxx,O.ThicknessCm/.04);
+    // Only buried mineral data shifts. The polished surface remains mesh-locked.
+    float2 SurfaceUV = CkUsf_LibraryUV(In.UV,UVScale,UVRotation);
+    O.ANormal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(PolishNormalMap,PolishNormalMapSampler,SurfaceUV),CoatNormalStrength,UVRotation);
+    O.ARoughness = clamp(CoatRoughness+CkUsf_SampleTexture2D(RoughnessMap,RoughnessMapSampler,SurfaceUV).r*.015,.025,.6);
+    return O;
+}

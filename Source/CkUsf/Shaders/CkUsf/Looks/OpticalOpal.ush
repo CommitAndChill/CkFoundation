@@ -1,0 +1,46 @@
+// @ckusf surface_graph AdaptiveVertical
+#pragma once
+#include "/CkUsf/OpticalPair.ush"
+
+FCkUsf_AdaptiveVerticalOutput CkUsf_Look_OpticalOpal(FCkUsf_SurfaceInput In,
+    Texture2D ColorMap, SamplerState ColorMapSampler,
+    Texture2D DomainMap, SamplerState DomainMapSampler,
+    Texture2D DomainNormalMap, SamplerState DomainNormalMapSampler,
+    Texture2D PolishNormalMap, SamplerState PolishNormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 MilkColor, float UVScale, float UVRotation, float MilkAmount,
+    float FlashCoverage, float FlashStrength, float DomainNormalStrength,
+    float DomainRoughness, float WavelengthShift, float CoatRoughness,
+    float CoatNormalStrength, float LayerThicknessCm)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV,UVScale,UVRotation);
+    float3 Color = CkUsf_SampleTexture2D(ColorMap,ColorMapSampler,UV).rgb;
+    float3 Domain = CkUsf_SampleTexture2D(DomainMap,DomainMapSampler,UV).rgb;
+    float Roughness = CkUsf_SampleTexture2D(RoughnessMap,RoughnessMapSampler,UV).r;
+    float Mask = saturate(Domain.r*max(FlashCoverage,0.0));
+    float3 DomainNormal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(DomainNormalMap,DomainNormalMapSampler,UV),DomainNormalStrength,UVRotation);
+    float NoV = saturate(dot(CkUsf_ViewDirTS(In),DomainNormal));
+    float3 Spectrum = CkUsf_OpalSpectrum(Domain.b*.6+(1.0-NoV)*.35+WavelengthShift);
+    float3 FlashColor = saturate(Color/max(max(Color.r,Color.g),max(Color.b,.001)));
+    FlashColor = pow(FlashColor,3.0);
+    float3 MineralColor = FlashColor;
+    FlashColor = lerp(FlashColor,FlashColor*Spectrum*1.8,.35);
+    FCkUsf_AdaptiveVerticalOutput O = CkUsf_DefaultAdaptiveVertical();
+    O.ADiffuseAlbedo = 0.0;
+    O.AF0 = float3(.04,.04,.04);
+    O.ANormal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(PolishNormalMap,PolishNormalMapSampler,UV),CoatNormalStrength,UVRotation);
+    O.ARoughness = clamp(CoatRoughness+Roughness*.015,.025,.6);
+    O.ThicknessCm = max(LayerThicknessCm,.0001);
+    O.ATransmittanceColor = pow(float3(.985,.989,.993),O.ThicknessCm/.04);
+    O.BDiffuseAlbedo = saturate(MilkColor)*lerp(.35,1.0,saturate(MilkAmount))*(.65+.35*Domain.g);
+    // Artist-authored mineral color supplements directional flashes; this static
+    // component approximates unresolved internal scattering, not spectral transport.
+    O.BDiffuseAlbedo *= lerp(1.0.xxx,MineralColor,Mask*saturate(FlashStrength)*.65);
+    // Structural color belongs to the lit reflection, not view-tinted diffuse.
+    O.BF0 = lerp(.035.xxx,saturate(FlashColor*.4),Mask*saturate(FlashStrength));
+    O.BNormal = DomainNormal;
+    O.BRoughness = clamp(DomainRoughness+Roughness*.25,.06,.85);
+    O.AEmissiveColor = 0.0;
+    O.BEmissiveColor = 0.0;
+    return O;
+}

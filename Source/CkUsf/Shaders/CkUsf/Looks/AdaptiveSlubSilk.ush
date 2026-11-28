@@ -1,0 +1,83 @@
+// @ckusf surface_graph AdaptiveMix
+#pragma once
+#include "/CkUsf/LibrarySurface.ush"
+#include "/CkUsf/AdaptiveSurface.ush"
+
+// Independent native anisotropic responses on CC0 PH crepe_satin backing.
+// Slubs are authored yarn-radius utilities, not a slub scan or Zorah asset copy.
+FCkUsf_AdaptiveMixOutput CkUsf_Look_AdaptiveSlubSilk(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    Texture2D DirectionMap, SamplerState DirectionMapSampler,
+    Texture2D AnisotropyMap, SamplerState AnisotropyMapSampler,
+    Texture2D SlubMask, SamplerState SlubMaskSampler,
+    Texture2D SlubNormalMap, SamplerState SlubNormalMapSampler,
+    float3 TintColor, float3 SecondaryTint,
+    float UVScale, float UVRotation, float NormalStrength,
+    float RoughnessScale, float RoughnessBias, float DebugView,
+    float SlubStrength, float SlubColorVariation, float DirectionInfluence,
+    float LobeARotation, float LobeBRotation, float AnisotropyA, float AnisotropyB,
+    float LobeARoughnessScale, float LobeARoughnessBias,
+    float LobeBRoughnessScale, float LobeBRoughnessBias,
+    float LobeWeight, float SlubWeightVariation)
+{
+    float2 UV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float3 Color = CkUsf_SampleTexture2D(BaseColorMap, BaseColorMapSampler, UV).rgb;
+    float Roughness = CkUsf_SampleTexture2D(RoughnessMap, RoughnessMapSampler, UV).r;
+    float Slub = saturate(CkUsf_SampleTexture2D(SlubMask, SlubMaskSampler, UV).r);
+    float Anisotropy = saturate(CkUsf_SampleTexture2D(AnisotropyMap, AnisotropyMapSampler, UV).r);
+    float3 Direction = CkUsf_SampleTexture2D(DirectionMap, DirectionMapSampler, UV).rgb;
+    // The retained texture encodes cos(2theta)/sin(2theta), not angle turns in R.
+    // Blend axial directions without introducing an angle-wrap discontinuity.
+    float2 SourceAxis = Direction.rg * 2.0 - 1.0;
+    float2 Axis = lerp(float2(1.0, 0.0), SourceAxis, saturate(DirectionInfluence) * 0.49 * saturate(Direction.b));
+    float FiberAngle = 1.57079632679 + 0.5 * atan2(Axis.y, Axis.x);
+    float AngleA = FiberAngle + (LobeARotation - UVRotation) * 0.01745329252;
+    float AngleB = FiberAngle + (LobeBRotation - UVRotation) * 0.01745329252;
+    float3 N = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(NormalMap, NormalMapSampler, UV),
+        NormalStrength, UVRotation);
+    float3 SlubN = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(SlubNormalMap, SlubNormalMapSampler, UV),
+        SlubStrength, UVRotation);
+    N = normalize(float3(N.xy + SlubN.xy, max(N.z * SlubN.z, 0.05)));
+    Color *= max(1.0 - Slub * SlubColorVariation, 0.0);
+    FCkUsf_AdaptiveMixOutput O = CkUsf_DefaultAdaptiveMix();
+    O.ADiffuseAlbedo = saturate(Color * max(TintColor, 0.0));
+    O.BDiffuseAlbedo = saturate(Color * max(TintColor, 0.0) * max(SecondaryTint, 0.0));
+    O.AF0 = float3(0.04, 0.04, 0.04);
+    O.BF0 = float3(0.04, 0.04, 0.04);
+    O.ANormal = N;
+    O.BNormal = N;
+    O.ARoughness = clamp((Roughness * max(LobeARoughnessScale, 0.0) + LobeARoughnessBias)
+        * max(RoughnessScale, 0.0) + RoughnessBias + Slub * 0.04, 0.045, 1.0);
+    O.BRoughness = clamp((Roughness * max(LobeBRoughnessScale, 0.0) + LobeBRoughnessBias)
+        * max(RoughnessScale, 0.0) + RoughnessBias, 0.045, 1.0);
+    O.AAnisotropy = clamp(Anisotropy * AnisotropyA, -0.95, 0.95);
+    O.BAnisotropy = clamp(Anisotropy * AnisotropyB, -0.95, 0.95);
+    O.ATangent = float3(cos(AngleA), sin(AngleA), 0.0);
+    O.BTangent = float3(cos(AngleB), sin(AngleB), 0.0);
+    O.MixWeight = saturate(LobeWeight + Slub * SlubWeightVariation);
+    if (DebugView > 0.5)
+    {
+        float3 Inspection = O.ADiffuseAlbedo;
+        if (DebugView > 1.5 && DebugView < 2.5)
+        { Inspection = N * 0.5 + 0.5; }
+        if (DebugView > 2.5 && DebugView < 3.5)
+        { Inspection = O.ARoughness.xxx; }
+        if (DebugView > 3.5)
+        { Inspection = Slub.xxx; }
+        O.ADiffuseAlbedo = 0.0;
+        O.BDiffuseAlbedo = 0.0;
+        O.AF0 = 0.0;
+        O.BF0 = 0.0;
+        O.AEmissiveColor = Inspection;
+        O.BEmissiveColor = Inspection;
+    }
+    O.ADiffuseAlbedo = CkUsf_AdaptiveColor(O.ADiffuseAlbedo);
+    O.BDiffuseAlbedo = CkUsf_AdaptiveColor(O.BDiffuseAlbedo);
+    O.AF0 = CkUsf_AdaptiveColor(O.AF0);
+    O.BF0 = CkUsf_AdaptiveColor(O.BF0);
+    O.AEmissiveColor = CkUsf_AdaptiveColor(O.AEmissiveColor);
+    O.BEmissiveColor = CkUsf_AdaptiveColor(O.BEmissiveColor);
+    return O;
+}

@@ -1,0 +1,102 @@
+// @ckusf shading_model ClearCoat
+#pragma once
+#include "/CkUsf/IndustrialSurface.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_IndustrialPaint(FCkUsf_SurfaceInput In,
+    Texture2D DetailData, SamplerState DetailDataSampler,
+    Texture2D PlacementData, SamplerState PlacementDataSampler,
+    float3 PaintColor, float3 PrimerColor, float Wear, float RustAmount, float DustAmount,
+    float ScratchAmount, float Wetness, float SurfaceTiling, float MaskTiling, float MaskOffset,
+    float PaintBlur, float NormalStrength, float DebugView)
+{
+    FCkUsf_SurfaceOutput O = CkUsf_DefaultSurface();
+    float2 DetailUV = In.UV * max(abs(SurfaceTiling), 0.001);
+    float2 MaskUV = In.UV * max(abs(MaskTiling), 0.001) + float2(MaskOffset, MaskOffset * 0.731);
+    float2 DetailDx = float2(0.0, 0.0);
+    float2 DetailDy = float2(0.0, 0.0);
+    float2 MaskDx = float2(0.0, 0.0);
+    float2 MaskDy = float2(0.0, 0.0);
+    float DetailVisibility = 1.0;
+#if PIXELSHADER
+    DetailDx = ddx(DetailUV);
+    DetailDy = ddy(DetailUV);
+    MaskDx = ddx(MaskUV);
+    MaskDy = ddy(MaskUV);
+#endif
+
+    uint DetailWidth;
+    uint DetailHeight;
+    DetailData.GetDimensions(DetailWidth, DetailHeight);
+    float2 Texel = 1.0 / max(float2(DetailWidth, DetailHeight), float2(1.0, 1.0));
+#if PIXELSHADER
+    float Footprint = max(length(DetailDx / Texel), length(DetailDy / Texel));
+    DetailVisibility = 1.0 - smoothstep(1.5, 8.0, Footprint);
+#endif
+
+    float4 Detail = CkUsf_IndustrialSample(DetailData, DetailDataSampler, DetailUV, DetailDx, DetailDy);
+    float4 Placement = CkUsf_IndustrialSample(PlacementData, PlacementDataSampler, MaskUV, MaskDx, MaskDy);
+    float Scratches = (1.0 - smoothstep(0.12, 0.24, Detail.r)) * saturate(ScratchAmount) * DetailVisibility;
+    float Damage = saturate(Placement.r + (Detail.b - 0.5) * 0.12 * DetailVisibility + Scratches * 0.12);
+    float Oxidation = saturate(Placement.g + (Detail.b - 0.5) * 0.12 * DetailVisibility);
+    float EdgeWidth = 0.008;
+    float RustEdgeWidth = 0.012;
+#if PIXELSHADER
+    EdgeWidth = max(EdgeWidth, fwidth(Damage) * 0.75);
+    RustEdgeWidth = max(RustEdgeWidth, fwidth(Oxidation) * 0.75);
+#endif
+    // Upward accumulation is an orientation bias, not a curvature or cavity estimate.
+    float Dust = saturate(DustAmount) * (0.25 + Placement.b * 0.75)
+        * (0.30 + 0.70 * saturate(In.VertexNormal.z));
+    FCkUsf_IndustrialWeights W = CkUsf_IndustrialRegions(Damage, Oxidation, Dust,
+        Wear, RustAmount, EdgeWidth, RustEdgeWidth);
+
+    float4 Left = CkUsf_IndustrialSample(DetailData, DetailDataSampler,
+        DetailUV - float2(Texel.x, 0.0), DetailDx, DetailDy);
+    float4 Right = CkUsf_IndustrialSample(DetailData, DetailDataSampler,
+        DetailUV + float2(Texel.x, 0.0), DetailDx, DetailDy);
+    float4 Down = CkUsf_IndustrialSample(DetailData, DetailDataSampler,
+        DetailUV - float2(0.0, Texel.y), DetailDx, DetailDy);
+    float4 Up = CkUsf_IndustrialSample(DetailData, DetailDataSampler,
+        DetailUV + float2(0.0, Texel.y), DetailDx, DetailDy);
+    O.Normal = CkUsf_IndustrialDetailNormal(Left, Right, Down, Up, Texel, W,
+        NormalStrength * DetailVisibility);
+
+    float4 Fine = (Detail - 0.5) * DetailVisibility;
+    float4 Surface = CkUsf_IndustrialCompose(
+        CkUsf_IndustrialPaintSurface(PaintColor, Placement.a, Fine.g, PaintBlur, Scratches),
+        CkUsf_IndustrialPrimerSurface(PrimerColor, Placement.a, Fine.g),
+        CkUsf_IndustrialSteelSurface(Fine.r, Scratches),
+        CkUsf_IndustrialRustSurface(Placement.g, Detail.b, Fine.b),
+        CkUsf_IndustrialDustSurface(Fine.a), W);
+    O.BaseColor = Surface.rgb;
+    O.Metallic = W.Steel;
+    O.Specular = 0.5;
+    O.Roughness = clamp(Surface.a, 0.08, 0.96);
+
+    // Existing native ClearCoat response: no arbitrary slabs, thickness, or independent coat normal.
+    // Explicit zero when dry avoids CkUsf_DefaultSurface's full-coat default.
+    float Wet = saturate(Wetness);
+    O.ClearCoat = Wet * (W.Paint + W.Primer * 0.35 + W.Steel * 0.85 + W.Rust * 0.12);
+    O.ClearCoatRoughness = clamp(0.09 + Scratches * 0.12 + W.Rust * 0.20, 0.06, 0.40);
+    O.BaseColor *= 1.0 - Wet * (W.Primer + W.Rust + W.Dust) * 0.18;
+    O.BaseColor = saturate(O.BaseColor);
+
+    // 0 lit; 1 ownership (paint blue, primer red, steel cyan, rust orange, dust tan);
+    // 2 roughness; 3 metallic; 4 damage / oxidation / dust; 5 tangent normal.
+    if (DebugView > 0.5)
+    {
+        float3 DebugColor = W.Paint * float3(0.0, 0.15, 1.0)
+            + W.Primer * float3(1.0, 0.0, 0.0) + W.Steel * float3(0.0, 1.0, 1.0)
+            + W.Rust * float3(1.0, 0.35, 0.0) + W.Dust * float3(0.6, 0.4, 0.2);
+        if (DebugView >= 1.5 && DebugView < 2.5) { DebugColor = O.Roughness.xxx; }
+        if (DebugView >= 2.5 && DebugView < 3.5) { DebugColor = O.Metallic.xxx; }
+        if (DebugView >= 3.5 && DebugView < 4.5) { DebugColor = float3(Damage, Placement.g, W.Dust); }
+        if (DebugView >= 4.5) { DebugColor = O.Normal * 0.5 + 0.5; }
+        O.BaseColor = float3(0.0, 0.0, 0.0);
+        O.Metallic = 0.0;
+        O.Specular = 0.0;
+        O.ClearCoat = 0.0;
+        O.EmissiveColor = DebugColor;
+    }
+    return O;
+}

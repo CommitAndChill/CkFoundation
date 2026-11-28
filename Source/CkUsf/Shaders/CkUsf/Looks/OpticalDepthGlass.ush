@@ -1,0 +1,31 @@
+// @ckusf surface_graph NativeTranslucentSlab
+#pragma once
+#include "/CkUsf/Looks/OpticalCoatedGlass.ush"
+
+FCkUsf_TranslucentSlabOutput CkUsf_Look_OpticalDepthGlass(FCkUsf_SurfaceInput In,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    Texture2D CoatingMap, SamplerState CoatingMapSampler,
+    float3 TransmissionColor, float3 GlassFaceNormalWS,
+    float UVScale, float UVRotation, float NormalStrength,
+    float PolishRoughness, float GlassIor, float CoatingIor, float CoatingThicknessNm,
+    float CoatingVariationNm, float CoatingStrength, float ReferenceThicknessCm,
+    float GlassThicknessCm, float EdgePathCm)
+{
+    float3 Axis = GlassFaceNormalWS / max(length(GlassFaceNormalWS),.001);
+    float Alignment = dot(normalize(In.VertexNormal),Axis);
+    float Face = smoothstep(.1,.95,abs(Alignment));
+    float CoatedFace = smoothstep(.1,.95,Alignment);
+    FCkUsf_TranslucentSlabOutput O = CkUsf_Look_OpticalCoatedGlass(In,
+        NormalMap,NormalMapSampler,RoughnessMap,RoughnessMapSampler,CoatingMap,CoatingMapSampler,
+        TransmissionColor,UVScale,UVRotation,NormalStrength,PolishRoughness,GlassIor,CoatingIor,
+        CoatingThicknessNm,CoatingVariationNm,CoatingStrength*CoatedFace,ReferenceThicknessCm,GlassThicknessCm);
+    // Artistic effective path for the polished sidewall. Native SimpleVolume already
+    // applies its angular transmission; do not divide this thickness by view cosine.
+    O.ThicknessCm = max(lerp(EdgePathCm*3.5,GlassThicknessCm,Face),.001);
+    // Fine-ground edge finish scatters a small amount of incident light while the
+    // broad optical face remains clear. Both stay in the same native glass Slab.
+    O.DiffuseAlbedo = float3(.15,.20,.20)*(1.0-Face);
+    O.Roughness = lerp(.075,O.Roughness,Face);
+    return O;
+}

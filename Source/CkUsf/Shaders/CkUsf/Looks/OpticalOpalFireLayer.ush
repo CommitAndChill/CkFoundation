@@ -1,0 +1,42 @@
+// @ckusf surface_graph NativeTranslucentSlab
+#pragma once
+#include "/CkUsf/OpticalPair.ush"
+
+FCkUsf_TranslucentSlabOutput CkUsf_Look_OpticalOpalFireLayer(FCkUsf_SurfaceInput In,
+    Texture2D ColorMap, SamplerState ColorMapSampler,
+    Texture2D DomainMap, SamplerState DomainMapSampler,
+    Texture2D DomainNormalMap, SamplerState DomainNormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 ColorTint, float3 UVOffset, float UVScale, float UVRotation,
+    float OrientationStrength, float FlashStrength, float FlashCoverage,
+    float FlashReflectance, float DomainRoughness, float AngularPeak, float AngularWidth,
+    float Transmission, float ReferenceThicknessCm, float LayerThicknessCm)
+{
+    float2 UV = saturate(CkUsf_LibraryUV(In.UV,UVScale,UVRotation)+UVOffset.xy);
+    float3 Color = CkUsf_SampleTexture2D(ColorMap,ColorMapSampler,UV).rgb;
+    float3 Data = CkUsf_SampleTexture2D(DomainMap,DomainMapSampler,UV).rgb;
+    float3 OpticalAxis = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(DomainNormalMap,DomainNormalMapSampler,UV),OrientationStrength,UVRotation);
+    float3 InternalView = -refract(-CkUsf_ViewDirTS(In),float3(0.0,0.0,1.0),1.0/1.45);
+    float High = max(Color.r,max(Color.g,Color.b));
+    float Low = min(Color.r,min(Color.g,Color.b));
+    float Chroma = (High-Low)/max(High,.001);
+    float3 PatchTint = pow(saturate(Color/max(High,.001)),1.6)*saturate(ColorTint);
+    float Peak = clamp(AngularPeak+(Data.b-.4)*.25,.55,.99);
+    float Alignment = saturate(dot(normalize(InternalView),OpticalAxis));
+    float AngularBand = exp(-.5*pow((Alignment-Peak)/clamp(AngularWidth,.02,.3),2.0));
+    float ActivePatch = saturate(Data.r*FlashCoverage)*smoothstep(.45,.78,Chroma)*saturate(FlashStrength)*AngularBand;
+
+    FCkUsf_TranslucentSlabOutput O = CkUsf_DefaultTranslucentSlab();
+    // Buried reflected color, with transmission between and through its quiet areas.
+    // Native F90 is not independently masked; grazing behavior remains a surface approximation.
+    O.DiffuseAlbedo = 0.0;
+    O.F0 = PatchTint*ActivePatch*clamp(FlashReflectance,0.0,.7);
+    O.Roughness = clamp(DomainRoughness+(CkUsf_SampleTexture2D(RoughnessMap,RoughnessMapSampler,UV).r-.3)*.1,.08,.6);
+    O.Normal = float3(0.0,0.0,1.0);
+    O.TransmittanceColor = clamp(Transmission,.01,.999);
+    O.ReferenceThicknessCm = max(ReferenceThicknessCm,.001);
+    O.ThicknessCm = max(LayerThicknessCm,.001);
+    O.RefractionStrength = 1.0;
+    O.EmissiveColor = 0.0;
+    return O;
+}

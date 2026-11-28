@@ -1,5 +1,113 @@
 # CkUsf
 
+## Native optical authoring
+
+`NativeTranslucentVertical` appends enum8 and declares
+`// @ckusf surface_graph NativeTranslucentVertical`. It requires Adaptive GBuffer and
+at least two supported closures. Return `FCkUsf_TranslucentVerticalOutput` from
+`CkUsf_DefaultTranslucentVertical()`. Its flat A/B fields are DiffuseAlbedo, F0,
+Roughness, Normal, EmissiveColor, TransmittanceColor, ReferenceThicknessCm and
+ThicknessCm, plus the shared RefractionStrength. A is the top and B the base.
+Both native Slabs use SimpleVolume with separate TransmittanceToMFP conversions:
+each ReferenceThicknessCm calibrates its own transmission. AThicknessCm feeds the
+Vertical operator; BThicknessCm feeds root SurfaceThickness for the bottom Slab.
+Parameter blending is disabled. The material fixes colored transmittance, forward
+surface lighting, thin-surface PNO refraction (clamped1..1.1), and BeforeDOF.
+Directional shading, fuzz, native glints, legacy profiles, scene color and WPO are
+unsupported. Numerical source edits reload in place; graph, output layout,
+calibration/thickness/refraction wiring and optical settings require regeneration.
+The two closures are a shading model on one mesh surface, not geometric depth or
+traced multi-interface transport. Verify requested and effective compiled closures
+and budget simplification on the intended real-RHI profile before claiming retention.
+Existing single-Slab optical and opaque graph contracts remain unchanged.
+
+`NativeTranslucentSlab` appends enum6 and uses the exact leading declaration
+`// @ckusf surface_graph NativeTranslucentSlab`. This opt-in requires Adaptive GBuffer
+and at least one supported closure. Author SurfaceLit, inherited shading/blend/translucency
+settings, no directional/fuzz/profile/WPO options. It fixes colored-transmittance blending,
+forward surface lighting, SimpleVolume, tangent normals, thin-surface thickness and native
+Pixel Normal Offset refraction. Existing native opaque contracts remain unchanged.
+
+Return `FCkUsf_TranslucentSlabOutput` from `CkUsf_DefaultTranslucentSlab()`: DiffuseAlbedo,
+F0, Roughness, Normal, EmissiveColor, TransmittanceColor, ReferenceThicknessCm, ThicknessCm,
+RefractionStrength. ReferenceThicknessCm calibrates the transmission-to-MFP conversion;
+ThicknessCm separately sets the material's optical wall thickness in centimeters. It is
+authored thickness, not a ray-traced measurement through the mesh. RefractionStrength uses
+the engine PNO convention:1 is neutral,1.02 is a small offset; generated output clamps1..1.1.
+PNO uses the difference between pixel/Slab and vertex normals. It does not reproduce smooth
+geometric lens bending or traced multi-interface optics. Dielectric IOR may independently
+control F0 in `.ush`; it is not used as PNO strength. Numerical controls/sampling reload in
+place; changing this fixed topology/settings/output layout requires explicit regeneration.
+Reload validates exact thickness, calibration and refraction connections before mutation.
+
+## Native BSDF authoring on UE5.8
+
+`_AdaptiveBaseGlints` is a default-off structural option for `AdaptiveVertical`.
+It connects only the lower Slab's native glint density and UV inputs. Author
+`O.BGlintValue` (0 sparse, 1 ordinary specular) and `O.BGlintUV` (float2) in `.ush`.
+The default output constructor supplies 1 and zero, but zero/constant UVs are not
+a useful glint distribution: supply smooth, unwrapped mesh UVs with a nonzero
+scale. Custom-output UVs use the engine's finite screen derivatives. Keep the
+glint UV separate from clamped/parallax coordinates used for color textures.
+
+The active Adaptive shader platform must support native glints. Toggling the
+structural option requires explicit regeneration; density, UV sampling and other
+numerical controls remain live-editable. Existing non-opt-in graph outputs and
+signature text are unchanged. `Get_CompiledSubstrateStats` additionally reports
+`HasGlint`, `ComplexSpecial`, `MaterialType`, and `BsdfFeatures` from the compiled
+resource, so closure count alone cannot be mistaken for retained glint support.
+The engine may simplify features to meet its material budget; verify the actual
+compiled feature and a rendered density endpoint in the intended renderer profile.
+
+Adaptive-only opt-ins append `AdaptiveVertical` and `AdaptiveMix` (enum values4/5).
+Their source declarations use those exact names. `FCkUsf_AdaptiveVerticalOutput` and
+`FCkUsf_AdaptiveMixOutput` expose flat A/B layer fields: DiffuseAlbedo, F0, Roughness,
+Normal, EmissiveColor, Anisotropy and Tangent, prefixed A or B. Use
+`CkUsf_DefaultAdaptiveVertical()` / `CkUsf_DefaultAdaptiveMix()`. A is top/foreground,
+B base/background. Vertical adds `ATransmittanceColor` (perpendicular transmission at
+`ThicknessCm`, centimeters), converted by native TransmittanceToMFP to a SimpleVolume top
+Slab. Mix adds `MixWeight` (0 selects B,1 selects A). Both native operators retain BSDFs;
+parameter blending is disabled. `_DirectionalShading` explicitly connects both tangent/
+anisotropy pairs. Adaptive mode and a minimum two-closure budget are required before
+generation/reload. Existing Slab/Toon/SimpleClearCoat contracts remain Blendable-only.
+
+The approved host workflow is a startup-only offscreen Adaptive profile and a dedicated
+scene, not a permanent renderer migration. Existing CK legacy Toon bridge assets cannot
+be used under Adaptive; engine-native Toon is a separate BSDF, whose Adaptive eligibility
+is not enabled in this CkUsf slice. Numerical sampling/math edits preserve masters/MIDs;
+layer topology, operator flags, field layout and bindings require explicit regeneration.
+The generator subsystem's `Get_CompiledSubstrateStats` reads an already loaded active
+resource and returns validity, compiled closure count, payload uints and compile errors.
+This reports material payload, not GPU timing or whole-frame memory allocation.
+
+Bulk generation separates validated other-profile authoring from invalid definitions.
+Bulk loaded-material reload additionally validates the saved native graph/code/signature
+before excluding an opposite-profile master. Excluded preparations are non-runnable; any
+invalid candidate rejects the batch before material edits. Direct preparation stays strict.
+Opposite-profile Legacy masters without native provenance still reject. Reload logs terminal
+completion even for zero compatible work, or `CkUsf reload batch rejected:` on preflight failure.
+
+LookDefinition `_SurfaceGraph` explicitly selects Legacy, NativeSlab, NativeToon or
+NativeSimpleClearCoat. Leading source declarations `surface_graph Slab`, `Toon`, and
+`SimpleClearCoat` resolve before generation. Native opaque SurfaceLit graphs connect
+engine-owned BSDF expressions directly to FrontMaterial; legacy paths remain separate.
+Slab uses `FCkUsf_SlabOutput`, Toon `FCkUsf_ToonOutput`, and coat `FCkUsf_CoatedOutput`.
+Use their default constructors from Common.ush. Numeric source bodies reload in place;
+topology, feature flags, profile bindings or texture dimensions require regeneration.
+
+`_SlabFuzz` adds FuzzAmount/FuzzColor only when enabled on NativeSlab. It rejects directional
+shading under Blendable. NativeSimpleClearCoat exposes base F0/diffuse/roughness plus coat
+coverage/roughness and a shared normal. Its top F0 is fixed .04; it has no directional input.
+BottomNormal stays disconnected with the current r.ClearCoatNormal=0. Blendable fixes fuzz
+roughness and simplifies general layered transport. Do not promise arbitrary physical stacks,
+secondary Slab roughness, or glints from these paths. Native Toon ramps remain ToonProfile data.
+
+Generator contract/layout signatures and batch-wide preflight validate exact native pins,
+output types and authoring bindings before numeric reload. New Custom output names use the
+`CkUsf_` prefix to preserve legacy parameter names such as FuzzColor and CoatRoughness.
+Campaign contracts/evidence: docs/campaigns/2026-10-18-UsfMaterialLibrary/NATIVE_BSDF.md and
+ADVANCED_BSDF.md. The older Toon section below describes the retained legacy MSM_CkUsf route.
+
 **Purpose:** Author materials as plain HLSL functions instead of material-editor node graphs. A
 *look* = one `.ush` entry point + one `UCkUsf_LookDefinition` data asset; the editor-side generator
 (CkUsfEditor) assembles a master `UMaterial` around a Custom node, validates the asset↔HLSL
@@ -25,6 +133,12 @@ of all of it.
   there. The name-only `ck::usf::Get_GeneratedMaster*Path(FName)` functions
   (`LookDefinition/CkUsf_LookDefinition_Naming.h`) always mean the framework root; they are for callers
   that address a framework look by name and have no definition in hand.
+- `_DirectionalShading` opts opaque/masked SurfaceLit DefaultLit/ClearCoat looks into general
+  `O.Anisotropy` and tangent-space `O.Tangent` outputs. It defaults off so existing graphs retain
+  their shader-feature usage. Changing the opt-in requires explicit master regeneration; existing
+  directional sampling/math remains live-reloadable. Under current Substrate, Rect-light direct
+  integration ignores anisotropy; verify directional highlights with a compatible point/directional
+  light. `HairTangent` remains a separate native-Hair contract.
 - `UCk_Utils_Usf_UE` (`Apply/CkUsf_Utils.h`) — `Get_LookMasterMaterial`, `Create_MID_ForLook`,
   `Apply_PostProcess_ToCamera/Component`, `Set_Scalar/Vector/Texture`.
 - `UCkUsf_MultiPassRenderer` (`MultiPass/`) — BufferA-D + Image passes, double-buffered feedback.
@@ -1172,8 +1286,59 @@ has no blendable equivalent.
   project's configured default presets. `Request_ResetToDefaults` already covers the runtime meaning of
   "back to how this project ships". Revisit if a Ck settings class ever grows real undo support.
 
+## Opt-in surface scene color
+
+`_SurfaceSceneColor=false` preserves ordinary graphs. Translucent SurfaceLit DefaultLit or
+ThinTranslucent looks may opt into native SceneColor RGB and viewport coordinates through
+`In.SceneColor` and `In.SurfaceScreenUV`; mesh `In.UV` remains independent. The generated
+`CK_USF_SURFACE_SCENE_COLOR` define is reserved. `_SceneColorReplacesBackground` requires this
+input and disables a second material-local fog application for replacement compositing.
+Changing either flag or the graph contract requires regeneration; `.ush` math and sampling
+remain live-reloadable. `SurfaceSceneColor.ush` supplies a fixed symmetric 64-tap HDR blur,
+radius 0-12 render pixels. It sees copied opaque scene color, with screen-edge/occlusion and
+later-translucency limits. Batch 3's frosted look is an example, not thickness-traced optics.
+
 ## See also
 
 - `CkGraphics/Claude.md` (MID utilities), `CkIsmRenderer/Claude.md` (per-instance data writers).
 - Tests: `CkTests/Source/CkTests/Private/UnitTests/CkUsf/` (generation, multi-pass, outline);
   gyms: `CkTests/Script/CkUsf/`.
+
+## Native refractive optical slab
+
+`NativeRefractiveSlab` (surface graph 7) shares `FCkUsf_TranslucentSlabOutput`
+with graph 6 and requires the opt-in Adaptive profile. It derives native refraction
+from the Slab F0 and surface normal (`RM_IndexOfRefractionFromF0`); root Refraction
+must stay disconnected. `RefractionStrength` is retained for the shared output
+layout but unused in this mode. Graph 6 retains PixelNormalOffset and its existing
+reload contract. Both use authored SurfaceThickness and SimpleVolume with thin
+surface evaluation; this does not trace a closed mesh's interior or multiple
+interfaces. Shader IOR, maps and numeric controls remain live-editable; changing
+the surface graph requires regeneration.
+
+## Native three-layer transmitting stack
+
+`NativeTranslucentStack3` (surface graph 9) is an opt-in Adaptive graph requiring
+at least three closures per pixel. `FCkUsf_TranslucentStack3Output` and
+`CkUsf_DefaultTranslucentStack3()` have 25 fields: diffuse albedo, F0, roughness,
+normal and emissive color for A/B/C, then transmittance color, reference thickness
+and actual thickness for A/B/C, and RefractionStrength. A diffuse is the primary
+Custom output; the remaining 24 fields are ordered native-only additional outputs.
+Existing graph layouts and defaults remain unchanged.
+
+Three SimpleVolume Slabs retain separate normals and transmittance-to-MFP
+calibrations. The topology is Vertical(A, Vertical(B, C)); both operators disable
+parameter blending. A thickness drives the outer operator, B thickness the inner
+operator, and C thickness the root SurfaceThickness. Reference thicknesses calibrate
+MFP independently. Colored transmittance, SurfacePerPixelLighting, thin surface,
+PixelNormalOffset refraction (1..1.1) and BeforeDOF are fixed. Directional shading,
+fuzz, native glints, profiles, SceneColor and WPO are unsupported.
+
+This permits a smooth clear A layer, independently oriented colored reflection on B,
+and a smooth cloudy C medium on one mesh. It does not implement physical diffraction
+or trace internal geometry. Whole-area color art can remain unchanged while native
+incident lighting and view direction change the reflected brightness. Numeric shader
+reload preserves the generated master/MID graph; any output, operator, calibration,
+root-binding or optical-setting change requires regeneration. Real-RHI tests require
+three requested and retained closures with no budget simplification; visual acceptance
+remains a separate gate.

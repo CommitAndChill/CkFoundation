@@ -1,0 +1,70 @@
+// @ckusf surface_graph NativeTranslucentVertical
+#pragma once
+#include "/CkUsf/OpticalPair.ush"
+
+FCkUsf_TranslucentVerticalOutput CkUsf_Look_OpticalOpalLayered(FCkUsf_SurfaceInput In,
+    Texture2D ColorMap, SamplerState ColorMapSampler,
+    Texture2D DomainMap, SamplerState DomainMapSampler,
+    Texture2D DomainNormalMap, SamplerState DomainNormalMapSampler,
+    Texture2D PolishNormalMap, SamplerState PolishNormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    float3 MilkColor, float3 CoatTransmission, float3 BodyTransmission,
+    float UVScale, float UVRotation, float ScatteringStrength,
+    float InternalDepthUV, float InternalLayerMix,
+    float DomainNormalStrength, float DomainRoughness,
+    float FlashReflectance, float FlashStrength, float FlashCoverage,
+    float CoatRoughness, float CoatNormalStrength, float CoatIor,
+    float CoatThicknessCm, float CoatReferenceThicknessCm,
+    float BodyThicknessCm, float BodyReferenceThicknessCm, float RefractionStrength)
+{
+    float2 SurfaceUV = CkUsf_LibraryUV(In.UV, UVScale, UVRotation);
+    float3 View = CkUsf_ViewDirTS(In);
+    float3 InternalView = -refract(-View, float3(0.0,0.0,1.0), 1.0/clamp(CoatIor,1.01,2.0));
+    float2 Offset = -InternalView.xy/max(abs(InternalView.z),.5)*clamp(InternalDepthUV,0.0,.03);
+    float2 NearUV = saturate(SurfaceUV+Offset);
+    float2 DeepUV = saturate((SurfaceUV-.5)*.91+.5+Offset*2.2+float2(.075,-.045));
+    float3 NearColor = CkUsf_SampleTexture2D(ColorMap,ColorMapSampler,NearUV).rgb;
+    float3 DeepColor = CkUsf_SampleTexture2D(ColorMap,ColorMapSampler,DeepUV).rgb;
+    float3 Data = CkUsf_SampleTexture2D(DomainMap,DomainMapSampler,NearUV).rgb;
+    float High = max(max(NearColor.r,NearColor.g),NearColor.b);
+    float Low = min(min(NearColor.r,NearColor.g),NearColor.b);
+    float Chroma = (High-Low)/max(High,.001);
+    float3 PatchColor = lerp(NearColor,DeepColor,saturate(InternalLayerMix));
+    float PatchHigh = max(max(PatchColor.r,PatchColor.g),PatchColor.b);
+    float3 PatchTint = pow(saturate(PatchColor/max(PatchHigh,.001)),1.35);
+    float Coverage = saturate(Data.r*FlashCoverage)*smoothstep(.35,.75,Chroma)*saturate(FlashStrength);
+    float3 FlashTint = saturate(PatchTint * FlashReflectance);
+    float Finish = CkUsf_SampleTexture2D(RoughnessMap,RoughnessMapSampler,NearUV).r;
+    // Authored angular color activation, not incident-light diffraction. Domain
+    // orientations affect internal color without faceting the cloudy medium.
+    float3 OpticalN = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(DomainNormalMap,DomainNormalMapSampler,NearUV),DomainNormalStrength,UVRotation);
+    float DomainCos = saturate(dot(normalize(InternalView),OpticalN));
+    float DomainCenter = lerp(.78,.97,saturate(Data.b));
+    float DomainWidth = max(.055,2.0*fwidth(DomainCos));
+    float DomainGate = exp2(-pow((DomainCos-DomainCenter)/DomainWidth,2.0));
+    float Activity = Coverage*(.10+.90*DomainGate);
+
+    FCkUsf_TranslucentVerticalOutput O = CkUsf_DefaultTranslucentVertical();
+    float Ior = clamp(CoatIor,1.01,2.0);
+    O.ADiffuseAlbedo = 0.0;
+    O.AF0 = pow((Ior-1.0)/(Ior+1.0),2.0).xxx;
+    O.ARoughness = clamp(CoatRoughness+(Finish-31.0/255.0)*.05,.01,.5);
+    O.ANormal = CkUsf_LibraryNormal(CkUsf_SampleTexture2D(PolishNormalMap,PolishNormalMapSampler,SurfaceUV),CoatNormalStrength,UVRotation);
+    O.ATransmittanceColor = clamp(CoatTransmission,.001,.999);
+    O.AReferenceThicknessCm = max(CoatReferenceThicknessCm,.0001);
+    O.AThicknessCm = clamp(CoatThicknessCm,.001,.1);
+
+    // Cloudiness is native participating-medium scattering; colored domains reflect
+    // with their own orientation beneath the smooth exterior. No emitted light.
+    O.BDiffuseAlbedo = saturate(lerp(MilkColor * ScatteringStrength,.85 * PatchTint,Activity));
+    O.BF0 = lerp(.012.xxx,FlashTint,Activity);
+    O.BRoughness = clamp(DomainRoughness+(Finish-31.0/255.0)*.1,.045,.5);
+    O.BNormal = float3(0.0,0.0,1.0);
+    O.BTransmittanceColor = clamp(pow(clamp(BodyTransmission,.001,.999),max(.1,1.0+(Data.g-.5)*.3)),.001,.999);
+    O.BReferenceThicknessCm = max(BodyReferenceThicknessCm,.0001);
+    O.BThicknessCm = clamp(BodyThicknessCm,.001,10.0);
+    O.RefractionStrength = clamp(RefractionStrength,1.0,1.1);
+    O.AEmissiveColor = 0.0;
+    O.BEmissiveColor = 0.0;
+    return O;
+}

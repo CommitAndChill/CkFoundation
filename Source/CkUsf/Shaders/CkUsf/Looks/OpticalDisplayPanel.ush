@@ -1,0 +1,21 @@
+#pragma once
+#include "/CkUsf/OpticalPair.ush"
+
+FCkUsf_SurfaceOutput CkUsf_Look_OpticalDisplayPanel(FCkUsf_SurfaceInput In,
+    Texture2D BaseColorMap, SamplerState BaseColorMapSampler,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    Texture2D EmissionMap, SamplerState EmissionMapSampler,
+    float3 TintColor, float3 EmissionColor, float UVScale, float UVRotation,
+    float NormalStrength, float RoughnessScale, float RoughnessBias, float EmissionStrength)
+{
+    // OBJ import already converts the authored upward V into Unreal texture V.
+    float2 UV = CkUsf_LibraryUV(In.UV,UVScale,UVRotation);
+    FCkUsf_SurfaceOutput O = CkUsf_LibrarySurface(
+        CkUsf_SampleTexture2D(BaseColorMap,BaseColorMapSampler,UV),
+        CkUsf_SampleTexture2D(NormalMap,NormalMapSampler,UV),
+        CkUsf_SampleTexture2D(RoughnessMap,RoughnessMapSampler,UV).r,
+        TintColor,NormalStrength,RoughnessScale,RoughnessBias,UVRotation);
+    O.EmissiveColor = CkUsf_SampleTexture2D(EmissionMap,EmissionMapSampler,UV).rgb*max(EmissionColor,0.0)*max(EmissionStrength,0.0);
+    return O;
+}

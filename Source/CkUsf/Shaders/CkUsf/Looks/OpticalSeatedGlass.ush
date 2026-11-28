@@ -1,0 +1,51 @@
+// @ckusf surface_graph NativeTranslucentSlab
+#pragma once
+#include "/CkUsf/Looks/OpticalCoatedGlass.ush"
+
+// Three-wavelength dielectric film reflectance. The native Slab supplies lighting
+// and grazing response. This models coating interference, not ray dispersion.
+float3 CkUsf_SeatedFilmF0(float NoV, float GlassIor, float FilmIor, float ThicknessNm)
+{
+    float N = clamp(FilmIor,1.01,2.4);
+    float G = clamp(GlassIor,1.01,2.4);
+    float CosFilm = sqrt(saturate(1.0-(1.0-NoV*NoV)/(N*N)));
+    float R01 = (1.0-N)/(1.0+N);
+    float R12 = (N-G)/(N+G);
+    float3 Phase = 12.5663706*N*max(ThicknessNm,0.0)*CosFilm/float3(650.0,510.0,475.0);
+    float3 CrossTerm = 2.0*R01*R12*cos(Phase);
+    return clamp((R01*R01+R12*R12+CrossTerm)/(1.0+R01*R01*R12*R12+CrossTerm),.005,.30);
+}
+
+FCkUsf_TranslucentSlabOutput CkUsf_Look_OpticalSeatedGlass(FCkUsf_SurfaceInput In,
+    Texture2D NormalMap, SamplerState NormalMapSampler,
+    Texture2D RoughnessMap, SamplerState RoughnessMapSampler,
+    Texture2D CoatingMap, SamplerState CoatingMapSampler,
+    float3 TransmissionColor, float3 GlassFaceNormalWS,
+    float UVScale, float UVRotation, float NormalStrength,
+    float PolishRoughness, float GlassIor, float CoatingIor, float CoatingThicknessNm,
+    float CoatingVariationNm, float CoatingStrength, float ReferenceThicknessCm,
+    float GlassThicknessCm, float EdgePathCm,
+    float BevelFilmIor, float BevelFilmThicknessNm, float BevelFilmVariationNm, float BevelFilmStrength)
+{
+    FCkUsf_TranslucentSlabOutput O = CkUsf_Look_OpticalCoatedGlass(In,
+        NormalMap,NormalMapSampler,RoughnessMap,RoughnessMapSampler,CoatingMap,CoatingMapSampler,
+        TransmissionColor,UVScale,UVRotation,NormalStrength,PolishRoughness,GlassIor,CoatingIor,
+        CoatingThicknessNm,CoatingVariationNm,CoatingStrength,ReferenceThicknessCm,GlassThicknessCm);
+    float3 Axis = GlassFaceNormalWS/max(length(GlassFaceNormalWS),.001);
+    float Alignment = abs(dot(normalize(In.VertexNormal),Axis));
+    float Face = smoothstep(.85,.98,Alignment);
+    float Bevel = smoothstep(.15,.45,Alignment)*(1.0-smoothstep(.90,.98,Alignment));
+    float Side = 1.0-smoothstep(.15,.45,Alignment);
+    // The weaker wall coating connects the colored chamfer to the continuous seat.
+    float FilmWeight = saturate((Bevel+.20*Side)*saturate(BevelFilmStrength));
+    float2 UV = CkUsf_LibraryUV(In.UV,UVScale,UVRotation);
+    float Flow = clamp((CkUsf_SampleTexture2D(CoatingMap,CoatingMapSampler,UV).r-.5)/.045,-1.0,1.0);
+    float NoV = saturate(abs(dot(CkUsf_ViewDirTS(In),O.Normal)));
+    float FilmNm = max(BevelFilmThicknessNm+BevelFilmVariationNm*Flow,0.0);
+    O.F0 = lerp(O.F0,CkUsf_SeatedFilmF0(NoV,GlassIor,BevelFilmIor,FilmNm),FilmWeight);
+    O.ThicknessCm = max(lerp(EdgePathCm,GlassThicknessCm,Face),.001);
+    O.DiffuseAlbedo = float3(.08,.10,.10)*(1.0-Face);
+    O.Roughness = lerp(lerp(.10,.035,Bevel),O.Roughness,Face);
+    O.EmissiveColor = 0.0;
+    return O;
+}
