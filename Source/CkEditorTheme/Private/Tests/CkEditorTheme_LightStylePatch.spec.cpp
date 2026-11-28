@@ -224,10 +224,10 @@ bool FCkEditorTheme_LightStylePatch_LightGraphNodes::RunTest(const FString& Para
 
     Patch.Request_Apply(ECk_EditorTheme_Brightness::Light);
     TestTrue(TEXT("Light: pin labels use the ink"), StyleSet.GetSlateColor("Graph.Node.PinLabelColor") == FStyleColors::Foreground);
-    TestTrue(TEXT("Light: node title stays white on its colored band"),
-        StyleSet.GetWidgetStyle<FTextBlockStyle>("Graph.Node.NodeTitle").ColorAndOpacity == FSlateColor{FLinearColor::White});
-    const auto Subline = StyleSet.GetWidgetStyle<FTextBlockStyle>("Graph.Node.NodeTitleExtraLines").ColorAndOpacity.GetSpecifiedColor();
-    TestTrue(TEXT("Light: title subline is soft white"), Subline.R == 1.0f && Subline.B == 1.0f && FMath::IsNearlyEqual(Subline.A, 0.8f));
+    TestTrue(TEXT("Light: node title uses the node title slot"),
+        StyleSet.GetWidgetStyle<FTextBlockStyle>("Graph.Node.NodeTitle").ColorAndOpacity == FSlateColor{EStyleColor::User16});
+    TestTrue(TEXT("Light: title subline uses the node subline slot"),
+        StyleSet.GetWidgetStyle<FTextBlockStyle>("Graph.Node.NodeTitleExtraLines").ColorAndOpacity == FSlateColor{EStyleColor::User15});
     const auto Compact = StyleSet.GetWidgetStyle<FTextBlockStyle>("Graph.CompactNode.Title").ColorAndOpacity.GetSpecifiedColor();
     TestTrue(TEXT("Light: compact node label is dark ink at the same strength"), Compact.R < 0.1f && FMath::IsNearlyEqual(Compact.A, 0.5f));
     TestTrue(TEXT("Light: other node text follows the theme"),
@@ -235,7 +235,48 @@ bool FCkEditorTheme_LightStylePatch_LightGraphNodes::RunTest(const FString& Para
 
     Patch.Request_Apply(ECk_EditorTheme_Brightness::Dark);
     TestTrue(TEXT("Dark: pin labels white again"), StyleSet.GetSlateColor("Graph.Node.PinLabelColor") == FSlateColor{FLinearColor::White});
+    // A node built now keeps this across a live switch to Light, where Foreground would resolve dark on the title band.
+    TestTrue(TEXT("Dark: node title keeps the node title slot, not Foreground"),
+        StyleSet.GetWidgetStyle<FTextBlockStyle>("Graph.Node.NodeTitle").ColorAndOpacity == FSlateColor{EStyleColor::User16});
 
+    return true;
+}
+
+// --------------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FCkEditorTheme_LightStylePatch_NodeTitleInk,
+    "Ck.EditorTheme.LightStylePatch.NodeTitleInk",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCkEditorTheme_LightStylePatch_NodeTitleInk::RunTest(const FString& Parameters)
+{
+    const auto DarkSubline = FLinearColor{218.0f / 255.0f, 218.0f / 255.0f, 96.0f / 255.0f, 0.5f};
+    auto StyleSet = FSlateStyleSet{TEXT("CkEditorThemeNodeTitleInkTest")};
+    StyleSet.Set("Graph.Node.PinLabelColor", FSlateColor{FLinearColor::White});
+    StyleSet.Set("Graph.Node.NodeTitle", FTextBlockStyle().SetColorAndOpacity(FStyleColors::Foreground));
+    StyleSet.Set("Graph.Node.NodeTitleExtraLines", FTextBlockStyle().SetColorAndOpacity(DarkSubline));
+
+    auto Patch = FCk_EditorTheme_LightStylePatch{};
+    Patch.Request_Capture(StyleSet);
+    const auto& ThemeManager = USlateThemeManager::Get();
+    TestFalse(TEXT("No ink before a brightness is applied"), Patch.Request_ApplyNodeTitleInk());
+
+    Patch.Request_Apply(ECk_EditorTheme_Brightness::Light);
+    Patch.Request_ApplyNodeTitleInk();
+    TestEqual(TEXT("Light: node titles resolve white"), ThemeManager.GetColor(EStyleColor::User16), FLinearColor::White);
+    TestEqual(TEXT("Light: title sublines resolve soft white"), ThemeManager.GetColor(EStyleColor::User15), FLinearColor{1.0f, 1.0f, 1.0f, 0.8f});
+    TestFalse(TEXT("Applying the same ink twice changes nothing"), Patch.Request_ApplyNodeTitleInk());
+
+    Patch.Request_Apply(ECk_EditorTheme_Brightness::Dark);
+    Patch.Request_ApplyNodeTitleInk();
+    TestEqual(TEXT("Dark: node titles resolve to the theme's Foreground"),
+        ThemeManager.GetColor(EStyleColor::User16), ThemeManager.GetColor(EStyleColor::Foreground));
+    TestEqual(TEXT("Dark: title sublines resolve to their captured color"), ThemeManager.GetColor(EStyleColor::User15), DarkSubline);
+
+    // The slots are global: leave them as the live patch would (the subline above is the stock color).
+    Patch.Request_Apply(ck::editor_theme::Get_Brightness());
+    Patch.Request_ApplyNodeTitleInk();
     return true;
 }
 

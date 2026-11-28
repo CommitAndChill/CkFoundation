@@ -156,7 +156,10 @@ auto
     }
 
     if (UObjectInitialized())
-    { _GraphPatch.Request_Apply(ECk_EditorTheme_Brightness::Dark); }
+    {
+        _LightPatch.Request_ApplyNodeTitleInk();
+        _GraphPatch.Request_Apply(ECk_EditorTheme_Brightness::Dark);
+    }
 
     if (_PreShutdownHandle.IsValid() && FSlateApplication::IsInitialized())
     { FSlateApplication::Get().OnPreShutdown().Remove(_PreShutdownHandle); }
@@ -205,11 +208,12 @@ auto
 {
     const auto Brightness = ck::editor_theme::Get_Brightness();
     const auto StylesChanged = _LightPatch.Request_Apply(Brightness);
+    const auto TitleInkChanged = _LightPatch.Request_ApplyNodeTitleInk();
     const auto IconsChanged = _IconPatch.Request_Apply(Brightness,
         GetDefault<UCk_EditorTheme_UserSettings_UE>()->Get_OutlineLegacyIconsInLight(), _LightPatch.Get_LightGraphNodes());
     const auto GraphChanged = _GraphPatch.Request_Apply(Brightness);
 
-    if (StylesChanged || IconsChanged || GraphChanged)
+    if (StylesChanged || TitleInkChanged || IconsChanged || GraphChanged)
     { FSlateApplication::Get().InvalidateAllWidgets(false); }
 }
 
@@ -408,7 +412,7 @@ auto
     { DoReconcile(); }
 #endif
 
-    if (_IconPatch.Request_RefreshStyleSets())
+    if (_IconPatch.Request_RefreshStyleSets() || _LightPatch.Request_ApplyNodeTitleInk())
     { FSlateApplication::Get().InvalidateAllWidgets(false); }
 
     return true;

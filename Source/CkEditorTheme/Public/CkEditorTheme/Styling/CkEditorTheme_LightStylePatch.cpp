@@ -1,5 +1,6 @@
 #include "CkEditorTheme_LightStylePatch.h"
 
+#include "CkCore/Ensure/CkEnsure.h"
 #include "CkCore/Macros/CkMacros.h"
 #include "CkCore/Theme/CkTheme_Utils.h"
 
@@ -12,6 +13,7 @@
 #include "Styling/SlateTypes.h"
 #include "Styling/StyleColors.h"
 #include "Styling/ToolBarStyle.h"
+#include "UObject/UnrealType.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -55,6 +57,34 @@ namespace ck_editor_theme_light_style_patch
         { return FSlateColor{FLinearColor::White}; }
 
         return {};
+    }
+
+    // Unused by the engine, which hides user slots from the theme editor (EditorStyleSettingsCustomization.cpp).
+    constexpr auto NodeTitleInk = EStyleColor::User16;
+    constexpr auto NodeSublineInk = EStyleColor::User15;
+
+    // The theme editor writes active colors through this property; there is no setter.
+    auto Request_WriteSlot(
+        EStyleColor InSlot,
+        const FLinearColor& InColor)
+        -> bool
+    {
+        auto& ThemeManager = USlateThemeManager::Get();
+
+        // The fallback for a theme whose colors load later.
+        ThemeManager.SetDefaultColor(InSlot, InColor);
+
+        static const auto* ActiveColorsProperty = FindFProperty<FStructProperty>(USlateThemeManager::StaticClass(), TEXT("ActiveColors"));
+        CK_ENSURE_IF_NOT(ActiveColorsProperty != nullptr && ActiveColorsProperty->Struct == FStyleColorList::StaticStruct(),
+            TEXT("USlateThemeManager::ActiveColors not found; node titles keep their last ink"))
+        { return false; }
+
+        auto& Slot = ActiveColorsProperty->ContainerPtrToValuePtr<FStyleColorList>(&ThemeManager)->StyleColors[static_cast<int32>(InSlot)];
+        if (Slot == InColor)
+        { return false; }
+
+        Slot = InColor;
+        return true;
     }
 
     // Hover/press overlays such as FColor(255, 255, 255, 40): they brighten on Dark and vanish on Light.
@@ -170,8 +200,9 @@ auto
         { DoCapture_Field(TextBox->FocusedForegroundColor, FStyleColors::ForegroundHover); }
 
         // Dark node art keeps the Dark ink on its text. Light node art lets it follow the theme, except node titles: they
-        // sit on the colored title band in both themes, so they stay white. Graph tooltip text sits on the (light)
-        // tooltip background either way.
+        // sit on the colored title band in both themes, so they stay light. A node copies its title style when built, so
+        // titles use their own slot (Request_ApplyNodeTitleInk) that follows a live switch. Graph tooltip text sits on the
+        // (light) tooltip background either way.
         if (const auto Key = Entry.Key.ToString(); Key.StartsWith(TEXT("Graph.")) && NOT Key.Contains(TEXT("Tooltip")))
         {
             auto* GraphText = static_cast<FSlateColor*>(nullptr);
@@ -186,10 +217,15 @@ auto
                 if (NOT LightGraphNodes && DarkInk.IsSet())
                 { DoCapture_Field(*GraphText, DarkInk.GetValue()); }
                 else if (LightGraphNodes && DarkInk.IsSet() && Key.StartsWith(TEXT("Graph.Node.NodeTitle")))
-                { DoCapture_Field(*GraphText, FSlateColor{FLinearColor::White}); }
-                // The title subline is yellow at 50%, which muddies on the solid Light title band.
+                { DoCapture_Field(*GraphText, FSlateColor{NodeTitleInk}, FSlateColor{NodeTitleInk}); }
+                // The title subline is yellow at 50%, which muddies on the solid Light title band; it follows a live switch
+                // like the title.
                 else if (LightGraphNodes && Key == TEXT("Graph.Node.NodeTitleExtraLines"))
-                { DoCapture_Field(*GraphText, FSlateColor{FLinearColor{1.0f, 1.0f, 1.0f, 0.8f}}); }
+                {
+                    if (NOT _DarkSublineInk.IsSet())
+                    { _DarkSublineInk = GraphText->GetSpecifiedColor(); }
+                    DoCapture_Field(*GraphText, FSlateColor{NodeSublineInk}, FSlateColor{NodeSublineInk});
+                }
                 // Compact node labels (+, ==, AND, conversions) are white at 50% on the variable-node body, which is
                 // light with light nodes; Light keeps the strength in a dark ink.
                 else if (LightGraphNodes && (Key == TEXT("Graph.CompactNode.Title") || Key == TEXT("Graph.ArrayCompactNode.Title"))
@@ -447,15 +483,46 @@ auto
 
 auto
     FCk_EditorTheme_LightStylePatch::
+    Request_ApplyNodeTitleInk() const
+    -> bool
+{
+    using namespace ck_editor_theme_light_style_patch;
+
+    if (NOT _Applied.IsSet())
+    { return false; }
+
+    const auto IsLight = _Applied.GetValue() == ECk_EditorTheme_Brightness::Light;
+    auto Changed = Request_WriteSlot(NodeTitleInk,
+        IsLight ? FLinearColor::White : USlateThemeManager::Get().GetColor(EStyleColor::Foreground));
+
+    if (_DarkSublineInk.IsSet())
+    { Changed |= Request_WriteSlot(NodeSublineInk, IsLight ? FLinearColor{1.0f, 1.0f, 1.0f, 0.8f} : _DarkSublineInk.GetValue()); }
+
+    return Changed;
+}
+
+auto
+    FCk_EditorTheme_LightStylePatch::
     DoCapture_Field(
         FSlateColor& InField,
+        const FSlateColor& InLightValue)
+    -> void
+{
+    DoCapture_Field(InField, InField, InLightValue);
+}
+
+auto
+    FCk_EditorTheme_LightStylePatch::
+    DoCapture_Field(
+        FSlateColor& InField,
+        const FSlateColor& InDarkValue,
         const FSlateColor& InLightValue)
     -> void
 {
     if (_Fields.ContainsByPredicate([&](const TCapturedField<FSlateColor>& InCaptured) { return InCaptured._Field == &InField; }))
     { return; }
 
-    _Fields.Add({&InField, InField, InLightValue});
+    _Fields.Add({&InField, InDarkValue, InLightValue});
 }
 
 auto

@@ -34,12 +34,21 @@ public:
     auto Request_Apply(
         ECk_EditorTheme_Brightness InBrightness) -> bool;
 
+    // Node titles and sublines resolve through theme slots that this sets for the applied brightness. ApplyTheme resets
+    // them and theme-editor edits don't broadcast, so it runs on every theme change and every tick.
+    auto Request_ApplyNodeTitleInk() const -> bool;
+
     // True once a captured style set carries the engine's Graph.Node.PinLabelColor (or the dev CVar forces it).
     auto Get_LightGraphNodes() const -> bool { return _LightGraphNodes; }
 
 private:
     auto DoCapture_Field(
         FSlateColor& InField,
+        const FSlateColor& InLightValue) -> void;
+
+    auto DoCapture_Field(
+        FSlateColor& InField,
+        const FSlateColor& InDarkValue,
         const FSlateColor& InLightValue) -> void;
 
     auto DoCapture_Field(
@@ -80,6 +89,7 @@ private:
     TArray<TCapturedField<FLinearColor>> _LinearFields;
     TArray<TCapturedField<FSlateBrush>> _BrushFields;
     TOptional<ECk_EditorTheme_Brightness> _Applied;
+    TOptional<FLinearColor> _DarkSublineInk;
     bool _LightGraphNodes = false;
 };
 
